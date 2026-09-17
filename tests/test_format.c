@@ -639,29 +639,24 @@ int test_eof_block_structure() {
     }
 
     // Validating Footer and EOF Block
-    // Total Overhead: 12 bytes (Footer) + 8 bytes (EOF Header) = 20 bytes
-    if (comp_size < 20) {
+    // Total Overhead: 8 bytes (Footer) + 8 bytes (EOF Header) = 16 bytes
+    if (comp_size < 16) {
         printf("Failed: Compressed size too small for Footer + EOF (%lld)\n", (long long)comp_size);
         free(compressed);
         return 0;
     }
 
-    // 1. Verify 12-byte Footer
-    // Structure: [SrcSize (8)] + [Hash (4)]
-    const uint8_t* footer_ptr = compressed + comp_size - 12;
-    uint32_t f_src_low = zxc_le32(footer_ptr);       // Should be 4
-    uint32_t f_src_high = zxc_le32(footer_ptr + 4);  // Should be 0
-    uint32_t f_hash = zxc_le32(footer_ptr + 8);      // Should be 0 (checksum disabled)
-
-    if (f_src_low != 4 || f_src_high != 0 || f_hash != 0) {
-        printf("Failed: Footer mismatch. Src: %u, Hash: %u\n", f_src_low, f_hash);
+    // 1. Verify 8-byte Footer: [SrcSize (8)]
+    const uint8_t* footer_ptr = compressed + comp_size - ZXC_FILE_FOOTER_SIZE;
+    if (zxc_le64(footer_ptr) != 4) {
+        printf("Failed: Footer mismatch. Src: %llu\n", (unsigned long long)zxc_le64(footer_ptr));
         free(compressed);
         return 0;
     }
 
     // 2. Verify EOF Block Header (8 bytes)
     // Should be immediately before the footer
-    const uint8_t* eof_ptr = compressed + comp_size - 20;
+    const uint8_t* eof_ptr = compressed + comp_size - ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE;
     uint8_t expected[8] = {0xFF, 0, 0, 0, 0, 0, 0, 0};
     expected[7] = zxc_hash8(expected);
 
@@ -736,10 +731,9 @@ int test_header_checksum() {
     return 1;
 }
 
-// 5. Test Global Checksum Order Sensitivity
-// Ensures that swapping two blocks (even if valid individually) triggers a global checksum failure.
-int test_global_checksum_order() {
-    printf("TEST: Global Checksum Order Sensitivity... ");
+// 5. Two blocks swapped in a stream-written archive: position-seeded checksums refuse it.
+int test_swapped_blocks_stream() {
+    printf("TEST: Swapped blocks, stream reader... ");
 
     // 1. Create input data withDISTINCT patterns for 2 blocks (so blocks are different)
     // ZXC_BLOCK_SIZE_DEFAULT is 256KB. We need > 256KB. Let's use 600KB.
@@ -788,7 +782,7 @@ int test_global_checksum_order() {
     zxc_read_block_header(comp_buf + off2, ZXC_BLOCK_HEADER_SIZE, &bh2);
     size_t len2 = ZXC_BLOCK_HEADER_SIZE + bh2.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
 
-    // Ensure we have at least 2 full blocks + EOF + Global Checksum
+    // Ensure we have at least 2 full blocks + EOF + footer
     if (off2 + len2 > (size_t)comp_sz) {
         printf("[FAIL] Compressed size too small for test\n");
         free(val_buf);
@@ -815,7 +809,7 @@ int test_global_checksum_order() {
     memcpy(swapped_buf + w_off, comp_buf + off1, len1);
     w_off += len1;
 
-    // Write remaining data (EOF block + Global Checksum)
+    // Write remaining data (EOF block + footer)
     size_t remaining_off = off2 + len2;
     size_t remaining_len = comp_sz - remaining_off;
     memcpy(swapped_buf + w_off, comp_buf + remaining_off, remaining_len);
@@ -838,13 +832,274 @@ int test_global_checksum_order() {
     free(comp_buf);
     free(swapped_buf);
 
-    if (res >= 0) {
-        printf("  [FAIL] zxc_stream_decompress unexpectedly succeeded on swapped blocks\n");
+    if (res != ZXC_ERROR_BAD_CHECKSUM) {
+        printf("  [FAIL] zxc_stream_decompress on swapped blocks -> %lld, want BAD_CHECKSUM\n",
+               (long long)res);
         return 0;
     }
 
     printf("PASS\n\n");
     return 1;
+}
+
+/* Two blocks 32 apart swapped, through the one-shot reader: position-seeded checksums. */
+int test_swapped_blocks_oneshot(void) {
+    printf("TEST: Swapped blocks, one-shot reader... ");
+
+    const size_t BLK = 4 * 1024;
+    const size_t NBLK = 40; /* > 33 so blocks 1 and 33 both exist */
+    const size_t in_sz = BLK * NBLK;
+    uint8_t* src = malloc(in_sz);
+    if (!src) return 0;
+    /* Each block distinct, and incompressible so every block is RAW and its
+     * physical size is predictable. */
+    uint32_t rng = 0x51ED270Bu;
+    for (size_t i = 0; i < in_sz; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+
+    const size_t cap = (size_t)zxc_compress_bound(in_sz) + 4096;
+    uint8_t* comp = malloc(cap);
+    uint8_t* swapped = malloc(cap);
+    uint8_t* out = malloc(in_sz);
+    int ok = 0;
+    do {
+        if (!comp || !swapped || !out) break;
+        zxc_compress_opts_t co = {.level = 3, .block_size = BLK, .checksum_enabled = 1};
+        const int64_t n = zxc_compress(src, in_sz, comp, cap, &co);
+        if (n <= 0) {
+            printf("[FAIL] compress -> %lld\n", (long long)n);
+            break;
+        }
+        /* Offsets of every data block, walking the frame once. */
+        size_t off[64], len[64], nb = 0;
+        size_t p = ZXC_FILE_HEADER_SIZE;
+        while (p + ZXC_BLOCK_HEADER_SIZE <= (size_t)n && nb < 64) {
+            zxc_block_header_t bh;
+            if (zxc_read_block_header(comp + p, (size_t)n - p, &bh) != ZXC_OK) break;
+            if (bh.block_type == ZXC_BLOCK_EOF) break;
+            off[nb] = p;
+            len[nb] = ZXC_BLOCK_HEADER_SIZE + bh.comp_size + ZXC_BLOCK_CHECKSUM_SIZE;
+            p += len[nb];
+            nb++;
+        }
+        if (nb < 34) {
+            printf("[FAIL] got %zu blocks, need >= 34\n", nb);
+            break;
+        }
+        /* Swap blocks 1 and 33: same length (both full), so the frame layout
+         * is untouched and only the order changes. */
+        if (len[1] != len[33]) {
+            printf("[FAIL] blocks 1 and 33 differ in size (%zu vs %zu)\n", len[1], len[33]);
+            break;
+        }
+        memcpy(swapped, comp, (size_t)n);
+        memcpy(swapped + off[1], comp + off[33], len[33]);
+        memcpy(swapped + off[33], comp + off[1], len[1]);
+
+        zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+        const int64_t intact = zxc_decompress(comp, (size_t)n, out, in_sz, &dopts);
+        if (intact != (int64_t)in_sz || memcmp(out, src, in_sz) != 0) {
+            printf("[FAIL] the intact archive -> %lld\n", (long long)intact);
+            break;
+        }
+        const int64_t r = zxc_decompress(swapped, (size_t)n, out, in_sz, &dopts);
+        if (r != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("[FAIL] a 32-apart swap -> %lld, want BAD_CHECKSUM\n", (long long)r);
+            break;
+        }
+        ok = 1;
+    } while (0);
+
+    free(src);
+    free(comp);
+    free(swapped);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* The footer carries an 8-byte archive digest before the size when checksums are on.
+ * It is a fold of the block checksums, so it is deterministic, identical for identical
+ * content, absent without -C, and a flipped digest byte fails a verified decode. */
+/* The 8 bytes after the EOF block are a SEK header or the footer's head. The
+ * rule the sequential readers share must return the table's full 64-bit length,
+ * not the header field: past 2^30 blocks the field has wrapped. */
+int test_seek_tail_rule(void) {
+    printf("=== TEST: Format - SEK-or-footer rule after EOF ===\n");
+    enum { BS = 4096 };
+    const uint64_t nblocks = (1ULL << 30) + 1; /* table = 4 GiB + 4: field = 4 */
+    const uint64_t table = zxc_seek_table_bytes(nblocks);
+    const uint64_t total_out = nblocks * BS;
+    uint8_t peek[ZXC_BLOCK_HEADER_SIZE];
+    const zxc_block_header_t sek = {
+        .block_type = ZXC_BLOCK_SEK, .block_flags = 0, .reserved = 0, .comp_size = (uint32_t)table};
+    if (zxc_write_block_header(peek, sizeof(peek), &sek) < 0) return 0;
+
+    uint64_t got = 0;
+    if (!zxc_seek_tail_is_sek(peek, total_out, BS, &got) || got != table) {
+        printf("Failed: SEK of %llu blocks: matched %d, length %llu, want %llu\n",
+               (unsigned long long)nblocks, got != 0, (unsigned long long)got,
+               (unsigned long long)table);
+        return 0;
+    }
+    /* Off by one block: the header field no longer agrees, so not a SEK. */
+    if (zxc_seek_tail_is_sek(peek, total_out - BS, BS, &got)) {
+        printf("Failed: matched a SEK header for the wrong block count\n");
+        return 0;
+    }
+    /* A footer's head: the source size of an unremarkable archive. */
+    uint8_t footer[ZXC_BLOCK_HEADER_SIZE];
+    zxc_store_le64(footer, 10);
+    if (zxc_seek_tail_is_sek(footer, 10, BS, &got)) {
+        printf("Failed: a source size read as a SEK header\n");
+        return 0;
+    }
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Only the SEK block belongs between the EOF block and the footer (Sec 5.5).
+ * Both frame decoders read the footer from the end, so inserted bytes used to
+ * ride along and still report success: size and digest cover the decoded bytes,
+ * not the gap. */
+int test_tail_between_eof_and_footer(void) {
+    printf("=== TEST: Format - only a SEK block may sit before the footer ===\n");
+    const size_t n = 4096;
+    uint8_t* const src = malloc(n);
+    const size_t cap = (size_t)zxc_compress_bound(n) + 128;
+    uint8_t* const arc = malloc(cap);
+    uint8_t* const mod = malloc(cap + 128);
+    uint8_t* const out = malloc(n);
+    if (!src || !arc || !mod || !out) {
+        free(src);
+        free(arc);
+        free(mod);
+        free(out);
+        return 0;
+    }
+    for (size_t i = 0; i < n; i++) src[i] = (uint8_t)(i * 7u);
+
+    int ok = 1;
+    const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+    /* Checksummed (16-byte footer) and plain (8-byte) both. */
+    for (int cs = 0; cs <= 1 && ok; cs++) {
+        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = cs};
+        const int64_t alen = zxc_compress(src, n, arc, cap, &co);
+        const size_t footer_len =
+            (size_t)ZXC_FILE_FOOTER_SIZE + (cs ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
+        if (alen <= (int64_t)footer_len) {
+            printf("  [FAIL] cs=%d: compress returned %lld\n", cs, (long long)alen);
+            ok = 0;
+            break;
+        }
+        if (zxc_decompress(arc, (size_t)alen, out, n, &verify) != (int64_t)n) {
+            printf("  [FAIL] cs=%d: the intact archive must decode\n", cs);
+            ok = 0;
+            break;
+        }
+        const size_t head = (size_t)alen - footer_len;
+        const size_t gaps[] = {1, 8, 64};
+        for (size_t g = 0; g < sizeof(gaps) / sizeof(gaps[0]) && ok; g++) {
+            memcpy(mod, arc, head);
+            memset(mod + head, 0xAB, gaps[g]);
+            memcpy(mod + head + gaps[g], arc + head, footer_len);
+            const int64_t r = zxc_decompress(mod, head + gaps[g] + footer_len, out, n, &verify);
+            if (r != ZXC_ERROR_CORRUPT_DATA) {
+                printf("  [FAIL] cs=%d: %zu inserted bytes gave %lld, want %d\n", cs, gaps[g],
+                       (long long)r, ZXC_ERROR_CORRUPT_DATA);
+                ok = 0;
+            }
+        }
+    }
+
+    /* The legitimate gap: a seekable archive carries its SEK block there. */
+    if (ok) {
+        const zxc_compress_opts_t so = {.level = 3, .checksum_enabled = 1, .seekable = 1};
+        const int64_t slen = zxc_compress(src, n, arc, cap, &so);
+        if (slen <= 0 || zxc_decompress(arc, (size_t)slen, out, n, &verify) != (int64_t)n) {
+            printf("  [FAIL] a seekable archive must still decode (len %lld)\n", (long long)slen);
+            ok = 0;
+        }
+    }
+
+    free(src);
+    free(arc);
+    free(mod);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+int test_footer_digest(void) {
+    printf("TEST: Footer digest... ");
+    enum { N = 40 * 1024 };
+    uint8_t* src = malloc(N);
+    if (!src) return 0;
+    uint32_t rng = 0x2545F491u;
+    for (size_t i = 0; i < N; i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+    const size_t cap = (size_t)zxc_compress_bound(N);
+    uint8_t* a = malloc(cap);
+    uint8_t* b = malloc(cap);
+    uint8_t* out = malloc(N);
+    int ok = 0;
+    do {
+        if (!a || !b || !out) break;
+        const zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
+        const int64_t ca = zxc_compress(src, N, a, cap, &co);
+        const int64_t cb = zxc_compress(src, N, b, cap, &co);
+        if (ca <= 0 || cb <= 0) {
+            printf("[FAIL] compress\n");
+            break;
+        }
+        /* Deterministic: two -C compressions of the same bytes are identical. */
+        if (ca != cb || memcmp(a, b, (size_t)ca) != 0) {
+            printf("[FAIL] non-deterministic -C output\n");
+            break;
+        }
+        const uint64_t digest = zxc_le64(a + ca - ZXC_FILE_DIGEST_SIZE);
+        if (digest == 0) {
+            printf("[FAIL] digest is zero on a non-empty archive\n");
+            break;
+        }
+        /* A verified decode accepts it; flipping a digest byte fails BAD_CHECKSUM;
+         * an unverified decode ignores it. */
+        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+        const zxc_decompress_opts_t quiet = {.checksum_enabled = 0};
+        if (zxc_decompress(a, (size_t)ca, out, N, &verify) != N) {
+            printf("[FAIL] verified decode of intact archive\n");
+            break;
+        }
+        a[ca - ZXC_FILE_DIGEST_SIZE] ^= 0xFF;
+        if (zxc_decompress(a, (size_t)ca, out, N, &verify) != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("[FAIL] flipped digest not caught\n");
+            break;
+        }
+        if (zxc_decompress(a, (size_t)ca, out, N, &quiet) != N) {
+            printf("[FAIL] unverified decode should ignore the digest\n");
+            break;
+        }
+        /* Empty -C archive: digest of zero blocks is 0, footer is 16 bytes. */
+        uint8_t e[64];
+        const int64_t ce = zxc_compress(NULL, 0, e, sizeof(e), &co);
+        if (ce <=
+                (int64_t)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE) - 1 ||
+            zxc_le64(e + ce - ZXC_FILE_DIGEST_SIZE) != 0) {
+            printf("[FAIL] empty -C archive digest\n");
+            break;
+        }
+        ok = 1;
+    } while (0);
+    free(src);
+    free(a);
+    free(b);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
 }
 
 /* Builds a header with the given chunk-size code, fixes the header checksum, and returns
@@ -1146,8 +1401,8 @@ int test_header_checksum_single_bit() {
     // only if the net shift's top halfword is 0x0000 or 0xFFFF.
     {
         uint64_t c[112];
-        for (int k = 0; k < 64; k++) c[k] = ((1ULL << k) * ZXC_HASH_PRIME2) * ZXC_HASH_PRIME1;
-        for (int k = 0; k < 48; k++) c[64 + k] = (1ULL << k) * ZXC_HASH_PRIME1;
+        for (int k = 0; k < 64; k++) c[k] = ((1ULL << k) * ZXC_HASH_MULT64) * ZXC_HASH_GOLDEN64;
+        for (int k = 0; k < 48; k++) c[64 + k] = (1ULL << k) * ZXC_HASH_GOLDEN64;
         for (int a = 0; a < 112; a++) {
             for (int b = a; b < 112; b++) { /* b == a: weight 1 */
                 for (unsigned sg = 0; sg < 4u; sg++) {

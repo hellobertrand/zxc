@@ -420,9 +420,6 @@ extern "C" {
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
 
-/** @brief Size of the global checksum appended after EOF block (4 bytes). */
-#define ZXC_GLOBAL_CHECKSUM_SIZE 4
-
 /** @name Seekable Format Constants
  *  @brief Seek table block appended between EOF block and footer.
  *
@@ -438,6 +435,20 @@ extern "C" {
 /** @brief Per-block entry size: comp_size(4) only.  decomp_size is derived
  *  from the file header's block_size (all blocks except the last are full). */
 #define ZXC_SEEK_ENTRY_SIZE 4
+
+/** @brief Blocks in @p total_decomp bytes of @p block_size: the seek table's entry
+ *  count, which the SEK header's field (table size modulo 2^32) cannot give. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
+                                                       const size_t block_size) {
+    // Not (total + bs - 1) / bs: it wraps near 2^64, turning a forged footer into 0 blocks.
+    return block_size ? total_decomp / block_size + (total_decomp % block_size != 0) : 0;
+}
+
+/** @brief Byte size of the seek table's entries for @p nblocks blocks, before the
+ *  header's modulo 2^32. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
+    return nblocks * ZXC_SEEK_ENTRY_SIZE;
+}
 /** @} */ /* end of Seekable Format Constants */
 
 /** @name GLO Token Constants
@@ -491,10 +502,6 @@ extern "C" {
  *  @{ */
 /** @brief Address bits for the LZ77 hash table (2^15 = 32 768 buckets). */
 #define ZXC_LZ_HASH_BITS 15
-/** @brief Marsaglia multiplicative hash constant for 4-byte hashing. */
-#define ZXC_LZ_HASH_PRIME1 0x2D35182DU
-/** @brief Marsaglia/Vigna xorshift* multiplier for 5-byte hashing. */
-#define ZXC_LZ_HASH_PRIME2 0x2545F4914F6CDD1DULL
 /** @brief Maximum number of entries in the hash table. */
 #define ZXC_LZ_HASH_SIZE (1U << ZXC_LZ_HASH_BITS)
 /** @brief Sliding window size (64 KB). */
@@ -578,13 +585,19 @@ extern "C" {
 
 /** @} */
 
-/** @name Hash Prime Constants
- *  @brief Mixing primes used by internal hash functions.
+/** @name Hash multipliers
+ *  @brief Odd constants that mix bits in the LZ match hash, the header checksums
+ *  (Sec 7.1) and the archive digest (Sec 7.3). The header-hash and digest values
+ *  are fixed by the on-disk format; changing them is a version bump.
  *  @{ */
-/** @brief Hash prime 1. */
-#define ZXC_HASH_PRIME1 0x9E3779B97F4A7C15ULL
-/** @brief Hash prime 2. */
-#define ZXC_HASH_PRIME2 0xD2D84A61D2D84A61ULL
+/** @brief Golden-ratio prime: header hashes and the digest spread. */
+#define ZXC_HASH_GOLDEN64 0x9E3779B97F4A7C15ULL
+/** @brief Vigna's xorshift* multiplier: the 5-byte LZ hash and the digest fold. */
+#define ZXC_HASH_XORSHIFT64 0x2545F4914F6CDD1DULL
+/** @brief Marsaglia 32-bit multiplier: the 4-byte LZ and dictionary hash. */
+#define ZXC_HASH_MULT32 0x2D35182DU
+/** @brief Second multiplier of the 16-byte header hash (@ref zxc_hash16). */
+#define ZXC_HASH_MULT64 0xD2D84A61D2D84A61ULL
 /** @} */
 
 /** @name Huffman Codec Constants
@@ -1257,7 +1270,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  * @brief Computes the 1-byte checksum for block headers.
  *
  * Multiply, then fold from the top. Flipping bit @c i moves the product by exactly
- * `+/- (ZXC_HASH_PRIME1 << i)`, and no shift of that constant leaves 0x00 or 0xFF
+ * `+/- (ZXC_HASH_GOLDEN64 << i)`, and no shift of that constant leaves 0x00 or 0xFF
  * in the top byte, so the carry cannot absorb it: every single-bit error is caught,
  * not merely likely to be. Folding from the top is required - a product's low bits
  * depend only on the input's low bits.
@@ -1266,7 +1279,7 @@ static ZXC_ALWAYS_INLINE void zxc_store_le64(void* p, const uint64_t v) {
  * @return The checksum byte.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
-    const uint64_t h = (zxc_le64(p) ^ ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1;
+    const uint64_t h = (zxc_le64(p) ^ ZXC_HASH_GOLDEN64) * ZXC_HASH_GOLDEN64;
 
     return (uint8_t)(h >> 56);
 }
@@ -1278,16 +1291,16 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
  * mixed again. Every bit flip shifts the result by a fixed amount, and the
  * constants are such that no 1- or 2-bit error leaves the top halfword
  * unchanged (proven by the test suite). Summing two products instead let one
- * bit per half cancel. Order matters: PRIME2 inside, PRIME1 outside; swapped,
- * 38 bit pairs can cancel.
+ * bit per half cancel. Order matters: ZXC_HASH_MULT64 inside, ZXC_HASH_GOLDEN64
+ * outside; swapped, 38 bit pairs can cancel.
  *
  * @param[in] p The 16 header bytes; bytes 14..15 must already be zero.
  * @return The checksum halfword.
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
-    const uint64_t h1 = (zxc_le64(p) ^ ZXC_HASH_PRIME2) * ZXC_HASH_PRIME2;
+    const uint64_t h1 = (zxc_le64(p) ^ ZXC_HASH_MULT64) * ZXC_HASH_MULT64;
 
-    return (uint16_t)(((h1 + zxc_le64(p + 8) + ZXC_HASH_PRIME1) * ZXC_HASH_PRIME1) >> 48);
+    return (uint16_t)(((h1 + zxc_le64(p + 8) + ZXC_HASH_GOLDEN64) * ZXC_HASH_GOLDEN64) >> 48);
 }
 
 /**
@@ -1432,12 +1445,12 @@ void zxc_aligned_free(void* ptr);
  *
  * @param[in] input Pointer to the data buffer.
  * @param[in] len Length of the data in bytes.
- * @param[in] seed Previous 32-bit checksum to derive from, or 0 to start fresh.
+ * @param[in] seed 0, a previous 32-bit checksum (zero-extended), or a block index.
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
  * @return The calculated 32-bit hash value.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
-                                               const uint32_t seed, const uint8_t hash_method) {
+                                               const uint64_t seed, const uint8_t hash_method) {
     (void)hash_method; /* single algorithm for now; extend when adding more */
     const uint64_t hash = rapidhash_withSeed(input, len, seed);
 
@@ -1445,18 +1458,32 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 }
 
 /**
- * @brief Folds a block hash into the running global checksum.
+ * @brief Folds a data block's 32-bit checksum into the running archive digest.
  *
- * `result = rotl32(hash, 1) ^ block_hash`. The rotate is what makes the result
- * depend on block order, so a reordered archive fails the global check.
+ * The digest, stored after the source size in the file footer when checksums are
+ * on, is this fold over every block in stream order: an ordered 64-bit identity
+ * of the archive that a reordered or altered block changes. Verified on a full
+ * decode, never on a range read. Seed 0 for the first block.
  *
- * @param[in] hash The current running hash value.
- * @param[in] block_hash The hash of the new block to combine.
- * @return The updated combined hash value.
+ * The checksum is spread across 64 bits, XORed into the accumulator, then
+ * mum-folded (64x64 multiply, XOR of the two 128-bit halves). The result is a 64-bit digest that is
+ * sensitive to the order and content of all blocks.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_hash_combine_rotate(const uint32_t hash,
-                                                          const uint32_t block_hash) {
-    return ((hash << 1) | (hash >> 31)) ^ block_hash;
+static ZXC_ALWAYS_INLINE uint64_t zxc_digest_combine(const uint64_t acc,
+                                                     const uint32_t block_checksum) {
+    const uint64_t a = acc ^ ((uint64_t)block_checksum + 1U) * ZXC_HASH_GOLDEN64;
+    const uint64_t b = ZXC_HASH_XORSHIFT64;
+#if defined(__SIZEOF_INT128__)
+    const __uint128_t r = (__uint128_t)a * b;
+    return (uint64_t)r ^ (uint64_t)(r >> 64);
+#else
+    const uint64_t alo = (uint32_t)a, ahi = a >> 32, blo = (uint32_t)b, bhi = b >> 32;
+    const uint64_t lolo = alo * blo, lohi = alo * bhi, hilo = ahi * blo, hihi = ahi * bhi;
+    const uint64_t cross = (lolo >> 32) + (uint32_t)lohi + (uint32_t)hilo;
+    const uint64_t hi = hihi + (lohi >> 32) + (hilo >> 32) + (cross >> 32);
+    const uint64_t lo = (cross << 32) | (uint32_t)lolo;
+    return lo ^ hi;
+#endif
 }
 
 /**
@@ -1875,18 +1902,20 @@ void zxc_cctx_free(zxc_cctx_t* ctx);
  * `_avx2`, `_avx512`, ...), running the one-time CPU detection on the first
  * call, and routes to the dict variant when the context carries a dictionary.
  *
- * @param[in]  ctx     Context holding the decode state and dictionary, if any.
- * @param[in]  src     Compressed chunk.
- * @param[in]  src_sz  Size of @p src in bytes.
- * @param[out] dst     Destination buffer.
- * @param[in]  dst_cap Capacity of @p dst.
+ * @param[in]  ctx         Context holding the decode state and dictionary, if any.
+ * @param[in]  src         Compressed chunk.
+ * @param[in]  src_sz      Size of @p src in bytes.
+ * @param[out] dst         Destination buffer.
+ * @param[in]  dst_cap     Capacity of @p dst.
+ * @param[in]  block_index Frame position of the block: checksum seed, 0 for the block API.
  * @return Bytes decoded (> 0), or a negative @ref zxc_error_t.
  */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                                 const uint64_t block_index);
 int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap);
+                                      const size_t dst_cap, const uint64_t block_index);
 
 /**
  * @brief Compresses one chunk through the runtime ISA dispatch.
@@ -1894,15 +1923,22 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
  * Counterpart of zxc_decompress_chunk_wrapper(): same lazily-resolved variant
  * pointer, same one-time CPU detection on the first call.
  *
- * @param[in,out] ctx     Compression context: configuration and working buffers.
- * @param[in]     src     Raw data to compress.
- * @param[in]     src_sz  Size of @p src in bytes.
- * @param[out]    dst     Destination buffer.
- * @param[in]     dst_cap Capacity of @p dst.
+ * @param[in,out] ctx         Compression context: configuration and working buffers.
+ * @param[in]     src         Raw data to compress.
+ * @param[in]     src_sz      Size of @p src in bytes.
+ * @param[out]    dst         Destination buffer.
+ * @param[in]     dst_cap     Capacity of @p dst.
+ * @param[in]     block_index Frame position of the block: checksum seed, 0 for the block API.
  * @return Bytes written (> 0), or a negative @ref zxc_error_t.
  */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap);
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                               const uint64_t block_index);
+
+/** @brief @ref zxc_compress_block, its checksum seeded with @p block_index (public entry: 0). */
+int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, size_t src_size,
+                              void* RESTRICT dst, size_t dst_capacity,
+                              const zxc_compress_opts_t* opts, uint64_t block_index);
 
 // ---------------------------------------------------------------------------
 // Internal frame primitives.
@@ -2003,21 +2039,103 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 /**
  * @brief Writes the ZXC file footer into @p dst.
  *
- * The footer stores the original uncompressed size and an optional global
- * checksum. It is always @c ZXC_FILE_FOOTER_SIZE (12) bytes long.
+ * The original uncompressed size (@c ZXC_FILE_FOOTER_SIZE, 8 bytes, always first),
+ * then the archive digest when checksums are on.
  *
  * @param[out] dst               Destination buffer.
  * @param[in]  dst_capacity      Total capacity of @p dst in bytes.
  * @param[in]  src_size          Original uncompressed size of the data.
- * @param[in]  global_hash       Global checksum hash (used only when
- *                               @p checksum_enabled is non-zero).
- * @param[in]  checksum_enabled  Non-zero if the checksum should be emitted.
+ * @param[in]  digest            Archive digest, written after the size when
+ *                               @p checksum_enabled.
+ * @param[in]  checksum_enabled  Non-zero to emit the digest.
  *
- * @return Number of bytes written (@c ZXC_FILE_FOOTER_SIZE) on success,
+ * @return Number of bytes written (8, or 16 with a digest) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL on failure.
  */
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
-                          const uint32_t global_hash, const int checksum_enabled);
+                          const uint64_t digest, const int checksum_enabled);
+
+/** @brief Footer bytes at the end of an archive: base size, plus the digest when
+ *  @p checksum_enabled. */
+static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
+    return ZXC_FILE_FOOTER_SIZE + (checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U);
+}
+
+/**
+ * @brief Whether a footer's decompressed size is reachable for this archive.
+ *
+ * The footer is untrusted and its size becomes the caller's allocation, so it is
+ * capped by what the archive could physically hold: every block costs at least
+ * @ref ZXC_BLOCK_HEADER_SIZE compressed bytes and decodes to at most one block
+ * size. The cap also keeps @ref zxc_inplace_margin's block count from
+ * overflowing. Every reader that sizes anything from the footer goes through it.
+ *
+ * Division rather than the usual ceil, which would wrap near @c UINT64_MAX.
+ *
+ * @param[in] dsize      Decompressed size read from the footer.
+ * @param[in] chunk_size Block size from the file header; never 0 after a
+ *                       @ref ZXC_OK from @ref zxc_read_file_header.
+ * @param[in] comp_size  Size of the whole archive in bytes.
+ * @return 1 when @p dsize is reachable, 0 for a forged footer.
+ */
+static ZXC_ALWAYS_INLINE int zxc_footer_dsize_plausible(const uint64_t dsize,
+                                                        const size_t chunk_size,
+                                                        const uint64_t comp_size) {
+    const uint64_t blocks_needed =
+        dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0);
+    return blocks_needed <= comp_size / ZXC_BLOCK_HEADER_SIZE;
+}
+
+/**
+ * @brief Tells a SEK block header from the footer, in the 8 bytes after the EOF
+ *        block.
+ *
+ * Both are 8 bytes long. They are a SEK header only if they parse as one and
+ * announce the table this archive would carry: @ref zxc_seek_table_bytes of its
+ * block count, modulo 2^32, the width of the header's size field. A source size
+ * that passes all three checks (type, header checksum, size) is one in about
+ * 2^40. The sequential readers share this rule so they drain the same number of
+ * bytes: the full 64-bit count, not the wrapped field.
+ *
+ * @param[in]  peek        The 8 bytes read after the EOF block.
+ * @param[in]  total_out   Bytes decoded so far: the archive's source size.
+ * @param[in]  block_size  Block size from the file header.
+ * @param[out] sek_bytes   The SEK payload length when it is one; untouched otherwise.
+ * @return 1 for a SEK header, 0 for the footer's first 8 bytes.
+ */
+static ZXC_ALWAYS_INLINE int zxc_seek_tail_is_sek(const uint8_t* peek, const uint64_t total_out,
+                                                  const size_t block_size, uint64_t* sek_bytes) {
+    zxc_block_header_t bh;
+    if (zxc_read_block_header(peek, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK ||
+        bh.block_type != ZXC_BLOCK_SEK)
+        return 0;
+    const uint64_t table = zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size));
+    if ((uint32_t)table != bh.comp_size) return 0;
+    *sek_bytes = table;
+    return 1;
+}
+
+/**
+ * @brief Whether the bytes between the EOF block and the footer are a legal tail.
+ *
+ * One thing may sit there: nothing, or the SEK block (Sec 5.5). Skipping the gap
+ * to reach the footer passes inserted bytes as sound, size and digest both being
+ * computed from the decoded bytes and blind to it.
+ *
+ * @param[in] gap        First byte after the EOF block header.
+ * @param[in] gap_len    Bytes between that point and the footer.
+ * @param[in] total_out  Bytes decoded: what the SEK table would describe.
+ * @param[in] block_size Block size from the file header.
+ * @return 1 for an empty gap or exactly one well-formed SEK block, 0 otherwise.
+ */
+static ZXC_ALWAYS_INLINE int zxc_tail_gap_ok(const uint8_t* gap, const uint64_t gap_len,
+                                             const uint64_t total_out, const size_t block_size) {
+    if (gap_len == 0) return 1;
+    if (gap_len < ZXC_BLOCK_HEADER_SIZE) return 0;
+    uint64_t sek_bytes = 0;
+    if (!zxc_seek_tail_is_sek(gap, total_out, block_size, &sek_bytes)) return 0;
+    return gap_len - ZXC_BLOCK_HEADER_SIZE == sek_bytes;
+}
 
 // ---------------------------------------------------------------------------
 // Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the

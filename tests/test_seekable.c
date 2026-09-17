@@ -948,6 +948,26 @@ int test_seekable_truncated_input() {
         return 0;
     }
 
+    /* A checksummed archive carries a 16-byte footer, so its floor is 48, not
+     * the 40 of a plain one; cut to 47 it is short of its own footer. */
+    zxc_compress_opts_t chk = {.level = 1, .seekable = 1, .checksum_enabled = 1};
+    const int64_t csize_chk = zxc_compress(src, SRC_SIZE, dst, dst_cap, &chk);
+    if (csize_chk <= 0) {
+        printf("Failed: compress with checksums\n");
+        free(src);
+        free(dst);
+        return 0;
+    }
+    s = zxc_seekable_open(dst, ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE +
+                                   ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE - 1);
+    if (s) {
+        printf("Failed: should reject a checksummed archive short of its footer\n");
+        zxc_seekable_free(s);
+        free(src);
+        free(dst);
+        return 0;
+    }
+
     free(src);
     free(dst);
     printf("PASS\n\n");
@@ -1636,11 +1656,61 @@ int test_seekable_range_reports_short_reads(void) {
     return ok;
 }
 
-/* Random access never verified per-block checksums: both paths carved their
- * context with checksum_enabled = 0 and file_has_checksums was never read, so
- * zxc_seekable_set_checksum had nothing to switch. Data is incompressible on
- * purpose: a RAW block memcpys a flipped byte straight through, so only the
- * checksum catches it. */
+/* A range read sees only its blocks: the position-seeded checksum must refuse a moved one. */
+int test_seekable_swapped_blocks_caught(void) {
+    printf("=== TEST: Seekable - a swapped block fails its checksum ===\n");
+    enum { BLK = 4096, NBLK = 4, SPAN = ZXC_BLOCK_HEADER_SIZE + BLK + ZXC_BLOCK_CHECKSUM_SIZE };
+    static uint8_t src[BLK * NBLK], arc[2 * BLK * NBLK], dec[BLK * NBLK], tmp[SPAN];
+    uint32_t rng = 0x6A09E667u;
+    for (size_t i = 0; i < sizeof(src); i++) {
+        rng = rng * 1103515245u + 12345u;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+    const zxc_compress_opts_t co = {
+        .level = 3, .block_size = BLK, .seekable = 1, .checksum_enabled = 1};
+    const int64_t n = zxc_compress(src, sizeof(src), arc, sizeof(arc), &co);
+    const size_t b0 = ZXC_FILE_HEADER_SIZE, b1 = b0 + SPAN;
+    uint8_t out[64];
+    int ok = 0;
+    do {
+        /* Incompressible: blocks 0 and 1 are full RAW blocks, swappable in place. */
+        if (n <= 0 || arc[b0] != ZXC_BLOCK_RAW || arc[b1] != ZXC_BLOCK_RAW ||
+            zxc_le32(arc + b0 + 3) != BLK || zxc_le32(arc + b1 + 3) != BLK) {
+            printf("  [FAIL] fixture: expected two full RAW blocks (n = %lld)\n", (long long)n);
+            break;
+        }
+        memcpy(tmp, arc + b0, SPAN);
+        memmove(arc + b0, arc + b1, SPAN);
+        memcpy(arc + b1, tmp, SPAN);
+
+        zxc_seekable* const s = zxc_seekable_open(arc, (size_t)n);
+        if (!s) {
+            printf("  [FAIL] open\n");
+            break;
+        }
+        const int64_t quiet = zxc_seekable_decompress_range(s, out, sizeof(out), 0, sizeof(out));
+        const int moved = quiet == (int64_t)sizeof(out) && memcmp(out, src + BLK, sizeof(out)) == 0;
+        zxc_seekable_set_checksum(s, 1);
+        const int64_t st = zxc_seekable_decompress_range(s, out, sizeof(out), 0, sizeof(out));
+        const int64_t mt = zxc_seekable_decompress_range_mt(s, out, sizeof(out), BLK - 32, 64, 2);
+        zxc_seekable_free(s);
+        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+        const int64_t frame = zxc_decompress(arc, (size_t)n, dec, sizeof(dec), &verify);
+
+        if (!moved || st != ZXC_ERROR_BAD_CHECKSUM || mt != ZXC_ERROR_BAD_CHECKSUM ||
+            frame != ZXC_ERROR_BAD_CHECKSUM) {
+            printf("  [FAIL] unverified moved=%d, st %lld, mt %lld, frame %lld\n", moved,
+                   (long long)st, (long long)mt, (long long)frame);
+            break;
+        }
+        ok = 1;
+    } while (0);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Incompressible on purpose: a RAW block passes a flipped byte straight through, so
+ * only the checksum catches it. */
 int test_seekable_corrupted_block_checksum(void) {
     printf("=== TEST: Seekable - opting into checksums catches a corrupted block ===\n");
 

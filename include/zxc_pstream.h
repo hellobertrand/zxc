@@ -216,7 +216,7 @@ ZXC_EXPORT size_t zxc_cstream_out_size(const zxc_cstream* cs);
  * @brief Creates a push decompression stream.
  *
  * @p opts is copied into the context. Only @c checksum_enabled is honoured: it
- * decides whether per-block and global checksums are verified when present.
+ * decides whether the block checksums and archive digest are verified when present.
  * Push streams take no dictionary yet (support can be added if a need
  * arises): @c dict / @c dict_size / @c dict_huf fail creation, and an archive
  * whose header requires one fails with @ref ZXC_ERROR_DICT_REQUIRED at the

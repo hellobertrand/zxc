@@ -335,6 +335,31 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_decompress src too small -> ZXC_ERROR_SRC_TOO_SMALL\n");
 
+    // 10b. Too small for its own footer: a checksummed header needs a 16-byte
+    //      footer, so [header][EOF] alone is short of it. Read from the end
+    //      regardless, the "footer" would be header bytes, and the verdict a
+    //      size mismatch; the walk and the no-destination probe both say short.
+    {
+        uint8_t arc[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE];
+        const zxc_block_header_t eof = {
+            .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
+        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, 4096, 1, 0) < 0 ||
+            zxc_write_block_header(arc + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0) {
+            printf("  [FAIL] fixture headers\n");
+            return 0;
+        }
+        uint8_t out[64];
+        zxc_decompress_opts_t o = {.checksum_enabled = 0};
+        const int64_t walk = zxc_decompress(arc, sizeof(arc), out, sizeof(out), &o);
+        const int64_t probe = zxc_decompress(arc, sizeof(arc), NULL, 0, &o);
+        if (walk != ZXC_ERROR_SRC_TOO_SMALL || probe != ZXC_ERROR_SRC_TOO_SMALL) {
+            printf("  [FAIL] short of its footer: walk %lld, probe %lld, want %d\n",
+                   (long long)walk, (long long)probe, ZXC_ERROR_SRC_TOO_SMALL);
+            return 0;
+        }
+    }
+    printf("  [PASS] zxc_decompress short of its 16-byte footer -> ZXC_ERROR_SRC_TOO_SMALL\n");
+
     // 11. Bad file header (invalid magic). The header reader's verdict is
     //     forwarded, so this reports the magic, not a catch-all.
     {
@@ -411,9 +436,10 @@ int test_buffer_error_codes() {
     {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
-        // Footer is at end: last 12 bytes = [src_size(8)] + [global_hash(4)]
-        // Corrupt the source size field (add 1 to the first byte)
-        const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE;
+        // Checksummed, so the footer is [src_size(8)][digest(8)]: the last 8 bytes
+        // are the digest. Aimed there, this passed on BAD_CHECKSUM and never
+        // exercised the size mismatch it is named for.
+        const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE;
         corrupt[footer_offset] ^= 0x01;  // Flip a bit in the stored source size
         uint8_t* out = malloc(test_src_sz);
         zxc_decompress_opts_t _do45 = {.checksum_enabled = 1};
@@ -431,17 +457,18 @@ int test_buffer_error_codes() {
     }
     printf("  [PASS] zxc_decompress stored size mismatch -> negative\n");
 
-    // 15. Global checksum failure (corrupt the global hash in footer)
+    // 15. Block checksum failure (corrupt the last block's trailing checksum)
     {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
-        // Global hash is the last 4 bytes of the file
-        corrupt[comp_sz - 1] ^= 0xFF;
+        // Last byte before the EOF block: the last block's checksum.
+        corrupt[comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE - ZXC_BLOCK_HEADER_SIZE -
+                1] ^= 0xFF;
         uint8_t* out = malloc(test_src_sz);
         zxc_decompress_opts_t _do46 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, (size_t)comp_sz, out, test_src_sz, &_do46);
         if (r != ZXC_ERROR_BAD_CHECKSUM) {
-            printf("  [FAIL] bad global checksum: expected %d, got %lld\n", ZXC_ERROR_BAD_CHECKSUM,
+            printf("  [FAIL] bad block checksum: expected %d, got %lld\n", ZXC_ERROR_BAD_CHECKSUM,
                    (long long)r);
             free(corrupt);
             free(out);
@@ -452,7 +479,7 @@ int test_buffer_error_codes() {
         free(corrupt);
         free(out);
     }
-    printf("  [PASS] zxc_decompress global checksum -> ZXC_ERROR_BAD_CHECKSUM\n");
+    printf("  [PASS] zxc_decompress block checksum -> ZXC_ERROR_BAD_CHECKSUM\n");
 
     // 16. dst too small for decompression
     {
@@ -946,10 +973,11 @@ static int inplace_forged_footer(void) {
     return ok;
 }
 
-/* The read/write separation is a difference between the bound and the archive
- * size, and the archive size is attacker-controlled: bytes between the EOF block
- * and the footer are skipped by the frame loop, so a padded archive still
- * decodes while each padding byte slides it closer to the output. */
+/* Padding between the EOF block and the footer is refused: only the SEK block
+ * belongs there (Sec 5.5). The frame loop used to skip it, which accepted hidden
+ * bytes and let each one slide the in-place read/write separation closer to the
+ * output, the archive size being attacker-controlled. The bound is still asserted:
+ * it must stay conservative on a padded input, which the decode then refuses. */
 static int inplace_padded_archive(void) {
     const size_t N = 64 * 1024;
     uint8_t* const orig = (uint8_t*)malloc(N);
@@ -996,9 +1024,9 @@ static int inplace_padded_archive(void) {
             if (buf) {
                 memcpy(buf + need - c2, a, c2);
                 const int64_t d = zxc_decompress_inplace(buf, need, c2, NULL);
-                if (d != (int64_t)N || memcmp(buf, orig, N) != 0) {
-                    printf("Failed [padded archive]: pad=%zu inplace %lld want %zu\n", pad,
-                           (long long)d, N);
+                if (d != ZXC_ERROR_CORRUPT_DATA) {
+                    printf("Failed [padded archive]: pad=%zu inplace %lld want %d\n", pad,
+                           (long long)d, ZXC_ERROR_CORRUPT_DATA);
                     ok = 0;
                 }
                 free(buf);

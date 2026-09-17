@@ -47,7 +47,7 @@ pub enum Error {
     #[error("corrupted or invalid header")]
     BadHeader,
 
-    /// Block or global checksum verification failed
+    /// A block's decoded bytes fail its checksum, or the archive digest mismatches
     #[error("checksum verification failed")]
     BadChecksum,
 

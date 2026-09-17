@@ -1628,8 +1628,8 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
 #undef DECODE_MATCH_SAFE
 
 /**
- * @brief Shared chunk-decode body: validates the block header, verifies the
- *        optional checksum, then dispatches on block type.
+ * @brief Shared chunk-decode body: validates the header, decodes, then verifies the
+ *        optional checksum.
  *
  * @p has_dict and @p safe are compile-time constants: the no-dict instantiation
  * folds the GLO/GHI selection to the plain (inlinable) decoders, so
@@ -1642,13 +1642,15 @@ static ZXC_NOINLINE int zxc_decode_block_ghi_safe(const zxc_cctx_t* RESTRICT ctx
  * @param[in]     src_sz    Size of @p src in bytes.
  * @param[out]    dst       Destination buffer for the decoded block.
  * @param[in]     dst_cap   Capacity of @p dst in bytes.
+ * @param[in]     block_index Frame position of the block: the checksum seed.
  * @param[in]     has_dict  Compile-time flag: 1 = dictionary-aware decoders.
  * @param[in]     safe      Compile-time flag: 1 = strict-tail safe decoders.
  * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src, const size_t src_sz,
-    uint8_t* RESTRICT dst, const size_t dst_cap, const int has_dict, const int safe) {
+    uint8_t* RESTRICT dst, const size_t dst_cap, const uint64_t block_index, const int has_dict,
+    const int safe) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t type = src[0];
@@ -1664,12 +1666,6 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     if (UNLIKELY(src_sz < expected_sz)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint8_t* data = src + ZXC_BLOCK_HEADER_SIZE;
-
-    if (has_checksum) {
-        const uint32_t stored = zxc_le32(data + comp_sz);
-        const uint32_t calc = zxc_checksum(data, comp_sz, 0, ZXC_CHECKSUM_RAPIDHASH);
-        if (UNLIKELY(stored != calc)) return ZXC_ERROR_BAD_CHECKSUM;
-    }
 
     int decoded_sz = ZXC_ERROR_BAD_BLOCK_TYPE;
 
@@ -1697,6 +1693,13 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
             return ZXC_ERROR_BAD_BLOCK_TYPE;
     }
 
+    if (has_checksum && LIKELY(decoded_sz >= 0)) {
+        const uint32_t stored = zxc_le32(data + comp_sz);
+        if (UNLIKELY(stored !=
+                     zxc_checksum(dst, (size_t)decoded_sz, block_index, ZXC_CHECKSUM_RAPIDHASH)))
+            return ZXC_ERROR_BAD_CHECKSUM;
+    }
+
     return decoded_sz;
 }
 
@@ -1708,8 +1711,9 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
  */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap) {
-    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0, 0);
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                                 const uint64_t block_index) {
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, block_index, 0, 0);
 }
 
 /**
@@ -1724,13 +1728,14 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
  * @param[in]     src_sz  Size of @p src in bytes.
  * @param[out]    dst     Destination buffer for the decoded block.
  * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @param[in]     block_index Frame position of the block: the checksum seed.
  * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap) {
-    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 1, 0);
+                                      const size_t dst_cap, const uint64_t block_index) {
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, block_index, 1, 0);
 }
 
 /**
@@ -1746,11 +1751,12 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
  * @param[in]     src_sz  Size of @p src in bytes.
  * @param[out]    dst     Destination buffer (capacity == exact decoded size).
  * @param[in]     dst_cap Capacity of @p dst in bytes.
+ * @param[in]     block_index Frame position of the block: the checksum seed.
  * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 // cppcheck-suppress unusedFunction
 int zxc_decompress_chunk_wrapper_safe(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap) {
-    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, 0, 1);
+                                      const size_t dst_cap, const uint64_t block_index) {
+    return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, block_index, 0, 1);
 }

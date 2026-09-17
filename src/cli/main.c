@@ -678,7 +678,7 @@ static void cli_progress_callback(uint64_t bytes_processed, uint64_t bytes_total
 /**
  * @brief Lists the contents of a ZXC archive.
  *
- * Reads the file header and footer to display:
+ * Reads the file header and the stored size to display:
  * - Compressed size
  * - Uncompressed size
  * - Compression ratio
@@ -797,21 +797,24 @@ static int zxc_list_archive(const char* path, int json_output) {
         block_size_kb = 0;  // unknown / unsupported code
     }
 
-    // Read footer for checksum info
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (fseeko(f, file_size - ZXC_FILE_FOOTER_SIZE, SEEK_SET) != 0 ||
-        fread(footer, 1, ZXC_FILE_FOOTER_SIZE, f) != ZXC_FILE_FOOTER_SIZE) {
-        fclose(f);
-        fprintf(stderr, "Error: Cannot read file footer\n");
-        return 1;
-    }
-    fclose(f);
-
-    // Presence is the header flag: the stored hash is zero for an empty input
-    const int has_checksum = (header[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) != 0;
-    const uint32_t stored_checksum = footer[8] | ((uint32_t)footer[9] << 8) |
-                                     ((uint32_t)footer[10] << 16) | ((uint32_t)footer[11] << 24);
+    // Flags byte, bit 7 (FORMAT.md 3); the library keeps layout constants internal.
+    enum { ZXC_HEADER_FLAGS = 6, ZXC_DIGEST_BYTES = 8 };
+    const int has_checksum = (header[ZXC_HEADER_FLAGS] & ZXC_FILE_FLAG_HAS_CHECKSUM) != 0;
     const char* checksum_method = has_checksum ? "RapidHash" : "-";
+
+    // Archive digest: the last 8 bytes (after the 8-byte size), present with checksums.
+    char digest_str[24] = "null";
+    if (has_checksum && file_size >= (long long)(ZXC_FILE_HEADER_SIZE + 2 * ZXC_DIGEST_BYTES)) {
+        uint8_t dg[ZXC_DIGEST_BYTES];
+        if (fseeko(f, file_size - ZXC_DIGEST_BYTES, SEEK_SET) == 0 &&
+            fread(dg, 1, sizeof(dg), f) == sizeof(dg)) {
+            uint64_t v = 0;
+            for (int i = 0; i < ZXC_DIGEST_BYTES; i++) v |= (uint64_t)dg[i] << (8 * i);
+            snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)v);
+        }
+    }
+
+    fclose(f);
 
     // Dictionary ID (from header flag bit 6 + bytes 7-10)
     const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
@@ -842,11 +845,11 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
             "  \"checksum_method\": \"%s\",\n"
-            "  \"checksum_value\": \"0x%08X\",\n"
+            "  \"digest\": %s,\n"
             "  \"dict_id\": %s%s%s\n"
             "}\n",
             path, file_size, (long long)uncompressed_size, ratio, format_version, block_size_kb,
-            has_checksum ? "RapidHash" : "none", stored_checksum, dict_id ? "\"" : "",
+            has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
             dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
@@ -858,7 +861,7 @@ static int zxc_list_archive(const char* path, int json_output) {
             "Checksum Method: %s\n",
             path, format_version, block_size_kb, has_checksum ? "RapidHash" : "None");
 
-        if (has_checksum) printf("Checksum Value:  0x%08X\n", stored_checksum);
+        if (has_checksum) printf("Digest:          %s\n", digest_str);
         if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
 
         printf(
@@ -1053,6 +1056,11 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     uint64_t total_size = 0;
     const int stderr_tty = isatty(fileno(stderr)) != 0;
 
+    char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
+    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+
     if (!g_quiet && g_progress_mode != ZXC_PROGRESS_NEVER &&
         (g_progress_mode == ZXC_PROGRESS_ALWAYS || (!use_stdout && !use_stdin && stderr_tty))) {
         // Get the total size based on mode (only knowable for seekable file input)
@@ -1076,12 +1084,6 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         if (g_progress_mode == ZXC_PROGRESS_ALWAYS || total_size > ZXC_STDIO_BUFFER_SIZE)
             show_progress = 1;
     }
-
-    // Set large buffers for I/O performance (AFTER file size detection)
-    char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
-    char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
-    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
-    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
     // -t reports the checksum the archive carries; stdin can't be re-read for it
     int archive_has_checksum = -1;  // -1 unknown, 0 none declared, 1 declared
