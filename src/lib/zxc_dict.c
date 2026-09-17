@@ -192,7 +192,7 @@ const void* zxc_dict_huf(const void* buf, const size_t buf_size) {
 static uint32_t zxc_dict_hash(const uint8_t* p) {
     uint32_t v = zxc_le32(p);
     v ^= (uint32_t)p[4];
-    return (v * ZXC_LZ_HASH_PRIME1) >> (32 - ZXC_DICT_HASH_BITS);
+    return (v * ZXC_HASH_MULT32) >> (32 - ZXC_DICT_HASH_BITS);
 }
 
 /**
@@ -487,7 +487,7 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
                                      : ZXC_DICT_HUF_TRAIN_BLOCK;
             ZXC_MEMCPY(work + dict_size, sample + off, slice);
             const int r =
-                zxc_compress_chunk_wrapper(&cctx, work, dict_size + slice, out_scratch, out_cap);
+                zxc_compress_chunk_wrapper(&cctx, work, dict_size + slice, out_scratch, out_cap, 0);
             if (UNLIKELY(r < 0)) {
                 rc = r;
                 break;
