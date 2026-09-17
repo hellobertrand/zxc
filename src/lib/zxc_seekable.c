@@ -530,7 +530,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     size_t remaining = len;
 
     // One slice, and one read, per table group.
-    uint64_t starts[ZXC_SEEK_GROUP + 1];
+    uint64_t starts[ZXC_SEEK_GROUP + 1] = {0};
     uint8_t raw[ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE];
     uint32_t bi = blk_start;
     while (bi <= blk_end) {
@@ -786,7 +786,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     // Allocate job descriptors, and the span's table groups in one read.
     zxc_seek_mt_job_t* const jobs =
         (zxc_seek_mt_job_t*)ZXC_CALLOC(num_jobs, sizeof(zxc_seek_mt_job_t));
-    uint64_t* const starts = (uint64_t*)ZXC_MALLOC(((size_t)num_jobs + 1) * sizeof(uint64_t));
+    uint64_t* const starts = (uint64_t*)ZXC_CALLOC((size_t)num_jobs + 1, sizeof(uint64_t));
     uint8_t* const raw = (uint8_t*)ZXC_MALLOC(zxc_seek_spans_raw_max(blk_start, num_jobs));
     if (UNLIKELY(!jobs || !starts || !raw)) {
         // LCOV_EXCL_START
