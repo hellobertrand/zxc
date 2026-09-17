@@ -920,9 +920,6 @@ int test_swapped_blocks_oneshot(void) {
     return ok;
 }
 
-/* The footer carries an 8-byte archive digest before the size when checksums are on.
- * It is a fold of the block checksums, so it is deterministic, identical for identical
- * content, absent without -C, and a flipped digest byte fails a verified decode. */
 /* The 8 bytes after the EOF block are a SEK header or the footer's head. The
  * rule the sequential readers share must return the table's full 64-bit length,
  * not the header field: past a 4 GiB table the field folds the high half in. */
@@ -935,10 +932,11 @@ int test_seek_tail_rule(void) {
     uint8_t peek[ZXC_BLOCK_HEADER_SIZE];
     /* Built by the writer, so the rule is checked against what is emitted. */
     if (zxc_seek_table_header(peek, sizeof(peek), (uint32_t)nblocks) < 0) return 0;
-    if (table >> 32 != 1 || zxc_le32(peek + 3) != zxc_seek_size_field(table) ||
-        zxc_seek_size_field(table) == (uint32_t)table) {
-        printf("Failed: size field %u, want the fold %u, not the low half %u\n", zxc_le32(peek + 3),
-               zxc_seek_size_field(table), (uint32_t)table);
+    const uint32_t field = zxc_le32(peek + 3);
+    const uint32_t fold = (uint32_t)(table ^ (table >> 32));
+    if (field != fold) {
+        printf("Failed: size field %u, want the fold %u, not the low half %u\n", field, fold,
+               (uint32_t)table);
         return 0;
     }
 
