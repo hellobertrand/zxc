@@ -175,7 +175,7 @@ impl Seekable {
 
     /// On-disk compressed size of a specific block (block header +
     /// payload + optional per-block checksum), read from its seek table
-    /// group.
+    /// group and checked against bounds only.
     ///
     /// Returns `Ok(None)` if `block_idx` is out of range, and
     /// [`Error::InvalidData`] if the group is unreadable or invalid.

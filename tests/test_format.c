@@ -925,17 +925,22 @@ int test_swapped_blocks_oneshot(void) {
  * content, absent without -C, and a flipped digest byte fails a verified decode. */
 /* The 8 bytes after the EOF block are a SEK header or the footer's head. The
  * rule the sequential readers share must return the table's full 64-bit length,
- * not the header field: past 2^30 blocks the field has wrapped. */
+ * not the header field: past a 4 GiB table the field folds the high half in. */
 int test_seek_tail_rule(void) {
     printf("=== TEST: Format - SEK-or-footer rule after EOF ===\n");
     enum { BS = 4096 };
-    const uint64_t nblocks = (1ULL << 30) + 1; /* table = 4 GiB + 4: field = 4 */
+    const uint64_t nblocks = (1ULL << 30) + 1; /* table past 4 GiB: its high half is 1 */
     const uint64_t table = zxc_seek_table_bytes(nblocks);
     const uint64_t total_out = nblocks * BS;
     uint8_t peek[ZXC_BLOCK_HEADER_SIZE];
-    const zxc_block_header_t sek = {
-        .block_type = ZXC_BLOCK_SEK, .block_flags = 0, .reserved = 0, .comp_size = (uint32_t)table};
-    if (zxc_write_block_header(peek, sizeof(peek), &sek) < 0) return 0;
+    /* Built by the writer, so the rule is checked against what is emitted. */
+    if (zxc_seek_table_header(peek, sizeof(peek), (uint32_t)nblocks) < 0) return 0;
+    if (table >> 32 != 1 || zxc_le32(peek + 3) != zxc_seek_size_field(table) ||
+        zxc_seek_size_field(table) == (uint32_t)table) {
+        printf("Failed: size field %u, want the fold %u, not the low half %u\n", zxc_le32(peek + 3),
+               zxc_seek_size_field(table), (uint32_t)table);
+        return 0;
+    }
 
     uint64_t got = 0;
     if (!zxc_seek_tail_is_sek(peek, total_out, BS, &got) || got != table) {

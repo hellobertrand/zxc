@@ -16,13 +16,15 @@
  *
  * On-disk layout of a SEK block, for N blocks in G = ceil(N / 64) groups:
  *
- *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size=(G*8 + N*4) mod 2^32
+ *   [Block Header (8B)]   block_type=SEK, block_flags=0, comp_size=(u32)(T ^ T >> 32),
+ *                         T = G*8 + N*4 the table's byte size
  *   G x group:
  *     [Anchor (8B)]       byte offset (u64 LE) of the group's first block
  *     [<= 64 x Size (4B)] on-disk size (u32 LE) of each of its blocks
  *
- * Anchor + sizes lands on the next anchor (the EOF block for the last group). N
- * comes from the footer: the header's 32-bit field does not bound it.
+ * Anchor + sizes lands on the next anchor (the EOF block for the last group); the
+ * reader checks each group alone. N comes from the footer: the header's 32-bit
+ * field does not bound it.
  *
  * Detection from end of file:
  *   1. Read file header (first 16 bytes) => block_size
@@ -57,10 +59,11 @@ size_t zxc_seek_table_size(const uint32_t num_blocks) {
 
 int zxc_seek_table_header(uint8_t* dst, const size_t dst_capacity, const uint32_t num_blocks) {
     // The field keeps the table size modulo 2^32; readers derive the count from the footer.
-    const zxc_block_header_t bh = {.block_type = ZXC_BLOCK_SEK,
-                                   .block_flags = 0,
-                                   .reserved = 0,
-                                   .comp_size = (uint32_t)zxc_seek_table_bytes(num_blocks)};
+    const zxc_block_header_t bh = {
+        .block_type = ZXC_BLOCK_SEK,
+        .block_flags = 0,
+        .reserved = 0,
+        .comp_size = zxc_seek_size_field(zxc_seek_table_bytes(num_blocks))};
     return zxc_write_block_header(dst, dst_capacity, &bh);
 }
 
@@ -260,7 +263,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(zxc_read_block_header(tail + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh) !=
                      ZXC_OK ||
                  bh.block_type != ZXC_BLOCK_SEK ||
-                 bh.comp_size != (uint32_t)zxc_seek_table_bytes(num_blocks_64)))
+                 bh.comp_size != zxc_seek_size_field(zxc_seek_table_bytes(num_blocks_64))))
         return NULL;
 
     zxc_seekable* const s = (zxc_seekable*)ZXC_CALLOC(1, sizeof(zxc_seekable));
@@ -282,36 +285,38 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
 }
 
 /** @brief Scratch bound for @ref zxc_seek_load_spans: the groups blocks [@p first,
- *  @p first + @p n) touch, plus the anchor after them. */
+ *  @p first + @p n) touch. */
 static size_t zxc_seek_spans_raw_max(const uint32_t first, const uint32_t n) {
     const uint32_t groups = (first + n - 1) / ZXC_SEEK_GROUP - first / ZXC_SEEK_GROUP + 1;
-    return (size_t)groups * ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE;
+    return (size_t)groups * ZXC_SEEK_GROUP_BYTES;
 }
 
 /**
- * @brief Loads @p starts[0..n]: where blocks [@p first, @p first + @p n) start, and
- *        where the last ends.
+ * @brief Loads where each block of [@p first, @p first + @p n) starts and its on-disk
+ *        size, both taken from the block's own group.
  *
- * One read of the groups the range touches, plus the next anchor. Each group is
- * checked whole: anchor in the data area, every size in [header, entry_max], and
- * anchor + sizes == next anchor (the EOF block for the last group). A forged
- * entry breaks that sum, so no offset the table does not vouch for is used.
+ * One read of the groups the range touches, each checked alone: anchor in the data
+ * area, sizes in [header, entry_max], end within the data area and, for the last
+ * group, on the EOF block. The next anchor is not read, so a bad one costs only
+ * its own group. A block's size is its own entry, never the gap to the next anchor,
+ * so a range spanning groups gets the verdict each group gives alone.
  *
  * @param[in]  s       Handle; @p first + @p n must not exceed its block count.
  * @param[in]  first   First block index.
  * @param[in]  n       Block count, at least 1.
- * @param[out] starts  Room for @p n + 1 offsets.
+ * @param[out] starts  Room for @p n offsets.
+ * @param[out] sizes   Room for @p n sizes, each in [header, entry_max].
  * @param[out] raw     Scratch of @ref zxc_seek_spans_raw_max bytes.
  * @return ZXC_OK, @ref ZXC_ERROR_IO (short read), @ref ZXC_ERROR_CORRUPT_DATA.
  */
 static int zxc_seek_load_spans(const zxc_seekable* s, const uint32_t first, const uint32_t n,
-                               uint64_t* RESTRICT starts, uint8_t* RESTRICT raw) {
-    const uint64_t groups = zxc_seek_group_count(s->num_blocks);
+                               uint64_t* RESTRICT starts, uint32_t* RESTRICT sizes,
+                               uint8_t* RESTRICT raw) {
+    const uint64_t last_group = zxc_seek_group_count(s->num_blocks) - 1;
     const uint32_t g0 = first / ZXC_SEEK_GROUP;
     const uint32_t g1 = (first + n - 1) / ZXC_SEEK_GROUP;
-    const int has_next = (uint64_t)g1 + 1 < groups;
 
-    size_t need = has_next ? ZXC_SEEK_ANCHOR_SIZE : 0;
+    size_t need = 0;
     for (uint32_t g = g0; g <= g1; g++)
         need += ZXC_SEEK_ANCHOR_SIZE +
                 (size_t)zxc_seek_group_len(s->num_blocks, g) * ZXC_SEEK_SIZE_ENTRY;
@@ -334,13 +339,15 @@ static int zxc_seek_load_spans(const zxc_seekable* s, const uint32_t first, cons
             if (UNLIKELY(sz < ZXC_BLOCK_HEADER_SIZE || sz > s->entry_max))
                 return ZXC_ERROR_CORRUPT_DATA;
             const uint64_t idx = (uint64_t)g * ZXC_SEEK_GROUP + k;
-            if (idx >= first && idx < (uint64_t)first + n) starts[idx - first] = pos;
+            if (idx >= first && idx < (uint64_t)first + n) {
+                starts[idx - first] = pos;
+                sizes[idx - first] = sz;
+            }
             pos += sz;  // no wrap: at most ZXC_SEEK_GROUP sizes of at most entry_max
-            if (idx == (uint64_t)first + n - 1) starts[n] = pos;
         }
-        // The group must land exactly on the next anchor, or on the EOF block.
-        const uint64_t next = (g < g1 || has_next) ? zxc_le64(p) : s->eof_off;
-        if (UNLIKELY(pos != next || pos > s->eof_off)) return ZXC_ERROR_CORRUPT_DATA;
+        // Within the data area; the last group, exactly on the EOF block.
+        if (UNLIKELY(pos > s->eof_off || (g == last_group && pos != s->eof_off)))
+            return ZXC_ERROR_CORRUPT_DATA;
     }
     return ZXC_OK;
 }
@@ -391,10 +398,11 @@ uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s) {
  */
 uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s, const uint32_t block_idx) {
     if (UNLIKELY(!s || block_idx >= s->num_blocks)) return 0;
-    uint64_t span[2];
-    uint8_t raw[ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE];
-    if (UNLIKELY(zxc_seek_load_spans(s, block_idx, 1, span, raw) != ZXC_OK)) return 0;
-    return (uint32_t)(span[1] - span[0]);
+    uint64_t start = 0;
+    uint32_t size = 0;
+    uint8_t raw[ZXC_SEEK_GROUP_BYTES];
+    if (UNLIKELY(zxc_seek_load_spans(s, block_idx, 1, &start, &size, raw) != ZXC_OK)) return 0;
+    return size;
 }
 
 /**
@@ -455,8 +463,9 @@ static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t t
 /**
  * @brief Reads a compressed block into @p buf from the memory buffer or reader.
  *
- * @p off and @p csz come from @ref zxc_seek_load_spans; the block's own header
- * must agree with @p csz, or a sum-preserving forge would point at another block.
+ * @p off and @p csz come from @ref zxc_seek_load_spans. The block's header must agree
+ * with @p csz: that rejects an entry pointing into a block, not a block moved onto
+ * another of the same size, which only the position-seeded checksum catches.
  *
  * @param[in]  s        Seekable handle.
  * @param[in]  off      Byte offset of the block in the archive.
@@ -530,20 +539,21 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     size_t remaining = len;
 
     // One slice, and one read, per table group.
-    uint64_t starts[ZXC_SEEK_GROUP + 1] = {0};
-    uint8_t raw[ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE];
+    uint64_t starts[ZXC_SEEK_GROUP] = {0};
+    uint32_t sizes[ZXC_SEEK_GROUP] = {0};
+    uint8_t raw[ZXC_SEEK_GROUP_BYTES];
     uint32_t bi = blk_start;
     while (bi <= blk_end) {
         const uint32_t left = blk_end - bi + 1;
         const uint32_t to_group_end = ZXC_SEEK_GROUP - bi % ZXC_SEEK_GROUP;
         const uint32_t n = left < to_group_end ? left : to_group_end;
-        const int span_res = zxc_seek_load_spans(s, bi, n, starts, raw);
+        const int span_res = zxc_seek_load_spans(s, bi, n, starts, sizes, raw);
         if (UNLIKELY(span_res < 0)) return span_res;
 
         // Block scratch kept on the handle, sized to the slice's largest block, not entry_max.
         uint64_t need = 0;
         for (uint32_t k = 0; k < n; k++)
-            if (starts[k + 1] - starts[k] > need) need = starts[k + 1] - starts[k];
+            if (sizes[k] > need) need = sizes[k];
         need += ZXC_PAD_SIZE;
         if (s->read_buf_cap < need) {
             uint8_t* const nb = (uint8_t*)ZXC_REALLOC(s->read_buf, (size_t)need);
@@ -555,8 +565,8 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
 
         for (uint32_t k = 0; k < n; k++, bi++) {
             // Read compressed block data
-            const int read_res = zxc_seek_read_block(
-                s, starts[k], (uint32_t)(starts[k + 1] - starts[k]), read_buf, s->read_buf_cap);
+            const int read_res =
+                zxc_seek_read_block(s, starts[k], sizes[k], read_buf, s->read_buf_cap);
             if (UNLIKELY(read_res < 0)) return read_res;  // LCOV_EXCL_LINE
 
             // Decompress the block: when a dictionary is active, decode into the
@@ -786,21 +796,24 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     // Allocate job descriptors, and the span's table groups in one read.
     zxc_seek_mt_job_t* const jobs =
         (zxc_seek_mt_job_t*)ZXC_CALLOC(num_jobs, sizeof(zxc_seek_mt_job_t));
-    uint64_t* const starts = (uint64_t*)ZXC_CALLOC((size_t)num_jobs + 1, sizeof(uint64_t));
+    uint64_t* const starts = (uint64_t*)ZXC_CALLOC(num_jobs, sizeof(uint64_t));
+    uint32_t* const sizes = (uint32_t*)ZXC_CALLOC(num_jobs, sizeof(uint32_t));
     uint8_t* const raw = (uint8_t*)ZXC_MALLOC(zxc_seek_spans_raw_max(blk_start, num_jobs));
-    if (UNLIKELY(!jobs || !starts || !raw)) {
+    if (UNLIKELY(!jobs || !starts || !sizes || !raw)) {
         // LCOV_EXCL_START
         ZXC_FREE(jobs);
         ZXC_FREE(starts);
+        ZXC_FREE(sizes);
         ZXC_FREE(raw);
         return ZXC_ERROR_MEMORY;
         // LCOV_EXCL_STOP
     }
-    const int span_res = zxc_seek_load_spans(s, blk_start, num_jobs, starts, raw);
+    const int span_res = zxc_seek_load_spans(s, blk_start, num_jobs, starts, sizes, raw);
     ZXC_FREE(raw);
     if (UNLIKELY(span_res < 0)) {
         ZXC_FREE(jobs);
         ZXC_FREE(starts);
+        ZXC_FREE(sizes);
         return span_res;
     }
 
@@ -816,6 +829,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
             // LCOV_EXCL_START
             ZXC_FREE(jobs);
             ZXC_FREE(starts);
+            ZXC_FREE(sizes);
             return ZXC_ERROR_CORRUPT_DATA;
             // LCOV_EXCL_STOP
         }
@@ -824,7 +838,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
 
         jobs[i].block_idx = bi;
         jobs[i].off = starts[i];
-        jobs[i].csz = (uint32_t)(starts[i + 1] - starts[i]);
+        jobs[i].csz = sizes[i];
         jobs[i].dst_off = out_off;
         jobs[i].skip = skip;
         jobs[i].copy_len = copy;
@@ -836,6 +850,7 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
         remaining -= copy;
     }
     ZXC_FREE(starts);
+    ZXC_FREE(sizes);
 
     // Launch one persistent worker per thread
     pthread_t* const threads = (pthread_t*)ZXC_MALLOC((size_t)n_threads * sizeof(pthread_t));

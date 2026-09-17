@@ -1372,7 +1372,8 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(
 
 Returns the compressed size (on-disk, including header) of a specific block,
 read from its seek table group, or `0` if `block_idx` is out of range or the
-group is unreadable or invalid.
+group is unreadable or invalid. Checked against bounds only: a forged size within
+them comes back as is.
 
 ### `zxc_seekable_get_block_decomp_size`
 
@@ -1400,6 +1401,10 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range(
 Decompresses `len` bytes starting at byte `offset` in the original
 uncompressed data.  Only the blocks overlapping the requested range are read
 and decompressed.
+
+The seek table is not authenticated: a forged one can return another block's
+bytes with no error. Only verified checksums (`zxc_seekable_set_checksum`) bind a
+block to its position.
 
 **Returns**: `len` on success, or negative `zxc_error_t`.
 
@@ -1595,7 +1600,9 @@ Turns per-block checksum verification on or off for this handle. **Off by
 default**, as in the one-shot API: random access reads whole blocks and
 verifying them costs a hash over each one, so the caller decides. With it on, a
 block whose checksum does not match returns `ZXC_ERROR_BAD_CHECKSUM`; with it
-off, a corrupted block can decode to wrong bytes with no error.
+off, a corrupted block can decode to wrong bytes with no error. Checksums are
+seeded with each block's position, so verification also catches a block moved by
+a forged seek table.
 
 Does nothing on an archive compressed without checksums. May be called at any
 time and applies from the next call on, on both the single- and multi-threaded

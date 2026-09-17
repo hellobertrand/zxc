@@ -456,9 +456,15 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_group_len(const uint64_t nblocks, con
     return left < ZXC_SEEK_GROUP ? (uint32_t)left : ZXC_SEEK_GROUP;
 }
 
-/** @brief Byte size of the groups for @p nblocks blocks, before the header's modulo 2^32. */
+/** @brief Byte size of the groups for @p nblocks blocks, in 64 bits. */
 static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
     return zxc_seek_group_count(nblocks) * ZXC_SEEK_ANCHOR_SIZE + nblocks * ZXC_SEEK_SIZE_ENTRY;
+}
+
+/** @brief SEK header size field: @p table_bytes with its high half folded onto the low
+ *  one. Exact below 4 GiB; above, all 64 bits count. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes) {
+    return (uint32_t)(table_bytes ^ (table_bytes >> 32));
 }
 
 /** @} */ /* end of Seekable Format Constants */
@@ -2103,11 +2109,10 @@ static ZXC_ALWAYS_INLINE int zxc_footer_dsize_plausible(const uint64_t dsize,
  *        block.
  *
  * Both are 8 bytes long. They are a SEK header only if they parse as one and
- * announce the table this archive would carry: @ref zxc_seek_table_bytes of its
- * block count, modulo 2^32, the width of the header's size field. A source size
- * that passes all three checks (type, header checksum, size) is one in about
- * 2^40. The sequential readers share this rule so they drain the same number of
- * bytes: the full 64-bit count, not the wrapped field.
+ * announce the table this archive would carry: @ref zxc_seek_size_field of its
+ * @ref zxc_seek_table_bytes. A source size that passes all three checks (type,
+ * header checksum, size) is one in about 2^40. The sequential readers share this
+ * rule so they drain the same number of bytes: the full 64-bit count, not the field.
  *
  * @param[in]  peek        The 8 bytes read after the EOF block.
  * @param[in]  total_out   Bytes decoded so far: the archive's source size.
@@ -2122,7 +2127,7 @@ static ZXC_ALWAYS_INLINE int zxc_seek_tail_is_sek(const uint8_t* peek, const uin
         bh.block_type != ZXC_BLOCK_SEK)
         return 0;
     const uint64_t table = zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size));
-    if ((uint32_t)table != bh.comp_size) return 0;
+    if (zxc_seek_size_field(table) != bh.comp_size) return 0;
     *sek_bytes = table;
     return 1;
 }

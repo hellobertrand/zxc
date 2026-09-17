@@ -18,6 +18,10 @@
  * read a group when one of its blocks is accessed: open costs the same at any
  * block count and no table stays in memory. Plain decompressors ignore it.
  *
+ * The table is not authenticated: a consistent forgery can point a block at
+ * another of the same size. Only checksums verified through
+ * @ref zxc_seekable_set_checksum bind a block to its position.
+ *
  * This header is freestanding: only @c <stddef.h>, @c <stdint.h> and the rest
  * of the ZXC public API, no @c <stdio.h>, so kernel-space and other
  * freestanding environments can include it. The @c FILE*-based
@@ -156,7 +160,8 @@ ZXC_EXPORT uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s);
  * @brief Returns the compressed size of a specific block.
  *
  * The on-disk size: block header + payload + optional per-block checksum, from
- * the block's seek table group: one read per call.
+ * the block's seek table group: one read per call. Checked against bounds only:
+ * a forged size within them comes back as is.
  *
  * @param[in] s          Seekable handle.
  * @param[in] block_idx  Zero-based block index.
@@ -185,7 +190,8 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s,
  * @par Checksums
  * Per-block checksums are **not** verified unless
  * @ref zxc_seekable_set_checksum was called with a non-zero argument; a
- * mismatch then returns @ref ZXC_ERROR_BAD_CHECKSUM.
+ * mismatch then returns @ref ZXC_ERROR_BAD_CHECKSUM. Without it, a forged seek
+ * table can return another block's bytes with no error.
  *
  * @param[in,out] s            Seekable handle.
  * @param[out]    dst          Destination buffer.
@@ -237,7 +243,9 @@ ZXC_EXPORT void zxc_seekable_free(zxc_seekable* s);
  * @brief Turns per-block checksum verification on or off.
  *
  * Off by default, as in the frame API. No effect without checksums in the
- * archive. Applies from the next call, on both paths.
+ * archive. Applies from the next call, on both paths. Checksums are seeded with
+ * each block's position, so this also binds blocks to their index, which the seek
+ * table cannot.
  *
  * @param[in,out] s       Seekable handle.
  * @param[in]     enabled Non-zero to verify, 0 to skip.
@@ -274,7 +282,7 @@ ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t d
  * Low-level helper used by the seekable compression paths. Layout is
  * block_header(8) + groups of 64 blocks, each a u64 anchor (its first block's
  * offset) then one u32 on-disk size per block; the header's size field holds
- * the groups' byte size modulo 2^32.
+ * the groups' byte size folded to 32 bits, exact below 4 GiB.
  *
  * @param[out] dst             Destination buffer.
  * @param[in]  dst_capacity    Capacity of @p dst in bytes.

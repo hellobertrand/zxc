@@ -387,8 +387,8 @@ export class Seekable {
   /**
    * On-disk compressed size of a specific block (block header +
    * payload + optional per-block checksum), read from its seek table
-   * group. Returns `null` if `blockIdx` is out of range; throws if the
-   * group is unreadable or invalid.
+   * group and checked against bounds only. Returns `null` if `blockIdx` is
+   * out of range; throws if the group is unreadable or invalid.
    */
   blockCompressedSize(blockIdx: number): number | null;
   /**

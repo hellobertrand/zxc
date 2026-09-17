@@ -180,6 +180,7 @@ int test_seekable_open_reader_mt(void);
 int test_seekable_cross_boundary(void);
 int test_seekable_truncated_input(void);
 int test_seekable_corrupted_sek(void);
+int test_seekable_mt_group_boundary(void);
 int test_seekable_forged_table_entry(void);
 int test_seekable_forged_total_size(void);
 int test_seekable_beyond_old_cap(void);

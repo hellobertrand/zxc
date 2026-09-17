@@ -357,10 +357,10 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
         tmp[7] = 0;
         CHECK(sh[7] == zxc_hash8(tmp), "SEK header checksum mismatch at %zu", off);
-        /* Size field: the groups' bytes modulo 2^32 (Sec 5.5). */
+        /* Size field: the groups' bytes, high half folded onto the low one (Sec 5.5). */
         const uint64_t table = zxc_seek_table_bytes((uint64_t)data_blocks);
-        CHECK(comp == (uint32_t)table, "SEK comp_size %u != table bytes (%llu) mod 2^32", comp,
-              (unsigned long long)table);
+        CHECK(comp == zxc_seek_size_field(table), "SEK comp_size %u != table bytes (%llu) folded",
+              comp, (unsigned long long)table);
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + table + ZXC_FILE_FOOTER_SIZE <= size,
               "SEK groups overrun file");
         EMIT("\n[seek table @%zu]\n", off);

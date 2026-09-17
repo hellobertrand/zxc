@@ -462,13 +462,13 @@ The **Seek Table** block is an optional block appended between the EOF block and
 **Layout of a SEK Block**:
 ```text
   Offset             Size    Field
-  0x00               8       Block Header (Block Type 254, Compressed Payload Size = table bytes mod 2^32)
+  0x00               8       Block Header (Block Type 254, Compressed Payload Size = table bytes, folded)
   0x08               8       Group 0 anchor: offset of block 0 (u64 LE), always 16
   0x10               4       Block 0 on-disk size (u32 LE)
   0x14               4       Block 1 on-disk size
   ...                4       ... one size per block, 64 per group
-  0x108              8       Group 1 anchor: offset of block 64 (u64 LE)
-  0x110              4       Block 64 on-disk size
+  0x110              8       Group 1 anchor: offset of block 64 (u64 LE)
+  0x118              4       Block 64 on-disk size
   ...                ...     ...
 ```
 
@@ -477,14 +477,17 @@ offset of its first block's header from the start of the archive, as a `u64` - f
 `u32` per block: the block's on-disk size (header + payload + optional checksum). Group `j`
 starts `j × 264` bytes into the table; only the last group may hold fewer than 64 sizes. Block
 `i` starts at `anchor(i / 64)` plus the sizes of the blocks before it in its group, so locating
-any block costs one bounded read. The table is `⌈N / 64⌉ × 8 + N × 4` bytes; the block header's
-32-bit Compressed Payload Size holds that value **modulo 2^32**, the block count being derived
-from the footer, so the table is not bounded by that field.
+any block costs one bounded read. The table is `T = ⌈N / 64⌉ × 8 + N × 4` bytes. The header's
+32-bit Compressed Payload Size holds `T` **folded**, `(T XOR (T >> 32)) mod 2^32`: `T` itself
+below 4 GiB, like every other block's payload size, with all 64 bits taking part above.
+Decoders never read the length from it: they derive `N` from the footer and compare the fold
+of `T`, so the field does not bound the table.
 
-Every group is self-checking: `anchor(j) + Σ sizes(j)` must equal `anchor(j + 1)`, or the EOF
-block's offset for the last group. A decoder verifies this on the group it loads before
-trusting any offset in it, so a forged entry cannot direct a read outside what the table
-vouches for.
+**The table is not authenticated.** Bounds checks (step 7) reject damaged entries, but a
+table rewritten consistently can point a block at another well-formed block of the same
+on-disk size, whose bytes the read returns with no error; any seek index checked only against
+itself shares this. Only the per-block checksum, seeded with the block's position (§ 7.2),
+binds a block to its index.
 
 **Backward Detection Strategy**:
 1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
@@ -492,25 +495,27 @@ vouches for.
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
 4. Calculate `seek_block_size = 8 + ⌈N / 64⌉ × 8 + N × 4`, in 64 bits.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
-6. Validate that Block Type is `254` (SEK) and Compressed Payload Size is
-   `(⌈N / 64⌉ × 8 + N × 4) mod 2^32`, and that an EOF block header sits 8 bytes before it.
-7. Nothing else is read at open: a decoder validates a group when it accesses one of its
-   blocks - anchor 0 is `16`, every anchor lies in `[16, EOF block]`, every size in
-   `[8, 8 + block_size + checksum_size]`, and anchor + sizes lands exactly on the next anchor
-   (or the EOF block) - and rejects a block whose own header disagrees with the size its
-   entry describes.
-
-Sequential decoders that meet the SEK block after the EOF block skip `⌈N / 64⌉ × 8 + N × 4`
-bytes, with `N` derived from the bytes they produced, and check the header field against the
-low 32 bits.
+6. Validate that Block Type is `254` (SEK) and Compressed Payload Size is the fold of
+   `⌈N / 64⌉ × 8 + N × 4`, and that an EOF block header sits 8 bytes before it.
+7. Nothing else is read at open. In a well-formed archive anchor + sizes lands exactly on
+   the next anchor, or on the EOF block for the last group. A decoder validates a group alone
+   when it accesses one of its blocks: anchor 0 is `16`, every anchor lies in
+   `[16, EOF block]`, every size in `[8, 8 + block_size + checksum_size]`, the group ends at
+   or before the EOF block, the last one exactly on it. It rejects a block whose header
+   disagrees with its entry's size, which catches an entry pointing into a block but not one
+   moved onto another block of the same size. A block's size is always its own entry, never
+   the gap to the next anchor. Checking that anchor is optional, and refuses an intact group
+   when it is damaged.
 
 **Sequential Detection**: after the EOF block, a decoder reads 8 bytes, which are either
 the footer or the SEK block header, and cannot tell them apart from those bytes alone: one
 source size in about 65536 parses as a valid SEK header. The bytes are the SEK header if
-and only if they parse as a block header of type `254` whose Compressed Payload Size
-equals `N × 4`, with `N` derived from the bytes the decoder produced; a source size never
-satisfies that equality below 2^56 bytes, since `N × 4 ≥ size / 2^19`. The decoder then
-skips `N × 4` bytes and reads the footer.
+and only if they parse as a block header of type `254` whose Compressed Payload Size equals
+the fold of `T = ⌈N / 64⌉ × 8 + N × 4`, with `N` derived from the bytes the decoder produced.
+Below 4 GiB the fold is `T`, which a source size never matches: those four bytes of the size
+hold at most `size / 2^24`, while `T ≥ 4N ≥ size / 2^19`. Beyond, a false match needs the type,
+the header checksum and the 32 folded bits to agree at once. The decoder then skips `T` bytes,
+counted in 64 bits, and reads the footer.
 
 ---
 
@@ -790,7 +795,8 @@ The recommended behavior for each class is specified below.
 | **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
 | **Data block comp_size above block size** | Block header, offset 0x03 | Reject. A data block never compresses past its own content (§4.1). |
 | **Block walk ends without an EOF block** | End of the block walk | Reject. A forged Compressed Payload Size can span the EOF marker; the resulting short decode must not be reported as success. |
-| **Seek table group inconsistent** | SEK payload | Reject. A size outside `[8, one block]`, an anchor outside the data area, or a group whose sizes do not land on the next anchor (§5.5). |
+| **Seek table group inconsistent** | SEK payload | Reject. A size outside `[8, one block]`, an anchor outside the data area, a group running past the EOF block, or a last group not ending on it (§5.5). |
+| **Block disagrees with its seek entry** | Block header, when a seekable reader accesses the block | Reject. The entry's size is not header + payload + checksum of the block found there (§5.5). |
 | **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
 | **Archive digest mismatch** | File footer, after the size (when `HAS_CHECKSUM=1`) | Reject (if verifying). Blocks were reordered, dropped or altered (§7.3). |
 | **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
@@ -1084,7 +1090,7 @@ FE | 00 | 00 | 0C 00 00 00 | 6F
 
 - `FE` -> type 254 = SEK (Seek Table).
 - flags `00`, reserved `00`.
-- `comp_size = 0x0000000C = 12` bytes (one group: an 8-byte anchor and one 4-byte size, modulo 2^32).
+- `comp_size = 0x0000000C = 12` bytes (one group: an 8-byte anchor and one 4-byte size; below 4 GiB the fold is the size itself).
 - header checksum = `0x6F`.
 
 Group 0 at `0x36`:

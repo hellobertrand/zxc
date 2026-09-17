@@ -194,8 +194,9 @@ func (s *Seekable) DecompressedSize() uint64 {
 
 // BlockCompressedSize returns the on-disk size of a specific block (block
 // header + payload + optional per-block checksum), read from its seek table
-// group. ok is false if blockIdx is out of range or the handle is closed; err
-// is [ErrInvalidData] if the group is unreadable or invalid.
+// group and checked against bounds only. ok is false if blockIdx is out of
+// range or the handle is closed; err is [ErrInvalidData] if the group is
+// unreadable or invalid.
 func (s *Seekable) BlockCompressedSize(blockIdx uint32) (size uint32, ok bool, err error) {
 	if s == nil || s.ptr == nil || blockIdx >= s.NumBlocks() {
 		return 0, false, nil
