@@ -296,6 +296,70 @@ func TestSeekableOpenReader(t *testing.T) {
 	}
 }
 
+// hookReaderAt runs hook once, on its next read.
+type hookReaderAt struct {
+	inner io.ReaderAt
+	hook  func()
+}
+
+func (h *hookReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if f := h.hook; f != nil {
+		h.hook = nil
+		f()
+	}
+	return h.inner.ReadAt(p, off)
+}
+
+// From ReadAt all is refused but a range under the getter, which shares nothing.
+func TestSeekableReentryFromReader(t *testing.T) {
+	payload := bytes.Repeat([]byte("ZXCseekable_"), 8192)
+	arc, err := os.ReadFile(buildSeekableArchive(t, payload))
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	rd := &hookReaderAt{inner: bytes.NewReader(arc)}
+	s, err := OpenReader(rd, int64(len(arc)))
+	if err != nil {
+		t.Fatalf("OpenReader: %v", err)
+	}
+	defer s.Close()
+
+	dst := make([]byte, len(payload))
+	calls := map[string]func() error{
+		"BlockCompressedSize": func() error { _, _, err := s.BlockCompressedSize(0); return err },
+		"DecompressRange":     func() error { _, err := s.DecompressRange(dst, 0, len(dst)); return err },
+	}
+	actions := map[string]func() error{
+		"Close":           s.Close,
+		"SetDict":         func() error { return s.SetDict([]byte("x"), nil) },
+		"DecompressRange": func() error { _, err := s.DecompressRange(make([]byte, 16), 0, 16); return err },
+	}
+	cases := []struct {
+		call, action string
+		want         error
+	}{
+		{"BlockCompressedSize", "Close", ErrSeekableInUse},
+		{"BlockCompressedSize", "SetDict", ErrSeekableInUse},
+		{"BlockCompressedSize", "DecompressRange", nil},
+		{"DecompressRange", "Close", ErrSeekableInUse},
+		{"DecompressRange", "SetDict", ErrSeekableInUse},
+		{"DecompressRange", "DecompressRange", ErrSeekableInUse},
+	}
+	for _, c := range cases {
+		got := errors.New("hook not run")
+		rd.hook = func() { got = actions[c.action]() }
+		if err := calls[c.call](); err != nil {
+			t.Fatalf("%s with %s from ReadAt: %v", c.call, c.action, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s from ReadAt during %s: %v, want %v", c.action, c.call, got, c.want)
+		}
+	}
+	if n, err := s.DecompressRange(dst, 0, len(dst)); err != nil || !bytes.Equal(dst[:n], payload) {
+		t.Fatalf("handle after the refusals: n=%d err=%v", n, err)
+	}
+}
+
 func TestSeekableOpenReaderRejectsNilAndZero(t *testing.T) {
 	if _, err := OpenReader(nil, 100); err == nil {
 		t.Fatalf("OpenReader(nil, 100) should fail")
