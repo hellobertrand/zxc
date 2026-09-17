@@ -567,7 +567,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
             // Read compressed block data
             const int read_res =
                 zxc_seek_read_block(s, starts[k], sizes[k], read_buf, s->read_buf_cap);
-            if (UNLIKELY(read_res < 0)) return read_res;  // LCOV_EXCL_LINE
+            if (UNLIKELY(read_res < 0)) return read_res;
 
             // Decompress the block: when a dictionary is active, decode into the
             // cctx-owned dict_buffer (which has dict content prepended) so that
@@ -728,10 +728,8 @@ static void* zxc_seek_mt_worker(void* arg) {
         const int read_res =
             zxc_seek_read_block(s, job->off, job->csz, read_buf, max_csz + ZXC_PAD_SIZE);
         if (UNLIKELY(read_res < 0)) {
-            // LCOV_EXCL_START
             job->result = read_res;
             break;
-            // LCOV_EXCL_STOP
         }
 
         // Decompress: use dict bounce buffer when dictionary is active

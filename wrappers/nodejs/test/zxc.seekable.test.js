@@ -125,7 +125,7 @@ describe("Seekable: reader callback", () => {
     };
     const s = new zxc.Seekable(reader);
     try {
-      // 3 reads at open: header, footer, seek table.
+      // 3 reads at open: file header, footer, EOF and SEK headers.
       expect(calls).toBe(3);
       expect(s.decompressedSize()).toBe(payload.length);
       const out = s.decompressRange(0, payload.length);
@@ -208,6 +208,34 @@ describe("Seekable: reader callback", () => {
       // The handle survived the attempt and still answers.
       expect(s.numBlocks()).toBeGreaterThanOrEqual(1);
       expect(s.blockDecompressedSize(0)).toBeGreaterThan(0);
+    } finally {
+      s.close();
+    }
+  });
+
+  test("setDict() from readAt during decompressRange is refused", () => {
+    // The running decode uses the dictionary a setDict would free.
+    let refused = null;
+    let s;
+    const reader = {
+      size: compressed.length,
+      readAt(dst, offset) {
+        if (refused === null && s) {
+          try {
+            s.setDict(Buffer.alloc(64, 0x78));
+            refused = false;
+          } catch {
+            refused = true;
+          }
+        }
+        compressed.copy(dst, 0, offset, offset + dst.length);
+      },
+    };
+    s = new zxc.Seekable(reader);
+    try {
+      const out = s.decompressRange(0, payload.length);
+      expect(refused).toBe(true);
+      expect(Buffer.compare(out, payload)).toBe(0);
     } finally {
       s.close();
     }

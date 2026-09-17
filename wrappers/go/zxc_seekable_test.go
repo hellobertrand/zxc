@@ -143,9 +143,13 @@ func TestSeekableForgedGroupIsAnError(t *testing.T) {
 	}
 	n := int(probe.NumBlocks())
 	probe.Close()
-	// Group 0's anchor sits at the start of the table, before the 8-byte footer.
+	// Group 0's anchor opens the table, before the 16-byte footer (size, digest).
 	table := (n+63)/64*8 + n*4
-	arc[len(arc)-8-table] ^= 0xFF
+	anchor := len(arc) - 16 - table
+	if arc[anchor] != 16 {
+		t.Fatalf("byte %d = %d, not group 0's anchor", anchor, arc[anchor])
+	}
+	arc[anchor] ^= 0xFF
 
 	s, err := OpenBytes(arc)
 	if err != nil {
@@ -259,8 +263,8 @@ func TestSeekableOpenReader(t *testing.T) {
 	}
 	defer s.Close()
 
-	// open_reader should have done exactly 3 reads: header, footer, seek
-	// table.
+	// open_reader should have done exactly 3 reads: header, footer, EOF/SEK
+	// block headers.
 	if got := atomic.LoadInt64(&cr.calls); got != 3 {
 		t.Fatalf("open phase calls = %d, want 3", got)
 	}

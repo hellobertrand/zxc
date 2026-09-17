@@ -119,8 +119,10 @@ impl Seekable {
     /// when the handle is dropped.
     ///
     /// `read_at` is invoked exactly three times during this call (file
-    /// header, footer, seek table), then once per block during subsequent
-    /// [`Seekable::decompress_range`] calls.
+    /// header, footer, EOF/SEK block headers), then by each
+    /// [`Seekable::decompress_range`] once per seek table group the range
+    /// covers and once per block; [`Seekable::block_compressed_size`] reads
+    /// the block's group per call.
     ///
     /// # Errors
     ///
@@ -492,9 +494,10 @@ mod tests {
         let n = Seekable::from_bytes(arc.clone())
             .expect("open failed")
             .num_blocks() as usize;
-        // Group 0's anchor sits at the start of the table, before the 8-byte footer.
+        // Group 0's anchor opens the table, before the 16-byte footer (size, digest).
         let table = n.div_ceil(64) * 8 + n * 4;
-        let anchor = arc.len() - 8 - table;
+        let anchor = arc.len() - 16 - table;
+        assert_eq!(arc[anchor], 16, "not group 0's anchor");
         arc[anchor] ^= 0xFF;
 
         // Groups are checked on access, not at open.

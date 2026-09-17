@@ -1036,9 +1036,10 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     // reader mode.
     Napi::FunctionReference read_at_ref_;
     Napi::Env env_{nullptr};
-    // True while a native call that may re-enter JS (via ReadAtTrampoline) is
-    // on the stack: close(), setDict() and decompressRange() from readAt would
-    // free or corrupt what it uses.
+    // True while a native call that may re-enter JS (via ReadAtTrampoline)
+    // is on the stack. Guards close(), setDict(), decompressRange() and
+    // blockCompressedSize() against reentrant calls from the readAt callback,
+    // which would free or corrupt the handle the C library is still using.
     bool in_native_call_ = false;
 
     // C trampoline invoked by the library for every positional read against
@@ -1181,6 +1182,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         Napi::Env env = info.Env();
         if (!requireOpen(env)) return env.Undefined();
         if (in_native_call_) {
+            // The running call decodes with the dictionary this would free.
             Napi::Error::New(env, "cannot setDict from inside its readAt callback")
                 .ThrowAsJavaScriptException();
             return env.Undefined();

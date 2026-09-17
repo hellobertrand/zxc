@@ -140,7 +140,7 @@ class TestSeekableReader:
                 return compressed[offset : offset + length]
 
         with zxc.Seekable(Reader()) as s:
-            assert calls[0] == 3  # header, footer, seek table
+            assert calls[0] == 3  # header, footer, EOF/SEK block headers
             assert s.decompressed_size == len(payload)
             out = s.decompress_range(0, len(payload))
             assert out == payload
@@ -250,6 +250,32 @@ class TestSeekableReader:
                     s.decompress_range(0, 1024)
             hostile[0] = False
             assert s.decompress_range(0, len(payload)) == payload
+
+    def test_reader_may_query_sizes_but_not_nest_a_range(self, tmp_path):
+        # The getter only reads the table; a nested range would share the running
+        # one's decode context.
+        payload = build_payload(128 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        armed = [False]
+        seen = []
+        handle = []
+
+        class Reader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                if armed[0]:
+                    armed[0] = False
+                    seen.append(handle[0].block_compressed_size(0))
+                    with pytest.raises(RuntimeError, match="in use"):
+                        handle[0].decompress_range(0, 16)
+                return compressed[offset : offset + length]
+
+        with zxc.Seekable(Reader()) as s:
+            handle.append(s)
+            armed[0] = True
+            assert s.decompress_range(0, len(payload)) == payload
+            assert seen == [s.block_compressed_size(0)]
 
     def test_reader_multithreaded_decode(self, tmp_path):
         # Regression: multi-threaded decode with a Python reader used to
