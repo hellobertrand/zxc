@@ -2083,6 +2083,53 @@ int test_seekable_forged_total_size(void) {
     return 1;
 }
 
+/* An EOF header announcing a payload is malformed (FORMAT 11.1), even with a valid
+ * header checksum: the seekable open must refuse it like the other decoders. */
+int test_seekable_eof_with_payload(void) {
+    printf("=== TEST: Seekable - EOF Header With Non-Zero comp_size ===\n");
+    enum { SRC_SIZE = 64 * 1024 };
+    uint8_t* const src = malloc(SRC_SIZE);
+    const size_t cap = (size_t)zxc_compress_bound(SRC_SIZE);
+    uint8_t* const arc = malloc(cap);
+    int ok = 0;
+    if (!src || !arc) goto done;
+    fill_seek_data(src, SRC_SIZE, 7);
+    const zxc_compress_opts_t opts = {.level = 1, .seekable = 1, .block_size = 4096};
+    const int64_t csize = zxc_compress(src, SRC_SIZE, arc, cap, &opts);
+    zxc_seekable* s = csize > 0 ? zxc_seekable_open(arc, (size_t)csize) : NULL;
+    if (!s) {
+        printf("Failed: intact archive does not open\n");
+        goto done;
+    }
+    const uint32_t n = zxc_seekable_get_num_blocks(s);
+    zxc_seekable_free(s);
+
+    /* [data blocks][EOF 8][SEK 8 + table][footer 8] */
+    uint8_t* const eof = arc + csize - ZXC_FILE_FOOTER_SIZE - (size_t)zxc_seek_table_bytes(n) -
+                         2 * ZXC_BLOCK_HEADER_SIZE;
+    const zxc_block_header_t forged = {
+        .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 1};
+    zxc_block_header_t back;
+    if (zxc_write_block_header(eof, ZXC_BLOCK_HEADER_SIZE, &forged) < 0 ||
+        zxc_read_block_header(eof, ZXC_BLOCK_HEADER_SIZE, &back) != ZXC_OK ||
+        back.block_type != ZXC_BLOCK_EOF || back.comp_size != 1) {
+        printf("Failed: forged EOF header does not read back\n");
+        goto done;
+    }
+    s = zxc_seekable_open(arc, (size_t)csize);
+    if (s) {
+        printf("Failed: EOF with comp_size 1 opened\n");
+        zxc_seekable_free(s);
+        goto done;
+    }
+    ok = 1;
+    printf("PASS\n\n");
+done:
+    free(src);
+    free(arc);
+    return ok;
+}
+
 /* 2^30 + 5 RAW blocks of 4 KiB served by a callback, four terabytes that never
  * exist: the old 2^30 cap is gone, open costs three reads, nothing is loaded. */
 #define SYNTH_BS 4096u

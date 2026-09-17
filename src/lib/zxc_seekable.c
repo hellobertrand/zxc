@@ -258,7 +258,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     zxc_block_header_t eof_bh;
     zxc_block_header_t bh;
     if (UNLIKELY(zxc_read_block_header(tail, ZXC_BLOCK_HEADER_SIZE, &eof_bh) != ZXC_OK ||
-                 eof_bh.block_type != ZXC_BLOCK_EOF))
+                 eof_bh.block_type != ZXC_BLOCK_EOF || eof_bh.comp_size != 0))
         return NULL;
     if (UNLIKELY(zxc_read_block_header(tail + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh) !=
                      ZXC_OK ||
