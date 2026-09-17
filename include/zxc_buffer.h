@@ -289,7 +289,8 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  * @brief Compresses a single block without file framing.
  *
  * Output is @c block_header(8B) + payload + optional @c checksum(4B), readable
- * by zxc_decompress_block(). One format-conformant block per call: @p src_size
+ * by zxc_decompress_block(). The checksum covers the uncompressed bytes, seeded
+ * with position 0. One format-conformant block per call: @p src_size
  * must not exceed @ref ZXC_BLOCK_SIZE_MAX (2 MiB). For larger payloads use the
  * frame API (zxc_compress) or the streaming API (zxc_cstream_*), which chunk
  * transparently.
@@ -339,6 +340,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  *                             used; a block carries no dictionary id, so pass
  *                             the same (content, table) pair as at compression.
  *                             Static context: @ref ZXC_ERROR_DICT_UNSUPPORTED.
+ *                             The checksum is checked after decoding, at
+ *                             position 0: a frame's later blocks fail it.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
@@ -347,8 +350,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  *         per-block limit. Static context: the carved block is the effective
  *         capacity; a larger block is @ref ZXC_ERROR_BAD_BLOCK_SIZE while it
  *         fits the workspace margin and fails like a too-small destination
- *         beyond it. On error @p dst holds whatever the aborted decode wrote;
- *         its previous contents do not survive.
+ *         beyond it. On error @p dst holds whatever the decode wrote, all of it
+ *         on @ref ZXC_ERROR_BAD_CHECKSUM; its previous contents do not survive.
  */
 ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                         size_t dst_capacity, const zxc_decompress_opts_t* opts);
@@ -385,7 +388,8 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity >
  *         @ref ZXC_BLOCK_SIZE_MAX. Static context: same bound and codes as
  *         zxc_decompress_block(), a larger @p dst_capacity accepted alike. On
- *         error @p dst holds whatever the aborted decode wrote.
+ *         error @p dst holds whatever the decode wrote, all of it on
+ *         @ref ZXC_ERROR_BAD_CHECKSUM.
  */
 ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, const size_t src_size,
                                              void* dst, const size_t dst_capacity,

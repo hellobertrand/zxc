@@ -388,19 +388,23 @@ int test_context_api_empty_input(void) {
         disagreed += !probe_and_decode("data block where EOF belongs", bad, (size_t)n2, NULL,
                                        ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_HEADER);
 
-        /* A corrupted global checksum and an unsupplied dictionary are only
-         * caught by the frame walk, so the probe has to reach it. */
+        /* A corrupted block checksum: the probe stops on capacity, the decode names it. */
+        static const char ck_text[] = "a block checksum only the decode reaches";
         const zxc_compress_opts_t cs_co = {.level = 3, .checksum_enabled = 1};
         const zxc_decompress_opts_t cs_do = {.checksum_enabled = 1};
-        const int64_t cn = zxc_compress(NULL, 0, bad, sizeof(bad), &cs_co);
-        if (cn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
-            printf("  [FAIL] empty+checksum setup: %lld\n", (long long)cn);
+        const int64_t cn = zxc_compress(ck_text, sizeof(ck_text) - 1, bad, sizeof(bad), &cs_co);
+        const int64_t ck_at =
+            cn - (int64_t)(ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE + ZXC_BLOCK_HEADER_SIZE) - 1;
+        if (ck_at < 0) {
+            printf("  [FAIL] block+checksum setup: %lld\n", (long long)cn);
             break;
         }
-        bad[cn - 1] ^= 0xFF;
-        disagreed += !probe_and_decode("corrupted global checksum", bad, (size_t)cn, &cs_do,
-                                       ZXC_ERROR_BAD_CHECKSUM, ZXC_ERROR_BAD_CHECKSUM);
+        bad[ck_at] ^= 0xFF; /* its checksum */
+        disagreed += !probe_and_decode("corrupted block checksum", bad, (size_t)cn, &cs_do,
+                                       ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_BAD_CHECKSUM);
 
+        /* An unsupplied dictionary is only caught by the frame walk, so the
+         * probe has to reach it. */
         static uint8_t dict[8192];
         memset(dict, 'x', sizeof(dict));
         zxc_compress_opts_t dict_co = {.level = 3};

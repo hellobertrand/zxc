@@ -411,6 +411,60 @@ int test_stream_get_decompressed_size_errors() {
     }
     printf("  [PASS] bad magic -> ZXC_ERROR_BAD_MAGIC\n");
 
+    // 3b. A header only the magic word of which is intact must not yield a
+    //     size: the flag byte that places the footer is unverified, and the 8
+    //     bytes it points at may be anything. Same verdict as the decoders.
+    //     A forged footer size is capped like the buffer API caps it.
+    {
+        const size_t src_sz = 4096;
+        uint8_t* src = malloc(src_sz);
+        gen_lz_data(src, src_sz);
+        const size_t cap = (size_t)zxc_compress_bound(src_sz);
+        uint8_t* comp = malloc(cap);
+        zxc_compress_opts_t co = {.level = 1, .checksum_enabled = 1};
+        const int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, &co);
+        if (comp_sz <= 0) {
+            printf("  [SKIP] compress failed\n");
+            free(src);
+            free(comp);
+            return 0;
+        }
+        struct {
+            const char* what;
+            size_t at;
+            int expect;
+        } forge[] = {
+            {"header checksum", 14, ZXC_ERROR_BAD_HEADER},
+            {"footer size", (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE + 7,
+             ZXC_ERROR_CORRUPT_DATA},
+        };
+        for (size_t k = 0; k < sizeof(forge) / sizeof(forge[0]); k++) {
+            FILE* f = tmpfile();
+            if (!f) {
+                printf("  [SKIP] tmpfile failed\n");
+                free(src);
+                free(comp);
+                return 0;
+            }
+            comp[forge[k].at] ^= 0x7F; /* the size stays positive as an int64 */
+            fwrite(comp, 1, (size_t)comp_sz, f);
+            comp[forge[k].at] ^= 0x7F;
+            fseek(f, 0, SEEK_SET);
+            r = zxc_stream_get_decompressed_size(f);
+            fclose(f);
+            if (r != forge[k].expect) {
+                printf("  [FAIL] forged %s: expected %s, got %lld\n", forge[k].what,
+                       zxc_error_name(forge[k].expect), (long long)r);
+                free(src);
+                free(comp);
+                return 0;
+            }
+        }
+        free(src);
+        free(comp);
+    }
+    printf("  [PASS] forged header -> BAD_HEADER, forged footer size -> CORRUPT_DATA\n");
+
     // 4. Valid file returns correct size
     {
         // Create a valid compressed file in memory
@@ -1244,4 +1298,228 @@ int test_stream_oversized_dict(void) {
     if (!ok) return 0;
     printf("PASS\n\n");
     return 1;
+}
+
+/* Checksums seeded by one path must verify through the others: a path alone
+ * round-trips its own mistake. */
+int test_stream_checksum_cross_paths(void) {
+    printf("=== TEST: Stream - block checksums agree across writers and readers ===\n");
+    enum { BS = 4096, N = 16 * BS };
+    static uint8_t src[N], arc[2 * N], out[N];
+    gen_lz_data(src, N);
+    const zxc_compress_opts_t co = {
+        .n_threads = 4, .level = 3, .block_size = BS, .checksum_enabled = 1, .seekable = 1};
+    const zxc_decompress_opts_t verify = {.n_threads = 4, .checksum_enabled = 1};
+    FILE* const f_src = tmpfile();
+    FILE* const f_arc = tmpfile();
+    FILE* const f_out = tmpfile();
+    int ok = 0;
+    do {
+        if (!f_src || !f_arc || !f_out || fwrite(src, 1, N, f_src) != N) {
+            printf("  [FAIL] tmpfile\n");
+            break;
+        }
+        rewind(f_src);
+        /* Multi-threaded stream writer, then the one-shot and seekable readers. */
+        if (zxc_stream_compress(f_src, f_arc, &co) <= 0) {
+            printf("  [FAIL] stream compress\n");
+            break;
+        }
+        rewind(f_arc);
+        const size_t n = fread(arc, 1, sizeof(arc), f_arc);
+        const int64_t one = zxc_decompress(arc, n, out, N, &verify);
+        const int one_ok = one == N && memcmp(out, src, N) == 0;
+        zxc_seekable* const s = zxc_seekable_open(arc, n);
+        if (s) zxc_seekable_set_checksum(s, 1);
+        const int64_t st = s ? zxc_seekable_decompress_range(s, out, N, 0, N) : -1;
+        const int st_ok = st == N && memcmp(out, src, N) == 0;
+        const int64_t mt = s ? zxc_seekable_decompress_range_mt(s, out, N, 0, N, 4) : -1;
+        const int mt_ok = mt == N && memcmp(out, src, N) == 0;
+        zxc_seekable_free(s);
+
+        /* One-shot writer, then the multi-threaded stream reader. */
+        const int64_t m = zxc_compress(src, N, arc, sizeof(arc), &co);
+        FILE* const f_one = tmpfile();
+        const int wrote = f_one && m > 0 && fwrite(arc, 1, (size_t)m, f_one) == (size_t)m;
+        if (f_one) rewind(f_one);
+        const int64_t stream = wrote ? zxc_stream_decompress(f_one, f_out, &verify) : -1;
+        if (f_one) fclose(f_one);
+        rewind(f_out);
+        const int stream_ok =
+            stream == N && fread(out, 1, N, f_out) == N && memcmp(out, src, N) == 0;
+
+        if (!one_ok || !st_ok || !mt_ok || !stream_ok) {
+            printf("  [FAIL] one-shot %lld, seekable st %lld / mt %lld, stream %lld\n",
+                   (long long)one, (long long)st, (long long)mt, (long long)stream);
+            break;
+        }
+        ok = 1;
+    } while (0);
+    if (f_src) fclose(f_src);
+    if (f_arc) fclose(f_arc);
+    if (f_out) fclose(f_out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Decodes @p arc whole through a push stream; 1 when it validates the footer. */
+static int dstream_finishes(const uint8_t* arc, size_t alen, uint8_t* out, size_t n) {
+    const zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
+    zxc_dstream* const ds = zxc_dstream_create(&dopts);
+    if (!ds) return 0;
+    zxc_inbuf_t in = {arc, alen, 0};
+    zxc_outbuf_t ob = {out, n, 0};
+    int ok = 1;
+    for (int i = 0; i < 4 && ok && !zxc_dstream_finished(ds); i++)
+        ok = zxc_dstream_decompress(ds, &ob, &in) >= 0;
+    ok = ok && zxc_dstream_finished(ds) && ob.pos == n;
+    zxc_dstream_free(ds);
+    return ok;
+}
+
+/* One source size in ~65536 reads back, as the footer's u64, like a valid SEK
+ * header. The tail readers must tell it from a real table, with or without one. */
+/* The CLI's `-t --progress` path asks for the stored size on the very stream it
+ * then decodes: the lookup seeks to the footer and back, and the decode has to
+ * start from a stream still in step.
+ *
+ * The second round adds a caller buffer, installed before the lookup as the CLI
+ * does it: setvbuf is defined only before a stream's first operation and its
+ * buffer must outlive the stream, hence one FILE per round freed after fclose.
+ * That order the other way round is what made Windows read a truncated frame. */
+int test_stream_size_then_decompress(void) {
+    printf("=== TEST: Stream - stored-size lookup then decode, same stream ===\n");
+    const size_t n = 600u * 1024u; /* > 1 block at the 512 KB default */
+    const char* const path = "zxc_size_then_decode.tmp";
+    uint8_t* const src = malloc(n);
+    uint8_t* const out = malloc(n);
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const arc = malloc(cap);
+    if (!src || !out || !arc) {
+        free(src);
+        free(out);
+        free(arc);
+        return 0;
+    }
+    gen_lz_data(src, n);
+
+    const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 1};
+    const int64_t alen = zxc_compress(src, n, arc, cap, &co);
+    int ok = alen > 0;
+    if (!ok) printf("  [FAIL] compress returned %lld\n", (long long)alen);
+
+    if (ok) {
+        FILE* const f = create_restricted_file(path);
+        ok = f && fwrite(arc, 1, (size_t)alen, f) == (size_t)alen;
+        if (f && fclose(f) != 0) ok = 0;
+        if (!ok) printf("  [FAIL] could not stage %s\n", path);
+    }
+    if (ok) {
+        FILE* const f = fopen(path, "rb");
+        long staged = -1;
+        if (f && fseek(f, 0, SEEK_END) == 0) staged = ftell(f);
+        if (f) fclose(f);
+        if (staged != (long)alen) {
+            printf("  [FAIL] staged %ld bytes, wrote %lld: the file is not binary\n", staged,
+                   (long long)alen);
+            ok = 0;
+        }
+    }
+
+    for (int buffered = 0; buffered <= 1 && ok; buffered++) {
+        FILE* const f_arc = fopen(path, "rb");
+        char* buf = NULL;
+        if (f_arc && buffered) {
+            buf = malloc(1u << 16);
+            if (buf) setvbuf(f_arc, buf, _IOFBF, 1u << 16);
+        }
+        FILE* const f_out = tmpfile();
+        int64_t reported = -1, got = -1;
+        if (f_arc && f_out) {
+            reported = zxc_stream_get_decompressed_size(f_arc);
+            const zxc_decompress_opts_t verify = {.n_threads = 1, .checksum_enabled = 1};
+            got = zxc_stream_decompress(f_arc, f_out, &verify);
+        }
+        if (reported != (int64_t)n || got != (int64_t)n) {
+            printf("  [FAIL] buffered=%d: size %lld, decode %lld, want %zu\n", buffered,
+                   (long long)reported, (long long)got, n);
+            ok = 0;
+        } else {
+            rewind(f_out);
+            if (fread(out, 1, n, f_out) != n || memcmp(out, src, n) != 0) {
+                printf("  [FAIL] buffered=%d: decoded bytes differ\n", buffered);
+                ok = 0;
+            }
+        }
+        if (f_out) fclose(f_out);
+        if (f_arc) fclose(f_arc); /* the buffer stays alive until here */
+        free(buf);
+    }
+
+    remove(path);
+    free(src);
+    free(out);
+    free(arc);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+int test_stream_footer_looks_like_sek(void) {
+    printf("=== TEST: Stream - a footer that parses as a SEK header ===\n");
+    uint64_t n = 0;
+    for (uint64_t k = ZXC_BLOCK_SEK; k < (1u << 24) && !n; k += 256) {
+        uint8_t b[8];
+        zxc_store_le64(b, k);
+        zxc_block_header_t bh;
+        if (zxc_read_block_header(b, sizeof(b), &bh) == ZXC_OK && bh.block_type == ZXC_BLOCK_SEK)
+            n = k;
+    }
+    if (!n) {
+        printf("  [FAIL] no such size below 16 MiB\n");
+        return 0;
+    }
+    printf("  size %llu bytes parses as a SEK header\n", (unsigned long long)n);
+
+    uint8_t* const src = malloc((size_t)n);
+    uint8_t* const out = malloc((size_t)n);
+    const size_t acap = (size_t)zxc_compress_bound((size_t)n) + 64;
+    uint8_t* const arc = malloc(acap);
+    int ok = 0;
+    if (src && out && arc) {
+        gen_lz_data(src, (size_t)n);
+        ok = 1;
+        for (int seekable = 0; seekable <= 1 && ok; seekable++) {
+            const zxc_compress_opts_t co = {
+                .n_threads = 1, .level = 3, .checksum_enabled = 1, .seekable = seekable};
+            const zxc_decompress_opts_t verify = {.n_threads = 1, .checksum_enabled = 1};
+            FILE* const f_src = tmpfile();
+            FILE* const f_arc = tmpfile();
+            FILE* const f_out = tmpfile();
+            int64_t st = -1;
+            int push = 0;
+            if (f_src && f_arc && f_out && fwrite(src, 1, (size_t)n, f_src) == n) {
+                rewind(f_src);
+                if (zxc_stream_compress(f_src, f_arc, &co) > 0) {
+                    rewind(f_arc);
+                    const int64_t alen = (int64_t)fread(arc, 1, acap, f_arc);
+                    rewind(f_arc);
+                    st = zxc_stream_decompress(f_arc, f_out, &verify);
+                    push = alen > 0 && dstream_finishes(arc, (size_t)alen, out, (size_t)n);
+                }
+            }
+            if (f_src) fclose(f_src);
+            if (f_arc) fclose(f_arc);
+            if (f_out) fclose(f_out);
+            if (st != (int64_t)n || !push || memcmp(out, src, (size_t)n) != 0) {
+                printf("  [FAIL] seekable=%d: stream reader -> %lld, push stream %s\n", seekable,
+                       (long long)st, push ? "finished" : "did not finish");
+                ok = 0;
+            }
+        }
+    }
+    free(src);
+    free(out);
+    free(arc);
+    if (ok) printf("PASS\n\n");
+    return ok;
 }

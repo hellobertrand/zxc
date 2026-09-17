@@ -280,10 +280,10 @@ if ! wait_for_file "$EMPTY.zxc"; then
     log_fail "Could not create empty archive $EMPTY.zxc"
 fi
 
-# Stored hash is zero, but the archive still carries a checksum
+# An empty archive still carries a checksum and a digest
 LIST_OUT=$("$ZXC_BIN" -l -j "$EMPTY.zxc")
 if [[ "$LIST_OUT" == *'"checksum_method": "RapidHash"'* ]] &&
-   [[ "$LIST_OUT" == *'"checksum_value": "0x00000000"'* ]]; then
+   [[ "$LIST_OUT" == *'"digest": "0x'* ]]; then
     log_pass "-l reports the checksum of an empty -C archive"
 else
     log_fail "-l should report a checksum on an empty -C archive: $LIST_OUT"
@@ -387,7 +387,7 @@ else
     log_fail "-t -N should report the archive checksum as present but unchecked (exit $RET): $OUT / $OUTJ"
 fi
 
-# Empty -C archive from 9b (zero stored hash)
+# Empty -C archive from 9b
 OUTJ=$("$ZXC_BIN" -t -j "$EMPTY.zxc" 2>&1)
 if [[ "$OUTJ" == *'"checksum_method": "RapidHash"'* ]] &&
    [[ "$OUTJ" == *'"checksum_verified": true'* ]]; then
@@ -396,23 +396,25 @@ else
     log_fail "-t should verify the checksum of an empty -C archive: $OUTJ"
 fi
 
-# 10. Global Checksum Integrity
-echo "Testing Global Checksum Integrity..."
+# 10. Block Checksum Integrity
+echo "Testing Block Checksum Integrity..."
 "$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
 
-# Corrupt the last byte (part of Global Checksum)
+# Flip the last byte of the last block's checksum: it sits right before the
+# 8-byte EOF block and the 16-byte footer (digest + size). Flipping always changes it.
 FILE_SZ=$(wc -c < "$TEST_FILE_XC_ARG" | tr -d ' ')
-LAST_BYTE_OFFSET=$((FILE_SZ - 1))
-printf '\x00' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$LAST_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
+CK_BYTE_OFFSET=$((FILE_SZ - 16 - 8 - 1))
+CK_BYTE=$(dd if="$TEST_FILE_XC_ARG" bs=1 skip=$CK_BYTE_OFFSET count=1 2>/dev/null | od -An -tu1 | tr -d ' ')
+printf "$(printf '\\x%02x' $((CK_BYTE ^ 0xFF)))" | dd of="$TEST_FILE_XC_ARG" bs=1 seek=$CK_BYTE_OFFSET count=1 conv=notrunc 2>/dev/null
 
 set +e
 OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG" 2>&1)
 RET=$?
 set -e
 if [[ $RET -ne 0 ]] && [[ "$OUT" == *": FAILED"* ]]; then
-    log_pass "Integrity check correctly failed on corrupt Global Checksum"
+    log_pass "Integrity check correctly failed on corrupt block checksum"
 else
-    log_fail "Integrity check PASSED on corrupt Global Checksum (False Negative)"
+    log_fail "Integrity check PASSED on corrupt block checksum (False Negative)"
 fi
 
 # Ensure no output file is created
@@ -1500,12 +1502,27 @@ else
 fi
 
 # 34.5 -t with --progress=always labels the operation "Testing"
-"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG"
-"$ZXC_BIN" -t --progress=always "$TEST_FILE_XC_ARG" > /dev/null 2> "$TEST_DIR/prog5.err"
-if grep -q "Testing" "$TEST_DIR/prog5.err"; then
-    log_pass "-t progress labeled 'Testing'"
+set +e
+"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG" 2> "$TEST_DIR/prog5z.err"
+ZRET=$?
+set -e
+if [[ $ZRET -ne 0 ]]; then
+    echo "  -z exit $ZRET, stderr: $(cat "$TEST_DIR/prog5z.err")"
+    log_fail "-t progress setup: compressing $TEST_FILE_ARG failed"
 else
-    log_fail "-t progress should be labeled 'Testing'"
+    set +e
+    "$ZXC_BIN" -t --progress=always "$TEST_FILE_XC_ARG" > /dev/null 2> "$TEST_DIR/prog5.err"
+    TRET=$?
+    set -e
+    if [[ $TRET -ne 0 ]]; then
+        echo "  -t exit $TRET, stderr: $(cat "$TEST_DIR/prog5.err")"
+        log_fail "-t --progress=always failed on a valid archive"
+    elif grep -q "Testing" "$TEST_DIR/prog5.err"; then
+        log_pass "-t progress labeled 'Testing'"
+    else
+        echo "  -t stderr: $(cat "$TEST_DIR/prog5.err")"
+        log_fail "-t progress should be labeled 'Testing'"
+    fi
 fi
 
 echo "All tests passed!"

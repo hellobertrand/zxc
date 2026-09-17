@@ -183,7 +183,7 @@ The file begins with a **16-byte** header that identifies the format and specifi
     - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB, `19` = 512 KB (default), `20` = 1 MB, `21` = 2 MB.
   - All other values are rejected; block sizes are powers of 2.
 * **Flags (1 byte)**: Global configuration flags.
-  - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream. Every block will carry a trailing 4-byte checksum, and the footer will contain a global checksum. If `0`, no checksums are present.
+  - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream: every block carries a trailing 4-byte checksum. If `0`, no checksums are present.
   - **Bit 6**: `HAS_DICTIONARY`. If `1`, the stream was compressed with a pre-trained dictionary and **requires** it for decompression; the reserved field carries the `dict_id` (see below and §5.10).
   - **Bits 4-5**: Reserved.
   - **Bits 0-3**: Checksum Algorithm ID (e.g., `0` = RapidHash).
@@ -207,7 +207,7 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 ```
 
-**Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the compressed payload**.
+**Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the block's decompressed bytes**, seeded with the block's position in the frame (§5.8).
 
 * **Type**: Block encoding type (0=RAW, 1=GLO, 2=GHI, 255=EOF).
 * **Flags**: Not used for now.
@@ -401,8 +401,7 @@ GHI Block Data Layout:
 The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
 
 *   **Structure**: Standard 8-byte Block Header.
-*   **Flags**:
-    *   **Bit 7 (0x80)**: `has_checksum`. If set, implies the **Global Stream Checksum** in the footer is valid and should be verified.
+*   **Flags**: written as `0`.
 *   **Comp Size**: Unlike other blocks, these **MUST be set to 0**. The decoder enforces strict validation (`Type == EOF` AND `Comp Size == 0`) to prevent processing of malformed termination blocks.
 *   **Checksum**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with the checksum byte set to 0) using `zxc_hash8`.
 
@@ -410,22 +409,29 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 ### 5.6 File Footer
 (Present immediately after the EOF Block)
 
-A mandatory **12-byte footer** closes the stream, providing total source size information and the global checksum.
+A mandatory footer closes the stream with the total source size in its first
+8 bytes, followed by an 8-byte **archive digest** when checksums are on.
 
-**Footer Structure (12 bytes):**
+**Footer Structure (8 bytes, 16 with a digest):**
 
 ```
-  Offset:  0                               8               12
-          +-------------------------------+---------------+
-          | Original Source Size          | Global Hash   |
-          | (8 bytes)                     | (4 bytes)     |
-          +-------------------------------+---------------+
+  Offset:  0               8              16
+          +---------------+---------------+
+          | Source Size   | Archive Digest|
+          | (8 bytes)     | (8, if -C)    |
+          +---------------+---------------+
 ```
 
 *   **Original Source Size** (8 bytes): Total size of the uncompressed data.
-*   **Global Hash** (4 bytes): The **Global Stream Checksum**. Valid only if the EOF block has the `has_checksum` flag set (or the decoder context requires it).
-    *   **Algorithm**: `Rotation + XOR`.
-    *   For each block with a checksum: `global_hash = (global_hash << 1) | (global_hash >> 31); global_hash ^= block_hash;`
+*   **Archive Digest** (8 bytes, only with checksums): an ordered fold of every
+    block's checksum -- a whole-archive identity that a full decode verifies and
+    `zxc -t` reports. A block reordered, dropped or altered changes it. It is not
+    checked on a seekable range read, which never sees every block.
+
+Per-block integrity does not need the digest: every block's checksum is seeded
+with its position (§5.8), so a block out of place already fails on its own,
+under a range read as under a full decode. The digest adds the whole-archive
+identity and catches a block silently replaced by a valid one at its position.
 
 ### 5.7 Block Encoding & Processing Algorithms
 
@@ -495,12 +501,13 @@ This format prioritizes decompression throughput over compression ratio. It uses
 ### 5.8 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.
 
-#### Post-Compression Verification
-Unlike traditional codecs that verify the integrity of the original uncompressed data, ZXC calculates checksums on the **compressed** payload.
+#### End-to-End Verification
+ZXC checksums the **decompressed** bytes of each block. The question answered is "are the bytes I hand back the ones that went in", not "are the compressed bytes intact".
 
-*   **Zero-Overhead Decompression**: Verifying uncompressed data requires computing a hash over the output *after* decompression, contending for cache and CPU resources with the decompression logic itself. By checksumming the compressed stream, verification happens *during* the read phase, before the data even enters the decoder.
-*   **Early Failure Detection**: Corruption is detected before attempting to decompress, preventing potential crashes or buffer overruns in the decoder caused by malformed data.
-*   **Reduced Memory Bandwidth**: The checksum is computed over a much smaller dataset (the compressed block), saving significant memory bandwidth.
+*   **Covers the whole pipeline**: An encoder defect, a decoder defect, a divergence between SIMD variants or a miscompilation all leave the compressed bytes intact and the output wrong. Only a checksum over the output sees them. So does a wrong dictionary accepted through a 32-bit `dict_id` collision.
+*   **Per block, not per file**: The checksum stays on each block rather than on the whole stream, which keeps it usable under random access: reading one block through the seek table verifies that block. It is seeded with the block's position in the frame, so a block moved elsewhere fails too, under a range read as under a full decode. A single whole-file hash cannot be checked without decoding everything.
+*   **What it costs**: verification is opt-in. When on, it hashes the output instead of the compressed payload, so the extra work is proportional to how well the data compresses -- nothing on incompressible data, where the payload already *is* the output. Measured on a mixed corpus at 43.5%: decoding goes from 23.1 to 18.7 GB/s, about 23% more than the previous checksummed decode. zstd's closest equivalent is an XXH64 of the whole frame's content: off by default in libzstd (its CLI turns it on), and unable to vouch for a partial read.
+*   **What it gives up**: a corrupted block is no longer rejected before decoding, so it reports whatever the decoder tripped on first. The decoder is fuzzed to be safe on malformed input regardless, and a checksum is forgeable, so this was never a security boundary.
 
 #### Multi-Algorithm Support
 ZXC supports multiple integrity verification algorithms (though currently standardized on rapidhash).
@@ -524,7 +531,7 @@ For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dict
 
 *   **Mechanism**: A dictionary is raw byte content (max 64 KB, bounded by the 64 KB LZ window). At compression, it is logically prepended to every block's input, seeding the hash tables so the match finder can reference dictionary content from the first byte. At decompression, it is prepended to the output buffer so match copies that point into dictionary bytes resolve naturally by pointer arithmetic. The prefill is **per-block**, so random access is preserved: load the dictionary once, then decode any block independently.
 
-*   **External, content-addressed model**: Dictionaries are **external** files (`.zxd`), referenced from the file header by a 32-bit `dict_id`. This follows the industry-standard train-once / reuse-many model (the dictionary is amortized across many archives rather than duplicated inside each). The `dict_id` is **self-validating**: it identifies *which* dictionary is required and simultaneously detects an accidentally wrong one. A decoder **MUST** reject decompression when the required dictionary is absent (`ZXC_ERROR_DICT_REQUIRED`) or when the supplied dictionary's id does not match `header.dict_id` (`ZXC_ERROR_DICT_MISMATCH`). The per-block and global checksums of §5.9 are a second line of defense: a wrong dictionary yields wrong output that fails the checksum (when enabled).
+*   **External, content-addressed model**: Dictionaries are **external** files (`.zxd`), referenced from the file header by a 32-bit `dict_id`. This follows the industry-standard train-once / reuse-many model (the dictionary is amortized across many archives rather than duplicated inside each). The `dict_id` is **self-validating**: it identifies *which* dictionary is required and simultaneously detects an accidentally wrong one. A decoder **MUST** reject decompression when the required dictionary is absent (`ZXC_ERROR_DICT_REQUIRED`) or when the supplied dictionary's id does not match `header.dict_id` (`ZXC_ERROR_DICT_MISMATCH`). The per-block checksums of §5.8 are a second line of defense: a wrong dictionary yields wrong output that fails the checksum (when enabled).
 
 *   **Shared literal Huffman table**: Beyond LZ priming, a dictionary carries a **shared canonical Huffman table** for the literal stream (128 bytes of packed code lengths, trained on the corpus' *post-LZ* literal distribution). Blocks whose literals compress better with this table use `enc_lit = 3` (§5.7) and skip the 128-byte per-block lengths header entirely — decisive at small block sizes, where the header never amortizes. The code lengths are validated **once per context** when the dictionary is attached, instead of being parsed per block. The result is a simultaneous ratio *and* decode-speed improvement on homogeneous corpora at small block sizes, tapering to neutral as blocks grow and per-block tables win on their own. The selection is by exact byte accounting, so the shared table is never a regression.
 

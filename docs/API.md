@@ -386,7 +386,7 @@ Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
 `seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
-zero `src_size` (with `src` NULL or not) writes the 36-byte empty archive.
+zero `src_size` (with `src` NULL or not) writes the 32-byte empty archive.
 
 ### `zxc_decompress`
 
@@ -503,6 +503,8 @@ for filesystem integrations (DwarFS, EROFS, SquashFS) where the caller
 manages its own block indexing.
 
 Output format: `block_header (8 B)` + compressed payload + optional `checksum (4 B)`.
+The checksum covers the block's decompressed bytes, seeded with 0 (frames seed each block with
+its position), so it is verified after decoding.
 
 ### `zxc_compress_block_bound`
 
@@ -1016,9 +1018,13 @@ Decompresses `f_in` -> `f_out` using a parallel pipeline.
 ZXC_EXPORT int64_t zxc_stream_get_decompressed_size(FILE* f_in);
 ```
 
-Reads the original size from the file footer. File position is restored.
+Reads the original size from the file footer, after validating the file header
+as a decoder would and capping the size by what the archive could hold. File
+position is restored.
 
-**Returns**: original size, or negative `zxc_error_t`.
+**Returns**: original size, or negative `zxc_error_t` (the header's verdict,
+`ZXC_ERROR_SRC_TOO_SMALL`, `ZXC_ERROR_CORRUPT_DATA` for an implausible size, or
+an I/O error).
 
 ---
 
@@ -1112,7 +1118,7 @@ ZXC_EXPORT int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out);
 ```
 
 Finalises the stream: compresses any partial last block, emits the EOF
-block (8 B) and the file footer (12 B).  **Must be called** to produce a
+block (8 B) and the file footer (8 B, 16 with a digest).  **Must be called** to produce a
 valid ZXC file.
 
 Reentrant the same way `_compress` is: loop until it returns `0`.
@@ -1144,10 +1150,10 @@ ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
 ```
 
 Creates a push decompression context.  Only `checksum_enabled` from `opts`
-is honoured (controls whether the global file-level checksum is verified
-when the file carries one). Dictionary options fail creation, and an archive
-whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED` at the
-first decompress call.
+is honoured (controls whether the block checksums and archive digest are
+verified when the file carries them). Dictionary options fail creation, and an
+archive whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED`
+at the first decompress call.
 
 **Returns**: context, or `NULL` on allocation failure.
 
