@@ -161,6 +161,33 @@ describe("Seekable: reader callback", () => {
     }
   });
 
+  test("setDict() from readAt during decompressRange is refused", () => {
+    let refused = null;
+    let s;
+    const reader = {
+      size: compressed.length,
+      readAt(dst, offset) {
+        if (refused === null && s) {
+          try {
+            s.setDict(Buffer.alloc(64, 0x78));
+            refused = false;
+          } catch {
+            refused = true;
+          }
+        }
+        compressed.copy(dst, 0, offset, offset + dst.length);
+      },
+    };
+    s = new zxc.Seekable(reader);
+    try {
+      const out = s.decompressRange(0, payload.length);
+      expect(refused).toBe(true);
+      expect(Buffer.compare(out, payload)).toBe(0);
+    } finally {
+      s.close();
+    }
+  });
+
   test("rejects missing size / readAt", () => {
     expect(() => new zxc.Seekable({})).toThrow();
     expect(() => new zxc.Seekable({ size: 100 })).toThrow();

@@ -1729,6 +1729,9 @@ typedef struct {
     PyObject* exc_type;
     PyObject* exc_value;
     PyObject* exc_tb;
+    /* decompress_range calls in progress, under the GIL: close(), set_dict() and
+     * a nested range would free or share what they use. */
+    int busy;
 } pyzxc_seekable_holder_t;
 
 /* Stores the currently-raised exception into the holder (first one wins) so
@@ -1777,6 +1780,19 @@ static zxc_seekable* seekable_from_capsule(PyObject* capsule) {
     return h->s;
 }
 
+/* seekable_from_capsule, refusing a handle in use. */
+static pyzxc_seekable_holder_t* seekable_idle_holder(PyObject* capsule) {
+    if (!seekable_from_capsule(capsule)) return NULL;
+    pyzxc_seekable_holder_t* h =
+        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    if (h->busy) {
+        PyErr_SetString(PyExc_RuntimeError,
+                        "Seekable is in use (called from its reader, or from another thread)");
+        return NULL;
+    }
+    return h;
+}
+
 static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
@@ -1813,6 +1829,7 @@ static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
     h->exc_type = NULL;
     h->exc_value = NULL;
     h->exc_tb = NULL;
+    h->busy = 0;
 
     PyObject* cap = PyCapsule_New(h, ZXC_SEEKABLE_CAPSULE, seekable_capsule_destructor);
     if (!cap) {
@@ -1886,6 +1903,7 @@ static PyObject* pyzxc_seekable_open_reader(PyObject* self, PyObject* arg) {
     h->exc_type = NULL;
     h->exc_value = NULL;
     h->exc_tb = NULL;
+    h->busy = 0;
 
     zxc_reader_t r;
     r.read_at = seekable_read_at_trampoline;
@@ -1968,8 +1986,9 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
 
     if (length < 0) Py_Return_Err(PyExc_ValueError, "length must be non-negative");
 
-    zxc_seekable* s = seekable_from_capsule(capsule);
-    if (!s) return NULL;
+    pyzxc_seekable_holder_t* h = seekable_idle_holder(capsule);
+    if (!h) return NULL;
+    zxc_seekable* const s = h->s;
 
     if (length == 0) return PyBytes_FromStringAndSize(NULL, 0);
 
@@ -1978,8 +1997,7 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
     char* dst = PyBytes_AS_STRING(out);
 
     int64_t r;
-    pyzxc_seekable_holder_t* h =
-        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    h->busy++;
 
     /* The GIL is released on every path: the reader trampoline re-attaches
      * with PyGILState_Ensure, which also makes the multi-threaded decode safe
@@ -1994,17 +2012,18 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
     }
     Py_END_ALLOW_THREADS
 
-        if (r < 0) {
+        h->busy--;
+    if (r < 0) {
         Py_DECREF(out);
         /* Prefer the reader's own exception (with traceback) when it caused
          * the failure; otherwise report the library error code. */
-        if (h && seekable_restore_exception(h)) return NULL;
+        if (seekable_restore_exception(h)) return NULL;
         Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)r));
     }
     /* A callback may have failed on one worker while another satisfied the
      * range; drop any stale stashed exception so it cannot leak into an
      * unrelated later call. */
-    if (h && h->exc_type) {
+    if (h->exc_type) {
         Py_CLEAR(h->exc_type);
         Py_CLEAR(h->exc_value);
         Py_CLEAR(h->exc_tb);
@@ -2019,6 +2038,10 @@ static PyObject* pyzxc_seekable_free(PyObject* self, PyObject* capsule) {
     if (!PyCapsule_IsValid(capsule, ZXC_SEEKABLE_CAPSULE)) Py_RETURN_NONE;
     pyzxc_seekable_holder_t* h =
         (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+    if (h && h->busy)
+        Py_Return_Err(PyExc_RuntimeError,
+                      "cannot close Seekable while a call on it is running (from its reader, or "
+                      "from another thread)");
     if (h && h->s) {
         zxc_seekable_free(h->s);
         h->s = NULL;
@@ -2055,11 +2078,12 @@ static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
     PyObject* dict_huf_obj = NULL;
     if (!PyArg_ParseTuple(args, "Oy*|O", &capsule, &view, &dict_huf_obj)) return NULL;
 
-    zxc_seekable* s = seekable_from_capsule(capsule);
-    if (!s) {
+    const pyzxc_seekable_holder_t* const h = seekable_idle_holder(capsule);
+    if (!h) {
         PyBuffer_Release(&view);
         return NULL;
     }
+    zxc_seekable* const s = h->s;
 
     uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
     const void* dict_huf = NULL;
