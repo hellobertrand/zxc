@@ -284,8 +284,8 @@ typedef struct {
     uint64_t digest;           // archive digest (compress side)
     uint64_t bytes_processed;  // For progress callback
     uint32_t* seek_comp;
-    uint32_t seek_count;
-    uint32_t seek_cap;
+    uint64_t seek_count;
+    uint64_t seek_cap;
 } writer_args_t;
 
 /**
@@ -447,25 +447,17 @@ static void* zxc_async_writer(void* arg) {
         // Seekable: record compressed block size
         if (args->seek_comp && ctx->compression_mode == 1) {
             if (UNLIKELY(args->seek_count >= args->seek_cap)) {
-                // Blocks are indexed by uint32_t: past UINT32_MAX entries (or
-                // what size_t can address) there is nowhere to grow; fail
-                // rather than wrap the count into a truncated table.
-                const size_t max_cap = SIZE_MAX / sizeof(uint32_t) < UINT32_MAX
-                                           ? SIZE_MAX / sizeof(uint32_t)
-                                           : UINT32_MAX;
+                const uint64_t max_cap = SIZE_MAX / sizeof(uint32_t);
                 uint32_t* nc = NULL;
-                int cause = ZXC_ERROR_OVERFLOW;
                 if (LIKELY(args->seek_cap < max_cap)) {
-                    args->seek_cap =
-                        args->seek_cap < max_cap / 2 ? args->seek_cap * 2 : (uint32_t)max_cap;
+                    args->seek_cap = args->seek_cap < max_cap / 2 ? args->seek_cap * 2 : max_cap;
                     nc = (uint32_t*)ZXC_REALLOC(args->seek_comp,
                                                 (size_t)args->seek_cap * sizeof(uint32_t));
-                    cause = ZXC_ERROR_MEMORY;
                 }
                 // LCOV_EXCL_START
                 if (UNLIKELY(!nc)) {
                     pthread_mutex_lock(&ctx->lock);
-                    if (!ctx->fail_code) ctx->fail_code = cause;
+                    if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_MEMORY;
                     ctx->io_error = 1;
                     job->status = JOB_STATUS_FREE;
                     pthread_cond_signal(&ctx->cond_reader);

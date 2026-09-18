@@ -166,7 +166,9 @@ impl Seekable {
     }
 
     /// Total number of data blocks (excludes the EOF marker block).
-    pub fn num_blocks(&self) -> u32 {
+    ///
+    /// Derived from the footer, never stored, so only the archive size bounds it.
+    pub fn num_blocks(&self) -> u64 {
         unsafe { zxc_sys::zxc_seekable_get_num_blocks(self.inner.as_ptr()) }
     }
 
@@ -181,7 +183,7 @@ impl Seekable {
     ///
     /// Returns `Ok(None)` if `block_idx` is out of range, and
     /// [`Error::InvalidData`] if the group is unreadable or invalid.
-    pub fn block_compressed_size(&self, block_idx: u32) -> Result<Option<u32>> {
+    pub fn block_compressed_size(&self, block_idx: u64) -> Result<Option<u32>> {
         if block_idx >= self.num_blocks() {
             return Ok(None);
         }
@@ -198,7 +200,7 @@ impl Seekable {
     /// Decompressed size of a specific block.
     ///
     /// Returns `None` if `block_idx` is out of range.
-    pub fn block_decompressed_size(&self, block_idx: u32) -> Option<u32> {
+    pub fn block_decompressed_size(&self, block_idx: u64) -> Option<u32> {
         if block_idx >= self.num_blocks() {
             return None;
         }
@@ -356,10 +358,11 @@ unsafe extern "C" fn reader_trampoline(
     result.unwrap_or(zxc_sys::ZXC_ERROR_IO as i64)
 }
 
-/// Encoded byte size of a seek table covering `num_blocks` data blocks.
+/// Encoded byte size of a seek table covering `num_blocks` data blocks,
+/// or 0 when that size does not fit a `usize`.
 ///
 /// Use this to size a destination buffer for [`write_seek_table`].
-pub fn seek_table_size(num_blocks: u32) -> usize {
+pub fn seek_table_size(num_blocks: u64) -> usize {
     unsafe { zxc_sys::zxc_seek_table_size(num_blocks) }
 }
 
@@ -375,7 +378,7 @@ pub fn write_seek_table(dst: &mut [u8], comp_sizes: &[u32]) -> Result<usize> {
             dst.as_mut_ptr(),
             dst.len(),
             comp_sizes.as_ptr(),
-            comp_sizes.len() as u32,
+            comp_sizes.len() as u64,
         )
     };
     if res < 0 {
@@ -649,7 +652,7 @@ mod tests {
     #[test]
     fn seek_table_size_matches_write() {
         let comp_sizes = [128u32, 256, 200, 4];
-        let expected = seek_table_size(comp_sizes.len() as u32);
+        let expected = seek_table_size(comp_sizes.len() as u64);
         let mut buf = vec![0u8; expected];
         let written = write_seek_table(&mut buf, &comp_sizes).expect("write failed");
         assert_eq!(written, expected);

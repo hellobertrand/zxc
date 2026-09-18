@@ -49,6 +49,21 @@ describe("Seekable: queries", () => {
       s.close();
     }
   });
+
+  test("block indices are 64-bit, but must stay exact JS integers", () => {
+    const s = new zxc.Seekable(compressed);
+    try {
+      // Above 2^32: no longer truncated into range, just out of range.
+      expect(s.blockCompressedSize(2 ** 40)).toBeNull();
+      expect(s.blockDecompressedSize(Number.MAX_SAFE_INTEGER)).toBeNull();
+      for (const bad of [-1, 1.5, 2 ** 53, Infinity, NaN]) {
+        expect(() => s.blockCompressedSize(bad)).toThrow(RangeError);
+        expect(() => s.blockDecompressedSize(bad)).toThrow(RangeError);
+      }
+    } finally {
+      s.close();
+    }
+  });
 });
 
 describe("Seekable: decompressRange", () => {

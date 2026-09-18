@@ -36,10 +36,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         # Seekable API
         "_zxc_seekable_open"
         "_zxc_seekable_free"
-        "_zxc_seekable_get_num_blocks"
         "_zxc_seekable_get_decompressed_size"
-        "_zxc_seekable_get_block_comp_size"
-        "_zxc_seekable_get_block_decomp_size"
         "_zxc_seekable_set_dict"
         "_zxc_seekable_set_checksum"
         # Dictionary API
@@ -53,11 +50,15 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_dict_save_bound"
         "_zxc_dict_load"
         "_zxc_dict_huf"
-        # i32-offset shim for seekable_decompress_range (see wasm_entry.c);
-        # avoids the i64 offset arg which cwrap cannot pass without BigInt.
+        # i32 shims for the seekable entry points whose offset, block count or
+        # block index is an i64 that cwrap cannot pass without BigInt
+        # (see wasm_entry.c).
         "_zxcw_seekable_decompress_range"
-        "_zxc_write_seek_table"
-        "_zxc_seek_table_size"
+        "_zxcw_seekable_get_num_blocks"
+        "_zxcw_seekable_get_block_comp_size"
+        "_zxcw_seekable_get_block_decomp_size"
+        "_zxcw_write_seek_table"
+        "_zxcw_seek_table_size"
         "_zxc_min_level"
         "_zxc_max_level"
         "_zxc_default_level"
