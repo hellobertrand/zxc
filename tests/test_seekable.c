@@ -2400,7 +2400,9 @@ int test_seekable_forged_table_entry() {
     /* Each group is checked alone on access, so a forged anchor costs only its own
      * group. A size one byte off is caught by its block's header: blocks before
      * it still decode, those after it are shifted and refused. The getter
-     * reads no block: 0 when the bounds refuse, else what the table says. */
+     * reads no block: 0 when the bounds refuse, else what the table says. The
+     * refusal says where the entry landed: on a real header its size fails
+     * (CORRUPT_DATA), inside a block the header checksum does (BAD_HEADER). */
     const uint32_t NONE = UINT32_MAX;
     struct {
         const char* what;
@@ -2414,29 +2416,33 @@ int test_seekable_forged_table_entry() {
         uint32_t near_blk;   /* a neighbour the forgery must NOT cost, or NONE */
         uint32_t after_blk;  /* behind a forged size in its group: refused too, or NONE */
         uint32_t good_blk;   /* in an untouched group */
+        int bad_err;         /* its refusal code */
+        int after_err;       /* its refusal code */
     } cases[] = {
         {"size 0 pushed up: more than one block", size0, 4, entry_max + 1, NULL, 0, 0, 0, NONE,
-         NONE, ZXC_SEEK_GROUP},
+         NONE, ZXC_SEEK_GROUP, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
         {"size 1 pulled below a header", size1, 4, ZXC_BLOCK_HEADER_SIZE - 1, NULL, 0, 1, 0, NONE,
-         NONE, ZXC_SEEK_GROUP},
+         NONE, ZXC_SEEK_GROUP, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
         {"size 1 one byte long: its block header disagrees", size1, 4, sz1 + 1, NULL, 0, 1, sz1 + 1,
-         0, 2, ZXC_SEEK_GROUP},
+         0, 2, ZXC_SEEK_GROUP, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_BAD_HEADER},
         {"anchor 0 off the file header", g0, 8, ZXC_FILE_HEADER_SIZE + 1, NULL, 0, 0, 0, NONE, NONE,
-         ZXC_SEEK_GROUP},
+         ZXC_SEEK_GROUP, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
         {"anchor 1 one byte late: group 1 shifted, group 0 untouched", g1, 8, zxc_le64(g1) + 1,
          NULL, 0, ZXC_SEEK_GROUP, zxc_le32(SIZE_AT(ZXC_SEEK_GROUP)), ZXC_SEEK_GROUP - 1, NONE,
-         2 * ZXC_SEEK_GROUP},
+         2 * ZXC_SEEK_GROUP, ZXC_ERROR_BAD_HEADER, ZXC_ERROR_CORRUPT_DATA},
         {"anchor 1 near 2^64: group 1 out of bounds, group 0 untouched", g1, 8, UINT64_MAX - 3,
-         NULL, 0, ZXC_SEEK_GROUP, 0, ZXC_SEEK_GROUP - 1, NONE, 2 * ZXC_SEEK_GROUP},
+         NULL, 0, ZXC_SEEK_GROUP, 0, ZXC_SEEK_GROUP - 1, NONE, 2 * ZXC_SEEK_GROUP,
+         ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
         {"last size one byte long: the last group overshoots the EOF block", size_last, 4, szl + 1,
-         NULL, 0, NB - 1, 0, NONE, NONE, 0},
+         NULL, 0, NB - 1, 0, NONE, NONE, 0, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
         {"last size one byte short: the last group misses the EOF block", size_last, 4, szl - 1,
-         NULL, 0, NB - 1, 0, NONE, NONE, 0},
+         NULL, 0, NB - 1, 0, NONE, NONE, 0, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
         {"two sizes of group 1 maxed: a middle group overshoots the EOF block",
          SIZE_AT(ZXC_SEEK_GROUP), 4, entry_max, SIZE_AT(ZXC_SEEK_GROUP + 1), (uint32_t)entry_max,
-         ZXC_SEEK_GROUP, 0, ZXC_SEEK_GROUP - 1, NONE, 2 * ZXC_SEEK_GROUP},
+         ZXC_SEEK_GROUP, 0, ZXC_SEEK_GROUP - 1, NONE, 2 * ZXC_SEEK_GROUP, ZXC_ERROR_CORRUPT_DATA,
+         ZXC_ERROR_CORRUPT_DATA},
         {"sizes 0 and 1 traded: sum intact, headers disagree", size0, 4, sz0 + 8, size1, sz1 - 8, 0,
-         sz0 + 8, NONE, NONE, 2},
+         sz0 + 8, NONE, NONE, 2, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
     };
     for (size_t k = 0; ok && k < sizeof(cases) / sizeof(cases[0]); k++) {
         const uint64_t keep = cases[k].width == 8 ? zxc_le64(cases[k].at) : zxc_le32(cases[k].at);
@@ -2469,13 +2475,13 @@ int test_seekable_forged_table_entry() {
                 near == NONE ? 16
                              : zxc_seekable_decompress_range(s, out, cap, (uint64_t)near * BS, 16);
             const uint32_t near_got = near == NONE ? 0 : zxc_seekable_get_block_comp_size(s, near);
-            const int64_t after_st = after == NONE ? ZXC_ERROR_CORRUPT_DATA
+            const int64_t after_st = after == NONE ? cases[k].after_err
                                                    : zxc_seekable_decompress_range(
                                                          s, out, cap, (uint64_t)after * BS, 16);
             const uint32_t bad_got = zxc_seekable_get_block_comp_size(s, bad);
             const uint32_t good_got = zxc_seekable_get_block_comp_size(s, cases[k].good_blk);
-            if (st != ZXC_ERROR_CORRUPT_DATA || mt != ZXC_ERROR_CORRUPT_DATA || good != 16 ||
-                near_st != 16 || near_got != near_size || after_st != ZXC_ERROR_CORRUPT_DATA ||
+            if (st != cases[k].bad_err || mt != cases[k].bad_err || good != 16 || near_st != 16 ||
+                near_got != near_size || after_st != cases[k].after_err ||
                 bad_got != cases[k].bad_getter || good_got != good_size) {
                 printf(
                     "Failed: %s: st %lld, mt %lld, good %lld, near %lld (%u/%u), after %lld, "

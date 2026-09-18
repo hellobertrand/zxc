@@ -463,9 +463,10 @@ static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t t
 /**
  * @brief Reads a compressed block into @p buf from the memory buffer or reader.
  *
- * @p off and @p csz come from @ref zxc_seek_load_spans. The block's header must agree
- * with @p csz: that rejects an entry pointing into a block, not a block moved onto
- * another of the same size, which only the position-seeded checksum catches.
+ * @p off and @p csz come from @ref zxc_seek_load_spans. What @p off points at must parse
+ * as a block header, checksum included, and agree with @p csz. An entry pointing into a
+ * block is refused; one moved onto a block of the same size is not, and only the
+ * position-seeded checksum catches that.
  *
  * @param[in]  s        Seekable handle.
  * @param[in]  off      Byte offset of the block in the archive.
@@ -473,7 +474,8 @@ static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t t
  * @param[out] buf      Destination buffer.
  * @param[in]  buf_cap  Capacity of @p buf in bytes.
  * @return @p csz, or a negative @ref zxc_error_t (@ref ZXC_ERROR_DST_TOO_SMALL,
- *         @ref ZXC_ERROR_SRC_TOO_SMALL, @ref ZXC_ERROR_IO, @ref ZXC_ERROR_CORRUPT_DATA).
+ *         @ref ZXC_ERROR_SRC_TOO_SMALL, @ref ZXC_ERROR_IO, @ref ZXC_ERROR_BAD_HEADER,
+ *         @ref ZXC_ERROR_CORRUPT_DATA).
  */
 static int zxc_seek_read_block(const zxc_seekable* s, const uint64_t off, const uint32_t csz,
                                uint8_t* buf, const size_t buf_cap) {
@@ -482,7 +484,10 @@ static int zxc_seek_read_block(const zxc_seekable* s, const uint64_t off, const 
     const int rc = zxc_seek_source_read(&src, buf, csz, off);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
 
-    const uint64_t on_disk = (uint64_t)ZXC_BLOCK_HEADER_SIZE + zxc_le32(buf + 3) +
+    zxc_block_header_t bh;
+    const int hdr_res = zxc_read_block_header(buf, csz, &bh);
+    if (UNLIKELY(hdr_res != ZXC_OK)) return hdr_res;
+    const uint64_t on_disk = (uint64_t)ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
                              (s->file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0U);
     if (UNLIKELY(on_disk != csz)) return ZXC_ERROR_CORRUPT_DATA;
     return (int)csz;
