@@ -196,9 +196,7 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
  * @brief Reads the original size from an archive footer, without decoding.
  *
  * The footer is untrusted input, so the value is checked for plausibility
- * against the archive size (each block costs at least a block header and
- * decodes to at most one block): a forged footer claiming an absurd size
- * returns 0 rather than driving an oversized allocation.
+ * against the archive size: a forged footer claiming an absurd size returns 0.
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.

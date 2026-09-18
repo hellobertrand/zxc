@@ -1065,7 +1065,7 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     fseeko(f_in, saved_pos, SEEK_SET);
 
     const uint64_t stored = zxc_le64(footer);
-    if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk_size, (uint64_t)file_size)))
+    if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk_size, has_cs, (uint64_t)file_size)))
         return ZXC_ERROR_CORRUPT_DATA;
     return (int64_t)stored;
 }

@@ -70,6 +70,7 @@ Initialise the WASM module. Returns a frozen API object.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `checksum` | `boolean` | `false` | Verify integrity checksums |
+| `maxOutputSize` | `number` | no cap | Output cap; set it for untrusted input |
 
 ### `zxc.compressBound(inputSize) -> number`
 
@@ -96,7 +97,8 @@ ctx.free(); // Release WASM memory
 ### `zxc.createDecompressContext(opts?) -> DecompressContext`
 
 Create a reusable decompression context. `opts` takes the same `checksum`,
-`dict` and `dictHuf` as `decompress`.
+`dict` and `dictHuf` as `decompress`. For untrusted input, pass
+`maxOutputSize` per call: `ctx.decompress(data, { maxOutputSize })`.
 
 ```js
 const ctx = zxc.createDecompressContext({ dict });

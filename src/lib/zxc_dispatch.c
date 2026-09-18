@@ -767,7 +767,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
         return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint64_t stored = zxc_le64(src + src_size - zxc_footer_bytes(cs));
-    if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, src_size)))
+    if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, cs, src_size)))
         return ZXC_ERROR_CORRUPT_DATA;
 
     *dsize = stored;

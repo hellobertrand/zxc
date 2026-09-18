@@ -2090,6 +2090,42 @@ int test_seekable_forged_total_size(void) {
     return 1;
 }
 
+/* Blocks must fit at their densest encoding: header-only blocks (the former
+ * floor) are refused, 8 + 44-byte ones open. */
+int test_seekable_dense_floor(void) {
+    printf("=== TEST: Seekable - Forged Total vs Densest Block Span ===\n");
+    enum { BS = 4096, N = 100 };
+    const zxc_block_header_t eof = {
+        .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
+    for (int dense = 0; dense < 2; dense++) {
+        const size_t blk = ZXC_BLOCK_HEADER_SIZE + (dense ? 12 + 32 : 0);  // FORMAT.md 5.2
+        const size_t eof_off = ZXC_FILE_HEADER_SIZE + N * blk;
+        const size_t size = eof_off + 2 * ZXC_BLOCK_HEADER_SIZE + (size_t)zxc_seek_table_bytes(N) +
+                            ZXC_FILE_FOOTER_SIZE;
+        uint8_t* const arc = calloc(1, size);
+        if (!arc || zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, BS, 0, 0) < 0 ||
+            zxc_write_block_header(arc + eof_off, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
+            zxc_seek_table_header(arc + eof_off + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, N) <
+                0 ||
+            zxc_write_file_footer(arc + size - ZXC_FILE_FOOTER_SIZE, ZXC_FILE_FOOTER_SIZE,
+                                  (uint64_t)N * BS, 0, 0) < 0) {
+            printf("Failed: fixture headers\n");
+            free(arc);
+            return 0;
+        }
+        zxc_seekable* const s = zxc_seekable_open(arc, size);
+        const int opened = s != NULL;
+        zxc_seekable_free(s);
+        free(arc);
+        if (opened != dense) {
+            printf("Failed: %zu-byte blocks %s\n", blk, opened ? "opened" : "refused");
+            return 0;
+        }
+    }
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* An EOF header announcing a payload is malformed (FORMAT 11.1), even with a valid
  * header checksum: the seekable open must refuse it like the other decoders. */
 int test_seekable_eof_with_payload(void) {

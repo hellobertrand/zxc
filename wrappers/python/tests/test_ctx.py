@@ -132,3 +132,21 @@ def test_oversized_dictionary_is_rejected_at_creation():
         with pytest.raises(RuntimeError, match="ZXC_ERROR_DICT_TOO_LARGE"):
             ctx(dict=b"x" * 65536)
         ctx(dict=b"x" * 65535).close()
+
+
+def test_max_output_size():
+    payload = b"".join(_samples())
+    archive = zxc.compress(payload)
+    bomb = zxc.compress(bytes(64 << 20))
+    with zxc.Dctx() as dctx:
+        assert dctx.decompress(archive, max_output_size=len(payload)) == payload
+        with pytest.raises(RuntimeError) as genuine:
+            dctx.decompress(archive, len(payload) - 1)
+        with pytest.raises(RuntimeError, match="ZXC_ERROR_DST_TOO_SMALL") as capped:
+            dctx.decompress(archive, max_output_size=len(payload) - 1)
+        assert capped.value.args == genuine.value.args
+        with pytest.raises(RuntimeError, match="ZXC_ERROR_DST_TOO_SMALL"):
+            dctx.decompress(bomb, max_output_size=1 << 20)
+        with pytest.raises(ValueError):
+            dctx.decompress(archive, max_output_size=-1)
+        assert dctx.decompress(archive) == payload

@@ -20,6 +20,8 @@ extern "C" {
 #include "zxc_seekable.h"
 }
 
+static Napi::Value ThrowZxcError(Napi::Env env, int code);
+
 // =============================================================================
 // compressBound(inputSize: number): number
 // =============================================================================
@@ -126,9 +128,15 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(nwritten));
 }
 
+// True when the optional output cap at info[i] (validated in JS) is below size.
+static bool ExceedsOutputCap(const Napi::CallbackInfo& info, size_t i, uint64_t size) {
+    return info.Length() > i && info[i].IsNumber() &&
+           size > static_cast<uint64_t>(info[i].As<Napi::Number>().Int64Value());
+}
+
 // =============================================================================
 // decompress(buffer: Buffer, decompressSize: number, checksum?: boolean,
-//            dict?: Buffer): Buffer
+//            dict?: Buffer, dictHuf?: Buffer, maxOutputSize?: number): Buffer
 // =============================================================================
 static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
@@ -170,6 +178,9 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
         dict_huf = huf_buf.Data();
     }
 
+    if (ExceedsOutputCap(info, 5, decompress_size)) {
+        return ThrowZxcError(env, ZXC_ERROR_DST_TOO_SMALL);
+    }
     Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
 
     static uint8_t kEmptyDst = 0;
@@ -184,13 +195,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
 
     int64_t nwritten = zxc_decompress(src, src_size, dst, decompress_size, &dopts);
 
-    if (nwritten < 0) {
-        auto err_code = static_cast<int>(nwritten);
-        Napi::Error err = Napi::Error::New(env, zxc_error_name(err_code));
-        err.Set("code", Napi::Number::New(env, err_code));
-        err.ThrowAsJavaScriptException();
-        return env.Undefined();
-    }
+    if (nwritten < 0) return ThrowZxcError(env, static_cast<int>(nwritten));
 
     // decompress_size is an upper bound from the caller: when fewer bytes
     // were written, slice to the actual size; napi buffers are allocated
@@ -221,8 +226,6 @@ static Napi::Value GetDecompressedSize(const Napi::CallbackInfo& info) {
 // =============================================================================
 // Dictionary API
 // =============================================================================
-
-static Napi::Value ThrowZxcError(Napi::Env env, int code);
 
 // trainDict(samples: Buffer[], maxSize?: number): Buffer
 static Napi::Value TrainDict(const Napi::CallbackInfo& info) {
@@ -650,8 +653,9 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
             return env.Undefined();
         }
         Napi::Buffer<uint8_t> src = info[0].As<Napi::Buffer<uint8_t>>();
-        const size_t orig =
-            static_cast<size_t>(zxc_get_decompressed_size(src.Data(), src.Length()));
+        const uint64_t declared = zxc_get_decompressed_size(src.Data(), src.Length());
+        if (ExceedsOutputCap(info, 1, declared)) return ThrowZxcError(env, ZXC_ERROR_DST_TOO_SMALL);
+        const size_t orig = static_cast<size_t>(declared);
         Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, orig);
 
         static uint8_t kEmptyDst = 0;

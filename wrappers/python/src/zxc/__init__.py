@@ -345,7 +345,13 @@ def get_decompressed_size(data: bytes) -> int:
 
 
 def decompress(
-    data, decompress_size=None, checksum=False, dict=None, dict_huf=None
+    data,
+    decompress_size=None,
+    checksum=False,
+    dict=None,
+    dict_huf=None,
+    *,
+    max_output_size=None,
 ) -> bytes:
     """Decompress a bytes object.
 
@@ -358,6 +364,8 @@ def decompress(
             the archive header.
         dict_huf: Shared literal Huffman table (128 bytes) when the archive
             was compressed with one (the dictionary ID binds the pair).
+        max_output_size: Output cap (``ZXC_ERROR_DST_TOO_SMALL`` before
+            allocating); set it for untrusted input.
 
     Returns:
         Decompressed bytes.
@@ -366,7 +374,9 @@ def decompress(
         decompress_size = get_decompressed_size(data)
 
     dict, dict_huf = _split_dict_arg(dict, dict_huf)
-    return pyzxc_decompress(data, decompress_size, checksum, dict, dict_huf)
+    return pyzxc_decompress(
+        data, decompress_size, checksum, dict, dict_huf, max_output_size
+    )
 
 
 def stream_compress(
@@ -644,16 +654,19 @@ class Dctx:
         dict, dict_huf = _split_dict_arg(dict, dict_huf)
         self._handle = pyzxc_dctx_create(checksum, dict, dict_huf)
 
-    def decompress(self, data, decompress_size=None) -> bytes:
+    def decompress(self, data, decompress_size=None, *, max_output_size=None) -> bytes:
         """Decompress one archive produced by :meth:`Cctx.compress`.
 
         *decompress_size* defaults to the size stored in the archive footer.
+        Set *max_output_size* for untrusted input, as in :func:`decompress`.
         """
         if self._handle is None:
             raise ValueError("Dctx is closed")
         if decompress_size is None:
             decompress_size = get_decompressed_size(data)
-        return pyzxc_dctx_decompress(self._handle, data, decompress_size)
+        return pyzxc_dctx_decompress(
+            self._handle, data, decompress_size, max_output_size
+        )
 
     def close(self) -> None:
         """Release native resources. Idempotent."""

@@ -70,3 +70,34 @@ def test_compress_roundtrip(data):
         decompressed = zxc.decompress(compressed, out_size)
         assert len(data) == len(decompressed)
         assert data == decompressed
+
+
+def test_max_output_size():
+    data = b"hello world" * 100
+    arc = zxc.compress(data)
+    assert zxc.decompress(arc, max_output_size=len(data)) == data
+    assert zxc.decompress(arc, max_output_size=None) == data
+
+    # The cap fails exactly like a genuine undersized destination.
+    with pytest.raises(RuntimeError) as genuine:
+        zxc.decompress(arc, len(data) - 1)
+    for kwargs in ({}, {"decompress_size": len(data)}):
+        with pytest.raises(RuntimeError, match="ZXC_ERROR_DST_TOO_SMALL") as capped:
+            zxc.decompress(arc, max_output_size=len(data) - 1, **kwargs)
+        assert capped.value.args == genuine.value.args
+
+
+def test_max_output_size_stops_a_bomb():
+    data = bytes(64 << 20)
+    arc = zxc.compress(data)
+    with pytest.raises(RuntimeError, match="ZXC_ERROR_DST_TOO_SMALL"):
+        zxc.decompress(arc, max_output_size=1 << 20)
+    assert zxc.decompress(arc) == data
+
+
+@pytest.mark.parametrize(
+    "cap,exc", [(-1, ValueError), (1.5, TypeError), ("1", TypeError)]
+)
+def test_max_output_size_invalid(cap, exc):
+    with pytest.raises(exc):
+        zxc.decompress(zxc.compress(b"x"), max_output_size=cap)

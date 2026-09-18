@@ -104,6 +104,54 @@ int test_buffer_api() {
     return 1;
 }
 
+// Footer cap edges: nb densest full blocks + a 1-byte tail, then one byte or
+// block more, then the former 8-bytes-per-block cap.
+static int forged_footer_at_bound(const int cs) {
+    const size_t lz_min = 12 + 32;  // FORMAT.md 5.2, not the lib constant
+    const size_t bs = ZXC_BLOCK_SIZE_MAX;
+    const uint64_t nb = 64;
+    const size_t per = ZXC_BLOCK_HEADER_SIZE + (cs ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    const size_t foot = zxc_footer_bytes(cs);
+    const size_t frame = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + foot;
+    const size_t n = frame + (size_t)nb * (per + lz_min) + per + 1;
+
+    // Genuine header, zeroed body.
+    const uint8_t one = 0;
+    uint8_t head[256];
+    zxc_compress_opts_t o = {.level = 1, .block_size = bs, .checksum_enabled = cs};
+    const int64_t c = zxc_compress(&one, 1, head, sizeof(head), &o);
+    uint8_t* const arc = calloc(1, n);
+    if (c <= 0 || !arc) {
+        printf("Failed [footer bound cs=%d]: setup\n", cs);
+        free(arc);
+        return 0;
+    }
+    memcpy(arc, head, ZXC_FILE_HEADER_SIZE);
+
+    const struct {
+        uint64_t claim;
+        uint64_t want;
+        const char* what;
+    } cases[] = {
+        {nb * bs + 1, nb * bs + 1, "densest size"},
+        {nb * bs + 2, 0, "one byte past the tail"},
+        {(nb + 1) * bs, 0, "one block past"},
+        {(uint64_t)(n / ZXC_BLOCK_HEADER_SIZE) * bs, 0, "former header-count cap"},
+    };
+    int ok = 1;
+    for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
+        zxc_write_file_footer(arc + n - foot, foot, cases[k].claim, 0, cs);
+        const uint64_t got = zxc_get_decompressed_size(arc, n);
+        if (got != cases[k].want) {
+            printf("Failed [footer bound cs=%d]: %s -> %llu, want %llu\n", cs, cases[k].what,
+                   (unsigned long long)got, (unsigned long long)cases[k].want);
+            ok = 0;
+        }
+    }
+    free(arc);
+    return ok;
+}
+
 // Test zxc_get_decompressed_size
 int test_get_decompressed_size() {
     printf("=== TEST: Unit - zxc_get_decompressed_size ===\n");
@@ -169,6 +217,14 @@ int test_get_decompressed_size() {
     }
     free(forged);
     printf("  [PASS] Forged footer size rejected\n");
+
+    // 5. Cap edges.
+    if (!forged_footer_at_bound(0) || !forged_footer_at_bound(1)) {
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] Footer cap at the densest reachable size\n");
 
     printf("PASS\n\n");
     free(src);

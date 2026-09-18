@@ -960,6 +960,83 @@ async function main() {
     );
   }
 
+  // --- 12. maxOutputSize ------------------------------------------------
+  console.log("\n12. maxOutputSize");
+  {
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const errorOf = (fn) => {
+      try {
+        fn();
+      } catch (e) {
+        return e;
+      }
+      return null;
+    };
+    const paths = (z, dctx) => [
+      ["decompress", (a, o) => z.decompress(a, o), "ZXC decompress"],
+      ["dctx", (a, o) => dctx.decompress(a, o), "ZXC dctx decompress"],
+    ];
+    const tooSmall = (prefix) =>
+      `${prefix} error: ZXC_ERROR_DST_TOO_SMALL (-2)`;
+
+    const payload = new Uint8Array(100 * 1024);
+    for (let i = 0; i < payload.length; i++) payload[i] = (i * 13) & 0xff;
+    const arc = zxc.compress(payload);
+    const dc = zxc.createDecompressContext();
+    for (const [name, dec, prefix] of paths(zxc, dc)) {
+      assert(
+        arraysEqual(dec(arc, { maxOutputSize: payload.length }), payload),
+        `${name}: limit == size decodes`,
+      );
+      const e = errorOf(() => dec(arc, { maxOutputSize: payload.length - 1 }));
+      assert(
+        e && e.constructor === Error && e.message === tooSmall(prefix),
+        `${name}: limit == size - 1 throws DST_TOO_SMALL (got "${e && e.message}")`,
+      );
+      assert(arraysEqual(dec(arc), payload), `${name}: no limit by default`);
+      assert(
+        [-1, 1.5, NaN, Infinity, "1024", null].every((bad) => {
+          const err = errorOf(() => dec(arc, { maxOutputSize: bad }));
+          return err instanceof TypeError || err instanceof RangeError;
+        }),
+        `${name}: invalid limits are rejected`,
+      );
+    }
+    dc.free();
+    assert(
+      zxc.decompress(zxc.compress(new Uint8Array(0)), { maxOutputSize: 0 })
+        .length === 0,
+      "limit 0 decodes an empty archive",
+    );
+
+    const bomb = zxc.compress(new Uint8Array(64 << 20));
+    // A fresh instance keeps its 2 MiB initial heap unless output is allocated.
+    const fresh = await createZXC({}, ZXCModule);
+    const M = fresh._module;
+    const heap = M.HEAPU8.length;
+    // A leaked input copy would move the next same-size allocation.
+    const probe = () => {
+      const p = M._malloc(bomb.length);
+      M._free(p);
+      return p;
+    };
+    const fdc = fresh.createDecompressContext();
+    for (const [name, dec, prefix] of paths(fresh, fdc)) {
+      const p = probe();
+      const e = errorOf(() => dec(bomb, { maxOutputSize: 1 << 20 }));
+      assert(
+        e && e.message === tooSmall(prefix),
+        `${name}: ${bomb.length}-byte archive of 64 MiB throws DST_TOO_SMALL`,
+      );
+      assert(
+        M.HEAPU8.length === heap && probe() === p,
+        `${name}: refused before allocating, input copy freed`,
+      );
+    }
+    fdc.free();
+  }
+
   // --- Summary ---
   console.log(`\n${"=".repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);

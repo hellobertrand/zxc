@@ -66,6 +66,22 @@ static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) 
     return 0;
 }
 
+// Refuses a size above the cap (None: no cap). Returns 0, or -1 with an exception set.
+static int check_output_cap(PyObject* cap_obj, Py_ssize_t size) {
+    if (!cap_obj || cap_obj == Py_None) return 0;
+    const Py_ssize_t cap = PyNumber_AsSsize_t(cap_obj, NULL);  // clamps, so 2**64 = no cap
+    if (cap == -1 && PyErr_Occurred()) return -1;
+    if (cap < 0) {
+        PyErr_SetString(PyExc_ValueError, "max_output_size must be non-negative");
+        return -1;
+    }
+    if (size > cap) {
+        PyErr_SetString(PyExc_RuntimeError, zxc_error_name(ZXC_ERROR_DST_TOO_SMALL));
+        return -1;
+    }
+    return 0;
+}
+
 // =============================================================================
 // Wrapper functions
 // =============================================================================
@@ -382,10 +398,12 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     PyObject* dict_huf_obj = NULL;
     uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
     const void* dict_huf = NULL;
-    static char* kwlist[] = {"data", "decompress_size", "checksum", "dict", "dict_huf", NULL};
+    PyObject* cap_obj = NULL;
+    static char* kwlist[] = {"data",     "decompress_size", "checksum", "dict",
+                             "dict_huf", "max_output_size", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|pOO", kwlist, &view, &decompress_size,
-                                     &checksum, &dict_obj, &dict_huf_obj)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|pOOO", kwlist, &view, &decompress_size,
+                                     &checksum, &dict_obj, &dict_huf_obj, &cap_obj)) {
         return NULL;
     }
 
@@ -398,6 +416,11 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     if (decompress_size < 0) {
         PyBuffer_Release(&view);
         PyErr_SetString(PyExc_ValueError, "decompress_size must be non-negative");
+        return NULL;
+    }
+
+    if (check_output_cap(cap_obj, decompress_size) < 0) {
+        PyBuffer_Release(&view);
         return NULL;
     }
 
@@ -1233,7 +1256,8 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
     PyObject* capsule = NULL;
     Py_buffer view;
     Py_ssize_t decompress_size;
-    if (!PyArg_ParseTuple(args, "Oy*n", &capsule, &view, &decompress_size)) return NULL;
+    PyObject* cap_obj = NULL;
+    if (!PyArg_ParseTuple(args, "Oy*n|O", &capsule, &view, &decompress_size, &cap_obj)) return NULL;
 
     if (view.itemsize != 1) {
         PyBuffer_Release(&view);
@@ -1250,6 +1274,10 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
     if (decompress_size < 0) {
         PyBuffer_Release(&view);
         PyErr_SetString(PyExc_ValueError, "decompress_size must be non-negative");
+        return NULL;
+    }
+    if (check_output_cap(cap_obj, decompress_size) < 0) {
+        PyBuffer_Release(&view);
         return NULL;
     }
 

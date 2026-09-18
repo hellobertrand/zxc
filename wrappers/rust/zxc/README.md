@@ -37,6 +37,9 @@ fn main() -> Result<(), zxc::Error> {
 }
 ```
 
+For untrusted input, cap the output: `decompress_with_options` with
+`DecompressOptions::default().with_max_output_size(n)`.
+
 ## Compression Levels
 
 | Level | Speed | Ratio | Use Case |
