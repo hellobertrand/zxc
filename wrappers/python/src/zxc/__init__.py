@@ -174,8 +174,8 @@ def default_level() -> int:
 
 
 def library_version() -> str:
-    """Return the version string reported by the linked native libzxc
-    (e.g. ``"0.13.3"``). Distinct from the Python package ``__version__``."""
+    """Return the version string reported by the linked native libzxc.
+    Distinct from the Python package ``__version__``."""
     return pyzxc_version_string()
 
 

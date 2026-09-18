@@ -65,8 +65,8 @@ function defaultLevel() {
 }
 
 /**
- * Returns the version string reported by the linked native libzxc
- * (e.g. "0.13.3"). Distinct from the npm package version.
+ * Returns the version string reported by the linked native libzxc.
+ * Distinct from the npm package version.
  * @returns {string}
  */
 function libraryVersion() {

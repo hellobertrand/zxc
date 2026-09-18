@@ -1,6 +1,6 @@
 # Changelog
 
-## [0.14.1] - 2026-09-XX
+## [0.14.1] - 2026-09-19
 api: Enforces strict block size and EOF validation (#428)
 api: Implements reusable compression contexts (#424)
 api: Enhances seekable API with checksum control and robust range validation (#425)
@@ -10,12 +10,14 @@ api: Adds shared literal table support to block API (#415)
 api: Extends dictionary support for reusable contexts (#414)
 api: Refines README documentation (#408)
 perf: Optimizes block decompression for direct and flexible output (#418)
-cli: report checksum presence from the archive header in -l and -t (#435)
+cli: Report checksum presence from the archive header in -l and -t (#435)
 build: Migrate release workflows to trusted publishing (#421)
 build: Enforce rapidhash resolution at configure/setup time (#420)
 build: Resolve dependency resolution in wrapper test (#410) (#411)
 build: Enhances wrapper packaging and release integrity (#409)
 doc: Clarify crate branding and improve documentation metadata (#410)
+misc: Compile library objects separately for fuzzers (#440)
+misc: Add fuzzer for streaming API (#443)
 misc: Skip SARIF uploads for fork pull requests
 misc: Enforce dictionary size limits on decompression path (#430)
 misc: Prevent stack memory escape in multi-threaded decompression (#429)

@@ -73,7 +73,7 @@ ZXC_EXPORT int zxc_max_level(void);
 ZXC_EXPORT int zxc_default_level(void);
 
 /**
- * @brief Library version string, "MAJOR.MINOR.PATCH" (e.g. "0.13.1").
+ * @brief Library version string, "MAJOR.MINOR.PATCH".
  * @return Null-terminated compile-time constant; do not free.
  */
 ZXC_EXPORT const char* zxc_version_string(void);

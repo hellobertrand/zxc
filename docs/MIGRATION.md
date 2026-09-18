@@ -7,8 +7,8 @@ version byte for exact equality and rejects anything else with
 
 | Format | Introduced by | A decoder reads | Headline change |
 | :--- | :--- | :--- | :--- |
-| **v8** | ZXC **0.14.0** | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
-| **v7** | ZXC 0.13.0 | v7 only | Huffman bits use the **PivCo** wire layout; new **level 7 (ULTRA)** adds Huffman-coded tokens |
+| **v8** | ZXC **0.14.x** | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
+| **v7** | ZXC 0.13.x | v7 only | Huffman bits use the **PivCo** wire layout; new **level 7 (ULTRA)** adds Huffman-coded tokens |
 | **v6** | ZXC 0.12.x | v6 only | **NUM** block removed; **GHI** renumbered type 3 → 2 |
 | **v5** | earlier | v5 only | — |
 
@@ -19,7 +19,7 @@ every jump.
 
 ---
 
-## v7 → v8 (ZXC 0.14.0)
+## v7 → v8 (ZXC 0.14.x)
 
 Format **v8** is a deliberate, non-backward-compatible break with **v7**. Nothing
 about the compression changed — the break is entirely in how a block describes
@@ -40,12 +40,12 @@ itself:
 Together these save 24 to 36 bytes per block, which is noise at 512 KB blocks and
 worth about 2 % at 4 KB — the regime dictionaries target.
 
-> A v8 build is ZXC **0.14.0** or newer; a v7 build is any **0.13.x**. Keep your
+> A v8 build is ZXC **0.14.x**; a v7 build is any **0.13.x**. Keep your
 > 0.13.x binary until every archive you care about is transcoded.
 
 ---
 
-## v6 → v7 (ZXC 0.13.0)
+## v6 → v7 (ZXC 0.13.x)
 
 Format **v7** is a deliberate, non-backward-compatible break with **v6**:
 
@@ -63,7 +63,7 @@ the Huffman wire layout plus the new token encoding. A **v7 decoder rejects v6
 archives** with `ZXC_ERROR_BAD_VERSION` rather than misinterpret them, and a v6
 decoder likewise cannot read v7 archives.
 
-> A v7 build is ZXC **0.13.0** or newer; a v6 build is any **0.12.x**. Keep your
+> A v7 build is ZXC **0.13.x**; a v6 build is any **0.12.x**. Keep your
 > old 0.12.x binary until every archive you care about is transcoded — it is the
 > only thing that can read v6 data.
 
@@ -72,7 +72,7 @@ decoder likewise cannot read v7 archives.
 Only if **both** are true:
 
 1. You have archives produced by an older build of ZXC (**v7** or earlier), **and**
-2. You want to read them with **v8-only** tools (ZXC 0.14.0+), or standardize your
+2. You want to read them with **v8-only** tools (ZXC 0.14.x+), or standardize your
    stored data on v8.
 
 If you keep the old build around, it can still read its own archives — migration
@@ -91,11 +91,11 @@ xxd -s 4 -l 1 archive.zxc      # -> "05" = v5, "06" = v6, "07" = v7, "08" = v8
 ## Migrate: transcode with the old build, recompress with v8
 
 Migration is a one-time **transcode**: decompress with a build that reads the old
-format and recompress with a **v8** build (ZXC 0.14.0+). This rebuilds the seek
+format and recompress with a **v8** build (ZXC 0.14.x+). This rebuilds the seek
 table and checksums as needed and, for a v5 source, handles legacy NUM blocks by
 decoding them and re-encoding as ordinary LZ/RAW.
 
-Assuming `zxc-old` is your existing binary and `zxc-new` is ZXC 0.14.0+:
+Assuming `zxc-old` is your existing binary and `zxc-new` is ZXC 0.14.x+:
 
 ```sh
 zxc-old -dc old.zxc | zxc-new -z -c > new.zxc

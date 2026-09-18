@@ -212,8 +212,8 @@ export function maxLevel(): number;
 export function defaultLevel(): number;
 
 /**
- * Returns the version string reported by the linked native libzxc
- * (e.g. "0.13.3"). Distinct from the npm package version.
+ * Returns the version string reported by the linked native libzxc.
+ * Distinct from the npm package version.
  */
 export function libraryVersion(): string;
 
