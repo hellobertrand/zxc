@@ -638,9 +638,9 @@ int test_seekable_many_blocks() {
         return 0;
     }
 
-    const uint32_t n_blocks = zxc_seekable_get_num_blocks(s);
+    const uint64_t n_blocks = zxc_seekable_get_num_blocks(s);
     if (n_blocks != 64) {
-        printf("Failed: expected 64 blocks, got %u\n", n_blocks);
+        printf("Failed: expected 64 blocks, got %llu\n", (unsigned long long)n_blocks);
         zxc_seekable_free(s);
         free(src);
         free(dst);
@@ -754,9 +754,9 @@ int test_seekable_open_file() {
     }
 
     /* Verify block count: 128KB / 32KB = 4 blocks */
-    const uint32_t n_blocks = zxc_seekable_get_num_blocks(s);
+    const uint64_t n_blocks = zxc_seekable_get_num_blocks(s);
     if (n_blocks != 4) {
-        printf("Failed: expected 4 blocks, got %u\n", n_blocks);
+        printf("Failed: expected 4 blocks, got %llu\n", (unsigned long long)n_blocks);
         zxc_seekable_free(s);
         fclose(tf);
         free(src);
@@ -1401,7 +1401,8 @@ int test_seekable_open_reader() {
 
     /* 256KB / 64KB = 4 blocks */
     if (zxc_seekable_get_num_blocks(s) != 4) {
-        printf("Failed: expected 4 blocks, got %u\n", zxc_seekable_get_num_blocks(s));
+        printf("Failed: expected 4 blocks, got %llu\n",
+               (unsigned long long)zxc_seekable_get_num_blocks(s));
         zxc_seekable_free(s);
         free(src);
         free(dst);
@@ -2001,7 +2002,8 @@ int test_seekable_work_buf_tail_pad(void) {
         return 0;
     }
     if (zxc_seekable_get_num_blocks(s) < 2) {
-        printf("Failed: need >= 2 full blocks, got %u\n", zxc_seekable_get_num_blocks(s));
+        printf("Failed: need >= 2 full blocks, got %llu\n",
+               (unsigned long long)zxc_seekable_get_num_blocks(s));
         zxc_seekable_free(s);
         free(src);
         free(dst);
@@ -2073,8 +2075,8 @@ int test_seekable_forged_total_size(void) {
         }
         zxc_seekable* const s = zxc_seekable_open(arc, sizeof(arc));
         if (s) {
-            printf("Failed: total %llu opened with %u blocks\n", (unsigned long long)totals[k],
-                   zxc_seekable_get_num_blocks(s));
+            printf("Failed: total %llu opened with %llu blocks\n", (unsigned long long)totals[k],
+                   (unsigned long long)zxc_seekable_get_num_blocks(s));
             zxc_seekable_free(s);
             return 0;
         }
@@ -2130,8 +2132,8 @@ done:
     return ok;
 }
 
-/* 2^30 + 5 RAW blocks of 4 KiB served by a callback, four terabytes that never
- * exist: the old 2^30 cap is gone, open costs three reads, nothing is loaded. */
+/* 2^32 + 5 RAW blocks of 4 KiB served by a callback, sixteen terabytes that never
+ * exist: no field caps the count, open costs three reads, nothing is loaded. */
 #define SYNTH_BS 4096u
 #define SYNTH_BLK (ZXC_BLOCK_HEADER_SIZE + SYNTH_BS)
 
@@ -2192,14 +2194,14 @@ static int64_t synth_read_at(void* ctx, void* dst, size_t len, uint64_t offset) 
 }
 
 int test_seekable_beyond_old_cap(void) {
-    printf("=== TEST: Seekable - 2^30 + 5 blocks through a callback, nothing materialised ===\n");
+    printf("=== TEST: Seekable - 2^32 + 5 blocks through a callback, nothing materialised ===\n");
     if (sizeof(size_t) < 8) {
         printf("  [SKIP] 64-bit hosts only\n\n");
         return 1;
     }
     synth_ctx_t c;
     memset(&c, 0, sizeof(c));
-    c.n = (1ULL << 30) + 5;
+    c.n = (1ULL << 32) + 5;
     c.counting = 1;
     c.eof_off = ZXC_FILE_HEADER_SIZE + c.n * SYNTH_BLK;
     c.size =
@@ -2212,7 +2214,7 @@ int test_seekable_beyond_old_cap(void) {
     if (zxc_write_file_header(c.file_hdr, sizeof(c.file_hdr), SYNTH_BS, 0, 0) < 0 ||
         zxc_write_block_header(c.blk_hdr, sizeof(c.blk_hdr), &raw) < 0 ||
         zxc_write_block_header(c.eof_hdr, sizeof(c.eof_hdr), &eof) < 0 ||
-        zxc_seek_table_header(c.sek_hdr, sizeof(c.sek_hdr), (uint32_t)c.n) < 0 ||
+        zxc_seek_table_header(c.sek_hdr, sizeof(c.sek_hdr), c.n) < 0 ||
         zxc_write_file_footer(c.footer, sizeof(c.footer), total, 0, 0) < 0) {
         printf("  [FAIL] fixture headers\n");
         return 0;
@@ -2228,21 +2230,22 @@ int test_seekable_beyond_old_cap(void) {
             printf("  [FAIL] open: %s, %d reads\n", s ? "ok" : "NULL", c.calls);
             break;
         }
-        if (zxc_seekable_get_num_blocks(s) != (uint32_t)c.n ||
+        if (zxc_seekable_get_num_blocks(s) != c.n ||
             zxc_seekable_get_decompressed_size(s) != total) {
             printf("  [FAIL] geometry\n");
             break;
         }
-        /* The archive's last 32 bytes: block 2^30 + 4, above the old cap. */
+        /* The archive's last 32 bytes: block 2^32 + 4, above what a u32 index reaches. */
         for (int i = 0; i < 32; i++) want[i] = synth_payload(c.n - 1, SYNTH_BS - 32 + (uint32_t)i);
         if (zxc_seekable_decompress_range(s, got, sizeof(got), total - 32, 32) != 32 ||
             memcmp(got, want, 32) != 0) {
             printf("  [FAIL] tail read\n");
             break;
         }
-        /* Across blocks 2^30 and 2^30 + 1, multi-threaded. */
+        /* Across blocks 2^32 and 2^32 + 1, multi-threaded: a u32 index would wrap
+         * onto block 0 and serve its bytes without error. */
         c.counting = 0;
-        const uint64_t hi = 1ULL << 30;
+        const uint64_t hi = 1ULL << 32;
         for (int i = 0; i < 16; i++) want[i] = synth_payload(hi, SYNTH_BS - 16 + (uint32_t)i);
         for (int i = 0; i < 16; i++) want[16 + i] = synth_payload(hi + 1, (uint32_t)i);
         if (zxc_seekable_decompress_range_mt(s, got, sizeof(got), (hi + 1) * SYNTH_BS - 16, 32,
@@ -2252,7 +2255,7 @@ int test_seekable_beyond_old_cap(void) {
             break;
         }
         if (zxc_seekable_get_block_comp_size(s, 0) != SYNTH_BLK ||
-            zxc_seekable_get_block_comp_size(s, (uint32_t)c.n - 1) != SYNTH_BLK) {
+            zxc_seekable_get_block_comp_size(s, c.n - 1) != SYNTH_BLK) {
             printf("  [FAIL] block sizes\n");
             break;
         }

@@ -388,12 +388,14 @@ export class Seekable {
    * On-disk compressed size of a specific block (block header +
    * payload + optional per-block checksum), read from its seek table
    * group and checked against bounds only. Returns `null` if `blockIdx` is
-   * out of range; throws if the group is unreadable or invalid.
+   * out of range; throws if the group is unreadable or invalid, or a
+   * `RangeError` if `blockIdx` is not an integer in `[0, 2**53)`.
    */
   blockCompressedSize(blockIdx: number): number | null;
   /**
    * Decompressed size of a specific block, or `null` if `blockIdx` is
-   * out of range.
+   * out of range. Throws a `RangeError` if `blockIdx` is not an integer
+   * in `[0, 2**53)`.
    */
   blockDecompressedSize(blockIdx: number): number | null;
   /**
@@ -422,6 +424,7 @@ export class Seekable {
 /**
  * Encoded byte size of a seek table covering `numBlocks` data blocks.
  * Use this to size a destination buffer for {@link writeSeekTable}.
+ * `numBlocks` must be an integer in `[0, 2**53)`.
  */
 export function seekTableSize(numBlocks: number): number;
 

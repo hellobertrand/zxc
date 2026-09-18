@@ -1348,10 +1348,11 @@ networked storage, or any non-POSIX backend.
 ### `zxc_seekable_get_num_blocks`
 
 ```c
-ZXC_EXPORT uint32_t zxc_seekable_get_num_blocks(const zxc_seekable* s);
+ZXC_EXPORT uint64_t zxc_seekable_get_num_blocks(const zxc_seekable* s);
 ```
 
-Returns the total number of data blocks in the archive.
+Returns the total number of data blocks in the archive. The count is derived
+from the footer, never stored in a field, so only the archive size bounds it.
 
 ### `zxc_seekable_get_decompressed_size`
 
@@ -1366,7 +1367,7 @@ Returns the total decompressed size of the archive.
 ```c
 ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(
     const zxc_seekable* s,
-    uint32_t            block_idx
+    uint64_t            block_idx
 );
 ```
 
@@ -1380,7 +1381,7 @@ them comes back as is.
 ```c
 ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(
     const zxc_seekable* s,
-    uint32_t            block_idx
+    uint64_t            block_idx
 );
 ```
 
@@ -1442,7 +1443,7 @@ ZXC_EXPORT int64_t zxc_write_seek_table(
     uint8_t*        dst,
     size_t          dst_capacity,
     const uint32_t* comp_sizes,
-    uint32_t        num_blocks
+    uint64_t        num_blocks
 );
 ```
 
@@ -1453,7 +1454,7 @@ Low-level: writes a seek table (block header + entries) to `dst`.
 ### `zxc_seek_table_size`
 
 ```c
-ZXC_EXPORT size_t zxc_seek_table_size(uint32_t num_blocks);
+ZXC_EXPORT size_t zxc_seek_table_size(uint64_t num_blocks);
 ```
 
 Returns the encoded byte size of a seek table for `num_blocks` blocks.

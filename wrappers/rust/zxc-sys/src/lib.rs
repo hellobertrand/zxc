@@ -864,7 +864,9 @@ unsafe extern "C" {
     pub fn zxc_seekable_set_checksum(s: *mut zxc_seekable, enabled: c_int) -> c_int;
 
     /// Returns the total number of data blocks in the archive (excluding EOF).
-    pub fn zxc_seekable_get_num_blocks(s: *const zxc_seekable) -> u32;
+    ///
+    /// Derived from the footer, never stored, so only the archive size bounds it.
+    pub fn zxc_seekable_get_num_blocks(s: *const zxc_seekable) -> u64;
 
     /// Returns the total decompressed size of the archive in bytes.
     pub fn zxc_seekable_get_decompressed_size(s: *const zxc_seekable) -> u64;
@@ -873,12 +875,12 @@ unsafe extern "C" {
     /// (block header + payload + optional per-block checksum).
     ///
     /// Returns 0 if `block_idx` is out of range.
-    pub fn zxc_seekable_get_block_comp_size(s: *const zxc_seekable, block_idx: u32) -> u32;
+    pub fn zxc_seekable_get_block_comp_size(s: *const zxc_seekable, block_idx: u64) -> u32;
 
     /// Returns the decompressed size of a specific block.
     ///
     /// Returns 0 if `block_idx` is out of range.
-    pub fn zxc_seekable_get_block_decomp_size(s: *const zxc_seekable, block_idx: u32) -> u32;
+    pub fn zxc_seekable_get_block_decomp_size(s: *const zxc_seekable, block_idx: u64) -> u32;
 
     /// Decompresses `len` bytes starting at byte `offset` in the original
     /// uncompressed data. Only the blocks overlapping the requested range
@@ -935,11 +937,12 @@ unsafe extern "C" {
         dst: *mut u8,
         dst_capacity: usize,
         comp_sizes: *const u32,
-        num_blocks: u32,
+        num_blocks: u64,
     ) -> i64;
 
-    /// Returns the encoded byte size of a seek table for `num_blocks` blocks.
-    pub fn zxc_seek_table_size(num_blocks: u32) -> usize;
+    /// Returns the encoded byte size of a seek table for `num_blocks` blocks,
+    /// or 0 when that size does not fit a `usize`.
+    pub fn zxc_seek_table_size(num_blocks: u64) -> usize;
 }
 
 // =============================================================================

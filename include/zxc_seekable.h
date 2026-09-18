@@ -18,6 +18,10 @@
  * read a group when one of its blocks is accessed: open costs the same at any
  * block count and no table stays in memory. Plain decompressors ignore it.
  *
+ * No field holds the block count, so nothing caps it but the footer's 64-bit
+ * size: counts and block indices are 64-bit here. Writing a table still costs
+ * four bytes of memory per block, which is what limits a producer today.
+ *
  * The table is not authenticated: a consistent forgery can point a block at
  * another of the same size. Only checksums verified through
  * @ref zxc_seekable_set_checksum bind a block to its position.
@@ -143,10 +147,13 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 /**
  * @brief Returns the total number of blocks in the seekable archive.
  *
+ * The count is derived from the footer, not stored, so it is bounded by the
+ * archive size and not by any field: 64 bits here.
+ *
  * @param[in] s  Seekable handle.
  * @return Number of data blocks (excluding EOF).
  */
-ZXC_EXPORT uint32_t zxc_seekable_get_num_blocks(const zxc_seekable* s);
+ZXC_EXPORT uint64_t zxc_seekable_get_num_blocks(const zxc_seekable* s);
 
 /**
  * @brief Returns the total decompressed size of the seekable archive.
@@ -169,7 +176,7 @@ ZXC_EXPORT uint64_t zxc_seekable_get_decompressed_size(const zxc_seekable* s);
  *         group is unreadable or invalid.
  */
 ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s,
-                                                     const uint32_t block_idx);
+                                                     const uint64_t block_idx);
 
 /**
  * @brief Returns the decompressed size of a specific block.
@@ -179,7 +186,7 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s,
  * @return Decompressed block size, or 0 if @p block_idx is out of range.
  */
 ZXC_EXPORT uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s,
-                                                       const uint32_t block_idx);
+                                                       const uint64_t block_idx);
 
 /**
  * @brief Decompresses an arbitrary byte range of the original data.
@@ -291,7 +298,7 @@ ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t d
  * @return Number of bytes written, or a negative @ref zxc_error_t on failure.
  */
 ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity,
-                                        const uint32_t* comp_sizes, const uint32_t num_blocks);
+                                        const uint32_t* comp_sizes, const uint64_t num_blocks);
 
 /**
  * @brief Returns the encoded size of a seek table for the given block count.
@@ -299,7 +306,7 @@ ZXC_EXPORT int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity,
  * @param[in] num_blocks     Number of blocks.
  * @return Total byte size of the seek table, or 0 when it does not fit @c size_t.
  */
-ZXC_EXPORT size_t zxc_seek_table_size(const uint32_t num_blocks);
+ZXC_EXPORT size_t zxc_seek_table_size(const uint64_t num_blocks);
 
 /** @} */ /* end of seekable_api */
 

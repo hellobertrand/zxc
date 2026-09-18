@@ -380,7 +380,7 @@ func TestSeekableOpenReaderRejectsGarbage(t *testing.T) {
 
 func TestSeekTableSizeAndWrite(t *testing.T) {
 	compSizes := []uint32{128, 256, 200, 4}
-	sz := SeekTableSize(uint32(len(compSizes)))
+	sz := SeekTableSize(uint64(len(compSizes)))
 	if sz == 0 {
 		t.Fatalf("SeekTableSize = 0")
 	}
