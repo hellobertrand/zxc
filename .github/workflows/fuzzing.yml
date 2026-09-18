@@ -122,6 +122,7 @@ jobs:
           echo "seekable inputs: $(find corpus/corpus/zxc_fuzzer_seekable -type f | wc -l)"
           echo "pstream inputs: $(find corpus/corpus/zxc_fuzzer_pstream -type f | wc -l)"
           echo "dict inputs: $(find corpus/corpus/zxc_fuzzer_dict -type f | wc -l)"
+          echo "stream inputs: $(find corpus/corpus/zxc_fuzzer_stream -type f 2>/dev/null | wc -l)"
 
       - name: Build Coverage Harnesses
         run: |
@@ -146,7 +147,11 @@ jobs:
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_dict.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_dict
 
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_stream.c \
+            -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_stream
+
       - name: Replay Corpora
+        shell: bash
         run: |
           LLVM_PROFILE_FILE="build-cov/roundtrip.profraw" \
             build-cov/fuzz_roundtrip corpus/corpus/zxc_fuzzer_roundtrip/ -runs=0 2>&1 | tail -1
@@ -164,6 +169,10 @@ jobs:
             LLVM_PROFILE_FILE="build-cov/dict.profraw" \
               build-cov/fuzz_dict corpus/corpus/zxc_fuzzer_dict/ -runs=0 2>&1 | tail -1
           fi
+          if [ -d corpus/corpus/zxc_fuzzer_stream ]; then
+            LLVM_PROFILE_FILE="build-cov/stream.profraw" \
+              build-cov/fuzz_stream corpus/corpus/zxc_fuzzer_stream/ -runs=0 2>&1 | tail -1
+          fi
 
       - name: Generate Coverage Report
         run: |
@@ -172,6 +181,7 @@ jobs:
             $([ -f build-cov/seekable.profraw ] && echo build-cov/seekable.profraw) \
             $([ -f build-cov/pstream.profraw ] && echo build-cov/pstream.profraw) \
             $([ -f build-cov/dict.profraw ] && echo build-cov/dict.profraw) \
+            $([ -f build-cov/stream.profraw ] && echo build-cov/stream.profraw) \
             -o build-cov/fuzz.profdata
 
           echo "=== COVERAGE SUMMARY ==="
@@ -180,16 +190,18 @@ jobs:
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
             $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
+            $([ -f build-cov/fuzz_stream ] && echo "-object build-cov/fuzz_stream") \
             -instr-profile=build-cov/fuzz.profdata \
-            --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)'
+            --ignore-filename-regex='(vendors/|tests/|fuzz_)'
 
           llvm-cov show \
             build-cov/fuzz_roundtrip -object build-cov/fuzz_decompress \
             $([ -f build-cov/fuzz_seekable ] && echo "-object build-cov/fuzz_seekable") \
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
             $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
+            $([ -f build-cov/fuzz_stream ] && echo "-object build-cov/fuzz_stream") \
             -instr-profile=build-cov/fuzz.profdata \
-            --ignore-filename-regex='(vendors/|tests/|fuzz_|zxc_driver)' \
+            --ignore-filename-regex='(vendors/|tests/|fuzz_)' \
             --format=html -output-dir=build-cov/coverage_html
 
       - name: Upload Coverage Report

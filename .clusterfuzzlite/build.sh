@@ -6,7 +6,7 @@
 #  This source code is licensed under the BSD-style license found in the
 #  LICENSE file in the root directory of this source tree.
 
-FUZZERS="decompress roundtrip seekable pstream dict"
+FUZZERS="decompress roundtrip seekable pstream dict stream"
 
 LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_pivco_tables.c src/lib/zxc_pstream.c src/lib/zxc_seekable.c"
 
