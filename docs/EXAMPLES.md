@@ -385,8 +385,8 @@ int main(int argc, char** argv) {
         return 1;
     }
 
-    fprintf(stderr, "Archive: %u blocks, %llu bytes decompressed.\n",
-            zxc_seekable_get_num_blocks(s),
+    fprintf(stderr, "Archive: %llu blocks, %llu bytes decompressed.\n",
+            (unsigned long long)zxc_seekable_get_num_blocks(s),
             (unsigned long long)zxc_seekable_get_decompressed_size(s));
 
     // Decompress a user-requested byte range.

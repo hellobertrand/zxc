@@ -50,6 +50,20 @@ class TestSeekableQueries:
             assert s.block_compressed_size(nb) is None
             assert s.block_decompressed_size(nb) is None
 
+    def test_block_index_is_64_bit(self, tmp_path):
+        # A 64-bit index is out of range, not truncated back into it; past 64 bits
+        # it is refused rather than masked onto a real block.
+        payload = build_payload(64 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        with zxc.Seekable(compressed) as s:
+            assert s.block_compressed_size(2**40) is None
+            assert s.block_decompressed_size(2**40) is None
+            for bad in (2**64 + 3, -1, -(2**64)):
+                with pytest.raises(OverflowError):
+                    s.block_compressed_size(bad)
+                with pytest.raises(OverflowError):
+                    s.block_decompressed_size(bad)
+
 
 # =========================================================================
 # decompress_range

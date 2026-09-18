@@ -644,10 +644,10 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     // Seekable: one compressed size per block, at most block_count + 1 of them.
     uint32_t* seek_comp = NULL;
-    uint32_t seek_count = 0;
+    uint64_t seek_count = 0;
     if (seekable) {
         const size_t block_count = src_size / block_size;
-        if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
+        if (UNLIKELY(block_count + 2 > SIZE_MAX / sizeof(uint32_t))) {
             // LCOV_EXCL_START
             zxc_cctx_free(&ctx);
             return ZXC_ERROR_BAD_BLOCK_SIZE;

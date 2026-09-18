@@ -77,11 +77,11 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     /* Phase 3: Exercise metadata getters                                 */
     /* ------------------------------------------------------------------ */
-    const uint32_t num_blocks = zxc_seekable_get_num_blocks(s);
+    const uint64_t num_blocks = zxc_seekable_get_num_blocks(s);
     const uint64_t total_decomp = zxc_seekable_get_decompressed_size(s);
     assert(total_decomp == size);
 
-    for (uint32_t i = 0; i < num_blocks; i++) {
+    for (uint64_t i = 0; i < num_blocks; i++) {
         const uint32_t csz = zxc_seekable_get_block_comp_size(s, i);
         const uint32_t dsz = zxc_seekable_get_block_decomp_size(s, i);
         assert(csz > 0);

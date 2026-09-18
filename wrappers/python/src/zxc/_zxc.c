@@ -1944,7 +1944,7 @@ static PyObject* pyzxc_seekable_num_blocks(PyObject* self, PyObject* capsule) {
     (void)self;
     zxc_seekable* s = seekable_from_capsule(capsule);
     if (!s) return NULL;
-    return PyLong_FromUnsignedLong(zxc_seekable_get_num_blocks(s));
+    return PyLong_FromUnsignedLongLong(zxc_seekable_get_num_blocks(s));
 }
 
 static PyObject* pyzxc_seekable_decompressed_size(PyObject* self, PyObject* capsule) {
@@ -1957,8 +1957,10 @@ static PyObject* pyzxc_seekable_decompressed_size(PyObject* self, PyObject* caps
 static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) {
     (void)self;
     PyObject* capsule;
-    unsigned int idx;
-    if (!PyArg_ParseTuple(args, "OI", &capsule, &idx)) return NULL;
+    PyObject* idx_obj;
+    if (!PyArg_ParseTuple(args, "OO", &capsule, &idx_obj)) return NULL;
+    const unsigned long long idx = PyLong_AsUnsignedLongLong(idx_obj);
+    if (idx == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
 
     pyzxc_seekable_holder_t* h = seekable_open_holder(capsule);
     if (!h) return NULL;
@@ -1981,8 +1983,10 @@ static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) 
 static PyObject* pyzxc_seekable_block_decomp_size(PyObject* self, PyObject* args) {
     (void)self;
     PyObject* capsule;
-    unsigned int idx;
-    if (!PyArg_ParseTuple(args, "OI", &capsule, &idx)) return NULL;
+    PyObject* idx_obj;
+    if (!PyArg_ParseTuple(args, "OO", &capsule, &idx_obj)) return NULL;
+    const unsigned long long idx = PyLong_AsUnsignedLongLong(idx_obj);
+    if (idx == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
 
     zxc_seekable* s = seekable_from_capsule(capsule);
     if (!s) return NULL;
@@ -2140,8 +2144,8 @@ static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
 
 static PyObject* pyzxc_seek_table_size(PyObject* self, PyObject* arg) {
     (void)self;
-    unsigned int num_blocks = (unsigned int)PyLong_AsUnsignedLong(arg);
-    if (num_blocks == (unsigned int)-1 && PyErr_Occurred()) return NULL;
+    unsigned long long num_blocks = PyLong_AsUnsignedLongLong(arg);
+    if (num_blocks == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
     return PyLong_FromSize_t(zxc_seek_table_size(num_blocks));
 }
 
@@ -2164,7 +2168,7 @@ static PyObject* pyzxc_write_seek_table(PyObject* self, PyObject* arg) {
         sizes[i] = (uint32_t)v;
     }
 
-    size_t cap = zxc_seek_table_size((uint32_t)n);
+    size_t cap = zxc_seek_table_size((uint64_t)n);
     PyObject* out = PyBytes_FromStringAndSize(NULL, (Py_ssize_t)cap);
     if (!out) {
         PyMem_Free(sizes);
@@ -2172,7 +2176,7 @@ static PyObject* pyzxc_write_seek_table(PyObject* self, PyObject* arg) {
     }
 
     int64_t written =
-        zxc_write_seek_table((uint8_t*)PyBytes_AS_STRING(out), cap, sizes, (uint32_t)n);
+        zxc_write_seek_table((uint8_t*)PyBytes_AS_STRING(out), cap, sizes, (uint64_t)n);
     PyMem_Free(sizes);
 
     if (written < 0) {

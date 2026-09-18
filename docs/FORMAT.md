@@ -492,7 +492,8 @@ binds a block to its index.
 **Backward Detection Strategy**:
 1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
 2. Read the **File Footer** (last 8 bytes, or 16 with checksums) -> its first 8 bytes are `total_decompressed_size`.
-3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`.
+3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`, in 64 bits: no field
+   holds `N`, so nothing caps it but the footer's 64-bit size.
 4. Calculate `seek_block_size = 8 + ⌈N / 64⌉ × 8 + N × 4`, in 64 bits.
 5. Seek backward by `seek_block_size` bytes from the start of the footer to read the Block Header.
 6. Validate that Block Type is `254` (SEK) and Compressed Payload Size is the fold of
