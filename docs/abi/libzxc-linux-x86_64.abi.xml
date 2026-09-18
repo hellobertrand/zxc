@@ -1,4 +1,4 @@
-<abi-corpus version='2.2' path='build/libzxc.so.0.14.1' architecture='elf-amd-x86_64' soname='libzxc.so.4'>
+<abi-corpus version='2.2' path='build/libzxc.so.0.14.1' architecture='elf-amd-x86_64' soname='libzxc.so.5'>
   <elf-needed>
     <dependency name='libc.so.6'/>
   </elf-needed>
@@ -79,10 +79,10 @@
     <qualified-type-def type-id='type-id-5' restrict='yes' id='type-id-6'/>
     <pointer-type-def type-id='type-id-7' size-in-bits='64' id='type-id-8'/>
     <qualified-type-def type-id='type-id-8' restrict='yes' id='type-id-9'/>
-    <class-decl name='zxc_pivco_tree_t' is-struct='yes' naming-typedef-id='type-id-7' visibility='default' filepath='/src/lib/zxc_internal.h' line='640' column='1' is-declaration-only='yes' id='type-id-10'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-7'/>
-    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='673' column='1' id='type-id-4'/>
-    <function-decl name='zxc_huf_dict_tree_build' filepath='/src/lib/zxc_internal.h' line='1646' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <class-decl name='zxc_pivco_tree_t' is-struct='yes' naming-typedef-id='type-id-7' visibility='default' filepath='/src/lib/zxc_internal.h' line='671' column='1' is-declaration-only='yes' id='type-id-10'/>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-7'/>
+    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='704' column='1' id='type-id-4'/>
+    <function-decl name='zxc_huf_dict_tree_build' filepath='/src/lib/zxc_internal.h' line='1692' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-9'/>
       <parameter type-id='type-id-11'/>
@@ -129,13 +129,13 @@
     <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-51'/>
     <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-52'/>
     <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-53'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-39'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-41'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-43'/>
-    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1092' column='1' id='type-id-27'/>
-    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1092' column='1' id='type-id-29'/>
-    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1092' column='1' id='type-id-31'/>
-    <function-decl name='zxc_write_glo_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1475' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-39'/>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-41'/>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-43'/>
+    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1123' column='1' id='type-id-27'/>
+    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1123' column='1' id='type-id-29'/>
+    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1123' column='1' id='type-id-31'/>
+    <function-decl name='zxc_write_glo_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1521' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-36'/>
@@ -143,59 +143,59 @@
       <parameter type-id='type-id-55'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_write_ghi_header' filepath='/src/lib/zxc_internal.h' line='1504' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_write_ghi_header' filepath='/src/lib/zxc_internal.h' line='1550' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-36'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_build_code_lengths_avx2' filepath='/src/lib/zxc_internal.h' line='1544' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_build_code_lengths_avx2' filepath='/src/lib/zxc_internal.h' line='1590' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-52'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_build_code_lengths_avx512' filepath='/src/lib/zxc_internal.h' line='1544' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_build_code_lengths_avx512' filepath='/src/lib/zxc_internal.h' line='1590' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-53'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_build_code_lengths_default' filepath='/src/lib/zxc_internal.h' line='1544' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_build_code_lengths_default' filepath='/src/lib/zxc_internal.h' line='1590' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-51'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_nudge_code_lengths' filepath='/src/lib/zxc_internal.h' line='1576' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_nudge_code_lengths' filepath='/src/lib/zxc_internal.h' line='1622' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-51'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_calc_size_avx2' filepath='/src/lib/zxc_internal.h' line='1634' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_calc_size_avx2' filepath='/src/lib/zxc_internal.h' line='1680' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_huf_calc_size_avx512' filepath='/src/lib/zxc_internal.h' line='1634' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_calc_size_avx512' filepath='/src/lib/zxc_internal.h' line='1680' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_huf_calc_size_default' filepath='/src/lib/zxc_internal.h' line='1634' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_calc_size_default' filepath='/src/lib/zxc_internal.h' line='1680' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_huf_encode_section_avx2' filepath='/src/lib/zxc_internal.h' line='1638' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_encode_section_avx2' filepath='/src/lib/zxc_internal.h' line='1684' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-56'/>
@@ -204,7 +204,7 @@
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_encode_section_avx512' filepath='/src/lib/zxc_internal.h' line='1638' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_encode_section_avx512' filepath='/src/lib/zxc_internal.h' line='1684' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-56'/>
@@ -213,7 +213,7 @@
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_encode_section_default' filepath='/src/lib/zxc_internal.h' line='1638' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_encode_section_default' filepath='/src/lib/zxc_internal.h' line='1684' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-56'/>
@@ -222,25 +222,25 @@
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_calc_size_dict_avx2' filepath='/src/lib/zxc_internal.h' line='1651' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_calc_size_dict_avx2' filepath='/src/lib/zxc_internal.h' line='1697' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-49'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_huf_calc_size_dict_avx512' filepath='/src/lib/zxc_internal.h' line='1651' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_calc_size_dict_avx512' filepath='/src/lib/zxc_internal.h' line='1697' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-50'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_huf_calc_size_dict_default' filepath='/src/lib/zxc_internal.h' line='1651' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_calc_size_dict_default' filepath='/src/lib/zxc_internal.h' line='1697' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-48'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_huf_encode_section_dict_avx2' filepath='/src/lib/zxc_internal.h' line='1655' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_encode_section_dict_avx2' filepath='/src/lib/zxc_internal.h' line='1701' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-56'/>
@@ -251,7 +251,7 @@
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_encode_section_dict_avx512' filepath='/src/lib/zxc_internal.h' line='1655' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_encode_section_dict_avx512' filepath='/src/lib/zxc_internal.h' line='1701' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-56'/>
@@ -262,7 +262,7 @@
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_encode_section_dict_default' filepath='/src/lib/zxc_internal.h' line='1655' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_encode_section_dict_default' filepath='/src/lib/zxc_internal.h' line='1701' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-56'/>
@@ -273,10 +273,10 @@
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-18'/>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-20'/>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-22'/>
-    <function-decl name='zxc_write_block_header' filepath='/src/lib/zxc_internal.h' line='1982' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-18'/>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-20'/>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-22'/>
+    <function-decl name='zxc_write_block_header' filepath='/src/lib/zxc_internal.h' line='2037' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-24'/>
@@ -311,16 +311,16 @@
     <qualified-type-def type-id='type-id-88' restrict='yes' id='type-id-93'/>
     <qualified-type-def type-id='type-id-90' restrict='yes' id='type-id-94'/>
     <qualified-type-def type-id='type-id-92' restrict='yes' id='type-id-95'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-69'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-71'/>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-73'/>
-    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='673' column='1' id='type-id-57'/>
-    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='673' column='1' id='type-id-59'/>
-    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='673' column='1' id='type-id-61'/>
-    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1092' column='1' id='type-id-87'/>
-    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1092' column='1' id='type-id-89'/>
-    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1092' column='1' id='type-id-91'/>
-    <function-decl name='zxc_read_glo_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1492' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-69'/>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-71'/>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-73'/>
+    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='704' column='1' id='type-id-57'/>
+    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='704' column='1' id='type-id-59'/>
+    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='704' column='1' id='type-id-61'/>
+    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1123' column='1' id='type-id-87'/>
+    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1123' column='1' id='type-id-89'/>
+    <typedef-decl name='zxc_gnr_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1123' column='1' id='type-id-91'/>
+    <function-decl name='zxc_read_glo_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1538' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-93'/>
@@ -328,13 +328,13 @@
       <parameter type-id='type-id-11'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_read_ghi_header' filepath='/src/lib/zxc_internal.h' line='1515' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_read_ghi_header' filepath='/src/lib/zxc_internal.h' line='1561' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-93'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_decode_section_avx2' filepath='/src/lib/zxc_internal.h' line='1663' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_decode_section_avx2' filepath='/src/lib/zxc_internal.h' line='1709' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-12'/>
@@ -342,7 +342,7 @@
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_decode_section_avx512' filepath='/src/lib/zxc_internal.h' line='1663' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_decode_section_avx512' filepath='/src/lib/zxc_internal.h' line='1709' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-12'/>
@@ -350,7 +350,7 @@
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_decode_section_default' filepath='/src/lib/zxc_internal.h' line='1663' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_decode_section_default' filepath='/src/lib/zxc_internal.h' line='1709' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-12'/>
@@ -358,7 +358,7 @@
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_decode_section_dict_avx2' filepath='/src/lib/zxc_internal.h' line='1668' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_decode_section_dict_avx2' filepath='/src/lib/zxc_internal.h' line='1714' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-12'/>
@@ -368,7 +368,7 @@
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_decode_section_dict_avx512' filepath='/src/lib/zxc_internal.h' line='1668' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_decode_section_dict_avx512' filepath='/src/lib/zxc_internal.h' line='1714' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-12'/>
@@ -378,7 +378,7 @@
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_decode_section_dict_default' filepath='/src/lib/zxc_internal.h' line='1668' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_decode_section_dict_default' filepath='/src/lib/zxc_internal.h' line='1714' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-12'/>
@@ -388,10 +388,10 @@
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-81'/>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-83'/>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-85'/>
-    <function-decl name='zxc_cctx_alloc_entropy_scratch' filepath='/src/lib/zxc_internal.h' line='1858' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-81'/>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-83'/>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-85'/>
+    <function-decl name='zxc_cctx_alloc_entropy_scratch' filepath='/src/lib/zxc_internal.h' line='1904' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-82'/>
       <return type-id='type-id-13'/>
     </function-decl>
@@ -404,20 +404,20 @@
       <parameter type-id='type-id-54'/>
       <return type-id='type-id-100'/>
     </function-decl>
-    <function-decl name='zxc_huf_build_code_lengths' filepath='/src/lib/zxc_internal.h' line='1544' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_build_code_lengths' filepath='/src/lib/zxc_internal.h' line='1590' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-56'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-101'/>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_pack_lengths' filepath='/src/lib/zxc_internal.h' line='1599' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_pack_lengths' filepath='/src/lib/zxc_internal.h' line='1645' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-97'/>
-    <function-decl name='zxc_cctx_init' filepath='/src/lib/zxc_internal.h' line='1776' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-97'/>
+    <function-decl name='zxc_cctx_init' filepath='/src/lib/zxc_internal.h' line='1822' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-98'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-102'/>
@@ -426,16 +426,17 @@
       <parameter type-id='type-id-54'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_cctx_free' filepath='/src/lib/zxc_internal.h' line='1868' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_cctx_free' filepath='/src/lib/zxc_internal.h' line='1914' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-98'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <function-decl name='zxc_compress_chunk_wrapper' filepath='/src/lib/zxc_internal.h' line='1903' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_compress_chunk_wrapper' filepath='/src/lib/zxc_internal.h' line='1952' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-99'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='malloc' filepath='/usr/include/stdlib.h' line='672' column='1' visibility='default' binding='global' size-in-bits='64'>
@@ -449,157 +450,169 @@
     </function-decl>
   </abi-instr>
   <abi-instr address-size='64' path='/src/lib/zxc_dispatch.c' comp-dir-path='/build' language='LANG_C11'>
-    <qualified-type-def type-id='type-id-103' const='yes' id='type-id-104'/>
-    <pointer-type-def type-id='type-id-104' size-in-bits='64' id='type-id-105'/>
-    <qualified-type-def type-id='type-id-106' const='yes' id='type-id-107'/>
-    <pointer-type-def type-id='type-id-107' size-in-bits='64' id='type-id-108'/>
-    <qualified-type-def type-id='type-id-108' restrict='yes' id='type-id-109'/>
-    <qualified-type-def type-id='type-id-110' const='yes' id='type-id-111'/>
-    <pointer-type-def type-id='type-id-111' size-in-bits='64' id='type-id-112'/>
-    <qualified-type-def type-id='type-id-112' restrict='yes' id='type-id-113'/>
-    <qualified-type-def type-id='type-id-114' const='yes' id='type-id-115'/>
-    <pointer-type-def type-id='type-id-115' size-in-bits='64' id='type-id-116'/>
-    <qualified-type-def type-id='type-id-116' restrict='yes' id='type-id-117'/>
-    <pointer-type-def type-id='type-id-103' size-in-bits='64' id='type-id-118'/>
-    <pointer-type-def type-id='type-id-106' size-in-bits='64' id='type-id-119'/>
-    <qualified-type-def type-id='type-id-119' restrict='yes' id='type-id-120'/>
+    <qualified-type-def type-id='type-id-104' const='yes' id='type-id-105'/>
+    <pointer-type-def type-id='type-id-105' size-in-bits='64' id='type-id-106'/>
+    <qualified-type-def type-id='type-id-107' const='yes' id='type-id-108'/>
+    <pointer-type-def type-id='type-id-108' size-in-bits='64' id='type-id-109'/>
+    <qualified-type-def type-id='type-id-109' restrict='yes' id='type-id-110'/>
+    <qualified-type-def type-id='type-id-111' const='yes' id='type-id-112'/>
+    <pointer-type-def type-id='type-id-112' size-in-bits='64' id='type-id-113'/>
+    <qualified-type-def type-id='type-id-113' restrict='yes' id='type-id-114'/>
+    <qualified-type-def type-id='type-id-115' const='yes' id='type-id-116'/>
+    <pointer-type-def type-id='type-id-116' size-in-bits='64' id='type-id-117'/>
+    <qualified-type-def type-id='type-id-117' restrict='yes' id='type-id-118'/>
+    <pointer-type-def type-id='type-id-104' size-in-bits='64' id='type-id-119'/>
+    <pointer-type-def type-id='type-id-107' size-in-bits='64' id='type-id-120'/>
+    <qualified-type-def type-id='type-id-120' restrict='yes' id='type-id-121'/>
     <function-decl name='zxc_dict_id' filepath='/src/lib/../../include/zxc_dict.h' line='72' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-14'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-14'/>
-      <return type-id='type-id-121'/>
+      <return type-id='type-id-122'/>
     </function-decl>
-    <function-decl name='zxc_write_seek_table' filepath='/src/lib/../../include/zxc_seekable.h' line='282' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-122'/>
+    <function-decl name='zxc_write_seek_table' filepath='/src/lib/../../include/zxc_seekable.h' line='300' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-123'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-96'/>
-      <parameter type-id='type-id-55'/>
-      <return type-id='type-id-123'/>
+      <parameter type-id='type-id-103'/>
+      <return type-id='type-id-124'/>
     </function-decl>
     <function-decl name='zxc_decompress_chunk_wrapper_default' filepath='/src/lib/zxc_dispatch.c' line='53' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_dict_default' filepath='/src/lib/zxc_dispatch.c' line='56' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_dict_default' filepath='/src/lib/zxc_dispatch.c' line='57' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_safe_default' filepath='/src/lib/zxc_dispatch.c' line='59' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_safe_default' filepath='/src/lib/zxc_dispatch.c' line='61' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_avx2' filepath='/src/lib/zxc_dispatch.c' line='65' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_avx2' filepath='/src/lib/zxc_dispatch.c' line='68' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_dict_avx2' filepath='/src/lib/zxc_dispatch.c' line='68' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_dict_avx2' filepath='/src/lib/zxc_dispatch.c' line='71' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_avx512' filepath='/src/lib/zxc_dispatch.c' line='71' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_avx512' filepath='/src/lib/zxc_dispatch.c' line='75' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_dict_avx512' filepath='/src/lib/zxc_dispatch.c' line='74' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_dict_avx512' filepath='/src/lib/zxc_dispatch.c' line='78' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_safe_avx2' filepath='/src/lib/zxc_dispatch.c' line='77' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_safe_avx2' filepath='/src/lib/zxc_dispatch.c' line='82' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_decompress_chunk_wrapper_safe_avx512' filepath='/src/lib/zxc_dispatch.c' line='80' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-109'/>
+    <function-decl name='zxc_decompress_chunk_wrapper_safe_avx512' filepath='/src/lib/zxc_dispatch.c' line='86' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-110'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_compress_chunk_wrapper_default' filepath='/src/lib/zxc_dispatch.c' line='97' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-120'/>
+    <function-decl name='zxc_compress_chunk_wrapper_default' filepath='/src/lib/zxc_dispatch.c' line='106' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-121'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_huf_pack_lengths_default' filepath='/src/lib/zxc_dispatch.c' line='127' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_pack_lengths_default' filepath='/src/lib/zxc_dispatch.c' line='136' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <function-decl name='zxc_huf_unpack_lengths_default' filepath='/src/lib/zxc_dispatch.c' line='128' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_huf_unpack_lengths_default' filepath='/src/lib/zxc_dispatch.c' line='137' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-12'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_compress_chunk_wrapper_avx2' filepath='/src/lib/zxc_dispatch.c' line='131' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-120'/>
+    <function-decl name='zxc_compress_chunk_wrapper_avx2' filepath='/src/lib/zxc_dispatch.c' line='140' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-121'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_compress_chunk_wrapper_avx512' filepath='/src/lib/zxc_dispatch.c' line='134' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-120'/>
+    <function-decl name='zxc_compress_chunk_wrapper_avx512' filepath='/src/lib/zxc_dispatch.c' line='143' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-121'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='654' column='1' id='type-id-114'/>
-    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='673' column='1' id='type-id-110'/>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-106'/>
-    <function-decl name='zxc_cctx_attach_dict_huf' filepath='/src/lib/zxc_internal.h' line='1791' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-120'/>
+    <typedef-decl name='zxc_pivco_tree_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='685' column='1' id='type-id-115'/>
+    <typedef-decl name='zxc_pivco_decode_aux_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='704' column='1' id='type-id-111'/>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-107'/>
+    <function-decl name='zxc_cctx_attach_dict_huf' filepath='/src/lib/zxc_internal.h' line='1837' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-121'/>
       <parameter type-id='type-id-3'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_cctx_compute_workspace_size' filepath='/src/lib/zxc_internal.h' line='1808' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_cctx_compute_workspace_size' filepath='/src/lib/zxc_internal.h' line='1854' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-102'/>
       <parameter type-id='type-id-102'/>
       <parameter type-id='type-id-54'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_cctx_init_in_workspace' filepath='/src/lib/zxc_internal.h' line='1843' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-120'/>
-      <parameter type-id='type-id-124'/>
+    <function-decl name='zxc_cctx_init_in_workspace' filepath='/src/lib/zxc_internal.h' line='1889' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-121'/>
+      <parameter type-id='type-id-125'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-102'/>
@@ -609,8 +622,8 @@
       <parameter type-id='type-id-102'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-103'/>
-    <function-decl name='zxc_write_file_header' filepath='/src/lib/zxc_internal.h' line='1943' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-104'/>
+    <function-decl name='zxc_write_file_header' filepath='/src/lib/zxc_internal.h' line='1998' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-54'/>
@@ -618,32 +631,27 @@
       <parameter type-id='type-id-55'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_read_file_header' filepath='/src/lib/zxc_internal.h' line='1965' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_read_file_header' filepath='/src/lib/zxc_internal.h' line='2020' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
-      <parameter type-id='type-id-125'/>
       <parameter type-id='type-id-126'/>
       <parameter type-id='type-id-127'/>
+      <parameter type-id='type-id-128'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_read_block_header' filepath='/src/lib/zxc_internal.h' line='1999' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_read_block_header' filepath='/src/lib/zxc_internal.h' line='2054' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
-      <parameter type-id='type-id-118'/>
+      <parameter type-id='type-id-119'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_write_file_footer' filepath='/src/lib/zxc_internal.h' line='2018' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_write_file_footer' filepath='/src/lib/zxc_internal.h' line='2073' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
-      <parameter type-id='type-id-128'/>
-      <parameter type-id='type-id-55'/>
+      <parameter type-id='type-id-103'/>
+      <parameter type-id='type-id-103'/>
       <parameter type-id='type-id-102'/>
       <return type-id='type-id-13'/>
-    </function-decl>
-    <function-decl name='realloc' filepath='/usr/include/stdlib.h' line='683' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-14'/>
-      <parameter type-id='type-id-17'/>
-      <return type-id='type-id-14'/>
     </function-decl>
     <function-decl name='memcmp' filepath='/usr/include/string.h' line='64' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-14'/>
@@ -810,61 +818,73 @@
     <qualified-type-def type-id='type-id-173' restrict='yes' id='type-id-174'/>
     <qualified-type-def type-id='type-id-162' const='yes' id='type-id-175'/>
     <pointer-type-def type-id='type-id-175' size-in-bits='64' id='type-id-176'/>
-    <pointer-type-def type-id='type-id-13' size-in-bits='64' id='type-id-126'/>
+    <pointer-type-def type-id='type-id-13' size-in-bits='64' id='type-id-127'/>
     <pointer-type-def type-id='type-id-156' size-in-bits='64' id='type-id-177'/>
     <qualified-type-def type-id='type-id-177' restrict='yes' id='type-id-178'/>
     <pointer-type-def type-id='type-id-160' size-in-bits='64' id='type-id-179'/>
     <qualified-type-def type-id='type-id-179' restrict='yes' id='type-id-180'/>
     <pointer-type-def type-id='type-id-163' size-in-bits='64' id='type-id-181'/>
     <qualified-type-def type-id='type-id-181' restrict='yes' id='type-id-182'/>
-    <pointer-type-def type-id='type-id-183' size-in-bits='64' id='type-id-184'/>
-    <qualified-type-def type-id='type-id-185' const='yes' id='type-id-186'/>
-    <pointer-type-def type-id='type-id-186' size-in-bits='64' id='type-id-187'/>
-    <qualified-type-def type-id='type-id-188' const='yes' id='type-id-189'/>
-    <pointer-type-def type-id='type-id-189' size-in-bits='64' id='type-id-190'/>
-    <qualified-type-def type-id='type-id-190' restrict='yes' id='type-id-191'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-192'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-193'/>
-    <pointer-type-def type-id='type-id-185' size-in-bits='64' id='type-id-194'/>
-    <pointer-type-def type-id='type-id-188' size-in-bits='64' id='type-id-195'/>
-    <qualified-type-def type-id='type-id-195' restrict='yes' id='type-id-196'/>
-    <function-decl name='zxc_seekable_open_reader' filepath='/src/lib/../../include/zxc_seekable.h' line='137' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-197'/>
-      <return type-id='type-id-198'/>
+    <pointer-type-def type-id='type-id-100' size-in-bits='64' id='type-id-183'/>
+    <qualified-type-def type-id='type-id-183' restrict='yes' id='type-id-184'/>
+    <pointer-type-def type-id='type-id-185' size-in-bits='64' id='type-id-186'/>
+    <qualified-type-def type-id='type-id-187' const='yes' id='type-id-188'/>
+    <pointer-type-def type-id='type-id-188' size-in-bits='64' id='type-id-189'/>
+    <qualified-type-def type-id='type-id-190' const='yes' id='type-id-191'/>
+    <pointer-type-def type-id='type-id-191' size-in-bits='64' id='type-id-192'/>
+    <qualified-type-def type-id='type-id-192' restrict='yes' id='type-id-193'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-194'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-195'/>
+    <pointer-type-def type-id='type-id-187' size-in-bits='64' id='type-id-196'/>
+    <pointer-type-def type-id='type-id-190' size-in-bits='64' id='type-id-197'/>
+    <qualified-type-def type-id='type-id-197' restrict='yes' id='type-id-198'/>
+    <function-decl name='zxc_seekable_open_reader' filepath='/src/lib/../../include/zxc_seekable.h' line='145' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-199'/>
+      <return type-id='type-id-200'/>
     </function-decl>
-    <function-decl name='zxc_seek_table_size' filepath='/src/lib/../../include/zxc_seekable.h' line='291' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-55'/>
-      <return type-id='type-id-17'/>
-    </function-decl>
-    <function-decl name='zxc_aligned_malloc' filepath='/src/lib/zxc_internal.h' line='1406' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_aligned_malloc' filepath='/src/lib/zxc_internal.h' line='1438' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-54'/>
       <return type-id='type-id-14'/>
     </function-decl>
-    <function-decl name='zxc_aligned_free' filepath='/src/lib/zxc_internal.h' line='1413' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_aligned_free' filepath='/src/lib/zxc_internal.h' line='1445' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-14'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-188'/>
-    <function-decl name='zxc_decompress_chunk_wrapper' filepath='/src/lib/zxc_internal.h' line='1884' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-191'/>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-190'/>
+    <function-decl name='zxc_decompress_chunk_wrapper' filepath='/src/lib/zxc_internal.h' line='1931' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-193'/>
       <parameter type-id='type-id-3'/>
       <parameter type-id='type-id-54'/>
       <parameter type-id='type-id-12'/>
       <parameter type-id='type-id-54'/>
+      <parameter type-id='type-id-103'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-185'/>
-    <function-decl name='zxc_seekable_attach_owned_ctx' filepath='/src/lib/zxc_internal.h' line='2039' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-198'/>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-187'/>
+    <function-decl name='zxc_seekable_attach_owned_ctx' filepath='/src/lib/zxc_internal.h' line='2175' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-200'/>
       <parameter type-id='type-id-14'/>
       <return type-id='type-id-15'/>
+    </function-decl>
+    <function-decl name='zxc_seek_table_header' filepath='/src/lib/zxc_internal.h' line='2184' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-123'/>
+      <parameter type-id='type-id-17'/>
+      <parameter type-id='type-id-100'/>
+      <return type-id='type-id-13'/>
+    </function-decl>
+    <function-decl name='zxc_seek_write_group' filepath='/src/lib/zxc_internal.h' line='2191' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-12'/>
+      <parameter type-id='type-id-184'/>
+      <parameter type-id='type-id-56'/>
+      <parameter type-id='type-id-122'/>
+      <return type-id='type-id-17'/>
     </function-decl>
     <function-decl name='pthread_create' filepath='/usr/include/pthread.h' line='202' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-182'/>
       <parameter type-id='type-id-171'/>
-      <parameter type-id='type-id-184'/>
-      <parameter type-id='type-id-192'/>
+      <parameter type-id='type-id-186'/>
+      <parameter type-id='type-id-194'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='pthread_join' filepath='/usr/include/pthread.h' line='219' column='1' visibility='default' binding='global' size-in-bits='64'>
@@ -912,7 +932,7 @@
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='fwrite' filepath='/usr/include/stdio.h' line='745' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-193'/>
+      <parameter type-id='type-id-195'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-168'/>
@@ -922,12 +942,17 @@
       <parameter type-id='type-id-167'/>
       <return type-id='type-id-13'/>
     </function-decl>
+    <function-decl name='realloc' filepath='/usr/include/stdlib.h' line='683' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-14'/>
+      <parameter type-id='type-id-17'/>
+      <return type-id='type-id-14'/>
+    </function-decl>
     <function-decl name='sysconf' filepath='/usr/include/unistd.h' line='640' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-13'/>
       <return type-id='type-id-151'/>
     </function-decl>
     <function-decl name='__fread_chk' filepath='/usr/include/x86_64-linux-gnu/bits/stdio2-decl.h' line='122' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-192'/>
+      <parameter type-id='type-id-194'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-17'/>
@@ -938,134 +963,137 @@
       <parameter type-id='type-id-13'/>
       <parameter type-id='type-id-14'/>
       <parameter type-id='type-id-17'/>
-      <parameter type-id='type-id-199'/>
+      <parameter type-id='type-id-201'/>
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-164'/>
     </function-decl>
-    <function-type size-in-bits='64' id='type-id-183'>
+    <function-type size-in-bits='64' id='type-id-185'>
       <parameter type-id='type-id-14'/>
       <return type-id='type-id-14'/>
     </function-type>
-    <function-type size-in-bits='64' id='type-id-200'>
+    <function-type size-in-bits='64' id='type-id-202'>
       <parameter type-id='type-id-14'/>
       <parameter type-id='type-id-14'/>
       <parameter type-id='type-id-17'/>
       <parameter type-id='type-id-100'/>
-      <return type-id='type-id-123'/>
+      <return type-id='type-id-124'/>
     </function-type>
   </abi-instr>
   <abi-instr address-size='64' path='/src/lib/zxc_huffman.c' comp-dir-path='/build' language='LANG_C11'>
   </abi-instr>
   <abi-instr address-size='64' path='/src/lib/zxc_pstream.c' comp-dir-path='/build' language='LANG_C11'>
-    <qualified-type-def type-id='type-id-201' const='yes' id='type-id-202'/>
-    <pointer-type-def type-id='type-id-202' size-in-bits='64' id='type-id-203'/>
-    <qualified-type-def type-id='type-id-204' const='yes' id='type-id-205'/>
-    <pointer-type-def type-id='type-id-205' size-in-bits='64' id='type-id-206'/>
-    <qualified-type-def type-id='type-id-206' restrict='yes' id='type-id-207'/>
-    <class-decl name='zxc_cctx_s' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-208'/>
-    <pointer-type-def type-id='type-id-201' size-in-bits='64' id='type-id-209'/>
-    <pointer-type-def type-id='type-id-210' size-in-bits='64' id='type-id-211'/>
-    <pointer-type-def type-id='type-id-204' size-in-bits='64' id='type-id-212'/>
-    <typedef-decl name='zxc_cctx' type-id='type-id-208' filepath='/src/lib/../../include/zxc_buffer.h' line='254' column='1' id='type-id-210'/>
+    <qualified-type-def type-id='type-id-203' const='yes' id='type-id-204'/>
+    <pointer-type-def type-id='type-id-204' size-in-bits='64' id='type-id-205'/>
+    <qualified-type-def type-id='type-id-206' const='yes' id='type-id-207'/>
+    <pointer-type-def type-id='type-id-207' size-in-bits='64' id='type-id-208'/>
+    <qualified-type-def type-id='type-id-208' restrict='yes' id='type-id-209'/>
+    <class-decl name='zxc_cctx_s' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-210'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-211'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-212'/>
+    <pointer-type-def type-id='type-id-203' size-in-bits='64' id='type-id-213'/>
+    <pointer-type-def type-id='type-id-214' size-in-bits='64' id='type-id-215'/>
+    <pointer-type-def type-id='type-id-206' size-in-bits='64' id='type-id-216'/>
+    <typedef-decl name='zxc_cctx' type-id='type-id-210' filepath='/src/lib/../../include/zxc_buffer.h' line='254' column='1' id='type-id-214'/>
     <function-decl name='zxc_compress_block_bound' filepath='/src/lib/../../include/zxc_buffer.h' line='269' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-17'/>
       <return type-id='type-id-100'/>
     </function-decl>
-    <function-decl name='zxc_compress_block' filepath='/src/lib/../../include/zxc_buffer.h' line='316' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-211'/>
-      <parameter type-id='type-id-14'/>
-      <parameter type-id='type-id-17'/>
-      <parameter type-id='type-id-14'/>
-      <parameter type-id='type-id-17'/>
-      <parameter type-id='type-id-213'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_create_cctx' filepath='/src/lib/../../include/zxc_buffer.h' line='446' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-217'/>
+      <return type-id='type-id-215'/>
     </function-decl>
-    <function-decl name='zxc_create_cctx' filepath='/src/lib/../../include/zxc_buffer.h' line='442' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-213'/>
-      <return type-id='type-id-211'/>
-    </function-decl>
-    <function-decl name='zxc_free_cctx' filepath='/src/lib/../../include/zxc_buffer.h' line='449' column='1' visibility='default' binding='global' size-in-bits='64'>
-      <parameter type-id='type-id-211'/>
+    <function-decl name='zxc_free_cctx' filepath='/src/lib/../../include/zxc_buffer.h' line='453' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-215'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-204'/>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-201'/>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-206'/>
+    <function-decl name='zxc_compress_block_at' filepath='/src/lib/zxc_internal.h' line='1957' column='1' visibility='default' binding='global' size-in-bits='64'>
+      <parameter type-id='type-id-215'/>
+      <parameter type-id='type-id-211'/>
+      <parameter type-id='type-id-17'/>
+      <parameter type-id='type-id-212'/>
+      <parameter type-id='type-id-17'/>
+      <parameter type-id='type-id-217'/>
+      <parameter type-id='type-id-100'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-203'/>
   </abi-instr>
   <abi-instr address-size='64' path='/src/lib/zxc_seekable.c' comp-dir-path='/build' language='LANG_C11'>
-    <qualified-type-def type-id='type-id-214' const='yes' id='type-id-215'/>
-    <pointer-type-def type-id='type-id-215' size-in-bits='64' id='type-id-216'/>
-    <qualified-type-def type-id='type-id-217' const='yes' id='type-id-218'/>
-    <pointer-type-def type-id='type-id-218' size-in-bits='64' id='type-id-219'/>
-    <qualified-type-def type-id='type-id-219' restrict='yes' id='type-id-220'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-221'/>
-    <pointer-type-def type-id='type-id-214' size-in-bits='64' id='type-id-222'/>
-    <pointer-type-def type-id='type-id-217' size-in-bits='64' id='type-id-223'/>
+    <qualified-type-def type-id='type-id-218' const='yes' id='type-id-219'/>
+    <pointer-type-def type-id='type-id-219' size-in-bits='64' id='type-id-220'/>
+    <qualified-type-def type-id='type-id-221' const='yes' id='type-id-222'/>
+    <pointer-type-def type-id='type-id-222' size-in-bits='64' id='type-id-223'/>
     <qualified-type-def type-id='type-id-223' restrict='yes' id='type-id-224'/>
-    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1756' column='1' id='type-id-217'/>
-    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1926' column='1' id='type-id-214'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-225'/>
+    <pointer-type-def type-id='type-id-218' size-in-bits='64' id='type-id-226'/>
+    <pointer-type-def type-id='type-id-221' size-in-bits='64' id='type-id-227'/>
+    <qualified-type-def type-id='type-id-227' restrict='yes' id='type-id-228'/>
+    <typedef-decl name='zxc_cctx_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1802' column='1' id='type-id-221'/>
+    <typedef-decl name='zxc_block_header_t' type-id='type-id-10' filepath='/src/lib/zxc_internal.h' line='1981' column='1' id='type-id-218'/>
   </abi-instr>
   <abi-instr address-size='64' path='&lt;artificial&gt;-c' comp-dir-path='/build' language='LANG_C11'>
     <type-decl name='char' size-in-bits='8' id='type-id-129'/>
-    <array-type-def dimensions='1' type-id='type-id-129' size-in-bits='8' id='type-id-225'>
-      <subrange length='1' lower-bound='0' upper-bound='0' type-id='type-id-131' id='type-id-226'/>
+    <array-type-def dimensions='1' type-id='type-id-129' size-in-bits='8' id='type-id-229'>
+      <subrange length='1' lower-bound='0' upper-bound='0' type-id='type-id-131' id='type-id-230'/>
     </array-type-def>
-    <array-type-def dimensions='1' type-id='type-id-129' size-in-bits='160' id='type-id-227'>
-      <subrange length='20' lower-bound='0' upper-bound='19' type-id='type-id-131' id='type-id-228'/>
+    <array-type-def dimensions='1' type-id='type-id-129' size-in-bits='160' id='type-id-231'>
+      <subrange length='20' lower-bound='0' upper-bound='19' type-id='type-id-131' id='type-id-232'/>
     </array-type-def>
-    <array-type-def dimensions='2' type-id='type-id-1' size-in-bits='16384' id='type-id-229'>
-      <subrange length='256' lower-bound='0' upper-bound='255' type-id='type-id-131' id='type-id-230'/>
-      <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-131' id='type-id-231'/>
+    <array-type-def dimensions='2' type-id='type-id-1' size-in-bits='16384' id='type-id-233'>
+      <subrange length='256' lower-bound='0' upper-bound='255' type-id='type-id-131' id='type-id-234'/>
+      <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-131' id='type-id-235'/>
     </array-type-def>
-    <array-type-def dimensions='3' type-id='type-id-1' size-in-bits='147456' id='type-id-232'>
-      <subrange length='9' lower-bound='0' upper-bound='8' type-id='type-id-131' id='type-id-233'/>
-      <subrange length='256' lower-bound='0' upper-bound='255' type-id='type-id-131' id='type-id-230'/>
-      <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-131' id='type-id-231'/>
+    <array-type-def dimensions='3' type-id='type-id-1' size-in-bits='147456' id='type-id-236'>
+      <subrange length='9' lower-bound='0' upper-bound='8' type-id='type-id-131' id='type-id-237'/>
+      <subrange length='256' lower-bound='0' upper-bound='255' type-id='type-id-131' id='type-id-234'/>
+      <subrange length='8' lower-bound='0' upper-bound='7' type-id='type-id-131' id='type-id-235'/>
     </array-type-def>
     <type-decl name='int' size-in-bits='32' id='type-id-13'/>
     <type-decl name='long int' size-in-bits='64' id='type-id-151'/>
-    <type-decl name='signed char' size-in-bits='8' id='type-id-234'/>
-    <class-decl name='_IO_FILE' size-in-bits='1728' is-struct='yes' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='49' column='1' id='type-id-235'>
+    <type-decl name='signed char' size-in-bits='8' id='type-id-238'/>
+    <class-decl name='_IO_FILE' size-in-bits='1728' is-struct='yes' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='49' column='1' id='type-id-239'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='_flags' type-id='type-id-13' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='51' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='64'>
-        <var-decl name='_IO_read_ptr' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='54' column='1'/>
+        <var-decl name='_IO_read_ptr' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='54' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='128'>
-        <var-decl name='_IO_read_end' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='55' column='1'/>
+        <var-decl name='_IO_read_end' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='55' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='192'>
-        <var-decl name='_IO_read_base' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='56' column='1'/>
+        <var-decl name='_IO_read_base' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='56' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='256'>
-        <var-decl name='_IO_write_base' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='57' column='1'/>
+        <var-decl name='_IO_write_base' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='57' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='320'>
-        <var-decl name='_IO_write_ptr' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='58' column='1'/>
+        <var-decl name='_IO_write_ptr' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='58' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='384'>
-        <var-decl name='_IO_write_end' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='59' column='1'/>
+        <var-decl name='_IO_write_end' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='59' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='448'>
-        <var-decl name='_IO_buf_base' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='60' column='1'/>
+        <var-decl name='_IO_buf_base' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='60' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='512'>
-        <var-decl name='_IO_buf_end' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='61' column='1'/>
+        <var-decl name='_IO_buf_end' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='61' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='576'>
-        <var-decl name='_IO_save_base' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='64' column='1'/>
+        <var-decl name='_IO_save_base' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='64' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='640'>
-        <var-decl name='_IO_backup_base' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='65' column='1'/>
+        <var-decl name='_IO_backup_base' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='65' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='704'>
-        <var-decl name='_IO_save_end' type-id='type-id-236' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='66' column='1'/>
+        <var-decl name='_IO_save_end' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='66' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='768'>
-        <var-decl name='_markers' type-id='type-id-237' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='68' column='1'/>
+        <var-decl name='_markers' type-id='type-id-241' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='68' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='832'>
-        <var-decl name='_chain' type-id='type-id-238' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='70' column='1'/>
+        <var-decl name='_chain' type-id='type-id-242' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='70' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='896'>
         <var-decl name='_fileno' type-id='type-id-13' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='72' column='1'/>
@@ -1074,31 +1102,31 @@
         <var-decl name='_flags2' type-id='type-id-13' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='73' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='960'>
-        <var-decl name='_old_offset' type-id='type-id-239' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='74' column='1'/>
+        <var-decl name='_old_offset' type-id='type-id-243' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='74' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1024'>
-        <var-decl name='_cur_column' type-id='type-id-240' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='77' column='1'/>
+        <var-decl name='_cur_column' type-id='type-id-244' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='77' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1040'>
-        <var-decl name='_vtable_offset' type-id='type-id-234' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='78' column='1'/>
+        <var-decl name='_vtable_offset' type-id='type-id-238' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='78' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1048'>
-        <var-decl name='_shortbuf' type-id='type-id-225' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='79' column='1'/>
+        <var-decl name='_shortbuf' type-id='type-id-229' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='79' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1088'>
-        <var-decl name='_lock' type-id='type-id-241' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='81' column='1'/>
+        <var-decl name='_lock' type-id='type-id-245' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='81' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1152'>
-        <var-decl name='_offset' type-id='type-id-199' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='89' column='1'/>
+        <var-decl name='_offset' type-id='type-id-201' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='89' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1216'>
-        <var-decl name='_codecvt' type-id='type-id-242' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='91' column='1'/>
+        <var-decl name='_codecvt' type-id='type-id-246' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='91' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1280'>
-        <var-decl name='_wide_data' type-id='type-id-243' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='92' column='1'/>
+        <var-decl name='_wide_data' type-id='type-id-247' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='92' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1344'>
-        <var-decl name='_freeres_list' type-id='type-id-238' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='93' column='1'/>
+        <var-decl name='_freeres_list' type-id='type-id-242' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='93' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1408'>
         <var-decl name='_freeres_buf' type-id='type-id-14' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='94' column='1'/>
@@ -1110,10 +1138,10 @@
         <var-decl name='_mode' type-id='type-id-13' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='96' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='1568'>
-        <var-decl name='_unused2' type-id='type-id-227' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='98' column='1'/>
+        <var-decl name='_unused2' type-id='type-id-231' visibility='default' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='98' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='zxc_compress_opts_t' size-in-bits='512' is-struct='yes' naming-typedef-id='type-id-244' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='58' column='1' id='type-id-245'>
+    <class-decl name='zxc_compress_opts_t' size-in-bits='512' is-struct='yes' naming-typedef-id='type-id-248' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='58' column='1' id='type-id-249'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='n_threads' type-id='type-id-13' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='59' column='1'/>
       </data-member>
@@ -1139,13 +1167,13 @@
         <var-decl name='dict_huf' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='67' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='384'>
-        <var-decl name='progress_cb' type-id='type-id-246' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='72' column='1'/>
+        <var-decl name='progress_cb' type-id='type-id-250' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='72' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='448'>
         <var-decl name='user_data' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='73' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='zxc_decompress_opts_t' size-in-bits='384' is-struct='yes' naming-typedef-id='type-id-247' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='86' column='1' id='type-id-248'>
+    <class-decl name='zxc_decompress_opts_t' size-in-bits='384' is-struct='yes' naming-typedef-id='type-id-251' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='86' column='1' id='type-id-252'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='n_threads' type-id='type-id-13' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='87' column='1'/>
       </data-member>
@@ -1162,13 +1190,13 @@
         <var-decl name='dict_huf' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='91' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='256'>
-        <var-decl name='progress_cb' type-id='type-id-246' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='94' column='1'/>
+        <var-decl name='progress_cb' type-id='type-id-250' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='94' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='320'>
         <var-decl name='user_data' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_opts.h' line='95' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='zxc_inbuf_t' size-in-bits='192' is-struct='yes' naming-typedef-id='type-id-249' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='81' column='1' id='type-id-250'>
+    <class-decl name='zxc_inbuf_t' size-in-bits='192' is-struct='yes' naming-typedef-id='type-id-253' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='81' column='1' id='type-id-254'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='src' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='82' column='1'/>
       </data-member>
@@ -1179,7 +1207,7 @@
         <var-decl name='pos' type-id='type-id-17' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='84' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='zxc_outbuf_t' size-in-bits='192' is-struct='yes' naming-typedef-id='type-id-251' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='100' column='1' id='type-id-252'>
+    <class-decl name='zxc_outbuf_t' size-in-bits='192' is-struct='yes' naming-typedef-id='type-id-255' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='100' column='1' id='type-id-256'>
       <data-member access='public' layout-offset-in-bits='0'>
         <var-decl name='dst' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='101' column='1'/>
       </data-member>
@@ -1190,168 +1218,168 @@
         <var-decl name='pos' type-id='type-id-17' visibility='default' filepath='/src/lib/../../include/zxc_pstream.h' line='103' column='1'/>
       </data-member>
     </class-decl>
-    <class-decl name='zxc_reader_t' size-in-bits='192' is-struct='yes' naming-typedef-id='type-id-253' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='105' column='1' id='type-id-254'>
+    <class-decl name='zxc_reader_t' size-in-bits='192' is-struct='yes' naming-typedef-id='type-id-257' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='113' column='1' id='type-id-258'>
       <data-member access='public' layout-offset-in-bits='0'>
-        <var-decl name='read_at' type-id='type-id-255' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='117' column='1'/>
+        <var-decl name='read_at' type-id='type-id-259' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='125' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='64'>
-        <var-decl name='ctx' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='120' column='1'/>
+        <var-decl name='ctx' type-id='type-id-14' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='128' column='1'/>
       </data-member>
       <data-member access='public' layout-offset-in-bits='128'>
-        <var-decl name='size' type-id='type-id-100' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='123' column='1'/>
+        <var-decl name='size' type-id='type-id-100' visibility='default' filepath='/src/lib/../../include/zxc_seekable.h' line='131' column='1'/>
       </data-member>
     </class-decl>
-    <typedef-decl name='FILE' type-id='type-id-235' filepath='/usr/include/x86_64-linux-gnu/bits/types/FILE.h' line='7' column='1' id='type-id-256'/>
-    <typedef-decl name='_IO_lock_t' type-id='type-id-15' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='43' column='1' id='type-id-257'/>
-    <typedef-decl name='__int64_t' type-id='type-id-151' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='44' column='1' id='type-id-258'/>
-    <typedef-decl name='__off64_t' type-id='type-id-151' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='153' column='1' id='type-id-199'/>
-    <typedef-decl name='__off_t' type-id='type-id-151' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='152' column='1' id='type-id-239'/>
-    <typedef-decl name='__uint32_t' type-id='type-id-144' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='42' column='1' id='type-id-259'/>
-    <typedef-decl name='__uint64_t' type-id='type-id-131' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='45' column='1' id='type-id-260'/>
-    <typedef-decl name='__uint8_t' type-id='type-id-261' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='38' column='1' id='type-id-262'/>
-    <typedef-decl name='int64_t' type-id='type-id-258' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-intn.h' line='27' column='1' id='type-id-123'/>
+    <typedef-decl name='FILE' type-id='type-id-239' filepath='/usr/include/x86_64-linux-gnu/bits/types/FILE.h' line='7' column='1' id='type-id-260'/>
+    <typedef-decl name='_IO_lock_t' type-id='type-id-15' filepath='/usr/include/x86_64-linux-gnu/bits/types/struct_FILE.h' line='43' column='1' id='type-id-261'/>
+    <typedef-decl name='__int64_t' type-id='type-id-151' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='44' column='1' id='type-id-262'/>
+    <typedef-decl name='__off64_t' type-id='type-id-151' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='153' column='1' id='type-id-201'/>
+    <typedef-decl name='__off_t' type-id='type-id-151' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='152' column='1' id='type-id-243'/>
+    <typedef-decl name='__uint32_t' type-id='type-id-144' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='42' column='1' id='type-id-263'/>
+    <typedef-decl name='__uint64_t' type-id='type-id-131' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='45' column='1' id='type-id-264'/>
+    <typedef-decl name='__uint8_t' type-id='type-id-265' filepath='/usr/include/x86_64-linux-gnu/bits/types.h' line='38' column='1' id='type-id-266'/>
+    <typedef-decl name='int64_t' type-id='type-id-262' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-intn.h' line='27' column='1' id='type-id-124'/>
     <typedef-decl name='size_t' type-id='type-id-131' filepath='/usr/lib/gcc/x86_64-linux-gnu/13/include/stddef.h' line='214' column='1' id='type-id-17'/>
-    <typedef-decl name='uint32_t' type-id='type-id-259' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h' line='26' column='1' id='type-id-121'/>
-    <typedef-decl name='uint64_t' type-id='type-id-260' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h' line='27' column='1' id='type-id-100'/>
-    <typedef-decl name='uint8_t' type-id='type-id-262' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h' line='24' column='1' id='type-id-263'/>
-    <typedef-decl name='zxc_compress_opts_t' type-id='type-id-245' filepath='/src/lib/../../include/zxc_opts.h' line='74' column='1' id='type-id-244'/>
-    <typedef-decl name='zxc_decompress_opts_t' type-id='type-id-248' filepath='/src/lib/../../include/zxc_opts.h' line='96' column='1' id='type-id-247'/>
-    <typedef-decl name='zxc_inbuf_t' type-id='type-id-250' filepath='/src/lib/../../include/zxc_pstream.h' line='85' column='1' id='type-id-249'/>
-    <typedef-decl name='zxc_outbuf_t' type-id='type-id-252' filepath='/src/lib/../../include/zxc_pstream.h' line='104' column='1' id='type-id-251'/>
-    <typedef-decl name='zxc_progress_callback_t' type-id='type-id-264' filepath='/src/lib/../../include/zxc_opts.h' line='43' column='1' id='type-id-246'/>
-    <typedef-decl name='zxc_reader_t' type-id='type-id-254' filepath='/src/lib/../../include/zxc_seekable.h' line='124' column='1' id='type-id-253'/>
-    <type-decl name='unsigned char' size-in-bits='8' id='type-id-261'/>
+    <typedef-decl name='uint32_t' type-id='type-id-263' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h' line='26' column='1' id='type-id-122'/>
+    <typedef-decl name='uint64_t' type-id='type-id-264' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h' line='27' column='1' id='type-id-100'/>
+    <typedef-decl name='uint8_t' type-id='type-id-266' filepath='/usr/include/x86_64-linux-gnu/bits/stdint-uintn.h' line='24' column='1' id='type-id-267'/>
+    <typedef-decl name='zxc_compress_opts_t' type-id='type-id-249' filepath='/src/lib/../../include/zxc_opts.h' line='74' column='1' id='type-id-248'/>
+    <typedef-decl name='zxc_decompress_opts_t' type-id='type-id-252' filepath='/src/lib/../../include/zxc_opts.h' line='96' column='1' id='type-id-251'/>
+    <typedef-decl name='zxc_inbuf_t' type-id='type-id-254' filepath='/src/lib/../../include/zxc_pstream.h' line='85' column='1' id='type-id-253'/>
+    <typedef-decl name='zxc_outbuf_t' type-id='type-id-256' filepath='/src/lib/../../include/zxc_pstream.h' line='104' column='1' id='type-id-255'/>
+    <typedef-decl name='zxc_progress_callback_t' type-id='type-id-268' filepath='/src/lib/../../include/zxc_opts.h' line='43' column='1' id='type-id-250'/>
+    <typedef-decl name='zxc_reader_t' type-id='type-id-258' filepath='/src/lib/../../include/zxc_seekable.h' line='132' column='1' id='type-id-257'/>
+    <type-decl name='unsigned char' size-in-bits='8' id='type-id-265'/>
     <type-decl name='unsigned int' size-in-bits='32' id='type-id-144'/>
     <type-decl name='unsigned long int' size-in-bits='64' id='type-id-131'/>
-    <type-decl name='unsigned short int' size-in-bits='16' id='type-id-240'/>
-    <pointer-type-def type-id='type-id-256' size-in-bits='64' id='type-id-167'/>
-    <pointer-type-def type-id='type-id-235' size-in-bits='64' id='type-id-238'/>
-    <pointer-type-def type-id='type-id-129' size-in-bits='64' id='type-id-236'/>
-    <qualified-type-def type-id='type-id-129' const='yes' id='type-id-265'/>
-    <pointer-type-def type-id='type-id-265' size-in-bits='64' id='type-id-266'/>
+    <type-decl name='unsigned short int' size-in-bits='16' id='type-id-244'/>
+    <pointer-type-def type-id='type-id-260' size-in-bits='64' id='type-id-167'/>
+    <pointer-type-def type-id='type-id-239' size-in-bits='64' id='type-id-242'/>
+    <pointer-type-def type-id='type-id-129' size-in-bits='64' id='type-id-240'/>
+    <qualified-type-def type-id='type-id-129' const='yes' id='type-id-269'/>
+    <pointer-type-def type-id='type-id-269' size-in-bits='64' id='type-id-270'/>
     <qualified-type-def type-id='type-id-13' const='yes' id='type-id-102'/>
     <qualified-type-def type-id='type-id-17' const='yes' id='type-id-54'/>
-    <pointer-type-def type-id='type-id-54' size-in-bits='64' id='type-id-267'/>
-    <qualified-type-def type-id='type-id-267' restrict='yes' id='type-id-268'/>
-    <qualified-type-def type-id='type-id-121' const='yes' id='type-id-55'/>
+    <pointer-type-def type-id='type-id-54' size-in-bits='64' id='type-id-271'/>
+    <qualified-type-def type-id='type-id-271' restrict='yes' id='type-id-272'/>
+    <qualified-type-def type-id='type-id-122' const='yes' id='type-id-55'/>
     <pointer-type-def type-id='type-id-55' size-in-bits='64' id='type-id-96'/>
-    <qualified-type-def type-id='type-id-100' const='yes' id='type-id-128'/>
-    <qualified-type-def type-id='type-id-263' const='yes' id='type-id-1'/>
-    <qualified-type-def type-id='type-id-244' const='yes' id='type-id-269'/>
-    <pointer-type-def type-id='type-id-269' size-in-bits='64' id='type-id-213'/>
-    <qualified-type-def type-id='type-id-213' restrict='yes' id='type-id-270'/>
-    <qualified-type-def type-id='type-id-247' const='yes' id='type-id-271'/>
-    <pointer-type-def type-id='type-id-271' size-in-bits='64' id='type-id-272'/>
-    <qualified-type-def type-id='type-id-253' const='yes' id='type-id-273'/>
-    <pointer-type-def type-id='type-id-273' size-in-bits='64' id='type-id-197'/>
-    <pointer-type-def type-id='type-id-17' size-in-bits='64' id='type-id-125'/>
-    <qualified-type-def type-id='type-id-125' restrict='yes' id='type-id-274'/>
-    <pointer-type-def type-id='type-id-200' size-in-bits='64' id='type-id-255'/>
-    <pointer-type-def type-id='type-id-121' size-in-bits='64' id='type-id-127'/>
-    <qualified-type-def type-id='type-id-127' restrict='yes' id='type-id-11'/>
-    <pointer-type-def type-id='type-id-263' size-in-bits='64' id='type-id-122'/>
-    <qualified-type-def type-id='type-id-122' restrict='yes' id='type-id-12'/>
-    <pointer-type-def type-id='type-id-275' size-in-bits='64' id='type-id-264'/>
-    <pointer-type-def type-id='type-id-276' size-in-bits='64' id='type-id-277'/>
-    <qualified-type-def type-id='type-id-277' restrict='yes' id='type-id-278'/>
+    <qualified-type-def type-id='type-id-100' const='yes' id='type-id-103'/>
+    <qualified-type-def type-id='type-id-267' const='yes' id='type-id-1'/>
+    <qualified-type-def type-id='type-id-248' const='yes' id='type-id-273'/>
+    <pointer-type-def type-id='type-id-273' size-in-bits='64' id='type-id-217'/>
+    <qualified-type-def type-id='type-id-217' restrict='yes' id='type-id-274'/>
+    <qualified-type-def type-id='type-id-251' const='yes' id='type-id-275'/>
+    <pointer-type-def type-id='type-id-275' size-in-bits='64' id='type-id-276'/>
+    <qualified-type-def type-id='type-id-257' const='yes' id='type-id-277'/>
+    <pointer-type-def type-id='type-id-277' size-in-bits='64' id='type-id-199'/>
+    <pointer-type-def type-id='type-id-17' size-in-bits='64' id='type-id-126'/>
+    <qualified-type-def type-id='type-id-126' restrict='yes' id='type-id-278'/>
+    <pointer-type-def type-id='type-id-202' size-in-bits='64' id='type-id-259'/>
+    <pointer-type-def type-id='type-id-122' size-in-bits='64' id='type-id-128'/>
+    <qualified-type-def type-id='type-id-128' restrict='yes' id='type-id-11'/>
+    <pointer-type-def type-id='type-id-267' size-in-bits='64' id='type-id-123'/>
+    <qualified-type-def type-id='type-id-123' restrict='yes' id='type-id-12'/>
+    <pointer-type-def type-id='type-id-279' size-in-bits='64' id='type-id-268'/>
+    <pointer-type-def type-id='type-id-280' size-in-bits='64' id='type-id-281'/>
+    <qualified-type-def type-id='type-id-281' restrict='yes' id='type-id-282'/>
     <pointer-type-def type-id='type-id-14' size-in-bits='64' id='type-id-16'/>
-    <qualified-type-def type-id='type-id-16' restrict='yes' id='type-id-279'/>
-    <pointer-type-def type-id='type-id-249' size-in-bits='64' id='type-id-280'/>
-    <pointer-type-def type-id='type-id-251' size-in-bits='64' id='type-id-281'/>
-    <pointer-type-def type-id='type-id-282' size-in-bits='64' id='type-id-242'/>
-    <pointer-type-def type-id='type-id-257' size-in-bits='64' id='type-id-241'/>
-    <pointer-type-def type-id='type-id-283' size-in-bits='64' id='type-id-237'/>
-    <pointer-type-def type-id='type-id-284' size-in-bits='64' id='type-id-243'/>
-    <qualified-type-def type-id='type-id-285' const='yes' id='type-id-286'/>
-    <pointer-type-def type-id='type-id-286' size-in-bits='64' id='type-id-287'/>
-    <qualified-type-def type-id='type-id-288' const='yes' id='type-id-289'/>
-    <pointer-type-def type-id='type-id-289' size-in-bits='64' id='type-id-290'/>
-    <qualified-type-def type-id='type-id-291' const='yes' id='type-id-292'/>
-    <pointer-type-def type-id='type-id-292' size-in-bits='64' id='type-id-293'/>
-    <class-decl name='_IO_codecvt' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-282'/>
-    <class-decl name='_IO_marker' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-283'/>
-    <class-decl name='_IO_wide_data' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-284'/>
-    <class-decl name='zxc_seekable_s' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-294'/>
-    <qualified-type-def type-id='type-id-14' const='yes' id='type-id-276'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-101'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-295'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-124'/>
+    <qualified-type-def type-id='type-id-16' restrict='yes' id='type-id-283'/>
+    <pointer-type-def type-id='type-id-253' size-in-bits='64' id='type-id-284'/>
+    <pointer-type-def type-id='type-id-255' size-in-bits='64' id='type-id-285'/>
+    <pointer-type-def type-id='type-id-286' size-in-bits='64' id='type-id-246'/>
+    <pointer-type-def type-id='type-id-261' size-in-bits='64' id='type-id-245'/>
+    <pointer-type-def type-id='type-id-287' size-in-bits='64' id='type-id-241'/>
+    <pointer-type-def type-id='type-id-288' size-in-bits='64' id='type-id-247'/>
+    <qualified-type-def type-id='type-id-289' const='yes' id='type-id-290'/>
+    <pointer-type-def type-id='type-id-290' size-in-bits='64' id='type-id-291'/>
+    <qualified-type-def type-id='type-id-292' const='yes' id='type-id-293'/>
+    <pointer-type-def type-id='type-id-293' size-in-bits='64' id='type-id-294'/>
+    <qualified-type-def type-id='type-id-295' const='yes' id='type-id-296'/>
     <pointer-type-def type-id='type-id-296' size-in-bits='64' id='type-id-297'/>
-    <pointer-type-def type-id='type-id-285' size-in-bits='64' id='type-id-298'/>
-    <pointer-type-def type-id='type-id-299' size-in-bits='64' id='type-id-300'/>
-    <pointer-type-def type-id='type-id-288' size-in-bits='64' id='type-id-301'/>
-    <pointer-type-def type-id='type-id-291' size-in-bits='64' id='type-id-302'/>
-    <pointer-type-def type-id='type-id-303' size-in-bits='64' id='type-id-198'/>
-    <typedef-decl name='zxc_cctx' type-id='type-id-304' filepath='/src/lib/../../include/zxc_buffer.h' line='254' column='1' id='type-id-296'/>
-    <typedef-decl name='zxc_dctx' type-id='type-id-305' filepath='/src/lib/../../include/zxc_buffer.h' line='256' column='1' id='type-id-299'/>
-    <typedef-decl name='zxc_cstream' type-id='type-id-306' filepath='/src/lib/../../include/zxc_pstream.h' line='108' column='1' id='type-id-285'/>
-    <typedef-decl name='zxc_dstream' type-id='type-id-307' filepath='/src/lib/../../include/zxc_pstream.h' line='110' column='1' id='type-id-288'/>
-    <typedef-decl name='zxc_seekable' type-id='type-id-308' filepath='/src/lib/../../include/zxc_seekable.h' line='75' column='1' id='type-id-291'/>
-    <typedef-decl name='zxc_seekable' type-id='type-id-294' filepath='/src/lib/../../include/zxc_seekable.h' line='75' column='1' id='type-id-303'/>
+    <class-decl name='_IO_codecvt' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-286'/>
+    <class-decl name='_IO_marker' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-287'/>
+    <class-decl name='_IO_wide_data' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-288'/>
+    <class-decl name='zxc_seekable_s' is-struct='yes' visibility='default' is-declaration-only='yes' id='type-id-298'/>
+    <qualified-type-def type-id='type-id-14' const='yes' id='type-id-280'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-101'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-299'/>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-125'/>
+    <pointer-type-def type-id='type-id-300' size-in-bits='64' id='type-id-301'/>
+    <pointer-type-def type-id='type-id-289' size-in-bits='64' id='type-id-302'/>
+    <pointer-type-def type-id='type-id-303' size-in-bits='64' id='type-id-304'/>
+    <pointer-type-def type-id='type-id-292' size-in-bits='64' id='type-id-305'/>
+    <pointer-type-def type-id='type-id-295' size-in-bits='64' id='type-id-306'/>
+    <pointer-type-def type-id='type-id-307' size-in-bits='64' id='type-id-200'/>
+    <typedef-decl name='zxc_cctx' type-id='type-id-308' filepath='/src/lib/../../include/zxc_buffer.h' line='254' column='1' id='type-id-300'/>
+    <typedef-decl name='zxc_dctx' type-id='type-id-309' filepath='/src/lib/../../include/zxc_buffer.h' line='256' column='1' id='type-id-303'/>
+    <typedef-decl name='zxc_cstream' type-id='type-id-310' filepath='/src/lib/../../include/zxc_pstream.h' line='108' column='1' id='type-id-289'/>
+    <typedef-decl name='zxc_dstream' type-id='type-id-311' filepath='/src/lib/../../include/zxc_pstream.h' line='110' column='1' id='type-id-292'/>
+    <typedef-decl name='zxc_seekable' type-id='type-id-312' filepath='/src/lib/../../include/zxc_seekable.h' line='83' column='1' id='type-id-295'/>
+    <typedef-decl name='zxc_seekable' type-id='type-id-298' filepath='/src/lib/../../include/zxc_seekable.h' line='83' column='1' id='type-id-307'/>
     <function-decl name='zxc_compress_opts_size' mangled-name='zxc_compress_opts_size' filepath='/src/lib/zxc_common.c' line='59' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_opts_size'>
       <return type-id='type-id-17'/>
     </function-decl>
     <function-decl name='zxc_decompress_opts_size' mangled-name='zxc_decompress_opts_size' filepath='/src/lib/zxc_common.c' line='69' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_opts_size'>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_compress_block_bound' mangled-name='zxc_compress_block_bound' filepath='/src/lib/zxc_common.c' line='774' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_block_bound'>
-      <parameter type-id='type-id-54' name='input_size' filepath='/src/lib/zxc_common.c' line='774' column='1'/>
+    <function-decl name='zxc_compress_block_bound' mangled-name='zxc_compress_block_bound' filepath='/src/lib/zxc_common.c' line='769' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_block_bound'>
+      <parameter type-id='type-id-54' name='input_size' filepath='/src/lib/zxc_common.c' line='769' column='1'/>
       <return type-id='type-id-100'/>
     </function-decl>
-    <function-decl name='zxc_decompress_block_bound' mangled-name='zxc_decompress_block_bound' filepath='/src/lib/zxc_common.c' line='796' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_block_bound'>
-      <parameter type-id='type-id-54' name='uncompressed_size' filepath='/src/lib/zxc_common.c' line='796' column='1'/>
+    <function-decl name='zxc_decompress_block_bound' mangled-name='zxc_decompress_block_bound' filepath='/src/lib/zxc_common.c' line='791' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_block_bound'>
+      <parameter type-id='type-id-54' name='uncompressed_size' filepath='/src/lib/zxc_common.c' line='791' column='1'/>
       <return type-id='type-id-100'/>
     </function-decl>
-    <function-decl name='zxc_estimate_cctx_size' mangled-name='zxc_estimate_cctx_size' filepath='/src/lib/zxc_common.c' line='815' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_estimate_cctx_size'>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_common.c' line='815' column='1'/>
-      <parameter type-id='type-id-102' name='level' filepath='/src/lib/zxc_common.c' line='815' column='1'/>
+    <function-decl name='zxc_estimate_cctx_size' mangled-name='zxc_estimate_cctx_size' filepath='/src/lib/zxc_common.c' line='810' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_estimate_cctx_size'>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_common.c' line='810' column='1'/>
+      <parameter type-id='type-id-102' name='level' filepath='/src/lib/zxc_common.c' line='810' column='1'/>
       <return type-id='type-id-100'/>
     </function-decl>
-    <function-decl name='zxc_error_name' mangled-name='zxc_error_name' filepath='/src/lib/zxc_common.c' line='828' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_error_name'>
-      <parameter type-id='type-id-102' name='code' filepath='/src/lib/zxc_common.c' line='828' column='1'/>
-      <return type-id='type-id-266'/>
+    <function-decl name='zxc_error_name' mangled-name='zxc_error_name' filepath='/src/lib/zxc_common.c' line='823' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_error_name'>
+      <parameter type-id='type-id-102' name='code' filepath='/src/lib/zxc_common.c' line='823' column='1'/>
+      <return type-id='type-id-270'/>
     </function-decl>
-    <function-decl name='zxc_min_level' mangled-name='zxc_min_level' filepath='/src/lib/zxc_common.c' line='886' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_min_level'>
+    <function-decl name='zxc_min_level' mangled-name='zxc_min_level' filepath='/src/lib/zxc_common.c' line='881' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_min_level'>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_max_level' mangled-name='zxc_max_level' filepath='/src/lib/zxc_common.c' line='893' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_max_level'>
+    <function-decl name='zxc_max_level' mangled-name='zxc_max_level' filepath='/src/lib/zxc_common.c' line='888' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_max_level'>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_default_level' mangled-name='zxc_default_level' filepath='/src/lib/zxc_common.c' line='900' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_default_level'>
+    <function-decl name='zxc_default_level' mangled-name='zxc_default_level' filepath='/src/lib/zxc_common.c' line='895' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_default_level'>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_version_string' mangled-name='zxc_version_string' filepath='/src/lib/zxc_common.c' line='908' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_version_string'>
-      <return type-id='type-id-266'/>
+    <function-decl name='zxc_version_string' mangled-name='zxc_version_string' filepath='/src/lib/zxc_common.c' line='903' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_version_string'>
+      <return type-id='type-id-270'/>
     </function-decl>
     <function-decl name='zxc_dict_id' mangled-name='zxc_dict_id' filepath='/src/lib/zxc_dict.c' line='29' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dict_id'>
-      <parameter type-id='type-id-309' name='dict' filepath='/src/lib/zxc_dict.c' line='29' column='1'/>
+      <parameter type-id='type-id-313' name='dict' filepath='/src/lib/zxc_dict.c' line='29' column='1'/>
       <parameter type-id='type-id-54' name='dict_size' filepath='/src/lib/zxc_dict.c' line='29' column='1'/>
-      <parameter type-id='type-id-309' name='huf_lengths' filepath='/src/lib/zxc_dict.c' line='30' column='1'/>
-      <return type-id='type-id-121'/>
+      <parameter type-id='type-id-313' name='huf_lengths' filepath='/src/lib/zxc_dict.c' line='30' column='1'/>
+      <return type-id='type-id-122'/>
     </function-decl>
     <function-decl name='zxc_dict_get_id' mangled-name='zxc_dict_get_id' filepath='/src/lib/zxc_dict.c' line='57' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dict_get_id'>
       <parameter type-id='type-id-14' name='buf' filepath='/src/lib/zxc_dict.c' line='57' column='1'/>
       <parameter type-id='type-id-54' name='buf_size' filepath='/src/lib/zxc_dict.c' line='57' column='1'/>
-      <return type-id='type-id-121'/>
+      <return type-id='type-id-122'/>
     </function-decl>
     <function-decl name='zxc_dict_save_bound' mangled-name='zxc_dict_save_bound' filepath='/src/lib/zxc_dict.c' line='69' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dict_save_bound'>
       <parameter type-id='type-id-54' name='content_size' filepath='/src/lib/zxc_dict.c' line='69' column='1'/>
       <return type-id='type-id-17'/>
     </function-decl>
     <function-decl name='zxc_dict_save' mangled-name='zxc_dict_save' filepath='/src/lib/zxc_dict.c' line='79' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dict_save'>
-      <parameter type-id='type-id-309' name='content' filepath='/src/lib/zxc_dict.c' line='79' column='1'/>
+      <parameter type-id='type-id-313' name='content' filepath='/src/lib/zxc_dict.c' line='79' column='1'/>
       <parameter type-id='type-id-54' name='content_size' filepath='/src/lib/zxc_dict.c' line='79' column='1'/>
-      <parameter type-id='type-id-309' name='huf_lengths' filepath='/src/lib/zxc_dict.c' line='80' column='1'/>
+      <parameter type-id='type-id-313' name='huf_lengths' filepath='/src/lib/zxc_dict.c' line='80' column='1'/>
       <parameter type-id='type-id-101' name='buf' filepath='/src/lib/zxc_dict.c' line='80' column='1'/>
       <parameter type-id='type-id-54' name='buf_capacity' filepath='/src/lib/zxc_dict.c' line='81' column='1'/>
-      <return type-id='type-id-123'/>
+      <return type-id='type-id-124'/>
     </function-decl>
     <function-decl name='zxc_dict_load' mangled-name='zxc_dict_load' filepath='/src/lib/zxc_dict.c' line='112' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dict_load'>
-      <parameter type-id='type-id-309' name='buf' filepath='/src/lib/zxc_dict.c' line='112' column='1'/>
+      <parameter type-id='type-id-313' name='buf' filepath='/src/lib/zxc_dict.c' line='112' column='1'/>
       <parameter type-id='type-id-54' name='buf_size' filepath='/src/lib/zxc_dict.c' line='112' column='1'/>
-      <parameter type-id='type-id-279' name='content_out' filepath='/src/lib/zxc_dict.c' line='113' column='1'/>
-      <parameter type-id='type-id-274' name='content_size_out' filepath='/src/lib/zxc_dict.c' line='113' column='1'/>
-      <parameter type-id='type-id-279' name='huf_out' filepath='/src/lib/zxc_dict.c' line='114' column='1'/>
+      <parameter type-id='type-id-283' name='content_out' filepath='/src/lib/zxc_dict.c' line='113' column='1'/>
+      <parameter type-id='type-id-278' name='content_size_out' filepath='/src/lib/zxc_dict.c' line='113' column='1'/>
+      <parameter type-id='type-id-283' name='huf_out' filepath='/src/lib/zxc_dict.c' line='114' column='1'/>
       <parameter type-id='type-id-11' name='dict_id_out' filepath='/src/lib/zxc_dict.c' line='114' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
@@ -1361,281 +1389,285 @@
       <return type-id='type-id-14'/>
     </function-decl>
     <function-decl name='zxc_train_dict' mangled-name='zxc_train_dict' filepath='/src/lib/zxc_dict.c' line='263' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_train_dict'>
-      <parameter type-id='type-id-278' name='samples' filepath='/src/lib/zxc_dict.c' line='263' column='1'/>
-      <parameter type-id='type-id-268' name='sample_sizes' filepath='/src/lib/zxc_dict.c' line='263' column='1'/>
+      <parameter type-id='type-id-282' name='samples' filepath='/src/lib/zxc_dict.c' line='263' column='1'/>
+      <parameter type-id='type-id-272' name='sample_sizes' filepath='/src/lib/zxc_dict.c' line='263' column='1'/>
       <parameter type-id='type-id-54' name='n_samples' filepath='/src/lib/zxc_dict.c' line='264' column='1'/>
       <parameter type-id='type-id-101' name='dict_buf' filepath='/src/lib/zxc_dict.c' line='264' column='1'/>
       <parameter type-id='type-id-54' name='dict_capacity' filepath='/src/lib/zxc_dict.c' line='265' column='1'/>
-      <return type-id='type-id-123'/>
+      <return type-id='type-id-124'/>
     </function-decl>
     <function-decl name='zxc_train_dict_huf' mangled-name='zxc_train_dict_huf' filepath='/src/lib/zxc_dict.c' line='437' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_train_dict_huf'>
-      <parameter type-id='type-id-278' name='samples' filepath='/src/lib/zxc_dict.c' line='437' column='1'/>
-      <parameter type-id='type-id-268' name='sample_sizes' filepath='/src/lib/zxc_dict.c' line='437' column='1'/>
+      <parameter type-id='type-id-282' name='samples' filepath='/src/lib/zxc_dict.c' line='437' column='1'/>
+      <parameter type-id='type-id-272' name='sample_sizes' filepath='/src/lib/zxc_dict.c' line='437' column='1'/>
       <parameter type-id='type-id-54' name='n_samples' filepath='/src/lib/zxc_dict.c' line='438' column='1'/>
-      <parameter type-id='type-id-309' name='dict' filepath='/src/lib/zxc_dict.c' line='438' column='1'/>
+      <parameter type-id='type-id-313' name='dict' filepath='/src/lib/zxc_dict.c' line='438' column='1'/>
       <parameter type-id='type-id-54' name='dict_size' filepath='/src/lib/zxc_dict.c' line='438' column='1'/>
       <parameter type-id='type-id-12' name='huf_lengths_out' filepath='/src/lib/zxc_dict.c' line='439' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <function-decl name='zxc_dict_train' mangled-name='zxc_dict_train' filepath='/src/lib/zxc_dict.c' line='540' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dict_train'>
-      <parameter type-id='type-id-278' name='samples' filepath='/src/lib/zxc_dict.c' line='540' column='1'/>
-      <parameter type-id='type-id-268' name='sample_sizes' filepath='/src/lib/zxc_dict.c' line='540' column='1'/>
+      <parameter type-id='type-id-282' name='samples' filepath='/src/lib/zxc_dict.c' line='540' column='1'/>
+      <parameter type-id='type-id-272' name='sample_sizes' filepath='/src/lib/zxc_dict.c' line='540' column='1'/>
       <parameter type-id='type-id-54' name='n_samples' filepath='/src/lib/zxc_dict.c' line='541' column='1'/>
       <parameter type-id='type-id-101' name='zxd_buf' filepath='/src/lib/zxc_dict.c' line='541' column='1'/>
       <parameter type-id='type-id-54' name='zxd_capacity' filepath='/src/lib/zxc_dict.c' line='541' column='1'/>
-      <return type-id='type-id-123'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_compress' mangled-name='zxc_compress' filepath='/src/lib/zxc_dispatch.c' line='564' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress'>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='564' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='564' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='564' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='565' column='1'/>
-      <parameter type-id='type-id-213' name='opts' filepath='/src/lib/zxc_dispatch.c' line='565' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_compress' mangled-name='zxc_compress' filepath='/src/lib/zxc_dispatch.c' line='581' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress'>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='581' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='581' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='581' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='582' column='1'/>
+      <parameter type-id='type-id-217' name='opts' filepath='/src/lib/zxc_dispatch.c' line='582' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_decompress' mangled-name='zxc_decompress' filepath='/src/lib/zxc_dispatch.c' line='836' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress'>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='836' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='836' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='836' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='837' column='1'/>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_dispatch.c' line='837' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_decompress' mangled-name='zxc_decompress' filepath='/src/lib/zxc_dispatch.c' line='809' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress'>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='809' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='809' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='809' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='810' column='1'/>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_dispatch.c' line='810' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_decompress_inplace_bound' mangled-name='zxc_decompress_inplace_bound' filepath='/src/lib/zxc_dispatch.c' line='1110' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_inplace_bound'>
-      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_dispatch.c' line='1110' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1110' column='1'/>
+    <function-decl name='zxc_decompress_inplace_bound' mangled-name='zxc_decompress_inplace_bound' filepath='/src/lib/zxc_dispatch.c' line='1084' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_inplace_bound'>
+      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_dispatch.c' line='1084' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1084' column='1'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_decompress_inplace' mangled-name='zxc_decompress_inplace' filepath='/src/lib/zxc_dispatch.c' line='1140' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_inplace'>
-      <parameter type-id='type-id-14' name='buffer' filepath='/src/lib/zxc_dispatch.c' line='1140' column='1'/>
-      <parameter type-id='type-id-54' name='buffer_capacity' filepath='/src/lib/zxc_dispatch.c' line='1140' column='1'/>
-      <parameter type-id='type-id-54' name='comp_size' filepath='/src/lib/zxc_dispatch.c' line='1140' column='1'/>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1141' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_decompress_inplace' mangled-name='zxc_decompress_inplace' filepath='/src/lib/zxc_dispatch.c' line='1114' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_inplace'>
+      <parameter type-id='type-id-14' name='buffer' filepath='/src/lib/zxc_dispatch.c' line='1114' column='1'/>
+      <parameter type-id='type-id-54' name='buffer_capacity' filepath='/src/lib/zxc_dispatch.c' line='1114' column='1'/>
+      <parameter type-id='type-id-54' name='comp_size' filepath='/src/lib/zxc_dispatch.c' line='1114' column='1'/>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1115' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_get_decompressed_size' mangled-name='zxc_get_decompressed_size' filepath='/src/lib/zxc_dispatch.c' line='1167' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_get_decompressed_size'>
-      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_dispatch.c' line='1167' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1167' column='1'/>
+    <function-decl name='zxc_get_decompressed_size' mangled-name='zxc_get_decompressed_size' filepath='/src/lib/zxc_dispatch.c' line='1141' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_get_decompressed_size'>
+      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_dispatch.c' line='1141' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1141' column='1'/>
       <return type-id='type-id-100'/>
     </function-decl>
-    <function-decl name='zxc_get_dict_id' mangled-name='zxc_get_dict_id' filepath='/src/lib/zxc_dispatch.c' line='1182' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_get_dict_id'>
-      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_dispatch.c' line='1182' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1182' column='1'/>
-      <return type-id='type-id-121'/>
+    <function-decl name='zxc_get_dict_id' mangled-name='zxc_get_dict_id' filepath='/src/lib/zxc_dispatch.c' line='1156' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_get_dict_id'>
+      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_dispatch.c' line='1156' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1156' column='1'/>
+      <return type-id='type-id-122'/>
     </function-decl>
-    <class-decl name='zxc_cctx_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_dispatch.c' line='1208' column='1' is-declaration-only='yes' id='type-id-304'/>
-    <function-decl name='zxc_compress_cctx' mangled-name='zxc_compress_cctx' filepath='/src/lib/zxc_dispatch.c' line='1296' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_cctx'>
-      <parameter type-id='type-id-297' name='cctx' filepath='/src/lib/zxc_dispatch.c' line='1296' column='1'/>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='1296' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1296' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1297' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1297' column='1'/>
-      <parameter type-id='type-id-213' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1298' column='1'/>
-      <return type-id='type-id-123'/>
+    <class-decl name='zxc_cctx_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_dispatch.c' line='1182' column='1' is-declaration-only='yes' id='type-id-308'/>
+    <function-decl name='zxc_compress_cctx' mangled-name='zxc_compress_cctx' filepath='/src/lib/zxc_dispatch.c' line='1270' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_cctx'>
+      <parameter type-id='type-id-301' name='cctx' filepath='/src/lib/zxc_dispatch.c' line='1270' column='1'/>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='1270' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1270' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1271' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1271' column='1'/>
+      <parameter type-id='type-id-217' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1272' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <class-decl name='zxc_dctx_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_dispatch.c' line='1432' column='1' is-declaration-only='yes' id='type-id-305'/>
-    <function-decl name='zxc_create_dctx' mangled-name='zxc_create_dctx' filepath='/src/lib/zxc_dispatch.c' line='1444' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_create_dctx'>
-      <return type-id='type-id-300'/>
+    <class-decl name='zxc_dctx_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_dispatch.c' line='1403' column='1' is-declaration-only='yes' id='type-id-309'/>
+    <function-decl name='zxc_create_dctx' mangled-name='zxc_create_dctx' filepath='/src/lib/zxc_dispatch.c' line='1415' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_create_dctx'>
+      <return type-id='type-id-304'/>
     </function-decl>
-    <function-decl name='zxc_free_dctx' mangled-name='zxc_free_dctx' filepath='/src/lib/zxc_dispatch.c' line='1455' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_free_dctx'>
-      <parameter type-id='type-id-300' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1455' column='1'/>
+    <function-decl name='zxc_free_dctx' mangled-name='zxc_free_dctx' filepath='/src/lib/zxc_dispatch.c' line='1426' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_free_dctx'>
+      <parameter type-id='type-id-304' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1426' column='1'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <function-decl name='zxc_decompress_dctx' mangled-name='zxc_decompress_dctx' filepath='/src/lib/zxc_dispatch.c' line='1493' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_dctx'>
-      <parameter type-id='type-id-300' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1493' column='1'/>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='1493' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1493' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1494' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1494' column='1'/>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1495' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_decompress_dctx' mangled-name='zxc_decompress_dctx' filepath='/src/lib/zxc_dispatch.c' line='1464' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_dctx'>
+      <parameter type-id='type-id-304' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1464' column='1'/>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='1464' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1464' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1465' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1465' column='1'/>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1466' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_compress_block' mangled-name='zxc_compress_block' filepath='/src/lib/zxc_dispatch.c' line='1651' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_block'>
-      <parameter type-id='type-id-297' name='cctx' filepath='/src/lib/zxc_dispatch.c' line='1651' column='1'/>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='1651' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1651' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1652' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1652' column='1'/>
-      <parameter type-id='type-id-213' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1653' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_compress_block' mangled-name='zxc_compress_block' filepath='/src/lib/zxc_dispatch.c' line='1633' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_compress_block'>
+      <parameter type-id='type-id-301' name='cctx' filepath='/src/lib/zxc_dispatch.c' line='1633' column='1'/>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='1633' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1633' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1634' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1634' column='1'/>
+      <parameter type-id='type-id-217' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1635' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_decompress_block' mangled-name='zxc_decompress_block' filepath='/src/lib/zxc_dispatch.c' line='1824' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_block'>
-      <parameter type-id='type-id-300' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1824' column='1'/>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='1824' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1824' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1825' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1825' column='1'/>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1826' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_decompress_block' mangled-name='zxc_decompress_block' filepath='/src/lib/zxc_dispatch.c' line='1813' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_block'>
+      <parameter type-id='type-id-304' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1813' column='1'/>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='1813' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1813' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1814' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1814' column='1'/>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1815' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_decompress_block_safe' mangled-name='zxc_decompress_block_safe' filepath='/src/lib/zxc_dispatch.c' line='1892' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_block_safe'>
-      <parameter type-id='type-id-300' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1892' column='1'/>
-      <parameter type-id='type-id-295' name='src' filepath='/src/lib/zxc_dispatch.c' line='1892' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1892' column='1'/>
-      <parameter type-id='type-id-124' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1893' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1893' column='1'/>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1894' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_decompress_block_safe' mangled-name='zxc_decompress_block_safe' filepath='/src/lib/zxc_dispatch.c' line='1881' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_decompress_block_safe'>
+      <parameter type-id='type-id-304' name='dctx' filepath='/src/lib/zxc_dispatch.c' line='1881' column='1'/>
+      <parameter type-id='type-id-299' name='src' filepath='/src/lib/zxc_dispatch.c' line='1881' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_dispatch.c' line='1881' column='1'/>
+      <parameter type-id='type-id-125' name='dst' filepath='/src/lib/zxc_dispatch.c' line='1882' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_dispatch.c' line='1882' column='1'/>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1883' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <function-decl name='zxc_static_cctx_workspace_size' mangled-name='zxc_static_cctx_workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1949' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_static_cctx_workspace_size'>
-      <parameter type-id='type-id-54' name='block_size' filepath='/src/lib/zxc_dispatch.c' line='1949' column='1'/>
-      <parameter type-id='type-id-102' name='level' filepath='/src/lib/zxc_dispatch.c' line='1949' column='1'/>
+    <function-decl name='zxc_static_cctx_workspace_size' mangled-name='zxc_static_cctx_workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1938' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_static_cctx_workspace_size'>
+      <parameter type-id='type-id-54' name='block_size' filepath='/src/lib/zxc_dispatch.c' line='1938' column='1'/>
+      <parameter type-id='type-id-102' name='level' filepath='/src/lib/zxc_dispatch.c' line='1938' column='1'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_init_static_cctx' mangled-name='zxc_init_static_cctx' filepath='/src/lib/zxc_dispatch.c' line='1957' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_init_static_cctx'>
-      <parameter type-id='type-id-124' name='workspace' filepath='/src/lib/zxc_dispatch.c' line='1957' column='1'/>
-      <parameter type-id='type-id-54' name='workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1957' column='1'/>
-      <parameter type-id='type-id-270' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1958' column='1'/>
-      <return type-id='type-id-297'/>
-    </function-decl>
-    <function-decl name='zxc_static_dctx_workspace_size' mangled-name='zxc_static_dctx_workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1996' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_static_dctx_workspace_size'>
-      <parameter type-id='type-id-54' name='block_size' filepath='/src/lib/zxc_dispatch.c' line='1996' column='1'/>
-      <return type-id='type-id-17'/>
-    </function-decl>
-    <function-decl name='zxc_init_static_dctx' mangled-name='zxc_init_static_dctx' filepath='/src/lib/zxc_dispatch.c' line='2003' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_init_static_dctx'>
-      <parameter type-id='type-id-124' name='workspace' filepath='/src/lib/zxc_dispatch.c' line='2003' column='1'/>
-      <parameter type-id='type-id-54' name='workspace_size' filepath='/src/lib/zxc_dispatch.c' line='2003' column='1'/>
-      <parameter type-id='type-id-54' name='block_size' filepath='/src/lib/zxc_dispatch.c' line='2004' column='1'/>
-      <return type-id='type-id-300'/>
-    </function-decl>
-    <function-decl name='zxc_stream_compress' mangled-name='zxc_stream_compress' filepath='/src/lib/zxc_driver.c' line='971' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_stream_compress'>
-      <parameter type-id='type-id-167' name='f_in' filepath='/src/lib/zxc_driver.c' line='971' column='1'/>
-      <parameter type-id='type-id-167' name='f_out' filepath='/src/lib/zxc_driver.c' line='971' column='1'/>
-      <parameter type-id='type-id-213' name='opts' filepath='/src/lib/zxc_driver.c' line='971' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <function-decl name='zxc_stream_decompress' mangled-name='zxc_stream_decompress' filepath='/src/lib/zxc_driver.c' line='1000' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_stream_decompress'>
-      <parameter type-id='type-id-167' name='f_in' filepath='/src/lib/zxc_driver.c' line='1000' column='1'/>
-      <parameter type-id='type-id-167' name='f_out' filepath='/src/lib/zxc_driver.c' line='1000' column='1'/>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_driver.c' line='1000' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <function-decl name='zxc_stream_get_decompressed_size' mangled-name='zxc_stream_get_decompressed_size' filepath='/src/lib/zxc_driver.c' line='1023' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_stream_get_decompressed_size'>
-      <parameter type-id='type-id-167' name='f_in' filepath='/src/lib/zxc_driver.c' line='1023' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_open_file' mangled-name='zxc_seekable_open_file' filepath='/src/lib/zxc_driver.c' line='1135' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_open_file'>
-      <parameter type-id='type-id-167' name='f' filepath='/src/lib/zxc_driver.c' line='1135' column='1'/>
-      <return type-id='type-id-198'/>
-    </function-decl>
-    <var-decl name='zxc_pivco_idxa_u8' type-id='type-id-229' visibility='default' filepath='/src/lib/zxc_pivco_tables.h' line='46' column='1'/>
-    <var-decl name='zxc_pivco_idxb_pre' type-id='type-id-232' visibility='default' filepath='/src/lib/zxc_pivco_tables.h' line='47' column='1'/>
-    <class-decl name='zxc_cstream_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_pstream.c' line='123' column='1' is-declaration-only='yes' id='type-id-306'/>
-    <function-decl name='zxc_cstream_create' mangled-name='zxc_cstream_create' filepath='/src/lib/zxc_pstream.c' line='266' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_create'>
-      <parameter type-id='type-id-213' name='opts' filepath='/src/lib/zxc_pstream.c' line='266' column='1'/>
-      <return type-id='type-id-298'/>
-    </function-decl>
-    <function-decl name='zxc_cstream_free' mangled-name='zxc_cstream_free' filepath='/src/lib/zxc_pstream.c' line='391' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_free'>
-      <parameter type-id='type-id-298' name='cs' filepath='/src/lib/zxc_pstream.c' line='391' column='1'/>
-      <return type-id='type-id-15'/>
-    </function-decl>
-    <function-decl name='zxc_cstream_in_size' mangled-name='zxc_cstream_in_size' filepath='/src/lib/zxc_pstream.c' line='402' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_in_size'>
-      <parameter type-id='type-id-287' name='cs' filepath='/src/lib/zxc_pstream.c' line='402' column='1'/>
-      <return type-id='type-id-17'/>
-    </function-decl>
-    <function-decl name='zxc_cstream_out_size' mangled-name='zxc_cstream_out_size' filepath='/src/lib/zxc_pstream.c' line='411' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_out_size'>
-      <parameter type-id='type-id-287' name='cs' filepath='/src/lib/zxc_pstream.c' line='411' column='1'/>
-      <return type-id='type-id-17'/>
-    </function-decl>
-    <function-decl name='zxc_cstream_compress' mangled-name='zxc_cstream_compress' filepath='/src/lib/zxc_pstream.c' line='430' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_compress'>
-      <parameter type-id='type-id-298' name='cs' filepath='/src/lib/zxc_pstream.c' line='430' column='1'/>
-      <parameter type-id='type-id-281' name='out' filepath='/src/lib/zxc_pstream.c' line='430' column='1'/>
-      <parameter type-id='type-id-280' name='in' filepath='/src/lib/zxc_pstream.c' line='430' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <function-decl name='zxc_cstream_end' mangled-name='zxc_cstream_end' filepath='/src/lib/zxc_pstream.c' line='503' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_end'>
-      <parameter type-id='type-id-298' name='cs' filepath='/src/lib/zxc_pstream.c' line='503' column='1'/>
-      <parameter type-id='type-id-281' name='out' filepath='/src/lib/zxc_pstream.c' line='503' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <class-decl name='zxc_dstream_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_pstream.c' line='690' column='1' is-declaration-only='yes' id='type-id-307'/>
-    <function-decl name='zxc_dstream_create' mangled-name='zxc_dstream_create' filepath='/src/lib/zxc_pstream.c' line='768' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_create'>
-      <parameter type-id='type-id-272' name='opts' filepath='/src/lib/zxc_pstream.c' line='768' column='1'/>
+    <function-decl name='zxc_init_static_cctx' mangled-name='zxc_init_static_cctx' filepath='/src/lib/zxc_dispatch.c' line='1946' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_init_static_cctx'>
+      <parameter type-id='type-id-125' name='workspace' filepath='/src/lib/zxc_dispatch.c' line='1946' column='1'/>
+      <parameter type-id='type-id-54' name='workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1946' column='1'/>
+      <parameter type-id='type-id-274' name='opts' filepath='/src/lib/zxc_dispatch.c' line='1947' column='1'/>
       <return type-id='type-id-301'/>
     </function-decl>
-    <function-decl name='zxc_dstream_free' mangled-name='zxc_dstream_free' filepath='/src/lib/zxc_pstream.c' line='789' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_free'>
-      <parameter type-id='type-id-301' name='ds' filepath='/src/lib/zxc_pstream.c' line='789' column='1'/>
-      <return type-id='type-id-15'/>
-    </function-decl>
-    <function-decl name='zxc_dstream_finished' mangled-name='zxc_dstream_finished' filepath='/src/lib/zxc_pstream.c' line='800' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_finished'>
-      <parameter type-id='type-id-290' name='ds' filepath='/src/lib/zxc_pstream.c' line='800' column='1'/>
-      <return type-id='type-id-13'/>
-    </function-decl>
-    <function-decl name='zxc_dstream_in_size' mangled-name='zxc_dstream_in_size' filepath='/src/lib/zxc_pstream.c' line='809' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_in_size'>
-      <parameter type-id='type-id-290' name='ds' filepath='/src/lib/zxc_pstream.c' line='809' column='1'/>
+    <function-decl name='zxc_static_dctx_workspace_size' mangled-name='zxc_static_dctx_workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1985' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_static_dctx_workspace_size'>
+      <parameter type-id='type-id-54' name='block_size' filepath='/src/lib/zxc_dispatch.c' line='1985' column='1'/>
       <return type-id='type-id-17'/>
     </function-decl>
-    <function-decl name='zxc_dstream_out_size' mangled-name='zxc_dstream_out_size' filepath='/src/lib/zxc_pstream.c' line='822' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_out_size'>
-      <parameter type-id='type-id-290' name='ds' filepath='/src/lib/zxc_pstream.c' line='822' column='1'/>
-      <return type-id='type-id-17'/>
+    <function-decl name='zxc_init_static_dctx' mangled-name='zxc_init_static_dctx' filepath='/src/lib/zxc_dispatch.c' line='1992' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_init_static_dctx'>
+      <parameter type-id='type-id-125' name='workspace' filepath='/src/lib/zxc_dispatch.c' line='1992' column='1'/>
+      <parameter type-id='type-id-54' name='workspace_size' filepath='/src/lib/zxc_dispatch.c' line='1992' column='1'/>
+      <parameter type-id='type-id-54' name='block_size' filepath='/src/lib/zxc_dispatch.c' line='1993' column='1'/>
+      <return type-id='type-id-304'/>
     </function-decl>
-    <function-decl name='zxc_dstream_decompress' mangled-name='zxc_dstream_decompress' filepath='/src/lib/zxc_pstream.c' line='966' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_decompress'>
-      <parameter type-id='type-id-301' name='ds' filepath='/src/lib/zxc_pstream.c' line='966' column='1'/>
-      <parameter type-id='type-id-281' name='out' filepath='/src/lib/zxc_pstream.c' line='966' column='1'/>
-      <parameter type-id='type-id-280' name='in' filepath='/src/lib/zxc_pstream.c' line='966' column='1'/>
-      <return type-id='type-id-123'/>
+    <function-decl name='zxc_stream_compress' mangled-name='zxc_stream_compress' filepath='/src/lib/zxc_driver.c' line='968' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_stream_compress'>
+      <parameter type-id='type-id-167' name='f_in' filepath='/src/lib/zxc_driver.c' line='968' column='1'/>
+      <parameter type-id='type-id-167' name='f_out' filepath='/src/lib/zxc_driver.c' line='968' column='1'/>
+      <parameter type-id='type-id-217' name='opts' filepath='/src/lib/zxc_driver.c' line='968' column='1'/>
+      <return type-id='type-id-124'/>
     </function-decl>
-    <class-decl name='zxc_seekable_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_seekable.c' line='88' column='1' is-declaration-only='yes' id='type-id-308'/>
-    <function-decl name='zxc_seekable_open' mangled-name='zxc_seekable_open' filepath='/src/lib/zxc_seekable.c' line='316' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_open'>
-      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_seekable.c' line='316' column='1'/>
-      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_seekable.c' line='316' column='1'/>
+    <function-decl name='zxc_stream_decompress' mangled-name='zxc_stream_decompress' filepath='/src/lib/zxc_driver.c' line='997' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_stream_decompress'>
+      <parameter type-id='type-id-167' name='f_in' filepath='/src/lib/zxc_driver.c' line='997' column='1'/>
+      <parameter type-id='type-id-167' name='f_out' filepath='/src/lib/zxc_driver.c' line='997' column='1'/>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_driver.c' line='997' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <function-decl name='zxc_stream_get_decompressed_size' mangled-name='zxc_stream_get_decompressed_size' filepath='/src/lib/zxc_driver.c' line='1021' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_stream_get_decompressed_size'>
+      <parameter type-id='type-id-167' name='f_in' filepath='/src/lib/zxc_driver.c' line='1021' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_open_file' mangled-name='zxc_seekable_open_file' filepath='/src/lib/zxc_driver.c' line='1148' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_open_file'>
+      <parameter type-id='type-id-167' name='f' filepath='/src/lib/zxc_driver.c' line='1148' column='1'/>
+      <return type-id='type-id-200'/>
+    </function-decl>
+    <var-decl name='zxc_pivco_idxa_u8' type-id='type-id-233' visibility='default' filepath='/src/lib/zxc_pivco_tables.h' line='46' column='1'/>
+    <var-decl name='zxc_pivco_idxb_pre' type-id='type-id-236' visibility='default' filepath='/src/lib/zxc_pivco_tables.h' line='47' column='1'/>
+    <class-decl name='zxc_cstream_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_pstream.c' line='122' column='1' is-declaration-only='yes' id='type-id-310'/>
+    <function-decl name='zxc_cstream_create' mangled-name='zxc_cstream_create' filepath='/src/lib/zxc_pstream.c' line='262' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_create'>
+      <parameter type-id='type-id-217' name='opts' filepath='/src/lib/zxc_pstream.c' line='262' column='1'/>
       <return type-id='type-id-302'/>
     </function-decl>
-    <function-decl name='zxc_seekable_get_num_blocks' mangled-name='zxc_seekable_get_num_blocks' filepath='/src/lib/zxc_seekable.c' line='343' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_num_blocks'>
-      <parameter type-id='type-id-293' name='s' filepath='/src/lib/zxc_seekable.c' line='343' column='1'/>
-      <return type-id='type-id-121'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_get_decompressed_size' mangled-name='zxc_seekable_get_decompressed_size' filepath='/src/lib/zxc_seekable.c' line='348' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_decompressed_size'>
-      <parameter type-id='type-id-293' name='s' filepath='/src/lib/zxc_seekable.c' line='348' column='1'/>
-      <return type-id='type-id-100'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_get_block_comp_size' mangled-name='zxc_seekable_get_block_comp_size' filepath='/src/lib/zxc_seekable.c' line='355' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_block_comp_size'>
-      <parameter type-id='type-id-293' name='s' filepath='/src/lib/zxc_seekable.c' line='355' column='1'/>
-      <parameter type-id='type-id-55' name='block_idx' filepath='/src/lib/zxc_seekable.c' line='355' column='1'/>
-      <return type-id='type-id-121'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_get_block_decomp_size' mangled-name='zxc_seekable_get_block_decomp_size' filepath='/src/lib/zxc_seekable.c' line='366' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_block_decomp_size'>
-      <parameter type-id='type-id-293' name='s' filepath='/src/lib/zxc_seekable.c' line='366' column='1'/>
-      <parameter type-id='type-id-55' name='block_idx' filepath='/src/lib/zxc_seekable.c' line='366' column='1'/>
-      <return type-id='type-id-121'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_decompress_range' mangled-name='zxc_seekable_decompress_range' filepath='/src/lib/zxc_seekable.c' line='459' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_decompress_range'>
-      <parameter type-id='type-id-302' name='s' filepath='/src/lib/zxc_seekable.c' line='459' column='1'/>
-      <parameter type-id='type-id-14' name='dst' filepath='/src/lib/zxc_seekable.c' line='459' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_seekable.c' line='459' column='1'/>
-      <parameter type-id='type-id-128' name='offset' filepath='/src/lib/zxc_seekable.c' line='460' column='1'/>
-      <parameter type-id='type-id-54' name='len' filepath='/src/lib/zxc_seekable.c' line='460' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_decompress_range_mt' mangled-name='zxc_seekable_decompress_range_mt' filepath='/src/lib/zxc_seekable.c' line='712' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_decompress_range_mt'>
-      <parameter type-id='type-id-302' name='s' filepath='/src/lib/zxc_seekable.c' line='712' column='1'/>
-      <parameter type-id='type-id-14' name='dst' filepath='/src/lib/zxc_seekable.c' line='712' column='1'/>
-      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_seekable.c' line='712' column='1'/>
-      <parameter type-id='type-id-128' name='offset' filepath='/src/lib/zxc_seekable.c' line='713' column='1'/>
-      <parameter type-id='type-id-54' name='len' filepath='/src/lib/zxc_seekable.c' line='713' column='1'/>
-      <parameter type-id='type-id-13' name='n_threads' filepath='/src/lib/zxc_seekable.c' line='713' column='1'/>
-      <return type-id='type-id-123'/>
-    </function-decl>
-    <function-decl name='zxc_seekable_free' mangled-name='zxc_seekable_free' filepath='/src/lib/zxc_seekable.c' line='826' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_free'>
-      <parameter type-id='type-id-302' name='s' filepath='/src/lib/zxc_seekable.c' line='826' column='1'/>
+    <function-decl name='zxc_cstream_free' mangled-name='zxc_cstream_free' filepath='/src/lib/zxc_pstream.c' line='387' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_free'>
+      <parameter type-id='type-id-302' name='cs' filepath='/src/lib/zxc_pstream.c' line='387' column='1'/>
       <return type-id='type-id-15'/>
     </function-decl>
-    <function-decl name='zxc_seekable_set_checksum' mangled-name='zxc_seekable_set_checksum' filepath='/src/lib/zxc_seekable.c' line='843' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_set_checksum'>
-      <parameter type-id='type-id-302' name='s' filepath='/src/lib/zxc_seekable.c' line='843' column='1'/>
-      <parameter type-id='type-id-102' name='enabled' filepath='/src/lib/zxc_seekable.c' line='843' column='1'/>
+    <function-decl name='zxc_cstream_in_size' mangled-name='zxc_cstream_in_size' filepath='/src/lib/zxc_pstream.c' line='398' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_in_size'>
+      <parameter type-id='type-id-291' name='cs' filepath='/src/lib/zxc_pstream.c' line='398' column='1'/>
+      <return type-id='type-id-17'/>
+    </function-decl>
+    <function-decl name='zxc_cstream_out_size' mangled-name='zxc_cstream_out_size' filepath='/src/lib/zxc_pstream.c' line='407' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_out_size'>
+      <parameter type-id='type-id-291' name='cs' filepath='/src/lib/zxc_pstream.c' line='407' column='1'/>
+      <return type-id='type-id-17'/>
+    </function-decl>
+    <function-decl name='zxc_cstream_compress' mangled-name='zxc_cstream_compress' filepath='/src/lib/zxc_pstream.c' line='426' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_compress'>
+      <parameter type-id='type-id-302' name='cs' filepath='/src/lib/zxc_pstream.c' line='426' column='1'/>
+      <parameter type-id='type-id-285' name='out' filepath='/src/lib/zxc_pstream.c' line='426' column='1'/>
+      <parameter type-id='type-id-284' name='in' filepath='/src/lib/zxc_pstream.c' line='426' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <function-decl name='zxc_cstream_end' mangled-name='zxc_cstream_end' filepath='/src/lib/zxc_pstream.c' line='499' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_cstream_end'>
+      <parameter type-id='type-id-302' name='cs' filepath='/src/lib/zxc_pstream.c' line='499' column='1'/>
+      <parameter type-id='type-id-285' name='out' filepath='/src/lib/zxc_pstream.c' line='499' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <class-decl name='zxc_dstream_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_pstream.c' line='681' column='1' is-declaration-only='yes' id='type-id-311'/>
+    <function-decl name='zxc_dstream_create' mangled-name='zxc_dstream_create' filepath='/src/lib/zxc_pstream.c' line='760' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_create'>
+      <parameter type-id='type-id-276' name='opts' filepath='/src/lib/zxc_pstream.c' line='760' column='1'/>
+      <return type-id='type-id-305'/>
+    </function-decl>
+    <function-decl name='zxc_dstream_free' mangled-name='zxc_dstream_free' filepath='/src/lib/zxc_pstream.c' line='781' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_free'>
+      <parameter type-id='type-id-305' name='ds' filepath='/src/lib/zxc_pstream.c' line='781' column='1'/>
+      <return type-id='type-id-15'/>
+    </function-decl>
+    <function-decl name='zxc_dstream_finished' mangled-name='zxc_dstream_finished' filepath='/src/lib/zxc_pstream.c' line='792' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_finished'>
+      <parameter type-id='type-id-294' name='ds' filepath='/src/lib/zxc_pstream.c' line='792' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
-    <function-decl name='zxc_seekable_set_dict' mangled-name='zxc_seekable_set_dict' filepath='/src/lib/zxc_seekable.c' line='857' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_set_dict'>
-      <parameter type-id='type-id-302' name='s' filepath='/src/lib/zxc_seekable.c' line='857' column='1'/>
-      <parameter type-id='type-id-14' name='dict' filepath='/src/lib/zxc_seekable.c' line='857' column='1'/>
-      <parameter type-id='type-id-54' name='dict_size' filepath='/src/lib/zxc_seekable.c' line='857' column='1'/>
-      <parameter type-id='type-id-14' name='dict_huf' filepath='/src/lib/zxc_seekable.c' line='858' column='1'/>
+    <function-decl name='zxc_dstream_in_size' mangled-name='zxc_dstream_in_size' filepath='/src/lib/zxc_pstream.c' line='801' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_in_size'>
+      <parameter type-id='type-id-294' name='ds' filepath='/src/lib/zxc_pstream.c' line='801' column='1'/>
+      <return type-id='type-id-17'/>
+    </function-decl>
+    <function-decl name='zxc_dstream_out_size' mangled-name='zxc_dstream_out_size' filepath='/src/lib/zxc_pstream.c' line='814' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_out_size'>
+      <parameter type-id='type-id-294' name='ds' filepath='/src/lib/zxc_pstream.c' line='814' column='1'/>
+      <return type-id='type-id-17'/>
+    </function-decl>
+    <function-decl name='zxc_dstream_decompress' mangled-name='zxc_dstream_decompress' filepath='/src/lib/zxc_pstream.c' line='958' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_dstream_decompress'>
+      <parameter type-id='type-id-305' name='ds' filepath='/src/lib/zxc_pstream.c' line='958' column='1'/>
+      <parameter type-id='type-id-285' name='out' filepath='/src/lib/zxc_pstream.c' line='958' column='1'/>
+      <parameter type-id='type-id-284' name='in' filepath='/src/lib/zxc_pstream.c' line='958' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <function-decl name='zxc_seek_table_size' mangled-name='zxc_seek_table_size' filepath='/src/lib/zxc_seekable.c' line='54' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seek_table_size'>
+      <parameter type-id='type-id-103' name='num_blocks' filepath='/src/lib/zxc_seekable.c' line='54' column='1'/>
+      <return type-id='type-id-17'/>
+    </function-decl>
+    <class-decl name='zxc_seekable_s' is-struct='yes' visibility='default' filepath='/src/lib/zxc_seekable.c' line='110' column='1' is-declaration-only='yes' id='type-id-312'/>
+    <function-decl name='zxc_seekable_open' mangled-name='zxc_seekable_open' filepath='/src/lib/zxc_seekable.c' line='361' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_open'>
+      <parameter type-id='type-id-14' name='src' filepath='/src/lib/zxc_seekable.c' line='361' column='1'/>
+      <parameter type-id='type-id-54' name='src_size' filepath='/src/lib/zxc_seekable.c' line='361' column='1'/>
+      <return type-id='type-id-306'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_get_num_blocks' mangled-name='zxc_seekable_get_num_blocks' filepath='/src/lib/zxc_seekable.c' line='387' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_num_blocks'>
+      <parameter type-id='type-id-297' name='s' filepath='/src/lib/zxc_seekable.c' line='387' column='1'/>
+      <return type-id='type-id-100'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_get_decompressed_size' mangled-name='zxc_seekable_get_decompressed_size' filepath='/src/lib/zxc_seekable.c' line='392' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_decompressed_size'>
+      <parameter type-id='type-id-297' name='s' filepath='/src/lib/zxc_seekable.c' line='392' column='1'/>
+      <return type-id='type-id-100'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_get_block_comp_size' mangled-name='zxc_seekable_get_block_comp_size' filepath='/src/lib/zxc_seekable.c' line='399' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_block_comp_size'>
+      <parameter type-id='type-id-297' name='s' filepath='/src/lib/zxc_seekable.c' line='399' column='1'/>
+      <parameter type-id='type-id-103' name='block_idx' filepath='/src/lib/zxc_seekable.c' line='399' column='1'/>
+      <return type-id='type-id-122'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_get_block_decomp_size' mangled-name='zxc_seekable_get_block_decomp_size' filepath='/src/lib/zxc_seekable.c' line='427' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_get_block_decomp_size'>
+      <parameter type-id='type-id-297' name='s' filepath='/src/lib/zxc_seekable.c' line='427' column='1'/>
+      <parameter type-id='type-id-103' name='block_idx' filepath='/src/lib/zxc_seekable.c' line='427' column='1'/>
+      <return type-id='type-id-122'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_decompress_range' mangled-name='zxc_seekable_decompress_range' filepath='/src/lib/zxc_seekable.c' line='498' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_decompress_range'>
+      <parameter type-id='type-id-306' name='s' filepath='/src/lib/zxc_seekable.c' line='498' column='1'/>
+      <parameter type-id='type-id-14' name='dst' filepath='/src/lib/zxc_seekable.c' line='498' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_seekable.c' line='498' column='1'/>
+      <parameter type-id='type-id-103' name='offset' filepath='/src/lib/zxc_seekable.c' line='499' column='1'/>
+      <parameter type-id='type-id-54' name='len' filepath='/src/lib/zxc_seekable.c' line='499' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_decompress_range_mt' mangled-name='zxc_seekable_decompress_range_mt' filepath='/src/lib/zxc_seekable.c' line='765' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_decompress_range_mt'>
+      <parameter type-id='type-id-306' name='s' filepath='/src/lib/zxc_seekable.c' line='765' column='1'/>
+      <parameter type-id='type-id-14' name='dst' filepath='/src/lib/zxc_seekable.c' line='765' column='1'/>
+      <parameter type-id='type-id-54' name='dst_capacity' filepath='/src/lib/zxc_seekable.c' line='765' column='1'/>
+      <parameter type-id='type-id-103' name='offset' filepath='/src/lib/zxc_seekable.c' line='766' column='1'/>
+      <parameter type-id='type-id-54' name='len' filepath='/src/lib/zxc_seekable.c' line='766' column='1'/>
+      <parameter type-id='type-id-13' name='n_threads' filepath='/src/lib/zxc_seekable.c' line='766' column='1'/>
+      <return type-id='type-id-124'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_free' mangled-name='zxc_seekable_free' filepath='/src/lib/zxc_seekable.c' line='905' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_free'>
+      <parameter type-id='type-id-306' name='s' filepath='/src/lib/zxc_seekable.c' line='905' column='1'/>
+      <return type-id='type-id-15'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_set_checksum' mangled-name='zxc_seekable_set_checksum' filepath='/src/lib/zxc_seekable.c' line='920' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_set_checksum'>
+      <parameter type-id='type-id-306' name='s' filepath='/src/lib/zxc_seekable.c' line='920' column='1'/>
+      <parameter type-id='type-id-102' name='enabled' filepath='/src/lib/zxc_seekable.c' line='920' column='1'/>
+      <return type-id='type-id-13'/>
+    </function-decl>
+    <function-decl name='zxc_seekable_set_dict' mangled-name='zxc_seekable_set_dict' filepath='/src/lib/zxc_seekable.c' line='934' column='1' visibility='default' binding='global' size-in-bits='64' elf-symbol-id='zxc_seekable_set_dict'>
+      <parameter type-id='type-id-306' name='s' filepath='/src/lib/zxc_seekable.c' line='934' column='1'/>
+      <parameter type-id='type-id-14' name='dict' filepath='/src/lib/zxc_seekable.c' line='934' column='1'/>
+      <parameter type-id='type-id-54' name='dict_size' filepath='/src/lib/zxc_seekable.c' line='934' column='1'/>
+      <parameter type-id='type-id-14' name='dict_huf' filepath='/src/lib/zxc_seekable.c' line='935' column='1'/>
       <return type-id='type-id-13'/>
     </function-decl>
     <type-decl name='void' id='type-id-15'/>
     <pointer-type-def type-id='type-id-15' id='type-id-14'/>
-    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-309'/>
-    <function-type size-in-bits='64' id='type-id-275'>
+    <qualified-type-def type-id='type-id-14' restrict='yes' id='type-id-313'/>
+    <function-type size-in-bits='64' id='type-id-279'>
       <parameter type-id='type-id-100'/>
       <parameter type-id='type-id-100'/>
       <parameter type-id='type-id-14'/>
