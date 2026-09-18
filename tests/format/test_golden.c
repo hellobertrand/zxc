@@ -357,25 +357,37 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         memcpy(tmp, sh, ZXC_BLOCK_HEADER_SIZE);
         tmp[7] = 0;
         CHECK(sh[7] == zxc_hash8(tmp), "SEK header checksum mismatch at %zu", off);
-        CHECK(comp == (uint32_t)data_blocks * 4U, "SEK comp_size %u != n_blocks*4 (%d)", comp,
-              data_blocks * 4);
-        const uint8_t* entries = sh + ZXC_BLOCK_HEADER_SIZE;
-        CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp + ZXC_FILE_FOOTER_SIZE <= size,
-              "SEK entries overrun file");
-        for (int i = 0; i < data_blocks; i++) {
-            uint32_t entry = zxc_le32(entries + (size_t)i * 4);
-            CHECK(entry == block_phys[i], "SEK entry %d = %u, expected %u", i, entry,
-                  block_phys[i]);
-        }
+        /* Size field: the groups' bytes, high half folded onto the low one (Sec 5.5). */
+        const uint64_t table = zxc_seek_table_bytes((uint64_t)data_blocks);
+        CHECK(comp == zxc_seek_size_field(table), "SEK comp_size %u != table bytes (%llu) folded",
+              comp, (unsigned long long)table);
+        CHECK(off + ZXC_BLOCK_HEADER_SIZE + table + ZXC_FILE_FOOTER_SIZE <= size,
+              "SEK groups overrun file");
         EMIT("\n[seek table @%zu]\n", off);
         emit_hex("raw:", sh, ZXC_BLOCK_HEADER_SIZE);
         EMIT("type:             SEK (%u)\n", sh[0]);
         EMIT("comp_size:        %u\n", comp);
         EMIT("header_checksum:  0x%02X\n", sh[7]);
         EMIT("entries:          %d\n", data_blocks);
-        for (int i = 0; i < data_blocks; i++)
-            EMIT("  block[%d]:       %u bytes\n", i, zxc_le32(entries + (size_t)i * 4));
-        off += ZXC_BLOCK_HEADER_SIZE + comp;
+        const uint8_t* p = sh + ZXC_BLOCK_HEADER_SIZE;
+        uint64_t expect = ZXC_FILE_HEADER_SIZE;
+        for (int i = 0; i < data_blocks; i++) {
+            if (i % (int)ZXC_SEEK_GROUP == 0) {
+                const uint64_t anchor = zxc_le64(p);
+                p += ZXC_SEEK_ANCHOR_SIZE;
+                CHECK(anchor == expect, "SEK group %d anchor = %llu, expected %llu",
+                      i / (int)ZXC_SEEK_GROUP, (unsigned long long)anchor,
+                      (unsigned long long)expect);
+                EMIT("  group[%d]:       anchor %llu\n", i / (int)ZXC_SEEK_GROUP,
+                     (unsigned long long)anchor);
+            }
+            const uint32_t sz = zxc_le32(p);
+            p += ZXC_SEEK_SIZE_ENTRY;
+            CHECK(sz == block_phys[i], "SEK size %d = %u, expected %u", i, sz, block_phys[i]);
+            EMIT("  block[%d]:       size %u\n", i, sz);
+            expect += sz;
+        }
+        off += ZXC_BLOCK_HEADER_SIZE + (size_t)table;
         seek_present = 1;
     }
     CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,

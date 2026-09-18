@@ -223,8 +223,8 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
         return 0;
     }
 
-    /* The seek table is advisory metadata that a sequential decode ignores, so
-     * a forged entry can only be caught where the entries are consumed. */
+    /* A sequential decode ignores the table; open reads no entry either, the
+     * first access to the block does. */
     if (exp->via_seekable) {
         char good[2048];
         snprintf(good, sizeof good, "%s/seekable_4blocks.zxc", valid_dir);
@@ -241,9 +241,13 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
         zxc_seekable_free(control);
 
         zxc_seekable* s = zxc_seekable_open(comp, comp_sz);
-        if (s) {
-            fprintf(stderr, "FAIL: %s  seekable open accepted a forged seek table\n", zxc_path);
-            zxc_seekable_free(s);
+        const int opened = s != NULL;
+        uint8_t first;
+        const int64_t got = opened ? zxc_seekable_decompress_range(s, &first, 1, 0, 1) : 0;
+        zxc_seekable_free(s);
+        if (!opened || got != ZXC_ERROR_CORRUPT_DATA) {
+            fprintf(stderr, "FAIL: %s  forged seek entry: open %s, block 0 read -> %lld\n",
+                    zxc_path, opened ? "ok" : "refused", (long long)got);
             free(comp);
             return 0;
         }

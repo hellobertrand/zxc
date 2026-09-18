@@ -1743,9 +1743,12 @@ typedef struct {
     PyObject* exc_type;
     PyObject* exc_value;
     PyObject* exc_tb;
-    /* decompress_range calls in progress, under the GIL: close(), set_dict() and
-     * a nested range would free or share what they use. */
+    /* Library calls in progress, under the GIL. Reader callbacks and GIL releases
+     * would otherwise let close() or set_dict() free what they use. */
     int busy;
+    /* decompress_range calls in progress: they share the handle's decode context,
+     * so a second one is refused. The table getter shares nothing. */
+    int ranging;
 } pyzxc_seekable_holder_t;
 
 /* Stores the currently-raised exception into the holder (first one wins) so
@@ -1794,12 +1797,16 @@ static zxc_seekable* seekable_from_capsule(PyObject* capsule) {
     return h->s;
 }
 
-/* seekable_from_capsule, refusing a handle in use. */
-static pyzxc_seekable_holder_t* seekable_idle_holder(PyObject* capsule) {
+/* The holder of an open handle, or NULL with an exception set. */
+static pyzxc_seekable_holder_t* seekable_open_holder(PyObject* capsule) {
     if (!seekable_from_capsule(capsule)) return NULL;
-    pyzxc_seekable_holder_t* h =
-        (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
-    if (h->busy) {
+    return (pyzxc_seekable_holder_t*)PyCapsule_GetPointer(capsule, ZXC_SEEKABLE_CAPSULE);
+}
+
+/* seekable_open_holder, refusing a handle a library call is still using. */
+static pyzxc_seekable_holder_t* seekable_idle_holder(PyObject* capsule) {
+    pyzxc_seekable_holder_t* const h = seekable_open_holder(capsule);
+    if (h && h->busy) {
         PyErr_SetString(PyExc_RuntimeError,
                         "Seekable is in use (called from its reader, or from another thread)");
         return NULL;
@@ -1844,6 +1851,7 @@ static PyObject* pyzxc_seekable_open(PyObject* self, PyObject* arg) {
     h->exc_value = NULL;
     h->exc_tb = NULL;
     h->busy = 0;
+    h->ranging = 0;
 
     PyObject* cap = PyCapsule_New(h, ZXC_SEEKABLE_CAPSULE, seekable_capsule_destructor);
     if (!cap) {
@@ -1918,6 +1926,7 @@ static PyObject* pyzxc_seekable_open_reader(PyObject* self, PyObject* arg) {
     h->exc_value = NULL;
     h->exc_tb = NULL;
     h->busy = 0;
+    h->ranging = 0;
 
     zxc_reader_t r;
     r.read_at = seekable_read_at_trampoline;
@@ -1965,11 +1974,22 @@ static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) 
     unsigned int idx;
     if (!PyArg_ParseTuple(args, "OI", &capsule, &idx)) return NULL;
 
-    zxc_seekable* s = seekable_from_capsule(capsule);
-    if (!s) return NULL;
+    pyzxc_seekable_holder_t* h = seekable_open_holder(capsule);
+    if (!h) return NULL;
 
-    if (idx >= zxc_seekable_get_num_blocks(s)) Py_RETURN_NONE;
-    return PyLong_FromUnsignedLong(zxc_seekable_get_block_comp_size(s, idx));
+    if (idx >= zxc_seekable_get_num_blocks(h->s)) Py_RETURN_NONE;
+    /* Reads the block's group through the reader; the trampoline attaches to the
+     * interpreter itself, so the GIL can stay held around this short call. */
+    h->busy++;
+    const uint32_t sz = zxc_seekable_get_block_comp_size(h->s, idx);
+    h->busy--;
+    if (sz == 0) {
+        /* 0 is never a real size: the group could not be read or is invalid.
+         * Prefer the reader's own exception (with traceback) when it caused it. */
+        if (seekable_restore_exception(h)) return NULL;
+        Py_Return_Err(PyExc_RuntimeError, "seek table group unreadable or invalid");
+    }
+    return PyLong_FromUnsignedLong(sz);
 }
 
 static PyObject* pyzxc_seekable_block_decomp_size(PyObject* self, PyObject* args) {
@@ -2000,8 +2020,12 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
 
     if (length < 0) Py_Return_Err(PyExc_ValueError, "length must be non-negative");
 
-    pyzxc_seekable_holder_t* h = seekable_idle_holder(capsule);
+    pyzxc_seekable_holder_t* h = seekable_open_holder(capsule);
     if (!h) return NULL;
+    if (h->ranging)
+        Py_Return_Err(PyExc_RuntimeError,
+                      "Seekable is in use by another decompress_range (called from its reader, "
+                      "or from another thread)");
     zxc_seekable* const s = h->s;
 
     if (length == 0) return PyBytes_FromStringAndSize(NULL, 0);
@@ -2012,6 +2036,7 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
 
     int64_t r;
     h->busy++;
+    h->ranging++;
 
     /* The GIL is released on every path: the reader trampoline re-attaches
      * with PyGILState_Ensure, which also makes the multi-threaded decode safe
@@ -2026,7 +2051,8 @@ static PyObject* pyzxc_seekable_decompress_range(PyObject* self, PyObject* args,
     }
     Py_END_ALLOW_THREADS
 
-        h->busy--;
+        h->ranging--;
+    h->busy--;
     if (r < 0) {
         Py_DECREF(out);
         /* Prefer the reader's own exception (with traceback) when it caused
@@ -2092,6 +2118,7 @@ static PyObject* pyzxc_seekable_set_dict(PyObject* self, PyObject* args) {
     PyObject* dict_huf_obj = NULL;
     if (!PyArg_ParseTuple(args, "Oy*|O", &capsule, &view, &dict_huf_obj)) return NULL;
 
+    /* Frees the dictionary and context a running call may use. */
     const pyzxc_seekable_holder_t* const h = seekable_idle_holder(capsule);
     if (!h) {
         PyBuffer_Release(&view);

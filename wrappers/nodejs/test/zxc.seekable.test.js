@@ -125,7 +125,7 @@ describe("Seekable: reader callback", () => {
     };
     const s = new zxc.Seekable(reader);
     try {
-      // 3 reads at open: header, footer, seek table.
+      // 3 reads at open: file header, footer, EOF and SEK headers.
       expect(calls).toBe(3);
       expect(s.decompressedSize()).toBe(payload.length);
       const out = s.decompressRange(0, payload.length);
@@ -136,8 +136,8 @@ describe("Seekable: reader callback", () => {
       expect(Buffer.compare(chunk, payload.subarray(2048, 2048 + 1024))).toBe(
         0,
       );
-      // Single-block sub-range must trigger exactly one extra read.
-      expect(calls - before).toBe(1);
+      // Single-block sub-range: its seek table entries, then the block.
+      expect(calls - before).toBe(2);
     } finally {
       s.close();
     }
@@ -183,6 +183,77 @@ describe("Seekable: reader callback", () => {
       const out = s.decompressRange(0, payload.length);
       expect(refused).toBe(true);
       expect(Buffer.compare(out, payload)).toBe(0);
+    } finally {
+      s.close();
+    }
+  });
+
+  test("close() from readAt during blockCompressedSize cannot free the handle", () => {
+    // blockCompressedSize reads the block's entry through readAt, so it
+    // re-enters JS like decompressRange: the same guard must hold, or a
+    // close() from the callback frees the handle the library is still using.
+    let attempted = 0;
+    let s;
+    const reader = {
+      size: compressed.length,
+      readAt(dst, offset) {
+        attempted++;
+        if (attempted > 3) s.close(); // refused: throws inside the callback
+        compressed.copy(dst, 0, offset, offset + dst.length);
+      },
+    };
+    s = new zxc.Seekable(reader);
+    try {
+      expect(() => s.blockCompressedSize(0)).toThrow();
+      // The handle survived the attempt and still answers.
+      expect(s.numBlocks()).toBeGreaterThanOrEqual(1);
+      expect(s.blockDecompressedSize(0)).toBeGreaterThan(0);
+    } finally {
+      s.close();
+    }
+  });
+
+  test("setDict() from readAt during decompressRange is refused", () => {
+    // The running decode uses the dictionary a setDict would free.
+    let refused = null;
+    let s;
+    const reader = {
+      size: compressed.length,
+      readAt(dst, offset) {
+        if (refused === null && s) {
+          try {
+            s.setDict(Buffer.alloc(64, 0x78));
+            refused = false;
+          } catch {
+            refused = true;
+          }
+        }
+        compressed.copy(dst, 0, offset, offset + dst.length);
+      },
+    };
+    s = new zxc.Seekable(reader);
+    try {
+      const out = s.decompressRange(0, payload.length);
+      expect(refused).toBe(true);
+      expect(Buffer.compare(out, payload)).toBe(0);
+    } finally {
+      s.close();
+    }
+  });
+
+  test("readAt throwing maps to a blockCompressedSize error, not a size of 0", () => {
+    let attempted = 0;
+    const reader = {
+      size: compressed.length,
+      readAt(dst, offset) {
+        attempted++;
+        if (attempted > 3) throw new Error("boom");
+        compressed.copy(dst, 0, offset, offset + dst.length);
+      },
+    };
+    const s = new zxc.Seekable(reader);
+    try {
+      expect(() => s.blockCompressedSize(0)).toThrow();
     } finally {
       s.close();
     }
