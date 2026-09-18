@@ -997,6 +997,14 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
                                  dict_huf);
 }
 
+// The decoder takes a const context: calling it through a cast to the processor
+// type is undefined behaviour (trips UBSan "function" and CFI).
+static int zxc_decompress_chunk_processor(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT in,
+                                          const size_t in_sz, uint8_t* RESTRICT out,
+                                          const size_t out_cap, const uint64_t block_index) {
+    return zxc_decompress_chunk_wrapper(ctx, in, in_sz, out, out_cap, block_index);
+}
+
 /**
  * @brief Decompresses a @c FILE* stream to another @c FILE* stream.
  *
@@ -1017,8 +1025,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
 
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
-                                 (zxc_chunk_processor_t)zxc_decompress_chunk_wrapper, cb, ud, dict,
-                                 dict_size, dict_huf);
+                                 zxc_decompress_chunk_processor, cb, ud, dict, dict_size, dict_huf);
 }
 
 /**
