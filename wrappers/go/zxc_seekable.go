@@ -48,7 +48,8 @@ import (
 // defer a call to [Seekable.Close] to release the native resources.
 //
 // A Seekable handle is single-threaded: callers must not invoke its methods
-// from more than one goroutine concurrently.
+// from more than one goroutine concurrently. From ReadAt, Close, SetDict and a
+// nested DecompressRange return [ErrSeekableInUse].
 type Seekable struct {
 	ptr     *C.zxc_seekable
 	file    *C.FILE // set when opened via Open
@@ -56,6 +57,8 @@ type Seekable struct {
 	pinner  runtime.Pinner
 	rhandle cgo.Handle // valid when opened via OpenReader; zero otherwise
 	hasRH   bool       // true when rhandle is set (cgo.Handle 0 is itself valid)
+	busy    int        // calls that may run ReadAt; Close and SetDict refuse
+	ranging bool       // DecompressRange running; a nested one refuses
 }
 
 // Open opens a seekable archive from a file path.
@@ -118,8 +121,9 @@ func OpenBytes(data []byte) (*Seekable, error) {
 //
 // size must be the total compressed-archive size in bytes (use
 // f.Stat().Size() for an *os.File). The library invokes ReadAt three
-// times during the call (header, footer, seek table) and once per block
-// during subsequent DecompressRange calls.
+// times during the call (header, footer, EOF/SEK block headers), then during
+// each DecompressRange call once per seek table group the range covers and
+// once per block; BlockCompressedSize reads the block's group per call.
 //
 // The caller's reader must remain valid until [Seekable.Close] is called.
 // ReadAt may be invoked from any goroutine but never concurrently in the
@@ -147,10 +151,14 @@ func OpenReader(r io.ReaderAt, size int64) (*Seekable, error) {
 // lets zxcGoOpenReader take its address.
 
 // Close releases the native resources associated with the handle. Safe to
-// call multiple times; subsequent calls are no-ops.
+// call multiple times; subsequent calls are no-ops. From ReadAt it returns
+// [ErrSeekableInUse] and releases nothing.
 func (s *Seekable) Close() error {
 	if s == nil || s.ptr == nil {
 		return nil
+	}
+	if s.busy > 0 {
+		return ErrSeekableInUse
 	}
 	// Free the C handle first so any in-flight read_at callbacks complete
 	// before we release the underlying Go reader handle.
@@ -192,13 +200,22 @@ func (s *Seekable) DecompressedSize() uint64 {
 }
 
 // BlockCompressedSize returns the on-disk size of a specific block (block
-// header + payload + optional per-block checksum). The second return value
-// is false if blockIdx is out of range or the handle has been closed.
-func (s *Seekable) BlockCompressedSize(blockIdx uint32) (uint32, bool) {
+// header + payload + optional per-block checksum), read from its seek table
+// group and checked against bounds only. ok is false if blockIdx is out of
+// range or the handle is closed; err is [ErrInvalidData] if the group is
+// unreadable or invalid.
+func (s *Seekable) BlockCompressedSize(blockIdx uint32) (size uint32, ok bool, err error) {
 	if s == nil || s.ptr == nil || blockIdx >= s.NumBlocks() {
-		return 0, false
+		return 0, false, nil
 	}
-	return uint32(C.zxc_seekable_get_block_comp_size(s.ptr, C.uint32_t(blockIdx))), true
+	s.busy++
+	sz := uint32(C.zxc_seekable_get_block_comp_size(s.ptr, C.uint32_t(blockIdx)))
+	s.busy--
+	// 0 is never a real size: the group is unreadable or invalid.
+	if sz == 0 {
+		return 0, true, ErrInvalidData
+	}
+	return sz, true, nil
 }
 
 // BlockDecompressedSize returns the decompressed size of a specific block.
@@ -221,6 +238,9 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 	if s == nil || s.ptr == nil {
 		return 0, ErrNullInput
 	}
+	if s.ranging {
+		return 0, ErrSeekableInUse
+	}
 	if length < 0 {
 		return 0, ErrInvalidData
 	}
@@ -231,6 +251,8 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 	if len(dst) > 0 {
 		dptr = unsafe.Pointer(&dst[0])
 	}
+	s.busy++
+	s.ranging = true
 	res := C.zxc_seekable_decompress_range(
 		s.ptr,
 		dptr,
@@ -238,6 +260,8 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 		C.uint64_t(offset),
 		C.size_t(length),
 	)
+	s.ranging = false
+	s.busy--
 	if res < 0 {
 		return 0, errorFromCode(res)
 	}
@@ -280,6 +304,9 @@ func (s *Seekable) SetDictionary(d *Dictionary) error {
 func (s *Seekable) SetDict(dict, hufLengths []byte) error {
 	if s == nil || s.ptr == nil {
 		return ErrNullInput
+	}
+	if s.busy > 0 {
+		return ErrSeekableInUse
 	}
 	if len(dict) == 0 {
 		return ErrSrcTooSmall
