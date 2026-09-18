@@ -48,10 +48,11 @@
 /**
  * @brief Byte size of a seek table holding @p num_blocks blocks: header, then groups.
  *
- * Public API; sizes the destination of @ref zxc_write_seek_table. 0 when the
- * table does not fit size_t (32-bit hosts).
+ * Public API; sizes the destination of @ref zxc_write_seek_table. 0 when the table
+ * does not fit size_t (32-bit hosts) or @p num_blocks is past what one can describe.
  */
 size_t zxc_seek_table_size(const uint64_t num_blocks) {
+    if (UNLIKELY(num_blocks > UINT64_MAX / ZXC_SEEK_ANCHOR_SIZE)) return 0;
     const uint64_t bytes = zxc_seek_table_bytes(num_blocks);
     if (UNLIKELY(bytes > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return 0;
     return ZXC_BLOCK_HEADER_SIZE + (size_t)bytes;
@@ -246,9 +247,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
                                (file_has_chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0U);
     const uint64_t data_area = eof_off - ZXC_FILE_HEADER_SIZE;
 
-    const uint64_t min_span = num_blocks > UINT64_MAX / ZXC_BLOCK_HEADER_SIZE
-                                  ? UINT64_MAX
-                                  : num_blocks * ZXC_BLOCK_HEADER_SIZE;
+    const uint64_t min_span = num_blocks * ZXC_BLOCK_HEADER_SIZE;
     const uint64_t max_span =
         num_blocks > UINT64_MAX / entry_max ? UINT64_MAX : num_blocks * entry_max;
     if (UNLIKELY(data_area < min_span || data_area > max_span)) return NULL;
@@ -407,16 +406,27 @@ uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s, const uint64_t 
 }
 
 /**
- * @brief Decompressed byte size of a given block.
+ * @brief Decompressed size of block @p idx (O(1)).
  *
- * Every block decompresses to @c block_size except the last, which holds the
- * remainder of @c total_decomp.
+ * Returns @p block_size for every block except the last, which holds the
+ * remainder of @p total_decomp.
+ *
+ * @param[in] block_size    Fixed decompressed block size.
+ * @param[in] total_decomp  Total decompressed archive size.
+ * @param[in] idx           Zero-based block index.
+ * @return Decompressed byte size of block @p idx.
  */
+static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t total_decomp,
+                                     const uint64_t idx) {
+    const uint64_t start = idx * (uint64_t)block_size;
+    const uint64_t remaining = total_decomp - start;
+    return (remaining >= (uint64_t)block_size) ? block_size : (uint32_t)remaining;
+}
+
+/** @brief Decompressed byte size of a given block. */
 uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint64_t block_idx) {
     if (UNLIKELY(!s || block_idx >= s->num_blocks)) return 0;
-    const uint64_t start = block_idx * (uint64_t)s->block_size;
-    const uint64_t remaining = s->total_decomp - start;
-    return (remaining >= (uint64_t)s->block_size) ? s->block_size : (uint32_t)remaining;
+    return zxc_seek_decomp_size(s->block_size, s->total_decomp, block_idx);
 }
 
 // =========================================================================
@@ -441,24 +451,6 @@ static uint64_t zxc_seek_find_block(const uint32_t block_size, const uint64_t of
  */
 static uint64_t zxc_seek_decomp_offset(const uint32_t block_size, const uint64_t idx) {
     return idx * (uint64_t)block_size;
-}
-
-/**
- * @brief Decompressed size of block @p idx (O(1)).
- *
- * Returns @p block_size for every block except the last, which holds the
- * remainder of @p total_decomp.
- *
- * @param[in] block_size    Fixed decompressed block size.
- * @param[in] total_decomp  Total decompressed archive size.
- * @param[in] idx           Zero-based block index.
- * @return Decompressed byte size of block @p idx.
- */
-static uint32_t zxc_seek_decomp_size(const uint32_t block_size, const uint64_t total_decomp,
-                                     const uint64_t idx) {
-    const uint64_t start = idx * (uint64_t)block_size;
-    const uint64_t remaining = total_decomp - start;
-    return (remaining >= (uint64_t)block_size) ? block_size : (uint32_t)remaining;
 }
 
 /**

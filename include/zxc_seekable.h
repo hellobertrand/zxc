@@ -219,9 +219,9 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst,
  * decompression context and reads through @c pread() (POSIX) or @c ReadFile()
  * (Windows), so the I/O stays lock-free.
  *
- * Falls back to the single-threaded path when @p n_threads <= 1 or the range
- * fits in one block. Same checksum rule as
- * @ref zxc_seekable_decompress_range.
+ * Falls back to the single-threaded path when @p n_threads <= 1, the range fits
+ * in one block, or it spans more than 2^32 blocks (16 TiB of @p dst). Same
+ * checksum rule as @ref zxc_seekable_decompress_range.
  *
  * @param[in,out] s            Seekable handle.
  * @param[out]    dst          Destination buffer.

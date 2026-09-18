@@ -447,21 +447,17 @@ static void* zxc_async_writer(void* arg) {
         // Seekable: record compressed block size
         if (args->seek_comp && ctx->compression_mode == 1) {
             if (UNLIKELY(args->seek_count >= args->seek_cap)) {
-                // One resident u32 per block: the wall is what size_t can
-                // address, the count itself is 64-bit.
                 const uint64_t max_cap = SIZE_MAX / sizeof(uint32_t);
                 uint32_t* nc = NULL;
-                int cause = ZXC_ERROR_OVERFLOW;
                 if (LIKELY(args->seek_cap < max_cap)) {
                     args->seek_cap = args->seek_cap < max_cap / 2 ? args->seek_cap * 2 : max_cap;
                     nc = (uint32_t*)ZXC_REALLOC(args->seek_comp,
                                                 (size_t)args->seek_cap * sizeof(uint32_t));
-                    cause = ZXC_ERROR_MEMORY;
                 }
                 // LCOV_EXCL_START
                 if (UNLIKELY(!nc)) {
                     pthread_mutex_lock(&ctx->lock);
-                    if (!ctx->fail_code) ctx->fail_code = cause;
+                    if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_MEMORY;
                     ctx->io_error = 1;
                     job->status = JOB_STATUS_FREE;
                     pthread_cond_signal(&ctx->cond_reader);

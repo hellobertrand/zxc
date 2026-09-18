@@ -1,7 +1,7 @@
 # ZXC API & ABI Reference
 
 **Library version**: 0.14.0
-**SOVERSION**: 4  
+**SOVERSION**: 5  
 **License**: BSD-3-Clause
 
 This document is the authoritative reference for the public API surface and ABI
@@ -137,7 +137,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 
 | Field | Description | Current |
 |-------|-------------|---------|
-| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **4** |
+| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **5** |
 | `VERSION` | Tracks the library release. | **0.14.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
@@ -147,8 +147,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.4` -> `libzxc.so.0.14.0` |
-| macOS | `libzxc.dylib` -> `libzxc.4.dylib` -> `libzxc.0.14.0.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.5` -> `libzxc.so.0.14.0` |
+| macOS | `libzxc.dylib` -> `libzxc.5.dylib` -> `libzxc.0.14.0.dylib` |
 | Windows | `zxc.dll` + `zxc.lib` (import) |
 
 ---

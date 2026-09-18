@@ -21,6 +21,11 @@ int test_seekable_table_sizes() {
         printf("Failed: zero blocks size\n");
         return 0;
     }
+    /* A count whose table would not fit 64 bits: refused, not wrapped. */
+    if (zxc_seek_table_size(1ULL << 62) != 0 || zxc_seek_table_size(UINT64_MAX) != 0) {
+        printf("Failed: counts past a describable table must give 0\n");
+        return 0;
+    }
 
     printf("PASS\n\n");
     return 1;
@@ -269,9 +274,9 @@ int test_seekable_open_query() {
         return 0;
     }
 
-    const uint32_t nb = zxc_seekable_get_num_blocks(s);
+    const uint64_t nb = zxc_seekable_get_num_blocks(s);
     if (nb < 3) {
-        printf("Failed: expected >= 3 blocks, got %u\n", nb);
+        printf("Failed: expected >= 3 blocks, got %llu\n", (unsigned long long)nb);
         zxc_seekable_free(s);
         free(src);
         free(dst);
@@ -2103,7 +2108,7 @@ int test_seekable_eof_with_payload(void) {
         printf("Failed: intact archive does not open\n");
         goto done;
     }
-    const uint32_t n = zxc_seekable_get_num_blocks(s);
+    const uint64_t n = zxc_seekable_get_num_blocks(s);
     zxc_seekable_free(s);
 
     /* [data blocks][EOF 8][SEK 8 + table][footer 8] */

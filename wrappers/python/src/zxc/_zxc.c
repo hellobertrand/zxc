@@ -1957,8 +1957,10 @@ static PyObject* pyzxc_seekable_decompressed_size(PyObject* self, PyObject* caps
 static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) {
     (void)self;
     PyObject* capsule;
-    unsigned long long idx;
-    if (!PyArg_ParseTuple(args, "OK", &capsule, &idx)) return NULL;
+    PyObject* idx_obj;
+    if (!PyArg_ParseTuple(args, "OO", &capsule, &idx_obj)) return NULL;
+    const unsigned long long idx = PyLong_AsUnsignedLongLong(idx_obj);
+    if (idx == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
 
     pyzxc_seekable_holder_t* h = seekable_open_holder(capsule);
     if (!h) return NULL;
@@ -1981,8 +1983,10 @@ static PyObject* pyzxc_seekable_block_comp_size(PyObject* self, PyObject* args) 
 static PyObject* pyzxc_seekable_block_decomp_size(PyObject* self, PyObject* args) {
     (void)self;
     PyObject* capsule;
-    unsigned long long idx;
-    if (!PyArg_ParseTuple(args, "OK", &capsule, &idx)) return NULL;
+    PyObject* idx_obj;
+    if (!PyArg_ParseTuple(args, "OO", &capsule, &idx_obj)) return NULL;
+    const unsigned long long idx = PyLong_AsUnsignedLongLong(idx_obj);
+    if (idx == (unsigned long long)-1 && PyErr_Occurred()) return NULL;
 
     zxc_seekable* s = seekable_from_capsule(capsule);
     if (!s) return NULL;
