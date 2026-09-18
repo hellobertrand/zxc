@@ -10,14 +10,14 @@ FUZZERS="decompress roundtrip seekable pstream dict"
 
 LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_pivco_tables.c src/lib/zxc_pstream.c src/lib/zxc_seekable.c"
 
+ZXC_CFLAGS="-I include -I src/lib/vendors \
+    -DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT \
+    -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
+
+$CC $CFLAGS $ZXC_CFLAGS -c $LIB_SOURCES
+
 for fuzzer in $FUZZERS; do
-    $CC $CFLAGS -I include \
-        -I src/lib/vendors \
-        -DZXC_FUNCTION_SUFFIX=_default -DZXC_ONLY_DEFAULT \
-        -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE \
-        $LIB_SOURCES \
-        tests/fuzz_${fuzzer}.c \
-        -o $OUT/zxc_fuzzer_${fuzzer} \
-        $LIB_FUZZING_ENGINE \
-        -lm -pthread
+    $CC $CFLAGS $ZXC_CFLAGS -c tests/fuzz_${fuzzer}.c
+    $CXX $CXXFLAGS fuzz_${fuzzer}.o zxc_*.o -o $OUT/zxc_fuzzer_${fuzzer} \
+        $LIB_FUZZING_ENGINE -lm -pthread
 done
