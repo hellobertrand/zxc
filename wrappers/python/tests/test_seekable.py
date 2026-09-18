@@ -140,7 +140,7 @@ class TestSeekableReader:
                 return compressed[offset : offset + length]
 
         with zxc.Seekable(Reader()) as s:
-            assert calls[0] == 3  # header, footer, seek table
+            assert calls[0] == 3  # header, footer, EOF/SEK block headers
             assert s.decompressed_size == len(payload)
             out = s.decompress_range(0, len(payload))
             assert out == payload
@@ -148,7 +148,8 @@ class TestSeekableReader:
             before = calls[0]
             chunk = s.decompress_range(2048, 1024)
             assert chunk == payload[2048 : 2048 + 1024]
-            assert calls[0] - before == 1
+            # Its seek table entries, then the block.
+            assert calls[0] - before == 2
 
     def test_reader_exception_propagates(self, tmp_path):
         # The reader's own exception (with its message) must reach the caller,
@@ -198,6 +199,83 @@ class TestSeekableReader:
             armed[0] = True
             assert s.decompress_range(0, len(payload)) == payload
             assert not armed[0]
+
+    def test_block_compressed_size_reader_exception_propagates(self, tmp_path):
+        # block_compressed_size reads the block's entry through the reader too:
+        # its exception must reach the caller, not come back as a size of 0.
+        payload = build_payload(128 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        attempted = [0]
+
+        class BadReader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                attempted[0] += 1
+                if attempted[0] > 3:  # header, footer, block headers; then the entry
+                    raise IOError("boom")
+                return compressed[offset : offset + length]
+
+        with zxc.Seekable(BadReader()) as s:
+            with pytest.raises(IOError, match="boom"):
+                s.block_compressed_size(0)
+
+    @pytest.mark.parametrize("call", ["block_compressed_size", "decompress_range"])
+    @pytest.mark.parametrize("action", ["close", "set_dict"])
+    def test_handle_change_from_reader_is_refused(self, tmp_path, call, action):
+        # close() or set_dict() from the reader would free what the running call uses.
+        payload = build_payload(128 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        hostile = [False]
+        handle = []
+
+        class HostileReader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                if hostile[0]:
+                    if action == "close":
+                        handle[0].close()
+                    else:
+                        handle[0].set_dict(b"x" * 64)
+                return compressed[offset : offset + length]
+
+        with zxc.Seekable(HostileReader()) as s:
+            handle.append(s)
+            hostile[0] = True
+            with pytest.raises(RuntimeError, match="in use|while a call"):
+                if call == "block_compressed_size":
+                    s.block_compressed_size(0)
+                else:
+                    s.decompress_range(0, 1024)
+            hostile[0] = False
+            assert s.decompress_range(0, len(payload)) == payload
+
+    def test_reader_may_query_sizes_but_not_nest_a_range(self, tmp_path):
+        # The getter only reads the table; a nested range would share the running
+        # one's decode context.
+        payload = build_payload(128 * 1024)
+        compressed = build_seekable_archive_stream(payload, tmp_path)
+        armed = [False]
+        seen = []
+        handle = []
+
+        class Reader:
+            size = len(compressed)
+
+            def read_at(self, length, offset):
+                if armed[0]:
+                    armed[0] = False
+                    seen.append(handle[0].block_compressed_size(0))
+                    with pytest.raises(RuntimeError, match="in use"):
+                        handle[0].decompress_range(0, 16)
+                return compressed[offset : offset + length]
+
+        with zxc.Seekable(Reader()) as s:
+            handle.append(s)
+            armed[0] = True
+            assert s.decompress_range(0, len(payload)) == payload
+            assert seen == [s.block_compressed_size(0)]
 
     def test_reader_multithreaded_decode(self, tmp_path):
         # Regression: multi-threaded decode with a Python reader used to

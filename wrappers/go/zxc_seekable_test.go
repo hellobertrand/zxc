@@ -120,14 +120,44 @@ func TestSeekableOpenAndQuery(t *testing.T) {
 		t.Fatalf("NumBlocks = 0, want >= 1")
 	}
 
-	if cs, ok := s.BlockCompressedSize(0); !ok || cs == 0 {
-		t.Fatalf("BlockCompressedSize(0) = %d ok=%v", cs, ok)
+	if cs, ok, err := s.BlockCompressedSize(0); !ok || err != nil || cs == 0 {
+		t.Fatalf("BlockCompressedSize(0) = %d ok=%v err=%v", cs, ok, err)
 	}
 	if ds, ok := s.BlockDecompressedSize(0); !ok || ds == 0 {
 		t.Fatalf("BlockDecompressedSize(0) = %d ok=%v", ds, ok)
 	}
-	if _, ok := s.BlockCompressedSize(s.NumBlocks()); ok {
-		t.Fatalf("BlockCompressedSize(out-of-range) should fail")
+	if _, ok, err := s.BlockCompressedSize(s.NumBlocks()); ok || err != nil {
+		t.Fatalf("BlockCompressedSize(out-of-range) = ok=%v err=%v, want false, nil", ok, err)
+	}
+}
+
+func TestSeekableForgedGroupIsAnError(t *testing.T) {
+	payload := bytes.Repeat([]byte("ZXCseekable_"), 8192)
+	arc, err := os.ReadFile(buildSeekableArchive(t, payload))
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	probe, err := OpenBytes(arc)
+	if err != nil {
+		t.Fatalf("OpenBytes: %v", err)
+	}
+	n := int(probe.NumBlocks())
+	probe.Close()
+	// Group 0's anchor opens the table, before the 16-byte footer (size, digest).
+	table := (n+63)/64*8 + n*4
+	anchor := len(arc) - 16 - table
+	if arc[anchor] != 16 {
+		t.Fatalf("byte %d = %d, not group 0's anchor", anchor, arc[anchor])
+	}
+	arc[anchor] ^= 0xFF
+
+	s, err := OpenBytes(arc)
+	if err != nil {
+		t.Fatalf("OpenBytes must not scan the table: %v", err)
+	}
+	defer s.Close()
+	if _, ok, err := s.BlockCompressedSize(0); !ok || !errors.Is(err, ErrInvalidData) {
+		t.Fatalf("BlockCompressedSize(0) on a forged group: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -233,8 +263,8 @@ func TestSeekableOpenReader(t *testing.T) {
 	}
 	defer s.Close()
 
-	// open_reader should have done exactly 3 reads: header, footer, seek
-	// table.
+	// open_reader should have done exactly 3 reads: header, footer, EOF/SEK
+	// block headers.
 	if got := atomic.LoadInt64(&cr.calls); got != 3 {
 		t.Fatalf("open phase calls = %d, want 3", got)
 	}
@@ -252,7 +282,7 @@ func TestSeekableOpenReader(t *testing.T) {
 		t.Fatalf("payload mismatch after full DecompressRange")
 	}
 
-	// Sub-range within a single block: must trigger exactly one extra read.
+	// Sub-range within a single block: its seek table entries, then the block.
 	before := atomic.LoadInt64(&cr.calls)
 	chunk := make([]byte, 1024)
 	if _, err := s.DecompressRange(chunk, 100, 1024); err != nil {
@@ -261,8 +291,72 @@ func TestSeekableOpenReader(t *testing.T) {
 	if !bytes.Equal(chunk, payload[100:1124]) {
 		t.Fatalf("sub-range mismatch")
 	}
-	if delta := atomic.LoadInt64(&cr.calls) - before; delta != 1 {
-		t.Fatalf("single-block sub-range should trigger 1 read, got %d", delta)
+	if delta := atomic.LoadInt64(&cr.calls) - before; delta != 2 {
+		t.Fatalf("single-block sub-range should trigger 2 reads (entries, block), got %d", delta)
+	}
+}
+
+// hookReaderAt runs hook once, on its next read.
+type hookReaderAt struct {
+	inner io.ReaderAt
+	hook  func()
+}
+
+func (h *hookReaderAt) ReadAt(p []byte, off int64) (int, error) {
+	if f := h.hook; f != nil {
+		h.hook = nil
+		f()
+	}
+	return h.inner.ReadAt(p, off)
+}
+
+// From ReadAt all is refused but a range under the getter, which shares nothing.
+func TestSeekableReentryFromReader(t *testing.T) {
+	payload := bytes.Repeat([]byte("ZXCseekable_"), 8192)
+	arc, err := os.ReadFile(buildSeekableArchive(t, payload))
+	if err != nil {
+		t.Fatalf("read archive: %v", err)
+	}
+	rd := &hookReaderAt{inner: bytes.NewReader(arc)}
+	s, err := OpenReader(rd, int64(len(arc)))
+	if err != nil {
+		t.Fatalf("OpenReader: %v", err)
+	}
+	defer s.Close()
+
+	dst := make([]byte, len(payload))
+	calls := map[string]func() error{
+		"BlockCompressedSize": func() error { _, _, err := s.BlockCompressedSize(0); return err },
+		"DecompressRange":     func() error { _, err := s.DecompressRange(dst, 0, len(dst)); return err },
+	}
+	actions := map[string]func() error{
+		"Close":           s.Close,
+		"SetDict":         func() error { return s.SetDict([]byte("x"), nil) },
+		"DecompressRange": func() error { _, err := s.DecompressRange(make([]byte, 16), 0, 16); return err },
+	}
+	cases := []struct {
+		call, action string
+		want         error
+	}{
+		{"BlockCompressedSize", "Close", ErrSeekableInUse},
+		{"BlockCompressedSize", "SetDict", ErrSeekableInUse},
+		{"BlockCompressedSize", "DecompressRange", nil},
+		{"DecompressRange", "Close", ErrSeekableInUse},
+		{"DecompressRange", "SetDict", ErrSeekableInUse},
+		{"DecompressRange", "DecompressRange", ErrSeekableInUse},
+	}
+	for _, c := range cases {
+		got := errors.New("hook not run")
+		rd.hook = func() { got = actions[c.action]() }
+		if err := calls[c.call](); err != nil {
+			t.Fatalf("%s with %s from ReadAt: %v", c.call, c.action, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s from ReadAt during %s: %v, want %v", c.action, c.call, got, c.want)
+		}
+	}
+	if n, err := s.DecompressRange(dst, 0, len(dst)); err != nil || !bytes.Equal(dst[:n], payload) {
+		t.Fatalf("handle after the refusals: n=%d err=%v", n, err)
 	}
 }
 
