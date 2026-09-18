@@ -25,19 +25,40 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 - **Dictionary mode for small data.** A corpus-trained dictionary (`zxc --train`) prefills the LZ77 window at every block start, recovering ratio on payloads too small to build their own history. See [dictionary compression](#dictionary-compression).
 - **Broadly packaged.** Conan, vcpkg, Homebrew, Winget and Rust/Python/Node packages.
 
-## Quick start
+## Benchmarks
 
-```bash
-# Install (pick your package manager)
-brew install zxc
-conan install --requires="zxc/[*]"     # or: vcpkg install zxc
+**Decompression speed against the closest competitor at each ratio tier** — Silesia corpus (202 MB),
+single-threaded:
 
-# Compress once, decompress fast
-zxc -5 assets.tar assets.tar.zxc
-zxc -d assets.tar.zxc assets.tar
-```
+| Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
+| :--- | ---: | ---: | ---: | ---: |
+| Apple M2 | **2.62x** | **1.75x** | **1.50x** | **2.60x** |
+| Axion (Neoverse-V2) | **1.92x** | **1.41x** | **1.25x** | **1.94x** |
+| EPYC 9B45 (Zen 5) | **2.20x** | **1.36x** | **1.19x** | **2.21x** |
+| EPYC 7B13 (Zen 3) | **1.81x** | **1.22x** | **1.10x** | **2.13x** |
 
-> **Independently verified:** ZXC is merged into both major open-source compression benchmark suites — [lzbench](https://github.com/inikep/lzbench) (master, by @inikep) and [TurboBench](https://github.com/powturbo/TurboBench) (master, by @powturbo). Every number in this README is reproducible with either tool, alongside 70+ other codecs.
+The speed is not bought with ratio: ZXC is also *smaller* in all four pairings — 61.76 vs 62.15,
+46.09 vs 47.60, 36.28 vs 36.75 and 33.09 vs 34.53 %.
+
+*Decompression Speed vs Compressed Size — ARM64 Apple M2*
+
+![Decompression Speed vs Compressed Size](docs/images/bench-arm64.svg)
+
+*Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers, across 4 CPUs (Fast ≈ 62%, Default ≈ 47%, High ≈ 37%)*
+
+![Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers](docs/images/bench-bars.svg)
+
+Measured with [lzbench](https://github.com/inikep/lzbench) 2.3.1 (from
+[@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
+machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
+/ Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
+commit ([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)); every
+number is reproducible with lzbench or [TurboBench](https://github.com/powturbo/TurboBench), where
+ZXC is merged alongside 70+ other codecs. Per-level tables for every machine, cycles per byte and
+memory figures live in the **[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**;
+the ratio-normalized view is under [Effective Throughput](#effective-throughput).
+
+---
 
 ## Design Philosophy: Asymmetric Efficiency
 
@@ -50,50 +71,13 @@ The encoder does the heavy lifting upfront — match selection, optimal parsing,
 
 [👉 **Read the Technical Whitepaper**](docs/WHITEPAPER.md)
 
-
-## Benchmarks
-
-Silesia corpus (202 MB), single-threaded, [lzbench](https://github.com/inikep/lzbench) 2.3.1 (from
-[@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
-machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
-/ Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
-commit ([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)).
-
-**Decompression speed, against the closest competitor at each ratio tier:**
-
-| Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
-| :--- | ---: | ---: | ---: | ---: |
-| Apple M2 | **2.62x** | **1.75x** | **1.50x** | **2.60x** |
-| Axion (Neoverse-V2) | **1.92x** | **1.41x** | **1.25x** | **1.94x** |
-| EPYC 9B45 (Zen 5) | **2.20x** | **1.36x** | **1.19x** | **2.21x** |
-| EPYC 7B13 (Zen 3) | **1.81x** | **1.22x** | **1.10x** | **2.13x** |
-
-The speed is not bought with ratio: ZXC is also *smaller* in all four pairings — 61.76 vs 62.15,
-46.09 vs 47.60, 36.28 vs 36.75 and 33.09 vs 34.53 %. Per-level tables for every machine, cycles per
-byte and memory figures live in the
-**[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**.
-
-*Decompression Speed vs Compressed Size — ARM64 Apple M2*
-
-![Decompression Speed vs Compressed Size](docs/images/bench-arm64.svg)
-
-*Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers, across 4 CPUs (Fast ≈ 62%, Default ≈ 47%, High ≈ 37%)*
-
-![Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers](docs/images/bench-bars.svg)
-
-*Effective Throughput : Ratio-Normalized Decode across ARM64 and x86 (decode x 100 / ratio%, LZ4 baseline = 1.00x)*
-
-![Effective Throughput](docs/images/bench-effective.svg)
-
-> **What is Effective Throughput?**
->
-> Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
->
-> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.19x on Apple Silicon** and ranging **1.26x–1.83x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.05x–1.40x**), at a 33.09% ratio.
-
----
-
 ## Installation
+
+```bash
+brew install zxc                       # or winget, vcpkg, Conan, cargo, pip, npm: see below
+zxc -5 assets.tar assets.tar.zxc       # compress once
+zxc -d assets.tar.zxc assets.tar       # decompress fast
+```
 
 ZXC is packaged across major ecosystems and kept current by their maintainers:
 
@@ -184,6 +168,18 @@ and building from source, with the full option table and the PGO workflow:
 *   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstd.
 *   **Level 6 (Density):** Beats LZ4HC on both axes — better ratio *and* faster decode on every measured platform — while staying in the multi-GB/s decode class. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
 *   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding several times faster than it. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
+
+## Effective Throughput
+
+*Effective Throughput: Ratio-Normalized Decode across ARM64 and x86 (decode x 100 / ratio%, LZ4 baseline = 1.00x)*
+
+![Effective Throughput](docs/images/bench-effective.svg)
+
+> **What is Effective Throughput?**
+>
+> Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
+>
+> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.19x on Apple Silicon** and ranging **1.26x–1.83x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.05x–1.40x**), at a 33.09% ratio.
 
 ## Block Size Tuning
 
