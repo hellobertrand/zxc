@@ -9,6 +9,7 @@ package zxc
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -134,6 +135,41 @@ func TestEmptyInput(t *testing.T) {
 		if len(out) != 0 {
 			t.Fatalf("empty must round-trip to empty, got %d bytes", len(out))
 		}
+	}
+}
+
+func TestDecompressMaxOutputSize(t *testing.T) {
+	data := bytes.Repeat([]byte("max output size "), 64)
+	comp, err := Compress(data)
+	if err != nil {
+		t.Fatalf("Compress: %v", err)
+	}
+	if out, err := Decompress(comp, WithMaxOutputSize(uint64(len(data)))); err != nil || !bytes.Equal(out, data) {
+		t.Fatalf("limit = size: %v", err)
+	}
+	if _, err := Decompress(comp, WithMaxOutputSize(uint64(len(data)-1))); !errors.Is(err, ErrDstTooSmall) {
+		t.Fatalf("limit = size-1: want ErrDstTooSmall, got %v", err)
+	}
+	if out, err := Decompress(comp); err != nil || !bytes.Equal(out, data) {
+		t.Fatalf("no limit: %v", err)
+	}
+
+	empty, err := Compress(nil)
+	if err != nil {
+		t.Fatalf("Compress(empty): %v", err)
+	}
+	if out, err := Decompress(empty, WithMaxOutputSize(0)); err != nil || len(out) != 0 {
+		t.Fatalf("empty, limit 0: got %d bytes, %v", len(out), err)
+	}
+}
+
+func TestDecompressMaxOutputSizeBomb(t *testing.T) {
+	comp, err := Compress(make([]byte, 64<<20))
+	if err != nil {
+		t.Fatalf("Compress: %v", err)
+	}
+	if _, err := Decompress(comp, WithMaxOutputSize(1<<20)); !errors.Is(err, ErrDstTooSmall) {
+		t.Fatalf("want ErrDstTooSmall, got %v", err)
 	}
 }
 

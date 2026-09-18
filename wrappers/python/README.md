@@ -35,6 +35,9 @@ assert zxc.decompress(blob) == data
 protocol - `bytes`, `bytearray`, `memoryview`, NumPy arrays - and release the
 GIL, so Python threads run them in true parallel.
 
+For untrusted input, cap the output: `decompress(..., max_output_size=n)`,
+likewise `Dctx.decompress()`.
+
 ## Compression Levels
 
 ```python

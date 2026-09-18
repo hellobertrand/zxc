@@ -202,6 +202,9 @@ pub struct DecompressOptions {
     /// Must match the table used at compression time (the archive's dict_id
     /// binds the (dict, table) pair).
     pub dict_huf: Option<Vec<u8>>,
+
+    /// Output cap in bytes (default: `None`); set it for untrusted input.
+    pub max_output_size: Option<usize>,
 }
 
 impl Default for DecompressOptions {
@@ -210,6 +213,7 @@ impl Default for DecompressOptions {
             verify_checksum: true,
             dict: None,
             dict_huf: None,
+            max_output_size: None,
         }
     }
 }
@@ -239,6 +243,12 @@ impl DecompressOptions {
     pub fn with_dictionary(mut self, dictionary: &Dictionary) -> Self {
         self.dict = Some(dictionary.content().to_vec());
         self.dict_huf = Some(dictionary.huf().to_vec());
+        self
+    }
+
+    /// Fail with [`Error::DstTooSmall`] when the archive declares more than `n` bytes.
+    pub fn with_max_output_size(mut self, n: usize) -> Self {
+        self.max_output_size = Some(n);
         self
     }
 }

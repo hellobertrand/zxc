@@ -72,6 +72,8 @@ func main() {
 }
 ```
 
+For untrusted input, cap the output of `Decompress` with `zxc.WithMaxOutputSize(n)`.
+
 ## Streaming Files
 
 ```go

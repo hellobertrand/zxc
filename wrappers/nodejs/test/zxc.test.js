@@ -193,6 +193,64 @@ describe("error handling", () => {
 });
 
 // =============================================================================
+// Output cap (maxOutputSize)
+// =============================================================================
+
+function errorShape(fn) {
+  try {
+    fn();
+  } catch (err) {
+    return [err.constructor, err.name, err.message, err.code, Object.keys(err)];
+  }
+  throw new Error("Should have thrown");
+}
+
+describe("maxOutputSize", () => {
+  const data = Buffer.from("output cap test".repeat(100));
+  const compressed = zxc.compress(data);
+  // The C decoder's own error, from a destination one byte short.
+  const dstTooSmall = errorShape(() =>
+    zxc.decompress(compressed, { size: data.length - 1 }),
+  );
+
+  test("allows the exact size, rejects one byte less", () => {
+    expect(dstTooSmall[3]).toBe(zxc.ERROR_DST_TOO_SMALL);
+    const out = zxc.decompress(compressed, { maxOutputSize: data.length });
+    expect(out.equals(data)).toBe(true);
+    expect(
+      errorShape(() =>
+        zxc.decompress(compressed, { maxOutputSize: data.length - 1 }),
+      ),
+    ).toEqual(dstTooSmall);
+  });
+
+  test("allows 0 for an empty payload", () => {
+    const empty = zxc.compress(Buffer.alloc(0));
+    expect(zxc.decompress(empty, { maxOutputSize: 0 }).length).toBe(0);
+  });
+
+  test("stops a decompression bomb", () => {
+    const bomb = zxc.compress(Buffer.alloc(64 << 20));
+    expect(zxc.getDecompressedSize(bomb)).toBe(64 << 20);
+    expect(
+      errorShape(() => zxc.decompress(bomb, { maxOutputSize: 1 << 20 })),
+    ).toEqual(dstTooSmall);
+  });
+
+  test("is unlimited by default, and validated", () => {
+    expect(zxc.decompress(compressed).equals(data)).toBe(true);
+    const cap = (maxOutputSize) => () =>
+      zxc.decompress(compressed, { maxOutputSize });
+    for (const bad of [-1, 1.5, 2 ** 53, Infinity, NaN]) {
+      expect(cap(bad)).toThrow(RangeError);
+    }
+    for (const bad of ["1", null, 1n]) {
+      expect(cap(bad)).toThrow(TypeError);
+    }
+  });
+});
+
+// =============================================================================
 // Push Streaming API (zxc.CStream / zxc.DStream)
 // =============================================================================
 

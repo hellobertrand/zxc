@@ -241,13 +241,13 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(seek_off < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE)) return NULL;
     const uint64_t eof_off = seek_off - ZXC_BLOCK_HEADER_SIZE;
 
-    // Geometry only, no table read: num_blocks blocks of [header, entry_max] bytes
-    // must fit the data area. Groups are checked on access.
+    // Geometry only, no table read: the blocks must fit the data area, between
+    // their densest encoding and entry_max bytes each. Groups are checked on access.
     const uint64_t entry_max = (uint64_t)ZXC_BLOCK_HEADER_SIZE + block_size +
                                (file_has_chk ? ZXC_BLOCK_CHECKSUM_SIZE : 0U);
     const uint64_t data_area = eof_off - ZXC_FILE_HEADER_SIZE;
 
-    const uint64_t min_span = num_blocks * ZXC_BLOCK_HEADER_SIZE;
+    const uint64_t min_span = zxc_blocks_min_span(total_decomp, block_size, file_has_chk);
     const uint64_t max_span =
         num_blocks > UINT64_MAX / entry_max ? UINT64_MAX : num_blocks * entry_max;
     if (UNLIKELY(data_area < min_span || data_area > max_span)) return NULL;

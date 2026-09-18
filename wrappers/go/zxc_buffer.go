@@ -137,9 +137,10 @@ func DecompressedSize(data []byte) (uint64, error) {
 // Decompress decompresses ZXC-compressed data.
 //
 // The output size is read from the compressed data footer. For pre-allocated
-// buffers, use [DecompressTo].
+// buffers, use [DecompressTo]. Use [WithMaxOutputSize] when the input is
+// untrusted.
 //
-// Options: [WithChecksum].
+// Options: [WithChecksum], [WithMaxOutputSize].
 func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, ErrInvalidData
@@ -160,6 +161,9 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
 	))
+	if o.maxOutputSizeSet && size > o.maxOutputSize {
+		return nil, ErrDstTooSmall
+	}
 
 	// The footer value is plausibility-checked in C (a forged size returns 0);
 	// only guard what Go's make() cannot represent.

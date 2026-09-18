@@ -363,6 +363,7 @@ mod tests {
             verify_checksum: true,
             dict: Some(dict),
             dict_huf: None,
+            max_output_size: None,
         };
         let restored = decompress_with_options(&archive, &dopts).expect("decompress with dict");
         assert_eq!(restored, sample);

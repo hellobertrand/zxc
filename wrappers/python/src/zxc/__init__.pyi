@@ -64,6 +64,8 @@ def decompress(
     checksum: bool = False,
     dict: Optional[bytes] = None,
     dict_huf: Optional[bytes] = None,
+    *,
+    max_output_size: Optional[int] = None,
 ) -> bytes: ...
 def stream_compress(
     src: FileLike,
@@ -154,7 +156,13 @@ class Dctx:
         dict: "Dictionary | bytes | None" = None,
         dict_huf: bytes | None = None,
     ) -> None: ...
-    def decompress(self, data: bytes, decompress_size: int | None = None) -> bytes: ...
+    def decompress(
+        self,
+        data: bytes,
+        decompress_size: int | None = None,
+        *,
+        max_output_size: int | None = None,
+    ) -> bytes: ...
     def close(self) -> None: ...
     def __enter__(self) -> "Dctx": ...
     def __exit__(self, exc_type, exc, tb) -> bool: ...

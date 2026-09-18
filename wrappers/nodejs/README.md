@@ -59,11 +59,12 @@ Returns: `Buffer` - compressed data.
 
 Decompress a ZXC compressed Buffer.
 
-| Parameter          | Type      | Default | Description                |
-| ------------------ | --------- | ------- | -------------------------- |
-| `data`             | `Buffer`  | -       | Compressed data            |
-| `options.size`     | `number`  | auto    | Expected decompressed size |
-| `options.checksum` | `boolean` | `false` | Verify checksum            |
+| Parameter               | Type      | Default | Description                            |
+| ----------------------- | --------- | ------- | -------------------------------------- |
+| `data`                  | `Buffer`  | -       | Compressed data                        |
+| `options.size`          | `number`  | auto    | Expected decompressed size             |
+| `options.checksum`      | `boolean` | `false` | Verify checksum                        |
+| `options.maxOutputSize` | `number`  | no cap  | Output cap; set it for untrusted input |
 
 Returns: `Buffer` - decompressed data.
 
@@ -88,7 +89,8 @@ cctx.close();
 dctx.close();
 ```
 
-A context is not thread-safe, and `close()` is idempotent.
+`dctx.decompress(data, { maxOutputSize })` takes the same output cap. A
+context is not thread-safe, and `close()` is idempotent.
 
 ### `compressBound(inputSize)`
 
