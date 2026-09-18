@@ -2181,7 +2181,7 @@ void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
  *
  * @return @ref ZXC_BLOCK_HEADER_SIZE, or a negative @ref zxc_error_t.
  */
-int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint32_t num_blocks);
+int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint64_t num_blocks);
 
 /**
  * @brief Writes one group (@p *anchor, then @p cnt sizes) into @p dst, which holds
