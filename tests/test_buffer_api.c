@@ -276,7 +276,7 @@ int test_buffer_error_codes() {
             free(src);
             free(full_dst);
         } else {
-            // EOF header(8) + footer(12) = 20 bytes at the end.
+            // EOF header(8) + footer(8) = 16 bytes at the end.
             // Try with a buffer that's just a few bytes too small.
             const size_t tight = (size_t)full_sz - 5;
             uint8_t* tight_dst = malloc(tight);
@@ -415,7 +415,7 @@ int test_buffer_error_codes() {
 
     // 13. Truncated at EOF (missing footer)
     {
-        // Find the EOF block: it ends with the footer(12 bytes)
+        // Find the EOF block: it ends with the footer(8 bytes)
         // Truncate so the footer is missing
         const size_t trunc_sz = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE + 2;  // Cut most of footer
         uint8_t* out = malloc(test_src_sz);

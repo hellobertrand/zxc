@@ -633,10 +633,9 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     // LCOV_EXCL_STOP
     op += h_val;
 
-    // Seekable: dynamic array for per-block compressed sizes
+    // Seekable: one compressed size per block, at most block_count + 1 of them.
     uint32_t* seek_comp = NULL;
     uint32_t seek_count = 0;
-    uint32_t seek_cap = 0;
     if (seekable) {
         const size_t block_count = src_size / block_size;
         if (UNLIKELY(block_count > (size_t)UINT32_MAX - 2)) {
@@ -645,8 +644,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
             return ZXC_ERROR_BAD_BLOCK_SIZE;
             // LCOV_EXCL_STOP
         }
-        seek_cap = (uint32_t)(block_count + 2);
-        seek_comp = (uint32_t*)ZXC_MALLOC(seek_cap * sizeof(uint32_t));
+        seek_comp = (uint32_t*)ZXC_MALLOC((block_count + 2) * sizeof(uint32_t));
         // LCOV_EXCL_START
         if (UNLIKELY(!seek_comp)) {
             zxc_cctx_free(&ctx);
@@ -676,22 +674,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         }
 
         // Seekable: record compressed block size
-        if (seekable) {
-            // LCOV_EXCL_START
-            if (UNLIKELY(seek_count >= seek_cap)) {
-                seek_cap = seek_cap * 2;
-                uint32_t* nc = (uint32_t*)ZXC_REALLOC(seek_comp, seek_cap * sizeof(uint32_t));
-                if (UNLIKELY(!nc)) {
-                    ZXC_FREE(seek_comp);
-                    zxc_cctx_free(&ctx);
-                    return ZXC_ERROR_MEMORY;
-                }
-                seek_comp = nc;
-            }
-            // LCOV_EXCL_STOP
-            seek_comp[seek_count] = (uint32_t)res;
-            seek_count++;
-        }
+        if (seekable) seek_comp[seek_count++] = (uint32_t)res;
         if (checksum_enabled && LIKELY(res >= ZXC_BLOCK_CHECKSUM_SIZE))
             digest = zxc_digest_combine(digest, zxc_le32(op + res - ZXC_BLOCK_CHECKSUM_SIZE));
 
@@ -1019,8 +1002,8 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
  * per-block overhead, not just one block's.
  *
  * `trailing` is everything written after the last data block: EOF header, footer
- * and seek table. The latter is always reserved at its worst case (4 bytes per
- * block, <= 0.1% of the payload) because no header flag announces one; omitting
+ * and seek table. The latter is always reserved at its worst case (about 4 bytes
+ * per block, <= 0.1% of the payload) because no header flag announces one; omitting
  * it used to push the bound *below* comp_size for a seekable archive of
  * incompressible data in small blocks.
  *
@@ -1031,14 +1014,12 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
  */
 static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size,
                                    const int has_cs) {
-    const uint64_t nblocks =
-        chunk_size ? (dsize + (uint64_t)chunk_size - 1) / (uint64_t)chunk_size : 0;
+    const uint64_t nblocks = zxc_seek_block_count(dsize, chunk_size);
     const uint64_t per_block =
         (uint64_t)ZXC_BLOCK_HEADER_SIZE + (has_cs ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0);
     const uint64_t trailing =
-        (uint64_t)ZXC_BLOCK_HEADER_SIZE +  // EOF block header
-        ((uint64_t)ZXC_BLOCK_HEADER_SIZE +
-         nblocks * (uint64_t)ZXC_SEEK_ENTRY_SIZE) +  // Seek table (worst case)
+        (uint64_t)ZXC_BLOCK_HEADER_SIZE +                                    // EOF block header
+        ((uint64_t)ZXC_BLOCK_HEADER_SIZE + zxc_seek_table_bytes(nblocks)) +  // Seek table
         (uint64_t)zxc_footer_bytes(has_cs);
     return (uint64_t)chunk_size + nblocks * per_block + trailing +
            (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;

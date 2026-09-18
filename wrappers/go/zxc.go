@@ -177,6 +177,11 @@ var (
 	// dictionary compression would produce undecodable archives. Static C
 	// contexts report the same condition (ZXC_ERROR_DICT_UNSUPPORTED).
 	ErrDictUnsupported = errors.New("zxc: dictionaries are not supported by the push streaming API")
+
+	// ErrSeekableInUse is returned when ReadAt calls Close, SetDict or a nested
+	// DecompressRange on its [Seekable], which would free or share what the
+	// running call uses.
+	ErrSeekableInUse = errors.New("zxc: seekable handle in use by the running call")
 )
 
 // errorFromCode converts a negative C error code to a Go error.

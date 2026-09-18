@@ -443,7 +443,8 @@ compressed stream run that much longer than the output), everything the encoder
 writes after the last data block, and the wild-copy tail. The trailing bytes
 matter because they sit to the *right* of the read cursor and so push the
 flush-right archive left, into the write cursor's path; no header flag announces
-a seek table, so its worst case (4 bytes per block) is always reserved. Always
+a seek table, so its worst case (one `u64` anchor per 64 blocks plus a `u32` per
+block, about 4.1 bytes per block) is always reserved. Always
 size the buffer with this function rather than re-deriving the formula.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
@@ -1321,8 +1322,8 @@ negative `zxc_error_t` on failure. Short reads are treated as errors.
 
 **Thread safety**: `read_at` MUST be safe to call concurrently from multiple
 threads when the resulting handle is used with
-`zxc_seekable_decompress_range_mt()`. The single-threaded path makes no
-concurrent calls.
+`zxc_seekable_decompress_range_mt()`, or when calls on one handle overlap: all
+of them read through it, `zxc_seekable_get_block_comp_size()` included.
 
 **Lifetime**: `ctx` and the backing storage must remain valid until
 `zxc_seekable_free()`.
@@ -1334,10 +1335,12 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 ```
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
-to fetch the file header, footer, and seek table at open time (3 reads), then
-once per block during decompression. No `FILE*` is involved — this is the
-entry point to use for kernel space, networked storage, or any non-POSIX
-backend.
+to fetch the file header, footer, and the EOF/SEK block headers at open time
+(3 reads, whatever the block count), then one read per seek table group a
+range covers and once per block during decompression;
+`zxc_seekable_get_block_comp_size()` reads the block's group per call. No
+`FILE*` is involved — this is the entry point to use for kernel space,
+networked storage, or any non-POSIX backend.
 
 **Returns**: handle on success, or `NULL` if `r`/`r->read_at` is `NULL`,
 `r->size` is `0`, the archive is not seekable, or any `read_at` call fails.
@@ -1367,7 +1370,10 @@ ZXC_EXPORT uint32_t zxc_seekable_get_block_comp_size(
 );
 ```
 
-Returns the compressed size (on-disk, including header) of a specific block.
+Returns the compressed size (on-disk, including header) of a specific block,
+read from its seek table group, or `0` if `block_idx` is out of range or the
+group is unreadable or invalid. Checked against bounds only: a forged size within
+them comes back as is.
 
 ### `zxc_seekable_get_block_decomp_size`
 
@@ -1395,6 +1401,10 @@ ZXC_EXPORT int64_t zxc_seekable_decompress_range(
 Decompresses `len` bytes starting at byte `offset` in the original
 uncompressed data.  Only the blocks overlapping the requested range are read
 and decompressed.
+
+The seek table is not authenticated: a forged one can return another block's
+bytes with no error. Only verified checksums (`zxc_seekable_set_checksum`) bind a
+block to its position.
 
 **Returns**: `len` on success, or negative `zxc_error_t`.
 
@@ -1590,7 +1600,9 @@ Turns per-block checksum verification on or off for this handle. **Off by
 default**, as in the one-shot API: random access reads whole blocks and
 verifying them costs a hash over each one, so the caller decides. With it on, a
 block whose checksum does not match returns `ZXC_ERROR_BAD_CHECKSUM`; with it
-off, a corrupted block can decode to wrong bytes with no error.
+off, a corrupted block can decode to wrong bytes with no error. Checksums are
+seeded with each block's position, so verification also catches a block moved by
+a forged seek table.
 
 Does nothing on an archive compressed without checksums. May be called at any
 time and applies from the next call on, on both the single- and multi-threaded

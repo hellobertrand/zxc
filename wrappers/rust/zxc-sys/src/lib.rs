@@ -829,8 +829,9 @@ unsafe extern "C" {
 
     /// Opens a seekable archive through a user-supplied [`zxc_reader_t`].
     ///
-    /// The reader is invoked to fetch the file header, footer, and seek table
-    /// at open time (3 reads), then once per block during decompression.
+    /// The reader is invoked to fetch the file header, footer, and EOF/SEK
+    /// block headers at open time (3 reads), then once per seek table group
+    /// and once per block during decompression.
     /// Use this entry point to back the seekable API with any storage that
     /// supports positional reads (mmap, HTTP `Range:`, S3, kernel
     /// `vfs_read()`, etc.).

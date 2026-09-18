@@ -915,7 +915,8 @@ export default async function createZXC(moduleOverrides, factory) {
    * for the lifetime of the handle. Call `.free()` to release both the
    * native handle and the WASM-side copy.
    *
-   * Throws on invalid archives (bad magic, truncated seek table, ...).
+   * Throws if the buffer is not a seekable archive; a corrupt seek table
+   * group throws on access instead.
    *
    * @param {Uint8Array} data - Compressed buffer, ideally produced with
    *        `{ seekable: true }` so it carries an embedded seek table.
@@ -955,7 +956,10 @@ export default async function createZXC(moduleOverrides, factory) {
       },
       blockCompressedSize(idx) {
         if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
-        return _seekable_block_comp_size(handle, idx);
+        const sz = _seekable_block_comp_size(handle, idx);
+        // 0 is never a real size: the group is invalid.
+        if (sz === 0) throw new Error("ZXC: seek table group invalid");
+        return sz;
       },
       blockDecompressedSize(idx) {
         if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
