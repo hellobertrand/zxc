@@ -366,46 +366,38 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
     const __m256i v = _mm256_set1_epi8((char)byte);
     _mm256_storeu_si256((__m256i*)dst, v);
     if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            _mm256_storeu_si256((__m256i*)out, v);
-            out += 32;
-            rem -= 32;
-        }
-        _mm256_storeu_si256((__m256i*)out, v);
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            _mm256_storeu_si256((__m256i*)p, v);
+        } while (p < last);
     }
 #elif defined(ZXC_USE_SSE2)
     const __m128i v = _mm_set1_epi8((char)byte);
     _mm_storeu_si128((__m128i*)dst, v);
     _mm_storeu_si128((__m128i*)(dst + 16), v);
     if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            _mm_storeu_si128((__m128i*)out, v);
-            _mm_storeu_si128((__m128i*)(out + 16), v);
-            out += 32;
-            rem -= 32;
-        }
-        _mm_storeu_si128((__m128i*)out, v);
-        _mm_storeu_si128((__m128i*)(out + 16), v);
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            _mm_storeu_si128((__m128i*)p, v);
+            _mm_storeu_si128((__m128i*)(p + 16), v);
+        } while (p < last);
     }
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     const uint8x16_t v = vdupq_n_u8(byte);
     vst1q_u8(dst, v);
     vst1q_u8(dst + 16, v);
     if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            vst1q_u8(out, v);
-            vst1q_u8(out + 16, v);
-            out += 32;
-            rem -= 32;
-        }
-        vst1q_u8(out, v);
-        vst1q_u8(out + 16, v);
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            vst1q_u8(p, v);
+            vst1q_u8(p + 16, v);
+        } while (p < last);
     }
 #else
     ZXC_MEMSET(dst, byte, ml);
@@ -439,16 +431,12 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
                                                        const uint64_t ll) {
     zxc_copy32(dst, src);
     if (UNLIKELY(ll > 32)) {
-        dst += 32;
-        src += 32;
-        size_t rem = ll - 32;
-        while (rem > 32) {
-            zxc_copy32(dst, src);
+        const uint8_t* const last = dst + ll - 32;
+        do {
             dst += 32;
             src += 32;
-            rem -= 32;
-        }
-        zxc_copy32(dst, src);
+            zxc_copy32(dst, src);
+        } while (dst < last);
     }
 }
 
@@ -481,16 +469,13 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
     if (LIKELY(off >= 32)) {
         zxc_copy32(d_ptr, match_src);
         if (UNLIKELY(ml > 32)) {
-            uint8_t* out = d_ptr + 32;
-            const uint8_t* ref = match_src + 32;
-            size_t rem = ml - 32;
-            while (rem > 32) {
-                zxc_copy32(out, ref);
+            uint8_t* out = d_ptr;
+            const uint8_t* const last = d_ptr + ml - 32;
+            do {
                 out += 32;
-                ref += 32;
-                rem -= 32;
-            }
-            zxc_copy32(out, ref);
+                match_src += 32;
+                zxc_copy32(out, match_src);
+            } while (out < last);
         }
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
