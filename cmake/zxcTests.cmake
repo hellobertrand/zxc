@@ -20,6 +20,7 @@ if(ZXC_BUILD_TESTS)
         tests/test_pstream_api.c
         tests/test_stream_api.c
         tests/test_seekable.c
+        tests/test_size_limit.c
         tests/test_seekable_mt.c
         tests/test_format.c
         tests/test_misc.c

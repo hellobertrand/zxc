@@ -1147,6 +1147,17 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
 }
 
 /**
+ * @brief Decompressed size, or the envelope's verdict; public API, see @c zxc_buffer.h.
+ */
+// cppcheck-suppress unusedFunction
+int64_t zxc_decompressed_size(const void* src, const size_t src_size) {
+    uint64_t dsize = 0;
+    const int rc = zxc_read_frame_envelope((const uint8_t*)src, src_size, &dsize, NULL, NULL);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    return (int64_t)dsize;
+}
+
+/**
  * @brief Reads the dictionary id from a compressed archive's file header.
  *
  * Public API; see @c zxc_buffer.h. Validates the magic, then returns the

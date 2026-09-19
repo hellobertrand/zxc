@@ -407,7 +407,10 @@ extern "C" {
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 12
 /** @brief Smallest GLO / GHI payload a decoder accepts: sub-header + literal slack. */
-#define ZXC_BLOCK_LZ_PAYLOAD_MIN (ZXC_GLO_HEADER_BINARY_SIZE + ZXC_BLOCK_LIT_SLACK)
+#define ZXC_BLOCK_LZ_PAYLOAD_MIN                                                              \
+    ((ZXC_GLO_HEADER_BINARY_SIZE < ZXC_GHI_HEADER_BINARY_SIZE ? ZXC_GLO_HEADER_BINARY_SIZE    \
+                                                              : ZXC_GHI_HEADER_BINARY_SIZE) + \
+     ZXC_BLOCK_LIT_SLACK)
 
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
@@ -2089,16 +2092,16 @@ static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
  */
 static ZXC_ALWAYS_INLINE uint64_t zxc_blocks_min_span(const uint64_t dsize, const size_t chunk_size,
                                                       const int has_cs) {
+    if (UNLIKELY(chunk_size == 0)) return 0;
     const uint64_t per_block =
         (uint64_t)ZXC_BLOCK_HEADER_SIZE + (has_cs ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0U);
     const uint64_t chunk = (uint64_t)chunk_size;
     const uint64_t tail = dsize % chunk;
-    const uint64_t full_cost =
-        per_block + (chunk < ZXC_BLOCK_LZ_PAYLOAD_MIN ? chunk : ZXC_BLOCK_LZ_PAYLOAD_MIN);
+    // Only the tail can decode fewer bytes than the LZ floor: chunk >= 4 KiB.
     const uint64_t tail_cost =
         tail == 0 ? 0U
                   : per_block + (tail < ZXC_BLOCK_LZ_PAYLOAD_MIN ? tail : ZXC_BLOCK_LZ_PAYLOAD_MIN);
-    return (dsize / chunk) * full_cost + tail_cost;
+    return (dsize / chunk) * (per_block + ZXC_BLOCK_LZ_PAYLOAD_MIN) + tail_cost;
 }
 
 /**
@@ -2107,8 +2110,9 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_blocks_min_span(const uint64_t dsize, cons
  * The footer is untrusted and its size becomes the caller's allocation: the
  * frame plus @ref zxc_blocks_min_span must fit the archive, so a forged size
  * buys no more than the densest genuine one. Also keeps
- * @ref zxc_inplace_margin's block count from overflowing. Every reader that
- * sizes anything from the footer goes through it.
+ * @ref zxc_inplace_margin's block count from overflowing. Every buffer and
+ * stream reader goes through it; @ref zxc_seekable_parse applies
+ * @ref zxc_blocks_min_span directly.
  *
  * @param[in] dsize      Decompressed size read from the footer.
  * @param[in] chunk_size Block size from the file header; never 0 after a

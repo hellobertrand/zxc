@@ -54,6 +54,10 @@ void gen_small_offset_data(uint8_t* buf, size_t size);
 void gen_large_offset_data(uint8_t* buf, size_t size);
 void fill_seek_data(uint8_t* buf, size_t size, uint8_t seed);
 
+/* Frame of `nb` densest full blocks plus a 1-byte tail, genuine header, footer
+ * claiming `claim`, body zeroed. Returns a malloc'd archive of *out_size. */
+uint8_t* make_dense_frame(uint64_t nb, size_t bs, int cs, uint64_t claim, size_t* out_size);
+
 /* Generic streaming round-trip check (compress, decompress, compare).
  * Returns 1 on success, 0 on failure. */
 int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
@@ -183,6 +187,9 @@ int test_seekable_corrupted_sek(void);
 int test_seekable_mt_group_boundary(void);
 int test_seekable_forged_table_entry(void);
 int test_seekable_forged_total_size(void);
+int test_footer_floor_density(void);
+int test_decompressed_size(void);
+int test_stream_footer_cap(void);
 int test_seekable_dense_floor(void);
 int test_seekable_eof_with_payload(void);
 int test_seekable_beyond_old_cap(void);

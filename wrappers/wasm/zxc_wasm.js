@@ -77,6 +77,10 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     ["number", "number"],
   );
+  const _decompressed_size = Module.cwrap("zxc_decompressed_size", "number", [
+    "number",
+    "number",
+  ]);
 
   const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
   const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
@@ -277,6 +281,12 @@ export default async function createZXC(moduleOverrides, factory) {
     const hi = _getTempRet0 ? _getTempRet0() >>> 0 : 0;
     return hi * 0x100000000 + lo;
   }
+  /** Same, for an int64_t: a signed high word carries the error codes. */
+  function _i64(low) {
+    const lo = low >>> 0;
+    const hi = _getTempRet0 ? _getTempRet0() | 0 : 0;
+    return hi * 0x100000000 + lo;
+  }
 
   // --- Options struct layout -----------------------------------------------
   // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
@@ -389,10 +399,31 @@ export default async function createZXC(moduleOverrides, factory) {
     if (typeof max !== "number") {
       throw new TypeError("ZXC: maxOutputSize must be a number");
     }
-    if (!Number.isInteger(max) || max < 0) {
+    if (!Number.isSafeInteger(max) || max < 0) {
       throw new RangeError("ZXC: maxOutputSize must be a non-negative integer");
     }
     return max;
+  }
+
+  /**
+   * Declared output size, checked against `max` before anything is allocated.
+   * @param {string} prefix - Error message prefix of the calling entry point.
+   * @throws {Error} The C verdict, the cap, or the wasm32 addressing limit.
+   */
+  function _declaredSize(srcPtr, srcSize, max, prefix) {
+    const size = _i64(_decompressed_size(srcPtr, srcSize));
+    const rc = size > max ? ZXC_ERROR_DST_TOO_SMALL : size;
+    if (rc < 0) {
+      throw new Error(`${prefix} error: ${_error_name(rc)} (${rc})`);
+    }
+    if (rc > 0x7fffffff) {
+      // A wasm32 heap cannot address it; fail clearly instead of
+      // aborting inside malloc.
+      throw new Error(
+        `ZXC: decompressed size (${rc} bytes) exceeds wasm32 addressable memory`,
+      );
+    }
+    return rc;
   }
 
   /**
@@ -497,21 +528,13 @@ export default async function createZXC(moduleOverrides, factory) {
     let dstPtr = 0;
 
     try {
-      // Read decompressed size from footer
       Module.HEAPU8.set(data, srcPtr);
-      const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-      if (origSize > maxOutputSize) {
-        throw new Error(
-          `ZXC decompress error: ${_error_name(ZXC_ERROR_DST_TOO_SMALL)} (${ZXC_ERROR_DST_TOO_SMALL})`,
-        );
-      }
-      if (origSize > 0x7fffffff) {
-        // A wasm32 heap cannot address it; fail clearly instead of
-        // aborting inside malloc.
-        throw new Error(
-          `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-        );
-      }
+      const origSize = _declaredSize(
+        srcPtr,
+        data.length,
+        maxOutputSize,
+        "ZXC decompress",
+      );
       dstPtr = _malloc(origSize || 1);
       const result = _decompress(
         srcPtr,
@@ -673,17 +696,12 @@ export default async function createZXC(moduleOverrides, factory) {
         let dstPtr = 0;
         try {
           Module.HEAPU8.set(data, srcPtr);
-          const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-          if (origSize > maxOutputSize) {
-            throw new Error(
-              `ZXC dctx decompress error: ${_error_name(ZXC_ERROR_DST_TOO_SMALL)} (${ZXC_ERROR_DST_TOO_SMALL})`,
-            );
-          }
-          if (origSize > 0x7fffffff) {
-            throw new Error(
-              `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-            );
-          }
+          const origSize = _declaredSize(
+            srcPtr,
+            data.length,
+            maxOutputSize,
+            "ZXC dctx decompress",
+          );
           dstPtr = _malloc(origSize || 1);
           const result = _decompress_dctx(
             dctx,

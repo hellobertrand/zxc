@@ -87,6 +87,13 @@ def test_max_output_size():
         assert capped.value.args == genuine.value.args
 
 
+def test_max_output_size_zero():
+    # None is no cap; 0 is a real cap.
+    assert zxc.decompress(zxc.compress(b""), max_output_size=0) == b""
+    with pytest.raises(RuntimeError, match="ZXC_ERROR_DST_TOO_SMALL"):
+        zxc.decompress(zxc.compress(b"x" * 100), max_output_size=0)
+
+
 def test_max_output_size_stops_a_bomb():
     data = bytes(64 << 20)
     arc = zxc.compress(data)

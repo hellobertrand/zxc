@@ -370,9 +370,6 @@ def decompress(
     Returns:
         Decompressed bytes.
     """
-    if decompress_size is None:
-        decompress_size = get_decompressed_size(data)
-
     dict, dict_huf = _split_dict_arg(dict, dict_huf)
     return pyzxc_decompress(
         data, decompress_size, checksum, dict, dict_huf, max_output_size
@@ -662,8 +659,6 @@ class Dctx:
         """
         if self._handle is None:
             raise ValueError("Dctx is closed")
-        if decompress_size is None:
-            decompress_size = get_decompressed_size(data)
         return pyzxc_dctx_decompress(
             self._handle, data, decompress_size, max_output_size
         )

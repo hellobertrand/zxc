@@ -107,26 +107,15 @@ int test_buffer_api() {
 // Footer cap edges: nb densest full blocks + a 1-byte tail, then one byte or
 // block more, then the former 8-bytes-per-block cap.
 static int forged_footer_at_bound(const int cs) {
-    const size_t lz_min = 12 + 32;  // FORMAT.md 5.2, not the lib constant
     const size_t bs = ZXC_BLOCK_SIZE_MAX;
     const uint64_t nb = 64;
-    const size_t per = ZXC_BLOCK_HEADER_SIZE + (cs ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
     const size_t foot = zxc_footer_bytes(cs);
-    const size_t frame = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + foot;
-    const size_t n = frame + (size_t)nb * (per + lz_min) + per + 1;
-
-    // Genuine header, zeroed body.
-    const uint8_t one = 0;
-    uint8_t head[256];
-    zxc_compress_opts_t o = {.level = 1, .block_size = bs, .checksum_enabled = cs};
-    const int64_t c = zxc_compress(&one, 1, head, sizeof(head), &o);
-    uint8_t* const arc = calloc(1, n);
-    if (c <= 0 || !arc) {
+    size_t n = 0;
+    uint8_t* const arc = make_dense_frame(nb, bs, cs, nb * bs + 1, &n);
+    if (!arc) {
         printf("Failed [footer bound cs=%d]: setup\n", cs);
-        free(arc);
         return 0;
     }
-    memcpy(arc, head, ZXC_FILE_HEADER_SIZE);
 
     const struct {
         uint64_t claim;
@@ -218,7 +207,25 @@ int test_get_decompressed_size() {
     free(forged);
     printf("  [PASS] Forged footer size rejected\n");
 
-    // 5. Cap edges.
+    // 5. Cap edges, and the in-place bound inherits them.
+    {
+        size_t n = 0;
+        uint8_t* const arc =
+            make_dense_frame(8, ZXC_BLOCK_SIZE_MAX, 0, 8ULL * ZXC_BLOCK_SIZE_MAX, &n);
+        const size_t at = arc ? zxc_decompress_inplace_bound(arc, n) : 0;
+        if (arc)
+            zxc_write_file_footer(arc + n - zxc_footer_bytes(0), zxc_footer_bytes(0),
+                                  9ULL * ZXC_BLOCK_SIZE_MAX, 0, 0);
+        const size_t past = arc ? zxc_decompress_inplace_bound(arc, n) : 1;
+        free(arc);
+        if (at == 0 || past != 0) {
+            printf("Failed: inplace bound at cap %zu, one block past %zu\n", at, past);
+            free(src);
+            free(compressed);
+            return 0;
+        }
+        printf("  [PASS] in-place bound follows the footer cap\n");
+    }
     if (!forged_footer_at_bound(0) || !forged_footer_at_bound(1)) {
         free(src);
         free(compressed);

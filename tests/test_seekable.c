@@ -2097,18 +2097,21 @@ int test_seekable_dense_floor(void) {
     enum { BS = 4096, N = 100 };
     const zxc_block_header_t eof = {
         .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
-    for (int dense = 0; dense < 2; dense++) {
-        const size_t blk = ZXC_BLOCK_HEADER_SIZE + (dense ? 12 + 32 : 0);  // FORMAT.md 5.2
+    for (int k = 0; k < 4; k++) {
+        const int dense = k & 1;
+        const int cs = (k >> 1) & 1;
+        const size_t per = ZXC_BLOCK_HEADER_SIZE + (cs ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        const size_t blk = per + (dense ? 12 + 32 : 0);  // FORMAT.md 5.2
         const size_t eof_off = ZXC_FILE_HEADER_SIZE + N * blk;
         const size_t size = eof_off + 2 * ZXC_BLOCK_HEADER_SIZE + (size_t)zxc_seek_table_bytes(N) +
-                            ZXC_FILE_FOOTER_SIZE;
+                            zxc_footer_bytes(cs);
         uint8_t* const arc = calloc(1, size);
-        if (!arc || zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, BS, 0, 0) < 0 ||
+        if (!arc || zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, BS, cs, 0) < 0 ||
             zxc_write_block_header(arc + eof_off, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
             zxc_seek_table_header(arc + eof_off + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, N) <
                 0 ||
-            zxc_write_file_footer(arc + size - ZXC_FILE_FOOTER_SIZE, ZXC_FILE_FOOTER_SIZE,
-                                  (uint64_t)N * BS, 0, 0) < 0) {
+            zxc_write_file_footer(arc + size - zxc_footer_bytes(cs), zxc_footer_bytes(cs),
+                                  (uint64_t)N * BS, 0, cs) < 0) {
             printf("Failed: fixture headers\n");
             free(arc);
             return 0;
@@ -2118,7 +2121,7 @@ int test_seekable_dense_floor(void) {
         zxc_seekable_free(s);
         free(arc);
         if (opened != dense) {
-            printf("Failed: %zu-byte blocks %s\n", blk, opened ? "opened" : "refused");
+            printf("Failed: cs=%d, %zu-byte blocks %s\n", cs, blk, opened ? "opened" : "refused");
             return 0;
         }
     }
