@@ -224,9 +224,12 @@ describe("maxOutputSize", () => {
     ).toEqual(dstTooSmall);
   });
 
-  test("allows 0 for an empty payload", () => {
+  test("allows 0 for an empty payload, refuses it for a real one", () => {
     const empty = zxc.compress(Buffer.alloc(0));
     expect(zxc.decompress(empty, { maxOutputSize: 0 }).length).toBe(0);
+    expect(
+      errorShape(() => zxc.decompress(compressed, { maxOutputSize: 0 })),
+    ).toEqual(dstTooSmall);
   });
 
   test("stops a decompression bomb", () => {

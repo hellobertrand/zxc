@@ -996,7 +996,7 @@ async function main() {
       );
       assert(arraysEqual(dec(arc), payload), `${name}: no limit by default`);
       assert(
-        [-1, 1.5, NaN, Infinity, "1024", null].every((bad) => {
+        [-1, 1.5, 2 ** 53, NaN, Infinity, "1024", null].every((bad) => {
           const err = errorOf(() => dec(arc, { maxOutputSize: bad }));
           return err instanceof TypeError || err instanceof RangeError;
         }),
@@ -1008,6 +1008,11 @@ async function main() {
       zxc.decompress(zxc.compress(new Uint8Array(0)), { maxOutputSize: 0 })
         .length === 0,
       "limit 0 decodes an empty archive",
+    );
+    const zeroCap = errorOf(() => zxc.decompress(arc, { maxOutputSize: 0 }));
+    assert(
+      zeroCap && zeroCap.message === tooSmall("ZXC decompress"),
+      "limit 0 refuses a real payload",
     );
 
     const bomb = zxc.compress(new Uint8Array(64 << 20));

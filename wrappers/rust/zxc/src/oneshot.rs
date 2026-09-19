@@ -209,11 +209,16 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 ///
 /// For untrusted input, set [`DecompressOptions::with_max_output_size`].
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
-    // `decompressed_size` returns None for an ambiguous 0 (a valid empty-payload
-    // archive or invalid input); fall back to 0 and let the C decoder validate
-    // the frame (it returns a negative error code on genuinely corrupt input).
-    let size = decompressed_size(compressed).unwrap_or(0);
-    if options.max_output_size.is_some_and(|max| size > max as u64) {
+    let size = unsafe {
+        zxc_sys::zxc_decompressed_size(compressed.as_ptr() as *const c_void, compressed.len())
+    };
+    if size < 0 {
+        return Err(error_from_code(size));
+    }
+    if options
+        .max_output_size
+        .is_some_and(|max| size as u64 > max as u64)
+    {
         return Err(Error::DstTooSmall);
     }
     let size = size as usize;
@@ -504,6 +509,16 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn test_max_output_size_zero_refuses_nonempty() {
+        let compressed = compress(b"payload", Level::Default, None).unwrap();
+        let opts = DecompressOptions::default().with_max_output_size(0);
+        assert!(matches!(
+            decompress_with_options(&compressed, &opts),
+            Err(Error::DstTooSmall)
+        ));
     }
 
     #[test]

@@ -228,3 +228,26 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     fclose(f_decomp);
     return 1;
 }
+
+uint8_t* make_dense_frame(const uint64_t nb, const size_t bs, const int cs, const uint64_t claim,
+                          size_t* const out_size) {
+    const size_t lz_min = 12 + 32;  // FORMAT.md 5.2, not the lib constant
+    const size_t per = ZXC_BLOCK_HEADER_SIZE + (cs ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    const size_t foot = zxc_footer_bytes(cs);
+    const size_t n =
+        ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + foot + (size_t)nb * (per + lz_min) + per + 1;
+
+    const uint8_t one = 0;
+    uint8_t head[256];
+    zxc_compress_opts_t o = {.level = 1, .block_size = bs, .checksum_enabled = cs};
+    const int64_t c = zxc_compress(&one, 1, head, sizeof(head), &o);
+    uint8_t* const arc = (uint8_t*)calloc(1, n);
+    if (c <= 0 || !arc) {
+        free(arc);
+        return NULL;
+    }
+    memcpy(arc, head, ZXC_FILE_HEADER_SIZE);
+    zxc_write_file_footer(arc + n - foot, foot, claim, 0, cs);
+    *out_size = n;
+    return arc;
+}

@@ -12,6 +12,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_decompress"
         "_zxc_compress_bound"
         "_zxc_get_decompressed_size"
+        "_zxc_decompressed_size"
         "_zxc_decompress_inplace"
         "_zxc_decompress_inplace_bound"
         "_zxc_create_cctx"

@@ -161,6 +161,9 @@ func TestDecompressMaxOutputSize(t *testing.T) {
 	if out, err := Decompress(empty, WithMaxOutputSize(0)); err != nil || len(out) != 0 {
 		t.Fatalf("empty, limit 0: got %d bytes, %v", len(out), err)
 	}
+	if _, err := Decompress(comp, WithMaxOutputSize(0)); !errors.Is(err, ErrDstTooSmall) {
+		t.Fatalf("payload, limit 0: want ErrDstTooSmall, got %v", err)
+	}
 }
 
 func TestDecompressMaxOutputSizeBomb(t *testing.T) {
