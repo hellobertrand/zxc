@@ -306,6 +306,19 @@ function _splitDictOption(options) {
   };
 }
 
+/** `options.maxOutputSize`: undefined (no cap) or an integer in [0, 2^53). */
+function _maxOutputSize(options) {
+  const max = options.maxOutputSize;
+  if (max === undefined) return undefined;
+  if (typeof max !== "number") {
+    throw new TypeError("maxOutputSize must be a number");
+  }
+  if (!Number.isSafeInteger(max) || max < 0) {
+    throw new RangeError("maxOutputSize must be an integer in [0, 2^53)");
+  }
+  return max;
+}
+
 /**
  * Load and validate a `.zxd` dictionary file.
  * @param {Buffer} zxd
@@ -364,6 +377,8 @@ function getDecompressedSize(data) {
  * @param {number} [options.size] - Expected decompressed size. If omitted, read from header.
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
  * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
+ * @param {number} [options.maxOutputSize] - Output cap in bytes: a larger output
+ *   throws ERROR_DST_TOO_SMALL before allocating. Set it for untrusted input.
  * @returns {Buffer} Decompressed data.
  */
 function decompress(data, options = {}) {
@@ -373,13 +388,14 @@ function decompress(data, options = {}) {
 
   const checksum = options.checksum ?? false;
   const { dict, dictHuf } = _splitDictOption(options);
+  const maxOutputSize = _maxOutputSize(options);
 
   let size = options.size;
   if (size === undefined) {
     size = getDecompressedSize(data);
   }
 
-  return native.decompress(data, size, checksum, dict, dictHuf);
+  return native.decompress(data, size, checksum, dict, dictHuf, maxOutputSize);
 }
 
 /**
@@ -412,6 +428,15 @@ class Dctx extends native.Dctx {
   constructor(options = {}) {
     const { dict, dictHuf } = _splitDictOption(options);
     super({ ...options, dict, dictHuf });
+  }
+
+  /**
+   * @param {Buffer} data
+   * @param {{maxOutputSize?: number}} [options] - As in {@link decompress}.
+   * @returns {Buffer}
+   */
+  decompress(data, options = {}) {
+    return super.decompress(data, _maxOutputSize(options));
   }
 }
 

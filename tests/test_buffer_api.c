@@ -104,6 +104,43 @@ int test_buffer_api() {
     return 1;
 }
 
+// Footer cap edges: nb densest full blocks + a 1-byte tail, then one byte or
+// block more, then the former 8-bytes-per-block cap.
+static int forged_footer_at_bound(const int cs) {
+    const size_t bs = ZXC_BLOCK_SIZE_MAX;
+    const uint64_t nb = 64;
+    const size_t foot = zxc_footer_bytes(cs);
+    size_t n = 0;
+    uint8_t* const arc = make_dense_frame(nb, bs, cs, nb * bs + 1, &n);
+    if (!arc) {
+        printf("Failed [footer bound cs=%d]: setup\n", cs);
+        return 0;
+    }
+
+    const struct {
+        uint64_t claim;
+        uint64_t want;
+        const char* what;
+    } cases[] = {
+        {nb * bs + 1, nb * bs + 1, "densest size"},
+        {nb * bs + 2, 0, "one byte past the tail"},
+        {(nb + 1) * bs, 0, "one block past"},
+        {(uint64_t)(n / ZXC_BLOCK_HEADER_SIZE) * bs, 0, "former header-count cap"},
+    };
+    int ok = 1;
+    for (size_t k = 0; k < sizeof(cases) / sizeof(cases[0]); k++) {
+        zxc_write_file_footer(arc + n - foot, foot, cases[k].claim, 0, cs);
+        const uint64_t got = zxc_get_decompressed_size(arc, n);
+        if (got != cases[k].want) {
+            printf("Failed [footer bound cs=%d]: %s -> %llu, want %llu\n", cs, cases[k].what,
+                   (unsigned long long)got, (unsigned long long)cases[k].want);
+            ok = 0;
+        }
+    }
+    free(arc);
+    return ok;
+}
+
 // Test zxc_get_decompressed_size
 int test_get_decompressed_size() {
     printf("=== TEST: Unit - zxc_get_decompressed_size ===\n");
@@ -169,6 +206,32 @@ int test_get_decompressed_size() {
     }
     free(forged);
     printf("  [PASS] Forged footer size rejected\n");
+
+    // 5. Cap edges, and the in-place bound inherits them.
+    {
+        size_t n = 0;
+        uint8_t* const arc =
+            make_dense_frame(8, ZXC_BLOCK_SIZE_MAX, 0, 8ULL * ZXC_BLOCK_SIZE_MAX, &n);
+        const size_t at = arc ? zxc_decompress_inplace_bound(arc, n) : 0;
+        if (arc)
+            zxc_write_file_footer(arc + n - zxc_footer_bytes(0), zxc_footer_bytes(0),
+                                  9ULL * ZXC_BLOCK_SIZE_MAX, 0, 0);
+        const size_t past = arc ? zxc_decompress_inplace_bound(arc, n) : 1;
+        free(arc);
+        if (at == 0 || past != 0) {
+            printf("Failed: inplace bound at cap %zu, one block past %zu\n", at, past);
+            free(src);
+            free(compressed);
+            return 0;
+        }
+        printf("  [PASS] in-place bound follows the footer cap\n");
+    }
+    if (!forged_footer_at_bound(0) || !forged_footer_at_bound(1)) {
+        free(src);
+        free(compressed);
+        return 0;
+    }
+    printf("  [PASS] Footer cap at the densest reachable size\n");
 
     printf("PASS\n\n");
     free(src);

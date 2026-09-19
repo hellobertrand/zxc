@@ -206,11 +206,22 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 }
 
 /// Decompresses data with full options control.
+///
+/// For untrusted input, set [`DecompressOptions::with_max_output_size`].
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
-    // `decompressed_size` returns None for an ambiguous 0 (a valid empty-payload
-    // archive or invalid input); fall back to 0 and let the C decoder validate
-    // the frame (it returns a negative error code on genuinely corrupt input).
-    let size = decompressed_size(compressed).unwrap_or(0) as usize;
+    let size = unsafe {
+        zxc_sys::zxc_decompressed_size(compressed.as_ptr() as *const c_void, compressed.len())
+    };
+    if size < 0 {
+        return Err(error_from_code(size));
+    }
+    if options
+        .max_output_size
+        .is_some_and(|max| size as u64 > max as u64)
+    {
+        return Err(Error::DstTooSmall);
+    }
+    let size = size as usize;
     let mut output = Vec::with_capacity(size);
 
     let written =
@@ -463,6 +474,51 @@ mod tests {
 
         let decompressed = decompress(&output).unwrap();
         assert_eq!(&decompressed[..], &data[..]);
+    }
+
+    #[test]
+    fn test_max_output_size_exact() {
+        let data = b"Hello, world! Testing the output cap.";
+        let compressed = compress(data, Level::Default, None).unwrap();
+        let exact = DecompressOptions::default().with_max_output_size(data.len());
+        assert_eq!(decompress_with_options(&compressed, &exact).unwrap(), data);
+        let short = DecompressOptions::default().with_max_output_size(data.len() - 1);
+        assert!(matches!(
+            decompress_with_options(&compressed, &short),
+            Err(Error::DstTooSmall)
+        ));
+    }
+
+    #[test]
+    fn test_max_output_size_bomb() {
+        let compressed = compress(&vec![0u8; 64 << 20], Level::Default, None).unwrap();
+        let opts = DecompressOptions::default().with_max_output_size(1 << 20);
+        assert!(matches!(
+            decompress_with_options(&compressed, &opts),
+            Err(Error::DstTooSmall)
+        ));
+    }
+
+    #[test]
+    fn test_max_output_size_default_and_empty() {
+        assert!(DecompressOptions::default().max_output_size.is_none());
+        let compressed = compress(b"", Level::Default, None).unwrap();
+        let opts = DecompressOptions::default().with_max_output_size(0);
+        assert!(
+            decompress_with_options(&compressed, &opts)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn test_max_output_size_zero_refuses_nonempty() {
+        let compressed = compress(b"payload", Level::Default, None).unwrap();
+        let opts = DecompressOptions::default().with_max_output_size(0);
+        assert!(matches!(
+            decompress_with_options(&compressed, &opts),
+            Err(Error::DstTooSmall)
+        ));
     }
 
     #[test]

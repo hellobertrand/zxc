@@ -108,6 +108,28 @@ describe("Cctx / Dctx", () => {
     dctx.close();
   });
 
+  test("cap the output size per call", () => {
+    const payload = Buffer.concat(samples());
+    const archive = zxc.compress(payload);
+    const bomb = zxc.compress(Buffer.alloc(64 << 20));
+    const dctx = new zxc.Dctx();
+    const cap = (a, maxOutputSize) => () =>
+      dctx.decompress(a, { maxOutputSize });
+    const dstTooSmall = expect.objectContaining({
+      constructor: Error,
+      message: "ZXC_ERROR_DST_TOO_SMALL",
+      code: zxc.ERROR_DST_TOO_SMALL,
+    });
+
+    expect(cap(archive, payload.length)().equals(payload)).toBe(true);
+    expect(cap(archive, payload.length - 1)).toThrow(dstTooSmall);
+    expect(cap(bomb, 1 << 20)).toThrow(dstTooSmall);
+    expect(cap(archive, -1)).toThrow(RangeError);
+    expect(cap(archive, "1")).toThrow(TypeError);
+    expect(dctx.decompress(archive).equals(payload)).toBe(true);
+    dctx.close();
+  });
+
   test("check the table length even without a dictionary", () => {
     expect(() => new zxc.Cctx({ dictHuf: Buffer.alloc(3) })).toThrow();
     expect(() => new zxc.Dctx({ dictHuf: Buffer.alloc(3) })).toThrow();

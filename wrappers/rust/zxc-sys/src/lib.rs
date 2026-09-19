@@ -338,6 +338,17 @@ unsafe extern "C" {
     /// Original uncompressed size in bytes, or 0 if invalid.
     pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> u64;
 
+    /// Same size, with the envelope's verdict when there is none.
+    ///
+    /// # Safety
+    ///
+    /// - `src` must be a valid pointer to `src_size` bytes.
+    ///
+    /// # Returns
+    ///
+    /// Original size (>= 0), or a negative error code.
+    pub fn zxc_decompressed_size(src: *const c_void, src_size: usize) -> i64;
+
     /// Returns the minimum single-buffer size for an in-place decompression.
     ///
     /// Reads `src`'s header and footer (no decoding) and returns the buffer

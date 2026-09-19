@@ -86,6 +86,9 @@ export interface DecompressOptions {
    *  with one (the dictionary ID binds the pair). Ignored when `dict` is a
    *  {@link Dictionary}. */
   dictHuf?: Buffer | Uint8Array;
+  /** Output cap in bytes: a larger output throws ERROR_DST_TOO_SMALL before
+   *  allocating. Set it for untrusted input. Defaults to no cap. */
+  maxOutputSize?: number;
 }
 
 /**
@@ -253,7 +256,10 @@ export class Cctx {
 /** Reusable decompression context, mirroring {@link Cctx}. */
 export class Dctx {
   constructor(options?: DctxOptions);
-  decompress(data: Buffer): Buffer;
+  decompress(
+    data: Buffer,
+    options?: Pick<DecompressOptions, "maxOutputSize">,
+  ): Buffer;
   close(): void;
 }
 

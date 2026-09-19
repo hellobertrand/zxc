@@ -66,6 +66,45 @@ static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) 
     return 0;
 }
 
+// Destination size: the caller's decompress_size, or the archive's when None. Refuses
+// one above cap_obj (None: no cap) before allocating. Returns -1 with an exception set.
+static Py_ssize_t decompress_dst_size(const Py_buffer* src, PyObject* size_obj, PyObject* cap_obj) {
+    Py_ssize_t size;
+    if (size_obj && size_obj != Py_None) {
+        size = PyNumber_AsSsize_t(size_obj, PyExc_OverflowError);
+        if (size == -1 && PyErr_Occurred()) return -1;
+        if (size < 0) {
+            PyErr_SetString(PyExc_ValueError, "decompress_size must be non-negative");
+            return -1;
+        }
+    } else {
+        const int64_t declared = zxc_decompressed_size(src->buf, (size_t)src->len);
+        if (declared < 0) {
+            PyErr_SetString(PyExc_RuntimeError, zxc_error_name((int)declared));
+            return -1;
+        }
+        if ((uint64_t)declared > (uint64_t)PY_SSIZE_T_MAX) {
+            PyErr_NoMemory();
+            return -1;
+        }
+        size = (Py_ssize_t)declared;
+    }
+
+    if (cap_obj && cap_obj != Py_None) {
+        const Py_ssize_t cap = PyNumber_AsSsize_t(cap_obj, NULL);  // clamps, so 2**64 = no cap
+        if (cap == -1 && PyErr_Occurred()) return -1;
+        if (cap < 0) {
+            PyErr_SetString(PyExc_ValueError, "max_output_size must be non-negative");
+            return -1;
+        }
+        if (size > cap) {
+            PyErr_SetString(PyExc_RuntimeError, zxc_error_name(ZXC_ERROR_DST_TOO_SMALL));
+            return -1;
+        }
+    }
+    return size;
+}
+
 // =============================================================================
 // Wrapper functions
 // =============================================================================
@@ -378,14 +417,16 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     PyObject* dict_obj = NULL;
     int have_dict = 0;
 
-    Py_ssize_t decompress_size;
+    PyObject* size_obj = NULL;
     PyObject* dict_huf_obj = NULL;
     uint8_t huf_local[ZXC_HUF_TABLE_SIZE];
     const void* dict_huf = NULL;
-    static char* kwlist[] = {"data", "decompress_size", "checksum", "dict", "dict_huf", NULL};
+    PyObject* cap_obj = NULL;
+    static char* kwlist[] = {"data",     "decompress_size", "checksum", "dict",
+                             "dict_huf", "max_output_size", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*n|pOO", kwlist, &view, &decompress_size,
-                                     &checksum, &dict_obj, &dict_huf_obj)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "y*O|pOOO", kwlist, &view, &size_obj, &checksum,
+                                     &dict_obj, &dict_huf_obj, &cap_obj)) {
         return NULL;
     }
 
@@ -395,9 +436,9 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
         return NULL;
     }
 
+    const Py_ssize_t decompress_size = decompress_dst_size(&view, size_obj, cap_obj);
     if (decompress_size < 0) {
         PyBuffer_Release(&view);
-        PyErr_SetString(PyExc_ValueError, "decompress_size must be non-negative");
         return NULL;
     }
 
@@ -1232,8 +1273,9 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
     (void)self;
     PyObject* capsule = NULL;
     Py_buffer view;
-    Py_ssize_t decompress_size;
-    if (!PyArg_ParseTuple(args, "Oy*n", &capsule, &view, &decompress_size)) return NULL;
+    PyObject* size_obj = NULL;
+    PyObject* cap_obj = NULL;
+    if (!PyArg_ParseTuple(args, "Oy*O|O", &capsule, &view, &size_obj, &cap_obj)) return NULL;
 
     if (view.itemsize != 1) {
         PyBuffer_Release(&view);
@@ -1247,9 +1289,10 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
         PyErr_SetString(PyExc_ValueError, "decompression context is closed");
         return NULL;
     }
+
+    const Py_ssize_t decompress_size = decompress_dst_size(&view, size_obj, cap_obj);
     if (decompress_size < 0) {
         PyBuffer_Release(&view);
-        PyErr_SetString(PyExc_ValueError, "decompress_size must be non-negative");
         return NULL;
     }
 

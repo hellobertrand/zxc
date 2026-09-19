@@ -77,6 +77,10 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     ["number", "number"],
   );
+  const _decompressed_size = Module.cwrap("zxc_decompressed_size", "number", [
+    "number",
+    "number",
+  ]);
 
   const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
   const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
@@ -259,6 +263,7 @@ export default async function createZXC(moduleOverrides, factory) {
 
   const ZXC_DICT_SIZE_MAX = 65535;
   const ZXC_HUF_TABLE_SIZE = 128;
+  const ZXC_ERROR_DST_TOO_SMALL = -2;
 
   const _version_string = Module.cwrap("zxc_version_string", "string", []);
   const _error_name = Module.cwrap("zxc_error_name", "string", ["number"]);
@@ -274,6 +279,12 @@ export default async function createZXC(moduleOverrides, factory) {
   function _u64(low) {
     const lo = low >>> 0;
     const hi = _getTempRet0 ? _getTempRet0() >>> 0 : 0;
+    return hi * 0x100000000 + lo;
+  }
+  /** Same, for an int64_t: a signed high word carries the error codes. */
+  function _i64(low) {
+    const lo = low >>> 0;
+    const hi = _getTempRet0 ? _getTempRet0() | 0 : 0;
     return hi * 0x100000000 + lo;
   }
 
@@ -381,6 +392,40 @@ export default async function createZXC(moduleOverrides, factory) {
     return { dict: fromObject ? d.content : d, dictHuf };
   }
 
+  /** `opts.maxOutputSize`, or Infinity when unset. */
+  function _maxOutputSize(opts) {
+    if (!opts || opts.maxOutputSize === undefined) return Infinity;
+    const max = opts.maxOutputSize;
+    if (typeof max !== "number") {
+      throw new TypeError("ZXC: maxOutputSize must be a number");
+    }
+    if (!Number.isSafeInteger(max) || max < 0) {
+      throw new RangeError("ZXC: maxOutputSize must be a non-negative integer");
+    }
+    return max;
+  }
+
+  /**
+   * Declared output size, checked against `max` before anything is allocated.
+   * @param {string} prefix - Error message prefix of the calling entry point.
+   * @throws {Error} The C verdict, the cap, or the wasm32 addressing limit.
+   */
+  function _declaredSize(srcPtr, srcSize, max, prefix) {
+    const size = _i64(_decompressed_size(srcPtr, srcSize));
+    const rc = size > max ? ZXC_ERROR_DST_TOO_SMALL : size;
+    if (rc < 0) {
+      throw new Error(`${prefix} error: ${_error_name(rc)} (${rc})`);
+    }
+    if (rc > 0x7fffffff) {
+      // A wasm32 heap cannot address it; fail clearly instead of
+      // aborting inside malloc.
+      throw new Error(
+        `ZXC: decompressed size (${rc} bytes) exceeds wasm32 addressable memory`,
+      );
+    }
+    return rc;
+  }
+
   /**
    * Copy the dictionary options of `opts` into WASM memory and write the C
    * options struct.
@@ -466,33 +511,31 @@ export default async function createZXC(moduleOverrides, factory) {
    * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
    *   (128 bytes) when the archive was compressed with one; redundant with a
    *   {@link Dictionary}.
+   * @param {number} [opts.maxOutputSize] - Output cap (DST_TOO_SMALL before
+   *   allocating); set it for untrusted input.
    * @returns {Uint8Array} Decompressed data.
    * @throws {Error} On decompression failure.
    */
   function decompress(data, opts) {
     const checksum = (opts && opts.checksum) || false;
+    const maxOutputSize = _maxOutputSize(opts);
     // Validated and allocated first, so a rejected table leaks nothing.
     const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
       _writeDecompressOpts(checksum, d, n, h),
     );
 
-    // Read decompressed size from footer
     const srcPtr = _malloc(data.length);
-    Module.HEAPU8.set(data, srcPtr);
-
-    const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-    if (origSize > 0x7fffffff) {
-      // A wasm32 heap cannot address it; fail clearly instead of
-      // aborting inside malloc.
-      _free(srcPtr);
-      release();
-      throw new Error(
-        `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-      );
-    }
-    const dstPtr = _malloc(origSize || 1);
+    let dstPtr = 0;
 
     try {
+      Module.HEAPU8.set(data, srcPtr);
+      const origSize = _declaredSize(
+        srcPtr,
+        data.length,
+        maxOutputSize,
+        "ZXC decompress",
+      );
+      dstPtr = _malloc(origSize || 1);
       const result = _decompress(
         srcPtr,
         data.length,
@@ -642,21 +685,24 @@ export default async function createZXC(moduleOverrides, factory) {
       /**
        * Decompress data using this reusable context.
        * @param {Uint8Array} data
+       * @param {object} [opts]
+       * @param {number} [opts.maxOutputSize] - As in `decompress`.
        * @returns {Uint8Array}
        */
-      decompress(data) {
+      decompress(data, opts) {
         if (!dctx) throw new Error("ZXC: decompression context already freed");
+        const maxOutputSize = _maxOutputSize(opts);
         const srcPtr = _malloc(data.length);
-        Module.HEAPU8.set(data, srcPtr);
-        const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-        if (origSize > 0x7fffffff) {
-          _free(srcPtr);
-          throw new Error(
-            `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-          );
-        }
-        const dstPtr = _malloc(origSize || 1);
+        let dstPtr = 0;
         try {
+          Module.HEAPU8.set(data, srcPtr);
+          const origSize = _declaredSize(
+            srcPtr,
+            data.length,
+            maxOutputSize,
+            "ZXC dctx decompress",
+          );
+          dstPtr = _malloc(origSize || 1);
           const result = _decompress_dctx(
             dctx,
             srcPtr,

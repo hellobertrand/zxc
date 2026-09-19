@@ -137,9 +137,10 @@ func DecompressedSize(data []byte) (uint64, error) {
 // Decompress decompresses ZXC-compressed data.
 //
 // The output size is read from the compressed data footer. For pre-allocated
-// buffers, use [DecompressTo].
+// buffers, use [DecompressTo]. Use [WithMaxOutputSize] when the input is
+// untrusted.
 //
-// Options: [WithChecksum].
+// Options: [WithChecksum], [WithMaxOutputSize].
 func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, ErrInvalidData
@@ -156,60 +157,43 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 		return nil, err
 	}
 
-	size := uint64(C.zxc_get_decompressed_size(
-		unsafe.Pointer(&data[0]),
-		C.size_t(len(data)),
-	))
-
-	// The footer value is plausibility-checked in C (a forged size returns 0);
-	// only guard what Go's make() cannot represent.
+	size := C.zxc_decompressed_size(unsafe.Pointer(&data[0]), C.size_t(len(data)))
+	if size < 0 {
+		return nil, errorFromCode(size)
+	}
+	if o.maxOutputSizeSet && uint64(size) > o.maxOutputSize {
+		return nil, ErrDstTooSmall
+	}
+	// Only guard what Go's make() cannot represent.
 	if size > math.MaxInt {
 		return nil, ErrInvalidData
 	}
 
-	if size == 0 {
-		// Ambiguous: a valid empty-payload archive, or input the C envelope
-		// rejected. Decoding into a zero-length buffer settles it. No
-		// destination was supplied, so DST_TOO_SMALL cannot be about the
-		// caller's buffer: blocks contradict the empty size the footer claims,
-		// which reads as invalid data.
-		var dummy [1]byte
-		written := C.zxc_decompress(
-			unsafe.Pointer(&data[0]),
-			C.size_t(len(data)),
-			unsafe.Pointer(&dummy[0]),
-			C.size_t(0),
-			&dopts,
-		)
-		if written < 0 {
-			if int(written) == int(C.ZXC_ERROR_DST_TOO_SMALL) {
-				return nil, ErrInvalidData
-			}
-			return nil, errorFromCode(written)
-		}
-		if written != 0 {
-			return nil, ErrInvalidData
-		}
-		return []byte{}, nil
-	}
-
 	dst := make([]byte, size)
+	var dstPtr unsafe.Pointer // NULL is the C probe for an empty archive
+	if size > 0 {
+		dstPtr = unsafe.Pointer(&dst[0])
+	}
 	written := C.zxc_decompress(
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
-		unsafe.Pointer(&dst[0]),
+		dstPtr,
 		C.size_t(size),
 		&dopts,
 	)
 
 	if written < 0 {
+		// dst is sized from the archive, so this means its blocks contradict the footer.
+		if int(written) == int(C.ZXC_ERROR_DST_TOO_SMALL) {
+			return nil, ErrInvalidData
+		}
 		return nil, errorFromCode(written)
 	}
-	if uint64(written) != size {
+	if written != size {
 		return nil, ErrInvalidData
 	}
 
-	return dst[:int(written)], nil
+	return dst, nil
 }
 
 // DecompressTo decompresses data into a pre-allocated output buffer.

@@ -196,9 +196,8 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
  * @brief Reads the original size from an archive footer, without decoding.
  *
  * The footer is untrusted input, so the value is checked for plausibility
- * against the archive size (each block costs at least a block header and
- * decodes to at most one block): a forged footer claiming an absurd size
- * returns 0 rather than driving an oversized allocation.
+ * against the archive size: a forged footer claiming an absurd size returns 0.
+ * @ref zxc_decompressed_size reports the same size with the reason on failure.
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.
@@ -207,6 +206,18 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
  *         too small, or carries an implausible footer value.
  */
 ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
+
+/**
+ * @brief Same size, with the reason when there is none.
+ *
+ * 0 from @ref zxc_get_decompressed_size is both a valid empty archive and a
+ * rejected one; here they differ.
+ *
+ * @param[in] src       Compressed buffer.
+ * @param[in] src_size  Compressed size in bytes.
+ * @return Original size (>= 0), or a negative @ref zxc_error_t.
+ */
+ZXC_EXPORT int64_t zxc_decompressed_size(const void* src, const size_t src_size);
 
 /**
  * @brief Reads the dictionary ID from an archive header, without decoding.

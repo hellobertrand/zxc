@@ -243,6 +243,9 @@ type options struct {
 	dict     []byte
 	dictHuf  []byte
 
+	maxOutputSize    uint64
+	maxOutputSizeSet bool // 0 is a valid limit
+
 	// *Set records whether the caller supplied the option explicitly, so a
 	// per-call option can fall back to the context's value, and an empty one
 	// can clear it (see Cctx).
@@ -315,6 +318,13 @@ func WithDictionary(d *Dictionary) Option {
 // pair, so the same table must be supplied at decompression time.
 func WithDictHuf(huf []byte) Option {
 	return func(o *options) { o.dictHuf, o.dictHufSet = huf, true }
+}
+
+// WithMaxOutputSize makes [Decompress] fail with [ErrDstTooSmall], before
+// allocating, when the archive's decompressed size exceeds n. Other APIs are
+// bounded by the caller's buffer.
+func WithMaxOutputSize(n uint64) Option {
+	return func(o *options) { o.maxOutputSize, o.maxOutputSizeSet = n, true }
 }
 
 func applyOptions(opts []Option) options {

@@ -496,6 +496,24 @@ Reads the original size from the file footer without decompressing.
 
 ---
 
+### `zxc_decompressed_size`
+
+```c
+ZXC_EXPORT int64_t zxc_decompressed_size(
+    const void* src,
+    size_t      src_size
+);
+```
+
+Same size, with the reason when there is none: `0` from
+`zxc_get_decompressed_size` is both a valid empty archive and a rejected one,
+which these codes separate. Bound the value against your own limit before
+allocating from untrusted input.
+
+**Returns**: original size (`>= 0`), or a negative `zxc_error_t`.
+
+---
+
 ## 8. Block API
 
 Declared in `zxc_buffer.h`. Single-block compression and decompression

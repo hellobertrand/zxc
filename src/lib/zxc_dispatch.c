@@ -758,7 +758,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
         return ZXC_ERROR_SRC_TOO_SMALL;
 
     const uint64_t stored = zxc_le64(src + src_size - zxc_footer_bytes(cs));
-    if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, src_size)))
+    if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, cs, src_size)))
         return ZXC_ERROR_CORRUPT_DATA;
 
     *dsize = stored;
@@ -1144,6 +1144,17 @@ uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
                  ZXC_OK))
         return 0;
     return dsize;
+}
+
+/**
+ * @brief Decompressed size, or the envelope's verdict; public API, see @c zxc_buffer.h.
+ */
+// cppcheck-suppress unusedFunction
+int64_t zxc_decompressed_size(const void* src, const size_t src_size) {
+    uint64_t dsize = 0;
+    const int rc = zxc_read_frame_envelope((const uint8_t*)src, src_size, &dsize, NULL, NULL);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    return (int64_t)dsize;
 }
 
 /**
