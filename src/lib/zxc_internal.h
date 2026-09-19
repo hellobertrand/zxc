@@ -537,18 +537,76 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
  * the encoder refuses to emit values above this bound. Together they bound the
  * varint surface to exactly the format-defined block size limit. */
 #define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
+
+/**
+ * @brief Reads a Prefix Varint encoded integer.
+ *
+ * Unary prefix bits in the first byte give the total length, at most 3 bytes
+ * since that covers every length the format admits:
+ *
+ * Format:
+ * - 1 byte  (0xxxxxxx):  7-bit payload (val < 2^7  = 128)
+ * - 2 bytes (10xxxxxx): 14-bit payload (val < 2^14 = 16384)
+ * - 3 bytes (110xxxxx): 21-bit payload (val < 2^21 = 2097152)
+ *
+ * @param[in,out] ptr Pointer to a pointer to the current position in the stream.
+ * @param[in] end Pointer to the end of the readable stream (for bounds checking).
+ * @return The decoded 32-bit integer, or 0 if reading would overflow bounds (safe default).
+ */
+static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uint8_t* end) {
+    const uint8_t* p = *ptr;
+    if (UNLIKELY(p >= end)) return 0;
+
+    const uint32_t b0 = p[0];
+
+    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128 (2^7)
+    if (LIKELY(b0 < 0x80)) {
+        *ptr = p + 1;
+        return b0;
+    }
+
+    // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
+    if (LIKELY(b0 < 0xC0)) {
+        if (UNLIKELY(p + 1 >= end)) {
+            *ptr = end;
+            return 0;
+        }
+        *ptr = p + 2;
+        return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
+    }
+
+    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2^21. The longest
+    // a legitimate varint can be: values are (ll - MASK) or (ml - MASK), always
+    // strictly below block_size_max = 2^21.
+    if (LIKELY(b0 < 0xE0)) {
+        if (UNLIKELY(p + 2 >= end)) {
+            *ptr = end;
+            return 0;
+        }
+        *ptr = p + 3;
+        return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
+    }
+
+    // extra encoding: out-of-spec for the current format, reject.
+    *ptr = end;
+    return 0;
+}
+
 /** @brief Maximum decoded output of one sequence with inline ll/ml, used by the
  *         4x bounds checks to reserve the rest of a batch.
  *
  *         Keep it small - the loop margins scale with it. Widening it to 543
  *         once cost 2 percent of decode on silesia. */
 #define ZXC_GLO_MAX_INLINE_OUT_PER_SEQ ((ZXC_TOKEN_LL_MASK - 1U) + ZXC_GLO_MAX_INLINE_ML) /* 33 */
+/** @brief Longest match length code (length minus ZXC_LZ_MIN_MATCH_LEN) a GLO
+ *         token carries inline; the code above it escapes to a varint. */
+#define ZXC_GLO_INLINE_ML_CODE (ZXC_TOKEN_ML_MASK - 1U) /* 14 */
 /** @brief Longest match a GLO sequence carries without a varint extension.
  *
  * Below @ref ZXC_PAD_SIZE, so the inline path needs no length ladder: one
  * 32-byte store covers it. The escape path always yields more, so comparing
  * against this recovers "was the ml nibble inline". */
-#define ZXC_GLO_MAX_INLINE_ML ((ZXC_TOKEN_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
+#define ZXC_GLO_MAX_INLINE_ML (ZXC_GLO_INLINE_ML_CODE + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
 #define ZXC_GHI_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
@@ -557,11 +615,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 
 /** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to
- *         the decoder's widest match-copy arm.
+ *         the decoder's widest match-copy arm so the overlap kernel stays off
+ *         the decode path.
  *
  *  Applied per block, and only where @ref ZXC_LZ_MINDIST_MAX_SHORT_PCT clears
  *  it; levels 6 and 7 keep every distance. Encoder policy: no format bit moves,
- *  so any decoder of the same format version still reads the result. */
+ *  so any decoder of the same format version reads the result. 1 disables. */
 #define ZXC_LZ_MINDIST 32
 
 /** @brief Probe sampling: one position per KB, clamped.
@@ -737,27 +796,41 @@ typedef struct {
  *  lengths toward power-of-two class counts and shallower caps, adopting a
  *  candidate only when its modeled decode win clears the guard below at a
  *  bounded ratio cost. Wire-compatible by construction: adjusted lengths stay
- *  canonical, Kraft-exact and within the level cap.
- *  Idea from pivco-huffman issue #20 (dougallj).
+ *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
+ *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
+ *  Idea from pivco-huffman issue #20 (dougallj). All knobs are
+ *  `#ifndef`-guarded so an A/B build can override them from CFLAGS; in
+ *  particular `-DZXC_HUF_NUDGE_MERGE_Q8=0` makes the guard reject every
+ *  candidate, restoring archives byte-identical to the unadjusted encoder.
  *  @{ */
 /** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
  *         cost `J = 256*bits + lambda*touches`; 26 ~= 0.10 bit per touch. */
+#ifndef ZXC_HUF_NUDGE_LAMBDA_Q8
 #define ZXC_HUF_NUDGE_LAMBDA_Q8 26
+#endif
 /** @brief Adoption guard, ratio side (permil): adopt only while
  *         `bits' * 1000 <= bits0 * ZXC_HUF_NUDGE_BITS_PERMIL` (<= +1.5%). */
+#ifndef ZXC_HUF_NUDGE_BITS_PERMIL
 #define ZXC_HUF_NUDGE_BITS_PERMIL 1015
+#endif
 /** @brief Adoption guard, speed side (Q8): adopt only while
  *         `touches' * 256 <= touches0 * ZXC_HUF_NUDGE_MERGE_Q8` (<= ~0.90x). */
+#ifndef ZXC_HUF_NUDGE_MERGE_Q8
 #define ZXC_HUF_NUDGE_MERGE_Q8 230
+#endif
 /** @brief Extra level-touches charged per occurrence under a flat root deeper
  *         than ::ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX (scalar bit-reader unpack path).
  *         24 keeps low-mass deep-flat tails adoptable while making
  *         all-the-mass deep flats impossible to justify. */
+#ifndef ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY
 #define ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY 24
+#endif
 /** @brief Fixed per-pass overhead (occurrence-equivalents) charged per merge
  *         level, modeling the pass-loop and node-dispatch cost so shallower
  *         trees also win on small sections. */
+#ifndef ZXC_HUF_NUDGE_LEVEL_COST
 #define ZXC_HUF_NUDGE_LEVEL_COST 64
+#endif
 /** @} */
 
 /** @name Space-speed section selection
@@ -856,6 +929,20 @@ static inline int zxc_level_clamp(const int level) {
 #define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level > 0) ? (o)->level : (dflt))
 /** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
+/** @name Per-block match splitting (zxc_glo_split_block), a level-table policy
+ *
+ *  Escaped matches up to split_max - in the token's units, length minus
+ *  ZXC_LZ_MIN_MATCH_LEN, so 14 is the inline reach - go out as inline pieces
+ *  at the same offset and the decoder skips its ML escape branch. The caps
+ *  sit in the level table; the dense levels keep every escape. A block is
+ *  split only when its escape branch looks mispredicted: a per-context
+ *  predictor over the last CTX_BITS escapes must err on at least
+ *  MIN_MISPREDICT_PCT of them, else the decoder already predicts them and the
+ *  split would only add sequences. A value above 100 turns splitting off.
+ *  @{ */
+#define ZXC_GLO_SPLIT_CTX_BITS 8 /* four 2 KB histogram lanes on the stack */
+#define ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT 80
+/** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
@@ -1012,6 +1099,11 @@ typedef struct {
      *  candidates do not end the chain walk, which continues to a legal one
      *  further back. See @ref ZXC_LZ_MINDIST. */
     uint32_t min_offset;
+
+    /** Longest match re-emitted as inline pieces (zxc_glo_split_block), in the
+     *  token's units (length - ZXC_LZ_MIN_MATCH_LEN); <= ZXC_GLO_INLINE_ML_CODE
+     *  disables. GLO levels only. */
+    uint8_t split_max;
 } zxc_lz77_params_t;
 
 /**
@@ -1025,19 +1117,21 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     // The distance floor stops at level 5: the slow levels keep every distance.
+    // Match splitting at the GLO speed levels only: levels 1-2 are GHI, and the
+    // dense levels keep every escape.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift, min_offset
+    // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // fallback
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST},       // level 1
-        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST},       // level 2
-        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST},     // level 3
-        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST},     // level 4
-        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST},  // level 5
-        {64, 256, 0, 0, 0, 1, 8, 1}                   // level 6
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // fallback
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // level 1
+        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST, 0},        // level 2
+        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST, 33},     // level 3
+        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST, 24},     // level 4
+        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST, 23},  // level 5
+        {64, 256, 0, 0, 0, 1, 8, 1, 0}                    // level 6
     };
     return (level >= ZXC_LEVEL_ULTRA)
-               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1}
+               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1, 0}
                : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
@@ -1756,6 +1850,7 @@ typedef struct {
     uint8_t* buf_tokens;     /**< Buffer for token sequences. */
     uint16_t* buf_offsets;   /**< Buffer for offsets. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
+    uint8_t* buf_split;      /**< Match-splitting side array (zxc_glo_split_block). */
     uint8_t* literals;       /**< Buffer for literal bytes. */
 
     // Cold zone: configuration / scratch / resizeable.
