@@ -99,8 +99,8 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 | winget (Windows 10 1709+) | `winget install hellobertrand.zxc` |
 | Rust / Python / Node.js | `cargo add zxc-compress` &middot; `pip install zxc-compress` &middot; `npm install zxc-compress` |
 
-The vcpkg and Conan Center recipes are maintained by their respective communities; if a version
-lags behind, open an issue on that registry's index repository.
+The vcpkg, Conan Center and winget recipes are maintained by their respective communities, so they
+can lag a release behind; if one does, open an issue on that registry's index repository.
 
 ### From a release archive
 
