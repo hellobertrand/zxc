@@ -40,8 +40,13 @@
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM)) && !defined(ZXC_ONLY_DEFAULT)
-#include <asm/hwcap.h>
 #include <sys/auxv.h>
+#if !defined(__has_include) || __has_include(<asm/hwcap.h>)
+#include <asm/hwcap.h>
+#endif
+#ifndef HWCAP_NEON
+#define HWCAP_NEON (1 << 12)
+#endif
 #endif
 
 // ============================================================================
