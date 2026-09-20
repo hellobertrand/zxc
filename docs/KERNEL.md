@@ -1,0 +1,173 @@
+# Kernel and freestanding integration
+
+Porting zxc to a host with no libc: a kernel backend (zram, zswap, a
+filesystem), a bootloader, a firmware.
+
+The core uses no floating point, no VLA and no `alloca`, has no stack frame
+above 400 bytes, and reaches the standard library only through
+`src/lib/zxc_deps.h`.
+
+## What to build
+
+Six translation units:
+
+```
+zxc_common.c  zxc_pivco_tables.c  zxc_dispatch.c
+zxc_compress.c  zxc_decompress.c  zxc_huffman.c
+```
+
+`zxc_driver.c` needs `<stdio.h>`. `zxc_dict.c` (dictionary training) and
+`zxc_seekable.c` (seek table) are reachable only from the frame API.
+
+```make
+ccflags-y += -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD
+ccflags-y += -std=gnu11 -Wno-declaration-after-statement
+
+# The per-ISA sources carry the suffix the dispatcher binds to; the other
+# translation units must NOT get it, hence per-file flags.
+CFLAGS_zxc_compress.o   := -DZXC_FUNCTION_SUFFIX=_default
+CFLAGS_zxc_decompress.o := -DZXC_FUNCTION_SUFFIX=_default
+CFLAGS_zxc_huffman.o    := -DZXC_FUNCTION_SUFFIX=_default
+```
+
+`ZXC_NO_FRAME_API` keeps the block, context and static-context APIs. It is
+required, not optional: the frame path references `zxc_dict.c`, so the subset
+above does not link without it. CI builds this configuration (block-only job in
+`.github/workflows/packaging.yml`).
+
+`-std=gnu11` because the kernel builds `-std=gnu89` with C90 declaration checks.
+
+## No FPU region
+
+Do not wrap the SIMD in `kernel_fpu_begin()` / `kernel_neon_begin()`. Build
+scalar, with `ZXC_DISABLE_SIMD`.
+
+- The SIMD is inline helpers called per match, so a region per call would save
+  and restore FPU state every few dozen bytes.
+- The only other seam is one region per block, which holds a whole block with
+  preemption disabled.
+- The calls are arch-specific and `EXPORT_SYMBOL_GPL`.
+- `irq_fpu_usable()` can refuse, so a scalar path is needed anyway.
+
+## Block API
+
+Use `zxc_compress_block()` and `zxc_decompress_block_safe()`. The frame API adds
+a header, a footer and per-frame setup that a block-at-a-time host pays for
+nothing.
+
+## Contexts
+
+Static contexts: the host allocates one workspace per CPU at init, the library
+carves everything out of it, and decoding then allocates nothing.
+
+```c
+size_t ws_sz = zxc_static_dctx_workspace_size(PAGE_SIZE);
+void  *ws    = kvmalloc(ws_sz, GFP_KERNEL);       /* once, at init, per CPU */
+zxc_dctx *dctx = zxc_init_static_dctx(ws, ws_sz, PAGE_SIZE);
+```
+
+Workspace sizes; levels 6-7 add the optimal-parser scratch:
+
+| blocks  | dctx      | cctx (levels 1-5) | cctx (levels 6-7) |
+|---------|-----------|-------------------|-------------------|
+| 4 KiB   | 15 872 B  | 306 304 B         | 396 480 B         |
+| 64 KiB  | 212 480 B | 492 288 B         | 1 025 024 B       |
+| 512 KiB | 1.68 MiB  | 1.87 MiB          | 6.13 MiB          |
+
+- `kvmalloc`, not `kmalloc`: a 306 KB request lands in a 512 KB slab, and an
+  order-7 contiguous allocation is fragile under memory pressure.
+- Never put a workspace on the stack.
+- A heap context (`zxc_create_dctx`) allocates on the first decode, and again on
+  the first entropy-coded block. With preemption disabled, that is a
+  `BUG: scheduling while atomic`.
+- Compression allocates per block from `ZXC_LEVEL_DENSITY` (6) upward: the joint
+  Huffman nudge sizes a scratch pool from the data. Stay below 6.
+
+## Exactly-sized destinations
+
+`zxc_decompress_block()` wants `ZXC_DECOMPRESS_TAIL_PAD` (2112 bytes) of slack
+past the output for its wild copies, which a page-sized buffer does not have.
+`zxc_decompress_block_safe()` takes a destination sized to the exact output.
+
+## The dependency header
+
+Vendor a replacement for `src/lib/zxc_deps.h`:
+
+```c
+/* SPDX-License-Identifier: BSD-3-Clause */
+#ifndef ZXC_DEPS_H
+#define ZXC_DEPS_H
+
+#include <linux/kernel.h>
+#include <linux/limits.h>
+#include <linux/overflow.h>
+#include <linux/slab.h>
+#include <linux/string.h>
+#include <linux/types.h>
+
+/* zxc spells these the libc way; the kernel ships the U*_MAX family. */
+#ifndef CHAR_BIT
+#define CHAR_BIT 8
+#endif
+#ifndef UINT16_MAX
+#define UINT16_MAX U16_MAX
+#endif
+#ifndef UINT32_MAX
+#define UINT32_MAX U32_MAX
+#endif
+#ifndef UINT64_MAX
+#define UINT64_MAX U64_MAX
+#endif
+
+/* No <stdatomic.h> here; ZXC_DISABLE_SIMD removes the publication anyway. */
+#define ZXC_USE_C11_ATOMICS 0
+
+/* GFP_NOIO, not GFP_KERNEL: reclaim must not recurse into the swap path. */
+#define ZXC_GFP (GFP_NOIO | __GFP_NOWARN)
+
+#define ZXC_MALLOC(size)          kvmalloc((size), ZXC_GFP)
+#define ZXC_CALLOC(nmemb, size)   kvcalloc((nmemb), (size), ZXC_GFP)
+#define ZXC_FREE(ptr)             kvfree(ptr)
+
+/* No ZXC_REALLOC: krealloc() only accepts kmalloc'd memory, and the block-only
+ * subset never reallocates - undefined, a future use fails to build. */
+
+/* kmalloc need not reach a cache line, so align by hand; kvmalloc keeps the
+ * big workspaces off the power-of-two slabs. */
+static inline void *zxc_kernel_aligned_alloc(size_t size, size_t alignment)
+{
+	void *mem, *ptr;
+	size_t total;
+
+	if (alignment < sizeof(void *))
+		alignment = sizeof(void *);
+	if (check_add_overflow(size, alignment + sizeof(void *), &total))
+		return NULL;
+	mem = kvmalloc(total, ZXC_GFP);
+	if (!mem)
+		return NULL;
+	ptr = (void *)ALIGN((uintptr_t)mem + sizeof(void *), alignment);
+	((void **)ptr)[-1] = mem;
+	return ptr;
+}
+
+static inline void zxc_kernel_aligned_free(void *ptr)
+{
+	if (ptr)
+		kvfree(((void **)ptr)[-1]);
+}
+
+#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_kernel_aligned_alloc((size), (alignment))
+#define ZXC_ALIGNED_FREE(ptr)               zxc_kernel_aligned_free(ptr)
+
+#endif /* ZXC_DEPS_H */
+```
+
+Overriding `ZXC_ALIGNED_MALLOC` drops the stock `posix_memalign` /
+`_aligned_malloc` defaults; override `ZXC_ALIGNED_FREE` with it, never one
+alone. `ZXC_USE_C11_ATOMICS` and `ZXC_NOINLINE` need no local edit.
+
+## Licensing
+
+BSD-3-Clause. A module calling `EXPORT_SYMBOL_GPL` symbols declares
+`MODULE_LICENSE("Dual BSD/GPL")`; BSD-3 is GPL-compatible.
