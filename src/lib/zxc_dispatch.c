@@ -191,6 +191,8 @@ static inline uint64_t zxc_xgetbv0(void) {
 }
 #endif /* x86-64 && !ZXC_ONLY_DEFAULT */
 
+#ifndef ZXC_ONLY_DEFAULT
+
 /**
  * @enum zxc_cpu_feature_t
  * @brief Detected CPU SIMD capability level.
@@ -215,9 +217,6 @@ typedef enum {
  */
 // LCOV_EXCL_START
 static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
-#ifdef ZXC_ONLY_DEFAULT
-    return ZXC_CPU_GENERIC;
-#else
     zxc_cpu_feature_t features = ZXC_CPU_GENERIC;
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -283,7 +282,6 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #endif
 
     return features;
-#endif
 }
 // LCOV_EXCL_STOP
 
@@ -461,6 +459,37 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
 #undef ZXC_DISPATCH_STORE
 #undef ZXC_DISPATCH_LOAD
+
+#else  // ZXC_ONLY_DEFAULT: one variant, bound at compile time
+
+/** @brief Public decompression dispatcher (direct binding, single variant). */
+int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                                 const uint64_t block_index) {
+    // Same per-block dict branch as the dispatching build.
+    if (ctx->dict_size)
+        return zxc_decompress_chunk_wrapper_dict_default(ctx, src, src_sz, dst, dst_cap,
+                                                         block_index);
+    return zxc_decompress_chunk_wrapper_default(ctx, src, src_sz, dst, dst_cap, block_index);
+}
+
+/** @brief Internal safe-decompression dispatcher (direct binding, single variant). */
+static int zxc_decompress_chunk_wrapper_safe_public(const zxc_cctx_t* RESTRICT ctx,
+                                                    const uint8_t* RESTRICT src,
+                                                    const size_t src_sz, uint8_t* RESTRICT dst,
+                                                    const size_t dst_cap,
+                                                    const uint64_t block_index) {
+    return zxc_decompress_chunk_wrapper_safe_default(ctx, src, src_sz, dst, dst_cap, block_index);
+}
+
+/** @brief Public compression dispatcher (direct binding, single variant). */
+int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                               const uint64_t block_index) {
+    return zxc_compress_chunk_wrapper_default(ctx, src, src_sz, dst, dst_cap, block_index);
+}
+
+#endif  // ZXC_ONLY_DEFAULT
 
 // ============================================================================
 // HUFFMAN TRAMPOLINES
