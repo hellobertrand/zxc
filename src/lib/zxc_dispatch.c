@@ -39,7 +39,7 @@
 #include <cpuid.h>  // __cpuid_count: CPUID probes in zxc_detect_cpu_features
 #endif
 
-#if defined(__linux__) && (defined(__arm__) || defined(_M_ARM))
+#if defined(__linux__) && (defined(__arm__) || defined(_M_ARM)) && !defined(ZXC_ONLY_DEFAULT)
 #include <asm/hwcap.h>
 #include <sys/auxv.h>
 #endif
