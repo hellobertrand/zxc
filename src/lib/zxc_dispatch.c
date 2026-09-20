@@ -40,8 +40,17 @@
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM)) && !defined(ZXC_ONLY_DEFAULT)
-#include <asm/hwcap.h>
 #include <sys/auxv.h>
+// musl does not ship <asm/hwcap.h>; HWCAP_NEON is stable arm32 UAPI. Nested:
+// naming __has_include in a single #if is a syntax error where it is missing.
+#ifdef __has_include
+#if __has_include(<asm/hwcap.h>)
+#include <asm/hwcap.h>
+#endif
+#endif
+#ifndef HWCAP_NEON
+#define HWCAP_NEON (1 << 12)
+#endif
 #endif
 
 // ============================================================================

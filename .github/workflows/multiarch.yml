@@ -226,6 +226,13 @@ jobs:
             cross_prefix: arm-linux-gnueabi
             cmake_processor: arm
             qemu_binary: qemu-arm
+          - name: Linux armv6
+            cross_pkg: gcc-arm-linux-gnueabi
+            cross_prefix: arm-linux-gnueabi
+            cmake_processor: armv6l
+            cmake_c_flags: "-march=armv6"
+            qemu_binary: qemu-arm
+            qemu_cpu: arm1176
 
     steps:
       - name: Checkout Repository
@@ -251,8 +258,15 @@ jobs:
               SHARED_FLAG="OFF"
               if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
 
+              # An `[ -n .. ] && ..` one-liner would abort the step under -e.
+              EXTRA_ARGS=()
+              if [ -n "${{ matrix.cmake_c_flags }}" ]; then
+                  EXTRA_ARGS+=(-DCMAKE_C_FLAGS="${{ matrix.cmake_c_flags }}")
+              fi
+
               cmake -S . -B $BUILD_DIR \
                   -DCMAKE_BUILD_TYPE=Release \
+                  "${EXTRA_ARGS[@]}" \
                   -DCMAKE_C_COMPILER=$CROSS_C \
                   -DCMAKE_CXX_COMPILER=$CROSS_CXX \
                   -DCMAKE_STRIP=$CROSS_STRIP \
