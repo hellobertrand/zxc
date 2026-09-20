@@ -7,13 +7,16 @@ name: Packaging (Consumer Integration)
 # Four consumption paths, static and shared: find_package(zxc), pkg-config,
 # direct integration (-I + raw library, no defines at all), and pkg-config from
 # a relocated install prefix.
+#
+# A fifth path consumes no install at all: kernel ports vendor the sources and
+# build a subset of them behind defines (see the block-only job below).
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, candidate ]
 
 permissions:
   contents: read
@@ -177,3 +180,35 @@ jobs:
             LD_LIBRARY_PATH="$(pkg-config --variable=libdir libzxc)" \
               "./consumer_relocated_$LIB_TYPE"
           done
+
+  no-frame-api:
+    name: "Consume vendored sources (block-only)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Compile the block-only subset and check it is self-contained
+        run: |
+          mkdir -p /tmp/nf
+          for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
+            # The per-ISA sources carry the suffix the dispatcher binds to.
+            suffix=""
+            case "$f" in zxc_compress|zxc_decompress|zxc_huffman) suffix="-DZXC_FUNCTION_SUFFIX=_default" ;; esac
+            cc -c -O2 -std=c11 -Wall -Wextra \
+               -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD $suffix \
+               -Iinclude -Isrc/lib -Isrc/lib/vendors \
+               -o "/tmp/nf/$f.o" "src/lib/$f.c"
+          done
+          # A leftover reference means the block path still reaches into the
+          # frame, dictionary or seekable translation units.
+          nm -u /tmp/nf/*.o | grep -o 'zxc_[A-Za-z0-9_]*' | sort -u > /tmp/nf/undef
+          nm --defined-only /tmp/nf/*.o | awk '{print $NF}' | grep -o 'zxc_[A-Za-z0-9_]*' | sort -u > /tmp/nf/def
+          missing=$(comm -23 /tmp/nf/undef /tmp/nf/def)
+          if [ -n "$missing" ]; then
+            echo "::error::block-only build needs symbols outside its own sources:"
+            echo "$missing"
+            exit 1
+          fi
