@@ -54,14 +54,16 @@ extern "C" {
  * otherwise it falls back to @c volatile.
  * @{
  */
-#if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && \
-    !defined(__STDC_NO_ATOMICS__)
+#if !defined(ZXC_USE_C11_ATOMICS) && !defined(__cplusplus) && defined(__STDC_VERSION__) && \
+    __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define ZXC_ATOMIC _Atomic
 #define ZXC_USE_C11_ATOMICS 1
 #else
 #define ZXC_ATOMIC volatile
+#ifndef ZXC_USE_C11_ATOMICS
 #define ZXC_USE_C11_ATOMICS 0
+#endif
 #endif
 /** @} */ /* end of Atomic Qualifier */
 
@@ -185,7 +187,7 @@ extern "C" {
 /** @def ZXC_NOINLINE
  * @brief Prevents a function from being inlined into its callers.
  */
-#define ZXC_NOINLINE __attribute__((noinline))
+#define ZXC_NOINLINE __attribute__((__noinline__))
 
 /** @def ZXC_COLD
  * @brief Marks a function as rarely executed: optimized for size and placed
@@ -1507,23 +1509,6 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
     return Debruijn64[((x & (0ULL - x)) * 0x03F79D71B4CA8B09ULL) >> 58];
 #endif
 }
-
-/**
- * @brief Allocates aligned memory (`_aligned_malloc` on Windows, else `posix_memalign`).
- *
- * @param[in] size      Bytes to allocate.
- * @param[in] alignment Power of two, and a multiple of `sizeof(void*)`.
- * @return The block, or NULL on failure. Free it with zxc_aligned_free(), not
- *         `free()`: the Windows allocator is a separate one.
- */
-void* zxc_aligned_malloc(const size_t size, const size_t alignment);
-
-/**
- * @brief Frees a zxc_aligned_malloc() block (`_aligned_free` on Windows, else `free`).
- *
- * @param[in] ptr Block to free; NULL is a no-op.
- */
-void zxc_aligned_free(void* ptr);
 
 // ============================================================================
 // COMPRESSION CONTEXT & STRUCTS

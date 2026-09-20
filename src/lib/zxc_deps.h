@@ -91,10 +91,8 @@
  * @brief Macros around the cache-line-aligned allocator used for compression
  * workspace and per-context scratch buffers.
  *
- * The default expansion calls the internal helpers @ref zxc_aligned_malloc /
- * @ref zxc_aligned_free (forward-declared in @c zxc_internal.h, defined in
- * @c zxc_common.c), which wrap @c _aligned_malloc / @c _aligned_free on
- * Windows and @c posix_memalign / @c free on POSIX.
+ * The default is the pair defined below, wrapping @c _aligned_malloc on Windows
+ * and @c posix_memalign elsewhere - the core's only use of either.
  *
  * Kernel builds typically map this to the slab allocator: @c kmalloc already
  * returns @c ARCH_KMALLOC_MINALIGN-aligned memory, which is greater than or
@@ -102,19 +100,38 @@
  * @{
  */
 
-/** @def ZXC_ALIGNED_MALLOC
- *  @brief Cache-line-aligned allocator.
- *         Default: @c zxc_aligned_malloc (wraps @c posix_memalign /
- *         @c _aligned_malloc). */
+// Defining ZXC_ALIGNED_MALLOC takes the whole block: the two helpers below are
+// then not compiled at all, and ZXC_ALIGNED_FREE has to come from the host too.
 #ifndef ZXC_ALIGNED_MALLOC
-#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_aligned_malloc(size, alignment)
-#endif
 
+/** @brief Default cache-line-aligned allocator; release with @ref zxc_aligned_free. */
+static inline void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
+#if defined(_WIN32)
+    return _aligned_malloc(size, alignment);
+#else
+    void* ptr = NULL;
+    if (posix_memalign(&ptr, alignment, size) != 0) return NULL;
+    return ptr;
+#endif
+}
+
+/** @brief Counterpart of @ref zxc_aligned_malloc; NULL is a no-op. */
+static inline void zxc_aligned_free(void* ptr) {
+#if defined(_WIN32)
+    _aligned_free(ptr);
+#else
+    free(ptr);
+#endif
+}
+
+/** @def ZXC_ALIGNED_MALLOC
+ *  @brief Cache-line-aligned allocator. */
+#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_aligned_malloc(size, alignment)
 /** @def ZXC_ALIGNED_FREE
  *  @brief Counterpart deallocator for @ref ZXC_ALIGNED_MALLOC. */
-#ifndef ZXC_ALIGNED_FREE
 #define ZXC_ALIGNED_FREE(ptr) zxc_aligned_free(ptr)
-#endif
+
+#endif  // ZXC_ALIGNED_MALLOC
 
 /** @} */ /* end of Aligned Allocator Abstraction */
 

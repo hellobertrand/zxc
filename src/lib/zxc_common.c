@@ -23,32 +23,6 @@
 // ============================================================================
 
 /**
- * @brief Allocates memory aligned to the specified boundary.
- *
- * Uses `_aligned_malloc` on Windows and `posix_memalign` elsewhere.
- */
-void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
-#if defined(_WIN32)
-    return _aligned_malloc(size, alignment);
-#else
-    void* ptr = NULL;
-    if (posix_memalign(&ptr, alignment, size) != 0) return NULL;
-    return ptr;
-#endif
-}
-
-/**
- * @brief Frees memory previously allocated by zxc_aligned_malloc().
- */
-void zxc_aligned_free(void* ptr) {
-#if defined(_WIN32)
-    _aligned_free(ptr);
-#else
-    free(ptr);
-#endif
-}
-
-/**
  * @brief Returns @c sizeof(zxc_compress_opts_t) for ABI-safe allocation.
  *
  * Public API; see @c zxc_buffer.h. Lets callers (other languages, or a
