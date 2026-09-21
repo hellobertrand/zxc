@@ -71,7 +71,8 @@ ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compre
 /**
  * @brief Decompresses one file stream into another.
  *
- * Same pipeline as compression, for the same throughput reasons.
+ * Same pipeline as compression, for the same throughput reasons. Bytes after
+ * the footer are @ref ZXC_ERROR_CORRUPT_DATA.
  *
  * @param[in]  f_in   Input stream, opened in "rb" mode.
  * @param[out] f_out  Output stream, opened in "wb" mode.

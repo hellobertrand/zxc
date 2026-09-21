@@ -723,6 +723,13 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
         ctx->io_error = 1;
     }
+    // Nothing may follow the footer, as for the buffer decoders. EOF without feof
+    // is a read error.
+    if (!ctx->io_error && UNLIKELY(fgetc(f_in) != EOF)) {
+        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
+        ctx->io_error = 1;
+    }
+    if (!ctx->io_error && UNLIKELY(!feof(f_in))) ctx->io_error = 1;  // LCOV_EXCL_LINE
 }
 
 /**

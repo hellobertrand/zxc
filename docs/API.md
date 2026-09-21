@@ -1011,7 +1011,8 @@ ZXC_EXPORT int64_t zxc_stream_decompress(
 );
 ```
 
-Decompresses `f_in` -> `f_out` using a parallel pipeline.
+Decompresses `f_in` -> `f_out` using a parallel pipeline. Bytes after the footer
+are `ZXC_ERROR_CORRUPT_DATA`.
 
 **Returns**: total decompressed bytes written, or negative `zxc_error_t`.
 

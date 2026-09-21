@@ -99,6 +99,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_stream_footer_looks_like_sek),
     TEST_CASE(test_stream_get_decompressed_size_errors),
     TEST_CASE(test_stream_engine_errors),
+    TEST_CASE(test_stream_trailing_bytes),
 
     /* --- Push Streaming API --- */
     TEST_CASE(test_pstream_roundtrip_basic),
