@@ -1325,6 +1325,16 @@ static ZXC_ALWAYS_INLINE uint16_t zxc_hash16(const uint8_t* p) {
 }
 
 /**
+ * @brief Writes the file header checksum (bytes 14-15) over the other 14 bytes.
+ *
+ * @param[in,out] h The 16-byte file header.
+ */
+static ZXC_ALWAYS_INLINE void zxc_file_header_sign(uint8_t* h) {
+    zxc_store_le16(h + 14, 0);
+    zxc_store_le16(h + 14, zxc_hash16(h));
+}
+
+/**
  * @brief Copies exactly 16 bytes as one vector move where the ISA has one.
  *
  * SSE2 on x86, NEON on ARM, memcpy elsewhere. Fixed width: the caller must

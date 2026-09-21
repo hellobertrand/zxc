@@ -827,7 +827,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.chunk_size = runtime_chunk_sz;
     ctx.checksum_enabled = checksum_enabled;
     ctx.file_has_checksum = mode == 1 ? checksum_enabled : file_has_chk;
-    ctx.file_has_seek = mode == 1 ? seekable : file_has_seek;
+    ctx.file_has_seek = file_has_seek;
     ctx.progress_cb = progress_cb;
     ctx.progress_user_data = user_data;
     ctx.total_input_bytes = total_file_size;

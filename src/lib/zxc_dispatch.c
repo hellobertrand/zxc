@@ -556,9 +556,9 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
  * @brief Writes the whole archive an empty source produces: file header, EOF
  *        block, the empty seek table when @p seekable, then the footer.
  *
- * Both entry points return through here, so their empty archives are the same
- * bytes by construction rather than by a test that compares them. Neither
- * carves a workspace to get here: there is no block to encode.
+ * Both entry points return through here: same options, same empty archive, by
+ * construction. The context API ignores seekable and passes 0. Neither carves a
+ * workspace: there is no block to encode.
  *
  * @return Bytes written, or a negative @ref zxc_error_t.
  */
@@ -721,8 +721,6 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
         ZXC_FREE(seek_comp);
         if (UNLIKELY(st_val < 0)) return st_val;  // LCOV_EXCL_LINE
         op += st_val;
-    } else {
-        ZXC_FREE(seek_comp);
     }
 
     if (UNLIKELY((size_t)(op_end - op) < zxc_footer_bytes(checksum_enabled)))

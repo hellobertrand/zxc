@@ -16,7 +16,8 @@
  * after the EOF block: groups of 64 blocks, each its first block's offset then
  * every block's on-disk size. Readers derive @c num_blocks from the footer and
  * read a group when one of its blocks is accessed: open costs the same at any
- * block count and no table stays in memory. Plain decompressors ignore it.
+ * block count and no table stays in memory. A header flag announces it; plain
+ * decompressors skip it and refuse a tail that disagrees.
  *
  * No field holds the block count, so nothing caps it but the footer's 64-bit
  * size: counts and block indices are 64-bit here. Writing a table still costs
@@ -142,7 +143,7 @@ typedef struct {
  * kernel file descriptor).
  *
  * @param[in] r  Reader interface (must remain valid for the handle lifetime).
- * @return Handle on success, or @c NULL on error.
+ * @return Handle (0 blocks if the archive is empty), or @c NULL on error.
  */
 ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 

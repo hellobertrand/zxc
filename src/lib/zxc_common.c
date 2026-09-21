@@ -513,9 +513,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     if (dict_id != 0) zxc_store_le32(dst + 7, dict_id);
 
     // Bytes 14-15: Header Checksum (16-bit)
-    zxc_store_le16(dst + 14, 0);  // Zero out before hashing
-    const uint16_t sum = zxc_hash16(dst);
-    zxc_store_le16(dst + 14, sum);
+    zxc_file_header_sign(dst);
 
     return ZXC_FILE_HEADER_SIZE;
 }

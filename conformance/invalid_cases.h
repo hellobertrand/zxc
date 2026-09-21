@@ -74,15 +74,6 @@ static const invalid_expect_t INVALID_EXPECT[] = {
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
 
-/* Re-sign the 16-byte file header after patching any of its fields. */
-static void resign_file_header(uint8_t* d) {
-    d[14] = 0;
-    d[15] = 0;
-    const uint16_t sum = zxc_hash16(d);
-    d[14] = (uint8_t)(sum & 0xFFU);
-    d[15] = (uint8_t)(sum >> 8);
-}
-
 /* Re-sign an 8-byte block header at @p b after patching type or comp_size. */
 static void resign_block_header(uint8_t* b) {
     uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
@@ -260,12 +251,12 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     /* --- File-header defects (checksum re-signed, except where it IS the defect) */
     if (!strcmp(name, "bad_block_size_field")) {
         d[5] = 31; /* block-size code outside [12,21] */
-        resign_file_header(d);
+        zxc_file_header_sign(d);
     } else if (!strcmp(name, "bad_checksum_algo")) {
         d[6] = (uint8_t)((d[6] & 0xF0U) | 0x0FU); /* checksum algorithm id != 0 */
-        resign_file_header(d);
+        zxc_file_header_sign(d);
     } else if (!strcmp(name, "bad_header_checksum")) {
-        resign_file_header(d);
+        zxc_file_header_sign(d);
         d[14] ^= 0xFFU; /* the checksum itself is the defect: corrupt it last */
     } else if (!strcmp(name, "dict_required")) {
         d[6] |= 0x40U; /* HAS_DICTIONARY with a non-zero id, but none supplied */
@@ -273,7 +264,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         d[8] = 0xBE;
         d[9] = 0xAD;
         d[10] = 0xDE;
-        resign_file_header(d);
+        zxc_file_header_sign(d);
     } else if (!strcmp(name, "dict_id_mismatch")) {
         /* Same shape, with an id matching no committed .zxd: offered a real
          * dictionary, the decoder must reject the binding rather than decode
@@ -283,7 +274,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         d[8] = 0x56;
         d[9] = 0x34;
         d[10] = 0x12;
-        resign_file_header(d);
+        zxc_file_header_sign(d);
 
         /* --- Block-header defects (checksum re-signed) ---------------------- */
     } else if (!strcmp(name, "bad_block_type")) {

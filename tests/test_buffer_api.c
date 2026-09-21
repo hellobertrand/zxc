@@ -1087,8 +1087,7 @@ static int inplace_seek_flag_margin(void) {
         }
 
         seek[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
-        zxc_store_le16(seek + 14, 0);
-        zxc_store_le16(seek + 14, zxc_hash16(seek));
+        zxc_file_header_sign(seek);
         const size_t lb = zxc_decompress_inplace_bound(seek, (size_t)sl);
         uint8_t* const buf = (uint8_t*)malloc(lb);
         if (!buf) {

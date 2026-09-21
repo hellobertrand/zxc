@@ -1036,12 +1036,6 @@ int test_tail_between_eof_and_footer(void) {
     return ok;
 }
 
-/* Re-signs a file header after a flag edit, so the edit alone is under test. */
-static void seek_flag_resign(uint8_t* hdr) {
-    zxc_store_le16(hdr + 14, 0);
-    zxc_store_le16(hdr + 14, zxc_hash16(hdr));
-}
-
 /* The four sequential readers on one archive: 1 if all decode @p n bytes, 0 if
  * all refuse, -1 (printed) if they disagree. */
 static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t n, uint8_t* out,
@@ -1117,7 +1111,7 @@ int test_seek_flag_contract(void) {
         // Flag set over no table.
         memcpy(lie, plain, (size_t)pl);
         lie[6] |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
-        seek_flag_resign(lie);
+        zxc_file_header_sign(lie);
         s = zxc_seekable_open(lie, (size_t)pl);
         ok = seek_flag_verdict(lie, (size_t)pl, n, out, "flag without table") == 0 && !s;
         zxc_seekable_free(s);
@@ -1125,7 +1119,7 @@ int test_seek_flag_contract(void) {
         // Flag clear over a table.
         memcpy(lie, seek, (size_t)sl);
         lie[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
-        seek_flag_resign(lie);
+        zxc_file_header_sign(lie);
         s = zxc_seekable_open(lie, (size_t)sl);
         ok = ok && seek_flag_verdict(lie, (size_t)sl, n, out, "table without flag") == 0 && !s;
         zxc_seekable_free(s);
