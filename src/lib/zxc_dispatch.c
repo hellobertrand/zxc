@@ -554,7 +554,7 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
 
 /**
  * @brief Writes the whole archive an empty source produces: file header, EOF
- *        block, footer, and nothing between them.
+ *        block, the empty seek table when @p seekable, then the footer.
  *
  * Both entry points return through here, so their empty archives are the same
  * bytes by construction rather than by a test that compares them. Neither
@@ -564,8 +564,9 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
  */
 static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_capacity,
                                      const size_t block_size, const int checksum_enabled,
-                                     const uint32_t did) {
-    const int h = zxc_write_file_header(dst, dst_capacity, block_size, checksum_enabled, did);
+                                     const uint32_t did, const int seekable) {
+    const int h =
+        zxc_write_file_header(dst, dst_capacity, block_size, checksum_enabled, did, seekable);
     if (UNLIKELY(h < 0)) return h;
     size_t off = (size_t)h;
 
@@ -574,6 +575,13 @@ static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_cap
     const int e = zxc_write_block_header(dst + off, dst_capacity - off, &eof);
     if (UNLIKELY(e < 0)) return e;
     off += (size_t)e;
+
+    // The flag promised a table: an empty one, a bare SEK header.
+    if (seekable) {
+        const int t = zxc_seek_table_header(dst + off, dst_capacity - off, 0);
+        if (UNLIKELY(t < 0)) return t;
+        off += (size_t)t;
+    }
 
     const int f = zxc_write_file_footer(dst + off, dst_capacity - off, 0, 0, checksum_enabled);
     if (UNLIKELY(f < 0)) return f;
@@ -605,8 +613,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
 
     if (UNLIKELY(src_size == 0))
-        return zxc_write_empty_frame((uint8_t*)dst, dst_capacity, block_size, checksum_enabled,
-                                     did);
+        return zxc_write_empty_frame((uint8_t*)dst, dst_capacity, block_size, checksum_enabled, did,
+                                     seekable);
 
     const uint8_t* ip = (const uint8_t*)src;
     uint8_t* op = (uint8_t*)dst;
@@ -632,8 +640,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     uint8_t* const dict_input = ctx.dict_buffer;
     if (dict_input) ZXC_MEMCPY(dict_input, dict, dict_size);
 
-    const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did);
+    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled,
+                                            did, seekable);
     // LCOV_EXCL_START
     if (UNLIKELY(h_val < 0)) {
         zxc_cctx_free(&ctx);
@@ -707,7 +715,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     op += eof_val;
 
     // Seekable: write seek table between EOF block and footer
-    if (seekable && seek_count > 0) {
+    if (seekable) {
         const size_t st_cap = (size_t)(op_end - op);
         const int64_t st_val = zxc_write_seek_table(op, st_cap, seek_comp, seek_count);
         ZXC_FREE(seek_comp);
@@ -758,7 +766,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
 
     size_t chunk = 0;
     int cs = 0;
-    const int hrc = zxc_read_file_header(src, src_size, &chunk, &cs, NULL);
+    const int hrc = zxc_read_file_header(src, src_size, &chunk, &cs, NULL, NULL);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     // The smallest archive: header, the mandatory EOF block, then the footer,
@@ -845,9 +853,10 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
     zxc_cctx_t ctx;
 
     int file_has_checksums = 0;
+    int file_has_seek = 0;
     uint32_t header_dict_id = 0;
     const int hrc = zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                         &header_dict_id);
+                                         &header_dict_id, &file_has_seek);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     // Dictionary validation, before any allocation: a binding the caller cannot
@@ -909,9 +918,10 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
             }
-            // Only a SEK block may sit between the EOF block and the footer.
+            // Between the EOF block and the footer: the SEK block if announced, else nothing.
             if (UNLIKELY(!zxc_tail_gap_ok(src + consumed, src_size - footer_len - consumed,
-                                          (uint64_t)(op - op_start), runtime_chunk_size))) {
+                                          file_has_seek, (uint64_t)(op - op_start),
+                                          runtime_chunk_size))) {
                 if (ctx_ready) zxc_cctx_free(&ctx);
                 return ZXC_ERROR_CORRUPT_DATA;
             }
@@ -1012,9 +1022,10 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
  *
  * `trailing` is everything written after the last data block: EOF header, footer
  * and seek table. The latter is always reserved at its worst case (about 4 bytes
- * per block, <= 0.1% of the payload) because no header flag announces one; omitting
- * it used to push the bound *below* comp_size for a seekable archive of
- * incompressible data in small blocks.
+ * per block, <= 0.1% of the payload), whatever the header flag says: the bound is
+ * computed before the walk that holds the flag to the tail. Omitting it used to
+ * push the bound *below* comp_size for a seekable archive of incompressible data
+ * in small blocks.
  *
  * @param[in] dsize      Decompressed size, in bytes.
  * @param[in] chunk_size Block size from the file header (0 = no blocks).
@@ -1314,8 +1325,8 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     // The sticky settings above are already stored, so an empty source is done:
     // same writer as the one-shot, and the workspace is left alone.
     if (UNLIKELY(src_size == 0))
-        return zxc_write_empty_frame((uint8_t*)dst, dst_capacity, block_size, checksum_enabled,
-                                     did);
+        return zxc_write_empty_frame((uint8_t*)dst, dst_capacity, block_size, checksum_enabled, did,
+                                     0);
 
     // Re-init when the chunk changed, a level raise needs the optimal-parser
     // scratch, or a dictionary arrives on a context carved without its prefix.
@@ -1356,7 +1367,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     const uint8_t* const ip = (const uint8_t*)src;
 
     const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did);
+        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did, 0);
     if (UNLIKELY(h_val < 0)) return h_val;  // LCOV_EXCL_LINE
     op += h_val;
 
@@ -1454,7 +1465,7 @@ static int64_t zxc_dctx_probe(const zxc_dctx* dctx, const uint8_t* RESTRICT src,
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     size_t chunk_size = 0;
     uint32_t header_dict_id = 0;
-    const int hrc = zxc_read_file_header(src, src_size, &chunk_size, NULL, &header_dict_id);
+    const int hrc = zxc_read_file_header(src, src_size, &chunk_size, NULL, &header_dict_id, NULL);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
     if (UNLIKELY(dctx->owns_workspace && chunk_size != dctx->last_block_size))
         return ZXC_ERROR_BAD_BLOCK_SIZE;
@@ -1491,10 +1502,11 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
     const uint8_t* const op_end = op + dst_capacity;
     size_t runtime_chunk_size = 0;
     int file_has_checksums = 0;
+    int file_has_seek = 0;
     uint32_t header_dict_id = 0;
 
     const int hrc = zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                         &header_dict_id);
+                                         &header_dict_id, &file_has_seek);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     // Static dctx: block_size is locked at workspace init; reject any
@@ -1571,9 +1583,9 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
             const uint8_t* const footer = (const uint8_t*)src + src_size - footer_len;
             if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start)))
                 return ZXC_ERROR_CORRUPT_DATA;
-            // Only a SEK block may sit between the EOF block and the footer.
+            // Between the EOF block and the footer: the SEK block if announced, else nothing.
             if (UNLIKELY(!zxc_tail_gap_ok((const uint8_t*)src + consumed,
-                                          src_size - footer_len - consumed,
+                                          src_size - footer_len - consumed, file_has_seek,
                                           (uint64_t)(op - op_start), runtime_chunk_size)))
                 return ZXC_ERROR_CORRUPT_DATA;
             if (checksum_enabled && file_has_checksums &&

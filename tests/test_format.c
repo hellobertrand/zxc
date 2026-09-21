@@ -920,11 +920,12 @@ int test_swapped_blocks_oneshot(void) {
     return ok;
 }
 
-/* The 8 bytes after the EOF block are a SEK header or the footer's head. The
- * rule the sequential readers share must return the table's full 64-bit length,
- * not the header field: past a 4 GiB table the field folds the high half in. */
+/* When the header announces a seek table, the 8 bytes after the EOF block must be
+ * its SEK header. The check the sequential readers share must return the table's
+ * full 64-bit length, not the header field: past a 4 GiB table the field folds the
+ * high half in. */
 int test_seek_tail_rule(void) {
-    printf("=== TEST: Format - SEK-or-footer rule after EOF ===\n");
+    printf("=== TEST: Format - SEK header check after EOF ===\n");
     enum { BS = 4096 };
     const uint64_t nblocks = (1ULL << 30) + 1; /* table past 4 GiB: its high half is 1 */
     const uint64_t table = zxc_seek_table_bytes(nblocks);
@@ -941,22 +942,22 @@ int test_seek_tail_rule(void) {
     }
 
     uint64_t got = 0;
-    if (!zxc_seek_tail_is_sek(peek, total_out, BS, &got) || got != table) {
+    if (!zxc_seek_header_ok(peek, total_out, BS, &got) || got != table) {
         printf("Failed: SEK of %llu blocks: matched %d, length %llu, want %llu\n",
                (unsigned long long)nblocks, got != 0, (unsigned long long)got,
                (unsigned long long)table);
         return 0;
     }
-    /* Off by one block: the header field no longer agrees, so not a SEK. */
-    if (zxc_seek_tail_is_sek(peek, total_out - BS, BS, &got)) {
+    /* Off by one block: the header field no longer agrees. */
+    if (zxc_seek_header_ok(peek, total_out - BS, BS, &got)) {
         printf("Failed: matched a SEK header for the wrong block count\n");
         return 0;
     }
-    /* A footer's head: the source size of an unremarkable archive. */
+    /* A lying flag: the footer's head where the SEK header should be. */
     uint8_t footer[ZXC_BLOCK_HEADER_SIZE];
     zxc_store_le64(footer, 10);
-    if (zxc_seek_tail_is_sek(footer, 10, BS, &got)) {
-        printf("Failed: a source size read as a SEK header\n");
+    if (zxc_seek_header_ok(footer, 10, BS, &got)) {
+        printf("Failed: a source size accepted as a SEK header\n");
         return 0;
     }
     printf("PASS\n\n");
@@ -1030,6 +1031,145 @@ int test_tail_between_eof_and_footer(void) {
     free(src);
     free(arc);
     free(mod);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* Re-signs a file header after a flag edit, so the edit alone is under test. */
+static void seek_flag_resign(uint8_t* hdr) {
+    zxc_store_le16(hdr + 14, 0);
+    zxc_store_le16(hdr + 14, zxc_hash16(hdr));
+}
+
+/* The four sequential readers on one archive: 1 if all decode @p n bytes, 0 if
+ * all refuse, -1 (printed) if they disagree. */
+static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t n, uint8_t* out,
+                             const char* what) {
+    const zxc_decompress_opts_t o = {.checksum_enabled = 1};
+    int acc[4] = {0, 0, 0, 0};
+
+    acc[0] = zxc_decompress(arc, len, out, n + 64, &o) == (int64_t)n;
+
+    zxc_dctx* const d = zxc_create_dctx();
+    acc[1] = d && zxc_decompress_dctx(d, arc, len, out, n + 64, &o) == (int64_t)n;
+    zxc_free_dctx(d);
+
+    FILE* const f = tmpfile();
+    if (f && fwrite(arc, 1, len, f) == len && fseek(f, 0, SEEK_SET) == 0)
+        acc[2] = zxc_stream_decompress(f, NULL, &o) == (int64_t)n;
+    if (f) fclose(f);
+
+    zxc_dstream* const ds = zxc_dstream_create(&o);
+    if (ds) {
+        zxc_inbuf_t ib = {arc, len, 0};
+        zxc_outbuf_t ob = {out, n + 64, 0};
+        acc[3] =
+            zxc_dstream_decompress(ds, &ob, &ib) >= 0 && zxc_dstream_finished(ds) && ob.pos == n;
+    }
+    zxc_dstream_free(ds);
+
+    if (acc[0] == acc[1] && acc[1] == acc[2] && acc[2] == acc[3]) return acc[0];
+    printf("  [FAIL] %s: readers disagree (buffer %d, dctx %d, FILE* %d, push %d)\n", what, acc[0],
+           acc[1], acc[2], acc[3]);
+    return -1;
+}
+
+/* HAS_SEEK_TABLE announces the SEK block (Sec 3.1, 5.5), and every reader holds
+ * the tail to it: a flag set over no table, or clear over one, is refused by the
+ * four sequential readers and zxc_seekable_open alike. Writers set it for what
+ * they write, not for what was asked: the context API ignores seekable. */
+int test_seek_flag_contract(void) {
+    printf("=== TEST: Format - HAS_SEEK_TABLE matches the tail on every reader ===\n");
+    const size_t n = 3 * 4096 + 7;
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const src = malloc(n);
+    uint8_t* const plain = malloc(cap);
+    uint8_t* const seek = malloc(cap);
+    uint8_t* const lie = malloc(cap);
+    uint8_t* const out = malloc(n + 64);
+    int ok = src && plain && seek && lie && out;
+    if (ok) gen_lz_data(src, n);
+
+    for (int cs = 0; cs <= 1 && ok; cs++) {
+        const zxc_compress_opts_t po = {.level = 3, .block_size = 4096, .checksum_enabled = cs};
+        zxc_compress_opts_t so = po;
+        so.seekable = 1;
+        const int64_t pl = zxc_compress(src, n, plain, cap, &po);
+        const int64_t sl = zxc_compress(src, n, seek, cap, &so);
+        if (pl <= 0 || sl <= 0 || (plain[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) ||
+            !(seek[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE)) {
+            printf("  [FAIL] cs=%d: flag does not follow the seekable option\n", cs);
+            ok = 0;
+            break;
+        }
+        zxc_seekable* s = zxc_seekable_open(seek, (size_t)sl);
+        ok = seek_flag_verdict(plain, (size_t)pl, n, out, "plain") == 1 &&
+             seek_flag_verdict(seek, (size_t)sl, n, out, "seekable") == 1 && s &&
+             !zxc_seekable_open(plain, (size_t)pl);
+        zxc_seekable_free(s);
+        if (!ok) {
+            printf("  [FAIL] cs=%d: an honest archive was refused\n", cs);
+            break;
+        }
+
+        // Flag set over no table.
+        memcpy(lie, plain, (size_t)pl);
+        lie[6] |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
+        seek_flag_resign(lie);
+        s = zxc_seekable_open(lie, (size_t)pl);
+        ok = seek_flag_verdict(lie, (size_t)pl, n, out, "flag without table") == 0 && !s;
+        zxc_seekable_free(s);
+
+        // Flag clear over a table.
+        memcpy(lie, seek, (size_t)sl);
+        lie[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
+        seek_flag_resign(lie);
+        s = zxc_seekable_open(lie, (size_t)sl);
+        ok = ok && seek_flag_verdict(lie, (size_t)sl, n, out, "table without flag") == 0 && !s;
+        zxc_seekable_free(s);
+        if (!ok) printf("  [FAIL] cs=%d: a lying flag was accepted somewhere\n", cs);
+    }
+
+    // Empty source: the flag still promises a table, an empty one. The FILE*
+    // writer cannot know the input is empty when it writes the header, so both
+    // writers must agree on these bytes.
+    if (ok) {
+        const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
+        const int64_t el = zxc_compress(NULL, 0, seek, cap, &so);
+        const size_t want = ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+        FILE* const fi = tmpfile();
+        FILE* const fo = tmpfile();
+        int64_t fl = -1;
+        if (fi && fo) fl = zxc_stream_compress(fi, fo, &so);
+        const int same = fl == el && fo && fseek(fo, 0, SEEK_SET) == 0 &&
+                         fread(lie, 1, (size_t)(fl > 0 ? fl : 0), fo) == (size_t)fl &&
+                         memcmp(lie, seek, (size_t)el) == 0;
+        if (fi) fclose(fi);
+        if (fo) fclose(fo);
+        ok = el == (int64_t)want && (seek[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) && same &&
+             seek_flag_verdict(seek, (size_t)el, 0, out, "empty seekable") == 1 &&
+             !zxc_seekable_open(seek, (size_t)el);
+        if (!ok)
+            printf("  [FAIL] empty seekable: %lld bytes (want %zu), FILE* writer %lld, same %d\n",
+                   (long long)el, want, (long long)fl, same);
+    }
+
+    // The context API ignores seekable, so its header must not promise a table.
+    if (ok) {
+        const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
+        zxc_cctx* const c = zxc_create_cctx(&so);
+        const int64_t cl = c ? zxc_compress_cctx(c, src, n, lie, cap, &so) : -1;
+        zxc_free_cctx(c);
+        ok = cl > 0 && !(lie[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) &&
+             seek_flag_verdict(lie, (size_t)cl, n, out, "cctx") == 1;
+        if (!ok) printf("  [FAIL] cctx: header promises a table it does not write\n");
+    }
+
+    free(src);
+    free(plain);
+    free(seek);
+    free(lie);
     free(out);
     if (ok) printf("PASS\n\n");
     return ok;
@@ -1122,7 +1262,7 @@ static int chunk_code_verdict(uint8_t code, size_t* bs) {
     hdr[15] = (uint8_t)(sum >> 8);
     int has_checksum = -1;
     *bs = 0;
-    return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL);
+    return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL, NULL);
 }
 
 int test_chunk_size_code() {

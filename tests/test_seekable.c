@@ -2070,7 +2070,7 @@ int test_seekable_forged_total_size(void) {
     uint8_t arc[ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
     for (size_t k = 0; k < sizeof(totals) / sizeof(totals[0]); k++) {
         uint8_t* p = arc;
-        if (zxc_write_file_header(p, ZXC_FILE_HEADER_SIZE, BS, 0, 0) < 0 ||
+        if (zxc_write_file_header(p, ZXC_FILE_HEADER_SIZE, BS, 0, 0, 1) < 0 ||
             zxc_write_block_header(p += ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
             zxc_seek_table_header(p += ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, 0) < 0 ||
             zxc_write_file_footer(p + ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_FOOTER_SIZE, totals[k], 0,
@@ -2216,7 +2216,7 @@ int test_seekable_beyond_old_cap(void) {
         .block_type = ZXC_BLOCK_RAW, .block_flags = 0, .reserved = 0, .comp_size = SYNTH_BS};
     const zxc_block_header_t eof = {
         .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
-    if (zxc_write_file_header(c.file_hdr, sizeof(c.file_hdr), SYNTH_BS, 0, 0) < 0 ||
+    if (zxc_write_file_header(c.file_hdr, sizeof(c.file_hdr), SYNTH_BS, 0, 0, 1) < 0 ||
         zxc_write_block_header(c.blk_hdr, sizeof(c.blk_hdr), &raw) < 0 ||
         zxc_write_block_header(c.eof_hdr, sizeof(c.eof_hdr), &eof) < 0 ||
         zxc_seek_table_header(c.sek_hdr, sizeof(c.sek_hdr), c.n) < 0 ||

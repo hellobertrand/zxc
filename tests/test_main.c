@@ -129,6 +129,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_forged_block_comp_size),
     TEST_CASE(test_swapped_blocks_oneshot),
     TEST_CASE(test_tail_between_eof_and_footer),
+    TEST_CASE(test_seek_flag_contract),
     TEST_CASE(test_footer_digest),
     TEST_CASE(test_seek_tail_rule),
     TEST_CASE(test_chunk_size_code),

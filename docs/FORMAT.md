@@ -31,7 +31,7 @@ It formalizes the current reference implementation of format version **8**.
 +----------------------+
 | EOF Block            | 8 bytes (type=255, comp_size=0)
 +----------------------+
-| SEK Block (Optional) | table of contents for random access
+| SEK Block           | iff HAS_SEEK_TABLE: table of contents for random access
 +----------------------+
 | File Footer          | 8 bytes, 16 with a digest
 +----------------------+
@@ -63,8 +63,10 @@ Offset  Size  Field
 - **Flags** (`u8`):
   - Bit 7 (`0x80`): `HAS_CHECKSUM`.
   - Bit 6 (`0x40`): `HAS_DICTIONARY` — a pre-trained dictionary is required for decompression.
+  - Bit 5 (`0x20`): `HAS_SEEK_TABLE` — a SEK block (§5.5) sits between the EOF block and the
+    footer. Clear, the footer follows the EOF block directly.
   - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
-  - Bits 4..5: reserved.
+  - Bit 4: reserved.
 - **Reserved / Dictionary ID**: 7 bytes.
   - When `HAS_DICTIONARY` is set: bytes `0x07..0x0A` contain a `dict_id` (`u32` LE), a 32-bit hash of the dictionary content. Bytes `0x0B..0x0D` remain zero.
   - When `HAS_DICTIONARY` is clear: all 7 bytes are zero.
@@ -451,13 +453,13 @@ Constraints:
 - no payload
 - no per-block trailing checksum
 
-Immediately after EOF block header comes the Optional SEK block, followed by the 8-byte file footer.
+Immediately after EOF block header comes the SEK block when `HAS_SEEK_TABLE=1`, then the file footer (§ 8).
 
 ---
 
 ## 5.5 SEK block (`type=254`)
 
-The **Seek Table** block is an optional block appended between the EOF block and the File Footer. It provides `O(1)` random-access capabilities by recording, in groups, where blocks start and how long each is on disk. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
+The **Seek Table** block sits between the EOF block and the File Footer when, and only when, the file header sets `HAS_SEEK_TABLE`. An empty source still gets one: a bare SEK header, payload size 0. It provides `O(1)` random-access capabilities by recording, in groups, where blocks start and how long each is on disk. Decompressed sizes and block indices are derived from the file header's `block_size` (all blocks are `block_size` except the last, which may be smaller).
 
 **Layout of a SEK Block**:
 ```text
@@ -489,8 +491,9 @@ on-disk size, whose bytes the read returns with no error; any seek index checked
 itself shares this. Only the per-block checksum, seeded with the block's position (§ 7.2),
 binds a block to its index.
 
-**Backward Detection Strategy**:
-1. Read the **File Header** (first 16 bytes) -> extract `block_size`.
+**Backward Reading**:
+1. Read the **File Header** (first 16 bytes) -> extract `block_size`; with `HAS_SEEK_TABLE`
+   clear, the archive is not seekable.
 2. Read the **File Footer** (last 8 bytes, or 16 with checksums) -> its first 8 bytes are `total_decompressed_size`.
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`, in 64 bits: no field
    holds `N`, so nothing caps it but the footer's 64-bit size.
@@ -508,15 +511,12 @@ binds a block to its index.
    the gap to the next anchor. Checking that anchor is optional, and refuses an intact group
    when it is damaged.
 
-**Sequential Detection**: after the EOF block, a decoder reads 8 bytes, which are either
-the footer or the SEK block header, and cannot tell them apart from those bytes alone: one
-source size in about 65536 parses as a valid SEK header. The bytes are the SEK header if
-and only if they parse as a block header of type `254` whose Compressed Payload Size equals
-the fold of `T = ⌈N / 64⌉ × 8 + N × 4`, with `N` derived from the bytes the decoder produced.
-Below 4 GiB the fold is `T`, which a source size never matches: those four bytes of the size
-hold at most `size / 2^24`, while `T ≥ 4N ≥ size / 2^19`. Beyond, a false match needs the type,
-the header checksum and the 32 folded bits to agree at once. The decoder then skips `T` bytes,
-counted in 64 bits, and reads the footer.
+**Sequential Reading**: the file header says what follows the EOF block, so a decoder never
+guesses from those bytes, which is unreliable: the footer opens with the source size, and one
+size in about 65536 parses as a valid SEK header. With `HAS_SEEK_TABLE=1`, it reads the SEK
+block header and rejects it unless it is type `254` with a Compressed Payload Size equal to the
+fold of `T = ⌈N / 64⌉ × 8 + N × 4`, `N` derived from the bytes it produced; it then skips `T`
+bytes, counted in 64 bits, and reads the footer. With the flag clear, the footer comes next.
 
 ---
 
@@ -721,8 +721,8 @@ Offset  Size  Field
    seeded with the block's position (§ 7.2).
 5. On EOF:
    - require `comp_size == 0`,
-   - read 8 bytes: the SEK block header if they parse as one with the payload
-     size § 5.5 derives from the output, else the footer; skip the table if so,
+   - if `HAS_SEEK_TABLE=1`, read the SEK block header, require the payload size
+     § 5.5 derives from the output, and skip the table,
    - read the footer (8 bytes, 16 when `HAS_CHECKSUM=1`),
    - compare the first 8 footer bytes (`original_source_size`) with produced output size,
    - if verifying, compare the trailing archive digest (§ 7.3) with the fold of the block checksums.
@@ -796,6 +796,7 @@ The recommended behavior for each class is specified below.
 | **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
 | **Data block comp_size above block size** | Block header, offset 0x03 | Reject. A data block never compresses past its own content (§4.1). |
 | **Block walk ends without an EOF block** | End of the block walk | Reject. A forged Compressed Payload Size can span the EOF marker; the resulting short decode must not be reported as success. |
+| **Seek-table flag disagrees with the tail** | Between the EOF block and the footer | Reject. `HAS_SEEK_TABLE=1` without the SEK block §5.5 derives from the output, or any byte there with `HAS_SEEK_TABLE=0`. |
 | **Seek table group inconsistent** | SEK payload | Reject. A size outside `[8, one block]`, an anchor outside the data area, a group running past the EOF block, or a last group not ending on it (§5.5). |
 | **Block disagrees with its seek entry** | Block header, when a seekable reader accesses the block | Reject. The entry's size is not header + payload + checksum of the block found there (§5.5). |
 | **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
@@ -1065,7 +1066,7 @@ Generated archive size: **82 bytes** (20 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 3C 35
+00000000: F5 2E B0 9C 08 13 A0 00 00 00 00 00 00 00 DC F3
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
 00000030: 00 0C 00 00 00 6F 10 00 00 00 00 00 00 00 16 00
@@ -1075,7 +1076,10 @@ Generated archive size: **82 bytes** (20 bytes larger than the non-seekable vari
 
 #### Byte-level decoding
 
-**A) File Header** (offset `0x00`, 16 bytes) - identical to non-seekable.
+**A) File Header** (offset `0x00`, 16 bytes) - as non-seekable, but for two fields:
+
+- `A0` -> `HAS_CHECKSUM=1` and `HAS_SEEK_TABLE=1` (`0x80 | 0x20`), algo id 0.
+- `DC F3` -> header checksum (LE value `0xF3DC`).
 
 **B) Data Block #0 (RAW)** (offset `0x10`, 22 bytes) - identical to non-seekable.
 
@@ -1128,7 +1132,7 @@ Group 0 at `0x36`:
 0x4A..0x51  Archive Digest (8)
 ```
 
-> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer, so the footer stays at the very **end of the file** (its last 8 bytes, or 16 with checksums; § 8). Decoders that locate it from the end (`src + src_size - footer_len` for buffer APIs, `fseek(END - footer_len)` for file APIs, `footer_len` being 8 or 16) work unchanged with seekable archives. However, **streaming decoders** that read the footer sequentially immediately after the EOF block must be updated to detect and skip the SEK block. In practice, all ZXC decoders since v0.9.0 handle both seekable and non-seekable archives transparently.
+> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer, so the footer stays at the very **end of the file** (its last 8 bytes, or 16 with checksums; § 8). Decoders that locate it from the end (`src + src_size - footer_len` for buffer APIs, `fseek(END - footer_len)` for file APIs, `footer_len` being 8 or 16) work unchanged with seekable archives. **Streaming decoders**, which reach the footer sequentially, learn from `HAS_SEEK_TABLE` whether a SEK block comes first.
 
 ---
 

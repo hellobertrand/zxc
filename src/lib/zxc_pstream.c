@@ -319,7 +319,7 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
  */
 static int cs_stage_file_header(zxc_cstream* cs) {
     const int w = zxc_write_file_header(cs->pending, cs->pending_cap, cs->block_size,
-                                        cs->opts.checksum_enabled, 0);
+                                        cs->opts.checksum_enabled, 0, 0);
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
@@ -588,13 +588,13 @@ int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out) {
  *      Calling the underlying block decoder on the accumulated payload.
  * @var dstream_state_t::DS_EMIT_DECODED
  *      Draining decoded bytes from @c decoded into @p out.
- * @var dstream_state_t::DS_PEEK_TAIL
- *      Just past the EOF block: 8 bytes are either a SEK block header or the
- *      whole footer.
+ * @var dstream_state_t::DS_NEED_SEK_HEADER
+ *      Just past the EOF block of an archive whose header announced a seek
+ *      table: pulling and validating its SEK block header.
  * @var dstream_state_t::DS_DRAIN_SEK_PAYLOAD
- *      The peeked 8 bytes were a SEK header; skipping its payload bytes.
+ *      Skipping the SEK payload bytes.
  * @var dstream_state_t::DS_NEED_FOOTER
- *      Pulling the file footer that follows a SEK block.
+ *      Pulling the file footer.
  * @var dstream_state_t::DS_VALIDATE_FOOTER
  *      Validating @c total_out.
  * @var dstream_state_t::DS_DONE
@@ -608,7 +608,7 @@ typedef enum {
     DS_NEED_BLOCK_PAYLOAD,
     DS_DECODE_BLOCK,
     DS_EMIT_DECODED,
-    DS_PEEK_TAIL,
+    DS_NEED_SEK_HEADER,
     DS_DRAIN_SEK_PAYLOAD,
     DS_NEED_FOOTER,
     DS_VALIDATE_FOOTER,
@@ -636,6 +636,8 @@ typedef enum {
  *      Block size declared by the file header; 0 until the header is parsed.
  * @var zxc_dstream_s::file_has_checksum
  *      File-level checksum flag declared by the file header.
+ * @var zxc_dstream_s::file_has_seek
+ *      Seek-table flag declared by the file header.
  * @var zxc_dstream_s::scratch
  *      Generic 32-byte accumulator for fixed-size frames (file header, block
  *      header, footer); comfortably holds the largest (16-byte file header).
@@ -684,6 +686,7 @@ struct zxc_dstream_s {
     int inner_initialized;
     size_t block_size;
     int file_has_checksum;
+    int file_has_seek;
 
     uint8_t scratch[32];
     size_t scratch_used;
@@ -845,13 +848,16 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
 
     size_t bs = 0;
     int has_csum = 0;
+    int has_seek = 0;
     uint32_t dict_id = 0;
-    const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum, &dict_id);
+    const int rc =
+        zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum, &dict_id, &has_seek);
     if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
     // Push streams take no dictionary yet, so an archive requiring one is refused.
     if (UNLIKELY(dict_id != 0)) return ds_set_error(ds, ZXC_ERROR_DICT_REQUIRED);
     ds->block_size = bs;
     ds->file_has_checksum = has_csum;
+    ds->file_has_seek = has_seek;
 
     // Allocate payload + decoded buffers now that block_size is known.
     const uint64_t pb = zxc_compress_block_bound(ds->block_size);
@@ -883,8 +889,8 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
  * @brief Handles the @c DS_NEED_BLOCK_HEADER state.
  *
  * Pulls 8 bytes into @c scratch and parses them as a block header.  If the
- * block is an EOF block, transitions to @c DS_PEEK_TAIL to disambiguate
- * between an optional SEK index and the file footer.  Otherwise, validates
+ * block is an EOF block, transitions to @c DS_NEED_SEK_HEADER or
+ * @c DS_NEED_FOOTER, as the file header's seek-table flag says.  Otherwise, validates
  * the announced @c comp_size against the @c payload buffer capacity, copies
  * the parsed header into @c payload (the underlying decoder expects header
  * + body + optional checksum as a single contiguous frame), and transitions
@@ -904,9 +910,10 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     if (ds->cur_bh.block_type == (uint8_t)ZXC_BLOCK_EOF) {
         // EOF block: comp_size must be 0; no payload, no checksum.
         if (UNLIKELY(ds->cur_bh.comp_size != 0)) return ds_set_error(ds, ZXC_ERROR_BAD_BLOCK_SIZE);
-        ds->state = DS_PEEK_TAIL;
+        ds->state = ds->file_has_seek ? DS_NEED_SEK_HEADER : DS_NEED_FOOTER;
         ds->scratch_used = 0;
-        ds->scratch_need = ZXC_BLOCK_HEADER_SIZE; /* sniff */
+        ds->scratch_need =
+            ds->file_has_seek ? ZXC_BLOCK_HEADER_SIZE : zxc_footer_bytes(ds->file_has_checksum);
         return 0;
     }
 
@@ -1029,24 +1036,13 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 break;
             }
 
-            case DS_PEEK_TAIL: {
+            case DS_NEED_SEK_HEADER: {
                 if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
                     return (int64_t)produced;
-                // A SEK block header, or the footer's first 8 bytes: see
-                // zxc_seek_tail_is_sek.
-                if (zxc_seek_tail_is_sek(ds->scratch, ds->total_out, ds->block_size,
-                                         &ds->sek_remaining)) {
-                    ds->state = DS_DRAIN_SEK_PAYLOAD;
-                    break;
-                }
-                // Not SEK -> the 8 bytes are the footer's head. Pull the rest if any.
-                const size_t footer_len = zxc_footer_bytes(ds->file_has_checksum);
-                if (footer_len > ZXC_BLOCK_HEADER_SIZE) {
-                    ds->scratch_need = footer_len;
-                    ds->state = DS_NEED_FOOTER;
-                } else {
-                    ds->state = DS_VALIDATE_FOOTER;
-                }
+                if (UNLIKELY(!zxc_seek_header_ok(ds->scratch, ds->total_out, ds->block_size,
+                                                 &ds->sek_remaining)))
+                    return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
+                ds->state = DS_DRAIN_SEK_PAYLOAD;
                 break;
             }
 

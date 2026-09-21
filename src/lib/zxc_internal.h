@@ -370,6 +370,9 @@ extern "C" {
 #define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
 /** @brief Bit flag in the Flags byte indicating a dictionary is required (bit 6). */
 #define ZXC_FILE_FLAG_HAS_DICTIONARY 0x40U
+/** @brief Bit flag in the Flags byte: a SEK block sits between the EOF block and the footer
+ *  (bit 5). */
+#define ZXC_FILE_FLAG_HAS_SEEK_TABLE 0x20U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
 
@@ -1991,12 +1994,13 @@ typedef struct {
  * @param[in]  chunk_size    Block size to encode in the header.
  * @param[in]  has_checksum  Non-zero if the checksum bit must be set.
  * @param[in]  dict_id       Dictionary ID (0 = no dictionary).
+ * @param[in]  has_seek      Non-zero if the archive will carry a SEK block.
  *
  * @return Number of bytes written (@c ZXC_FILE_HEADER_SIZE) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum, const uint32_t dict_id);
+                          const int has_checksum, const uint32_t dict_id, const int has_seek);
 
 /**
  * @brief Validates and reads the ZXC file header from @p src.
@@ -2012,13 +2016,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *                               flag. May be @c NULL.
  * @param[out] out_dict_id       Optional pointer that receives the dictionary
  *                               ID (0 if none). May be @c NULL.
+ * @param[out] out_has_seek      Optional pointer that receives the seek-table
+ *                               flag. May be @c NULL.
  *
  * @return @c ZXC_OK on success, or a negative error code (e.g.
  *         @c ZXC_ERROR_SRC_TOO_SMALL, @c ZXC_ERROR_BAD_MAGIC,
  *         @c ZXC_ERROR_BAD_VERSION).
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
-                         int* out_has_checksum, uint32_t* out_dict_id);
+                         int* out_has_checksum, uint32_t* out_dict_id, int* out_has_seek);
 
 /**
  * @brief Encodes a block header into @p dst.
@@ -2105,25 +2111,23 @@ static ZXC_ALWAYS_INLINE int zxc_footer_dsize_plausible(const uint64_t dsize,
 }
 
 /**
- * @brief Tells a SEK block header from the footer, in the 8 bytes after the EOF
- *        block.
+ * @brief Validates the SEK block header the file header announced.
  *
- * Both are 8 bytes long. They are a SEK header only if they parse as one and
- * announce the table this archive would carry: @ref zxc_seek_size_field of its
- * @ref zxc_seek_table_bytes. A source size that passes all three checks (type,
- * header checksum, size) is one in about 2^40. The sequential readers share this
- * rule so they drain the same number of bytes: the full 64-bit count, not the field.
+ * The flag says where the table is; this says whether it is the one the archive
+ * needs: @ref zxc_seek_size_field of its @ref zxc_seek_table_bytes. The sequential
+ * readers share it so they drain the same number of bytes: the full 64-bit count,
+ * not the field.
  *
- * @param[in]  peek        The 8 bytes read after the EOF block.
- * @param[in]  total_out   Bytes decoded so far: the archive's source size.
+ * @param[in]  hdr         The 8 bytes after the EOF block.
+ * @param[in]  total_out   Bytes decoded: the archive's source size.
  * @param[in]  block_size  Block size from the file header.
- * @param[out] sek_bytes   The SEK payload length when it is one; untouched otherwise.
- * @return 1 for a SEK header, 0 for the footer's first 8 bytes.
+ * @param[out] sek_bytes   The SEK payload length when valid; untouched otherwise.
+ * @return 1 for the expected SEK header, 0 otherwise.
  */
-static ZXC_ALWAYS_INLINE int zxc_seek_tail_is_sek(const uint8_t* peek, const uint64_t total_out,
-                                                  const size_t block_size, uint64_t* sek_bytes) {
+static ZXC_ALWAYS_INLINE int zxc_seek_header_ok(const uint8_t* hdr, const uint64_t total_out,
+                                                const size_t block_size, uint64_t* sek_bytes) {
     zxc_block_header_t bh;
-    if (zxc_read_block_header(peek, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK ||
+    if (zxc_read_block_header(hdr, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK ||
         bh.block_type != ZXC_BLOCK_SEK)
         return 0;
     const uint64_t table = zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size));
@@ -2133,25 +2137,29 @@ static ZXC_ALWAYS_INLINE int zxc_seek_tail_is_sek(const uint8_t* peek, const uin
 }
 
 /**
- * @brief Whether the bytes between the EOF block and the footer are a legal tail.
+ * @brief Whether the bytes between the EOF block and the footer are the tail the
+ *        header announced.
  *
- * One thing may sit there: nothing, or the SEK block (Sec 5.5). Skipping the gap
- * to reach the footer passes inserted bytes as sound, size and digest both being
- * computed from the decoded bytes and blind to it.
+ * Nothing without @ref ZXC_FILE_FLAG_HAS_SEEK_TABLE, exactly one well-formed SEK
+ * block with it (Sec 5.5). Skipping the gap to reach the footer passes inserted
+ * bytes as sound, size and digest both being computed from the decoded bytes and
+ * blind to it.
  *
  * @param[in] gap        First byte after the EOF block header.
  * @param[in] gap_len    Bytes between that point and the footer.
+ * @param[in] has_seek   Seek-table flag from the file header.
  * @param[in] total_out  Bytes decoded: what the SEK table would describe.
  * @param[in] block_size Block size from the file header.
- * @return 1 for an empty gap or exactly one well-formed SEK block, 0 otherwise.
+ * @return 1 when the gap matches the flag, 0 otherwise.
  */
 static ZXC_ALWAYS_INLINE int zxc_tail_gap_ok(const uint8_t* gap, const uint64_t gap_len,
-                                             const uint64_t total_out, const size_t block_size) {
-    if (gap_len == 0) return 1;
-    if (gap_len < ZXC_BLOCK_HEADER_SIZE) return 0;
+                                             const int has_seek, const uint64_t total_out,
+                                             const size_t block_size) {
+    if (!has_seek) return gap_len == 0;
     uint64_t sek_bytes = 0;
-    if (!zxc_seek_tail_is_sek(gap, total_out, block_size, &sek_bytes)) return 0;
-    return gap_len - ZXC_BLOCK_HEADER_SIZE == sek_bytes;
+    return gap_len >= ZXC_BLOCK_HEADER_SIZE &&
+           zxc_seek_header_ok(gap, total_out, block_size, &sek_bytes) &&
+           gap_len - ZXC_BLOCK_HEADER_SIZE == sek_bytes;
 }
 
 // ---------------------------------------------------------------------------

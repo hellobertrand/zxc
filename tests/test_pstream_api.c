@@ -510,8 +510,8 @@ int test_pstream_corrupted_magic(void) {
 }
 
 /* Decompress a SEEKABLE archive through the pstream API: after the EOF block
- * the decoder peeks 8 bytes, recognises a SEK block, and skips its payload
- * in DS_DRAIN_SEK_PAYLOAD before consuming the file footer. */
+ * the header's HAS_SEEK_TABLE sends the decoder to the SEK block, whose payload
+ * it skips in DS_DRAIN_SEK_PAYLOAD before consuming the file footer. */
 int test_pstream_decode_seekable_archive(void) {
     printf("=== TEST: PStream decodes seekable archive (DS_DRAIN_SEK_PAYLOAD) ===\n");
     const size_t size = 96 * 1024; /* > one default block to force >1 SEK entry */

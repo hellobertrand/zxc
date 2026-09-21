@@ -343,7 +343,7 @@ int test_buffer_error_codes() {
         uint8_t arc[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE];
         const zxc_block_header_t eof = {
             .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
-        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, 4096, 1, 0) < 0 ||
+        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, 4096, 1, 0, 0) < 0 ||
             zxc_write_block_header(arc + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0) {
             printf("  [FAIL] fixture headers\n");
             return 0;

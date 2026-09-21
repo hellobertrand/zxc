@@ -212,6 +212,7 @@ int test_swapped_blocks_stream(void);
 int test_forged_block_comp_size(void);
 int test_swapped_blocks_oneshot(void);
 int test_tail_between_eof_and_footer(void);
+int test_seek_flag_contract(void);
 int test_footer_digest(void);
 int test_seek_tail_rule(void);
 int test_chunk_size_code(void);
