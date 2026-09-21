@@ -735,11 +735,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 }
 
 // Shared frame decode body for zxc_decompress and zxc_decompress_inplace. No
-// RESTRICT between src and dst, so the overlapping case stays defined; the
-// in-place margin still gives each block disjoint regions, and the per-block
-// wrappers keep their own RESTRICT.
+// RESTRICT between src and dst, which overlap in place; there the walk keeps each
+// block's writes clear of its bytes, as the per-block RESTRICT requires.
 static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t* dst,
-                                    size_t dst_capacity, const zxc_decompress_opts_t* opts);
+                                    size_t dst_capacity, const zxc_decompress_opts_t* opts,
+                                    int inplace);
 
 /**
  * @brief Validates a frame envelope without decoding it: file header, then the
@@ -814,7 +814,7 @@ static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t s
     const int rc = zxc_probe_reject_payload(src, src_size);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     uint8_t probe_dst[1];
-    return zxc_decompress_frame(src, src_size, probe_dst, 0, opts);
+    return zxc_decompress_frame(src, src_size, probe_dst, 0, opts, 0);
 }
 
 /**
@@ -833,11 +833,13 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size, opts);
 
-    return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts);
+    return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts,
+                                0);
 }
 
 static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, uint8_t* dst,
-                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
+                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts,
+                                    const int inplace) {
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
@@ -941,6 +943,13 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
         if (UNLIKELY(advance > rem_src)) {
             if (ctx_ready) zxc_cctx_free(&ctx);
             return ZXC_ERROR_SRC_TOO_SMALL;
+        }
+
+        // In place, the block's work_sz-byte write window must end before its bytes.
+        // The margin guarantees it for honest archives; padding or forged sizes do not.
+        if (inplace && UNLIKELY(ip < op || (size_t)(ip - op) < work_sz)) {
+            if (ctx_ready) zxc_cctx_free(&ctx);
+            return ZXC_ERROR_CORRUPT_DATA;
         }
 
         if (!ctx_ready) {
@@ -1099,9 +1108,9 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
  * read cursor.
  *
  * Because src_size is attacker-controlled, inserted padding bytes can slide decoding dangerously
- * close to the output boundary. Enforcing a minimum bound via src_size + floor maintains the
- * required separation regardless of archive padding. For authentic archives, this adjustment grows
- * the bound by at most 16 bytes and guarantees it never shrinks.
+ * close to the output boundary. The src_size + floor term keeps block 0 clear; the walk checks
+ * every later block. For authentic archives, this adjustment grows the bound by at most 16 bytes
+ * and guarantees it never shrinks.
  */
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
@@ -1130,6 +1139,7 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
  * buffer carries a one-block + wild-copy margin (see
  * @ref zxc_decompress_inplace_bound), the write cursor provably never overtakes
  * the read cursor, so a single allocation replaces the usual input+output pair.
+ * An archive that could (padding, forged sizes) is refused as corrupt first.
  * Dictionary archives are supported (they decode through the context's own
  * bounce buffer, which does not alias @p buffer).
  */
@@ -1149,9 +1159,9 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
     if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
         return ZXC_ERROR_DST_TOO_SMALL;
     /* The check above sizes the buffer against the payload, this one against the
-     * archive where it actually lies. Only the second bounds the read/write gap. */
+     * archive where it lies: block 0 starts clear, the walk checks the others. */
     if (UNLIKELY((uint64_t)(buffer_capacity - comp_size) < floor)) return ZXC_ERROR_DST_TOO_SMALL;
-    return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);
+    return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts, 1);
 }
 
 /**

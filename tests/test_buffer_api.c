@@ -977,74 +977,84 @@ static int inplace_forged_footer(void) {
  * belongs there (Sec 5.5). The frame loop used to skip it, which accepted hidden
  * bytes and let each one slide the in-place read/write separation closer to the
  * output, the archive size being attacker-controlled. The bound is still asserted:
- * it must stay conservative on a padded input, which the decode then refuses. */
+ * it must stay conservative on a padded input, which the decode then refuses.
+ *
+ * All-RAW is the worst case for the margin; a compressible head then RAW blocks is
+ * the worst for padding: the first RAW block used to start inside the write window,
+ * its memcpy overlapping itself. */
 static int inplace_padded_archive(void) {
     const size_t N = 64 * 1024;
     uint8_t* const orig = (uint8_t*)malloc(N);
-    if (!orig) return 0;
-    gen_random_data(orig, N); /* all-RAW: the worst case for the separation */
-
     const size_t cbound = (size_t)zxc_compress_bound(N);
     uint8_t* const comp = (uint8_t*)malloc(cbound);
-    if (!comp) {
+    if (!orig || !comp) {
         free(orig);
-        return 0;
-    }
-    const zxc_compress_opts_t co = {.level = 1, .block_size = ZXC_BLOCK_SIZE_MIN};
-    const int64_t c = zxc_compress(orig, N, comp, cbound, &co);
-    if (c <= 0) {
-        printf("Failed [padded archive]: compress -> %lld\n", (long long)c);
         free(comp);
-        free(orig);
         return 0;
     }
-    const size_t csz = (size_t)c;
 
     int ok = 1;
-    const size_t pads[] = {1, 4096, 20000, 100000};
-    for (size_t i = 0; i < sizeof(pads) / sizeof(pads[0]); i++) {
-        const size_t pad = pads[i];
-        const size_t c2 = csz + pad;
-        uint8_t* const a = (uint8_t*)malloc(c2);
-        if (!a) {
+    for (int shape = 0; shape < 2 && ok; shape++) {
+        const char* const what = shape ? "mixed" : "all-RAW";
+        gen_random_data(orig, N);
+        if (shape) memset(orig, 0, N / 4);
+
+        const zxc_compress_opts_t co = {.level = 1, .block_size = ZXC_BLOCK_SIZE_MIN};
+        const int64_t c = zxc_compress(orig, N, comp, cbound, &co);
+        if (c <= 0) {
+            printf("Failed [padded %s]: compress -> %lld\n", what, (long long)c);
             ok = 0;
             break;
         }
-        memcpy(a, comp, csz - ZXC_FILE_FOOTER_SIZE);
-        memset(a + csz - ZXC_FILE_FOOTER_SIZE, 0xAA, pad);
-        memcpy(a + csz - ZXC_FILE_FOOTER_SIZE + pad, comp + csz - ZXC_FILE_FOOTER_SIZE,
-               ZXC_FILE_FOOTER_SIZE);
+        const size_t csz = (size_t)c;
 
-        const size_t need = zxc_decompress_inplace_bound(a, c2);
-        if (need < c2) {
-            printf("Failed [padded archive]: pad=%zu bound %zu < archive %zu\n", pad, need, c2);
-            ok = 0;
-        } else {
-            uint8_t* const buf = (uint8_t*)malloc(need);
-            if (buf) {
-                memcpy(buf + need - c2, a, c2);
-                const int64_t d = zxc_decompress_inplace(buf, need, c2, NULL);
-                if (d != ZXC_ERROR_CORRUPT_DATA) {
-                    printf("Failed [padded archive]: pad=%zu inplace %lld want %d\n", pad,
-                           (long long)d, ZXC_ERROR_CORRUPT_DATA);
-                    ok = 0;
-                }
-                free(buf);
+        const size_t pads[] = {1, 4096, 20000, 100000};
+        for (size_t i = 0; i < sizeof(pads) / sizeof(pads[0]) && ok; i++) {
+            const size_t pad = pads[i];
+            const size_t c2 = csz + pad;
+            uint8_t* const a = (uint8_t*)malloc(c2);
+            if (!a) {
+                ok = 0;
+                break;
             }
-        }
-        free(a);
-    }
+            memcpy(a, comp, csz - ZXC_FILE_FOOTER_SIZE);
+            memset(a + csz - ZXC_FILE_FOOTER_SIZE, 0xAA, pad);
+            memcpy(a + csz - ZXC_FILE_FOOTER_SIZE + pad, comp + csz - ZXC_FILE_FOOTER_SIZE,
+                   ZXC_FILE_FOOTER_SIZE);
 
-    /* The bound an authentic archive gets must not have moved. */
-    const size_t plain = zxc_decompress_inplace_bound(comp, csz);
-    uint8_t* const buf = (uint8_t*)malloc(plain);
-    if (buf) {
-        memcpy(buf + plain - csz, comp, csz);
-        if (zxc_decompress_inplace(buf, plain, csz, NULL) != (int64_t)N) {
-            printf("Failed [padded archive]: unpadded archive regressed\n");
-            ok = 0;
+            const size_t need = zxc_decompress_inplace_bound(a, c2);
+            if (need < c2) {
+                printf("Failed [padded %s]: pad=%zu bound %zu < archive %zu\n", what, pad, need,
+                       c2);
+                ok = 0;
+            } else {
+                uint8_t* const buf = (uint8_t*)malloc(need);
+                if (buf) {
+                    memcpy(buf + need - c2, a, c2);
+                    const int64_t d = zxc_decompress_inplace(buf, need, c2, NULL);
+                    if (d != ZXC_ERROR_CORRUPT_DATA) {
+                        printf("Failed [padded %s]: pad=%zu inplace %lld want %d\n", what, pad,
+                               (long long)d, ZXC_ERROR_CORRUPT_DATA);
+                        ok = 0;
+                    }
+                    free(buf);
+                }
+            }
+            free(a);
         }
-        free(buf);
+
+        /* The bound an authentic archive gets must not have moved. */
+        const size_t plain = zxc_decompress_inplace_bound(comp, csz);
+        uint8_t* const buf = (uint8_t*)malloc(plain);
+        if (buf) {
+            memcpy(buf + plain - csz, comp, csz);
+            if (zxc_decompress_inplace(buf, plain, csz, NULL) != (int64_t)N ||
+                memcmp(buf, orig, N) != 0) {
+                printf("Failed [padded %s]: unpadded archive regressed\n", what);
+                ok = 0;
+            }
+            free(buf);
+        }
     }
 
     free(comp);

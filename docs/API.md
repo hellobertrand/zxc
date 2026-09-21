@@ -467,7 +467,9 @@ targets (embedded, FOTA, firmware). The compressed archive must sit
 **flush-right** in `buffer` (its last `comp_size` bytes); decoding runs
 left-to-right into `buffer[0..]`. Because ZXC never expands a block, the write
 cursor provably never overtakes the flush-right read cursor once
-`buffer_capacity >= zxc_decompress_inplace_bound(...)`. Dictionary archives are
+`buffer_capacity >= zxc_decompress_inplace_bound(...)`; an archive that would
+(padding, forged block sizes) is refused with `ZXC_ERROR_CORRUPT_DATA` first.
+Dictionary archives are
 supported. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`,
 never corruption.
 
