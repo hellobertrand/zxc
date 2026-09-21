@@ -87,6 +87,8 @@ typedef struct zxc_seekable_s zxc_seekable;
  *
  * Locates and validates the seek table at the end of the buffer; entries are
  * read from @p src on access. @p src must stay valid for the lifetime of the handle.
+ * An empty seekable archive opens with 0 blocks: any non-empty range is then
+ * @ref ZXC_ERROR_SRC_TOO_SMALL.
  *
  * @param[in] src       Pointer to the compressed data.
  * @param[in] src_size  Size of the compressed data in bytes.

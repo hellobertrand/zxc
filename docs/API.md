@@ -442,10 +442,9 @@ accumulated per-block framing overhead (incompressible blocks make the
 compressed stream run that much longer than the output), everything the encoder
 writes after the last data block, and the wild-copy tail. The trailing bytes
 matter because they sit to the *right* of the read cursor and so push the
-flush-right archive left, into the write cursor's path. The seek table's worst
-case (one `u64` anchor per 64 blocks plus a `u32` per block, about 4.1 bytes per
-block) is always reserved, whatever `HAS_SEEK_TABLE` says: the bound comes before
-the decode that holds the flag to the tail. Always
+flush-right archive left, into the write cursor's path. The seek table (one `u64`
+anchor per 64 blocks plus a `u32` per block, about 4.1 bytes per block) counts
+only when the header's `HAS_SEEK_TABLE` announces it. Always
 size the buffer with this function rather than re-deriving the formula.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.

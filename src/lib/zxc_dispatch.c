@@ -755,18 +755,20 @@ static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t
  * @param[out] dsize      Stored decompressed size.
  * @param[out] chunk_size Block size declared by the header, or NULL.
  * @param[out] has_cs     Set when the archive carries checksums, or NULL.
+ * @param[out] has_seek   Set when the header announces a seek table, or NULL.
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
  */
 static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src_size,
                                    uint64_t* RESTRICT dsize, size_t* RESTRICT chunk_size,
-                                   int* RESTRICT has_cs) {
+                                   int* RESTRICT has_cs, int* RESTRICT has_seek) {
     if (UNLIKELY(!src)) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE))
         return ZXC_ERROR_SRC_TOO_SMALL;
 
     size_t chunk = 0;
     int cs = 0;
-    const int hrc = zxc_read_file_header(src, src_size, &chunk, &cs, NULL, NULL);
+    int seek = 0;
+    const int hrc = zxc_read_file_header(src, src_size, &chunk, &cs, NULL, &seek);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     // The smallest archive: header, the mandatory EOF block, then the footer,
@@ -781,6 +783,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
     *dsize = stored;
     if (chunk_size) *chunk_size = chunk;
     if (has_cs) *has_cs = cs;
+    if (has_seek) *has_seek = seek;
     return ZXC_OK;
 }
 
@@ -796,7 +799,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
  */
 static int zxc_probe_reject_payload(const uint8_t* RESTRICT src, const size_t src_size) {
     uint64_t dsize = 0;
-    const int rc = zxc_read_frame_envelope(src, src_size, &dsize, NULL, NULL);
+    const int rc = zxc_read_frame_envelope(src, src_size, &dsize, NULL, NULL, NULL);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     return (dsize != 0) ? ZXC_ERROR_DST_TOO_SMALL : ZXC_OK;
 }
@@ -1020,27 +1023,28 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
  * `dsize + chunk_size + nblocks * H`: the margin carries the whole accumulated
  * per-block overhead, not just one block's.
  *
- * `trailing` is everything written after the last data block: EOF header, footer
- * and seek table. The latter is always reserved at its worst case (about 4 bytes
- * per block, <= 0.1% of the payload), whatever the header flag says: the bound is
- * computed before the walk that holds the flag to the tail. Omitting it used to
- * push the bound *below* comp_size for a seekable archive of incompressible data
- * in small blocks.
+ * `trailing` is everything written after the last data block: EOF header, the
+ * seek table when HAS_SEEK_TABLE announces one, and the footer. Like has_cs, the
+ * flag is taken on trust here and checked by the walk: a tail it does not announce
+ * is trailing bytes the bound did not count, as inserted padding is, and fails the
+ * tail check. Leaving out an announced table used to push the bound *below*
+ * comp_size for a seekable archive of incompressible data in small blocks.
  *
  * @param[in] dsize      Decompressed size, in bytes.
  * @param[in] chunk_size Block size from the file header (0 = no blocks).
  * @param[in] has_cs     Non-zero if blocks carry checksums.
+ * @param[in] has_seek   Non-zero if the header announces a seek table.
  * @return Bytes to reserve beyond @p dsize.
  */
-static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size,
-                                   const int has_cs) {
+static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size, const int has_cs,
+                                   const int has_seek) {
     const uint64_t nblocks = zxc_seek_block_count(dsize, chunk_size);
     const uint64_t per_block =
         (uint64_t)ZXC_BLOCK_HEADER_SIZE + (has_cs ? (uint64_t)ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    const uint64_t trailing =
-        (uint64_t)ZXC_BLOCK_HEADER_SIZE +                                    // EOF block header
-        ((uint64_t)ZXC_BLOCK_HEADER_SIZE + zxc_seek_table_bytes(nblocks)) +  // Seek table
-        (uint64_t)zxc_footer_bytes(has_cs);
+    const uint64_t seek_table =
+        has_seek ? (uint64_t)ZXC_BLOCK_HEADER_SIZE + zxc_seek_table_bytes(nblocks) : 0;
+    const uint64_t trailing = (uint64_t)ZXC_BLOCK_HEADER_SIZE +  // EOF block header
+                              seek_table + (uint64_t)zxc_footer_bytes(has_cs);
     return (uint64_t)chunk_size + nblocks * per_block + trailing +
            (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
 }
@@ -1070,17 +1074,18 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
                              uint64_t* margin, uint64_t* floor) {
     size_t chunk_size = 0;
     int has_cs = 0;
+    int has_seek = 0;
     uint64_t d = 0;
 
     // Own mapping: only a wrong magic word and a forged footer keep their code,
     // everything else reads as a bad header.
-    const int rc = zxc_read_frame_envelope(comp, comp_size, &d, &chunk_size, &has_cs);
+    const int rc = zxc_read_frame_envelope(comp, comp_size, &d, &chunk_size, &has_cs, &has_seek);
     if (UNLIKELY(rc != ZXC_OK))
         return (rc == ZXC_ERROR_BAD_MAGIC || rc == ZXC_ERROR_CORRUPT_DATA) ? rc
                                                                            : ZXC_ERROR_BAD_HEADER;
 
     *dsize = d;
-    *margin = zxc_inplace_margin(d, chunk_size, has_cs);
+    *margin = zxc_inplace_margin(d, chunk_size, has_cs, has_seek);
     *floor = (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
     return ZXC_OK;
 }
@@ -1160,7 +1165,7 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
  */
 uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     uint64_t dsize = 0;
-    if (UNLIKELY(zxc_read_frame_envelope((const uint8_t*)src, src_size, &dsize, NULL, NULL) !=
+    if (UNLIKELY(zxc_read_frame_envelope((const uint8_t*)src, src_size, &dsize, NULL, NULL, NULL) !=
                  ZXC_OK))
         return 0;
     return dsize;

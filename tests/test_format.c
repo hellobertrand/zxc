@@ -1078,7 +1078,8 @@ static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t 
 /* HAS_SEEK_TABLE announces the SEK block (Sec 3.1, 5.5), and every reader holds
  * the tail to it: a flag set over no table, or clear over one, is refused by the
  * four sequential readers and zxc_seekable_open alike. Writers set it for what
- * they write, not for what was asked: the context API ignores seekable. */
+ * they write, not for what was asked: the context API ignores seekable. An empty
+ * seekable archive carries an empty table and opens with 0 blocks. */
 int test_seek_flag_contract(void) {
     printf("=== TEST: Format - HAS_SEEK_TABLE matches the tail on every reader ===\n");
     const size_t n = 3 * 4096 + 7;
@@ -1133,7 +1134,8 @@ int test_seek_flag_contract(void) {
 
     // Empty source: the flag still promises a table, an empty one. The FILE*
     // writer cannot know the input is empty when it writes the header, so both
-    // writers must agree on these bytes.
+    // writers must agree on these bytes. It opens with 0 blocks, from memory and
+    // from a file alike, and only the empty range lies inside it.
     if (ok) {
         const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
         const int64_t el = zxc_compress(NULL, 0, seek, cap, &so);
@@ -1145,14 +1147,28 @@ int test_seek_flag_contract(void) {
         const int same = fl == el && fo && fseek(fo, 0, SEEK_SET) == 0 &&
                          fread(lie, 1, (size_t)(fl > 0 ? fl : 0), fo) == (size_t)fl &&
                          memcmp(lie, seek, (size_t)el) == 0;
+        zxc_seekable* const sm = zxc_seekable_open(seek, (size_t)el);
+        zxc_seekable* const sf = fo ? zxc_seekable_open_file(fo) : NULL;
+        int opens = sm && sf;
+        for (int k = 0; k < 2 && opens; k++) {
+            zxc_seekable* const h = k ? sf : sm;
+            opens = zxc_seekable_get_num_blocks(h) == 0 &&
+                    zxc_seekable_get_decompressed_size(h) == 0 &&
+                    zxc_seekable_decompress_range(h, out, n, 0, 0) == 0 &&
+                    zxc_seekable_decompress_range(h, out, n, 0, 1) == ZXC_ERROR_SRC_TOO_SMALL &&
+                    zxc_seekable_decompress_range_mt(h, out, n, 0, 1, 2) == ZXC_ERROR_SRC_TOO_SMALL;
+        }
+        zxc_seekable_free(sm);
+        zxc_seekable_free(sf);
         if (fi) fclose(fi);
         if (fo) fclose(fo);
         ok = el == (int64_t)want && (seek[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) && same &&
-             seek_flag_verdict(seek, (size_t)el, 0, out, "empty seekable") == 1 &&
-             !zxc_seekable_open(seek, (size_t)el);
+             seek_flag_verdict(seek, (size_t)el, 0, out, "empty seekable") == 1 && opens;
         if (!ok)
-            printf("  [FAIL] empty seekable: %lld bytes (want %zu), FILE* writer %lld, same %d\n",
-                   (long long)el, want, (long long)fl, same);
+            printf(
+                "  [FAIL] empty seekable: %lld bytes (want %zu), FILE* writer %lld, same %d, "
+                "opens with 0 blocks %d\n",
+                (long long)el, want, (long long)fl, same, opens);
     }
 
     // The context API ignores seekable, so its header must not promise a table.

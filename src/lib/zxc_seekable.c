@@ -230,9 +230,6 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
         return NULL;
     const uint64_t total_decomp = zxc_le64(footer);
 
-    // An empty archive carries an empty table, but has nothing to seek.
-    if (UNLIKELY(total_decomp == 0)) return NULL;
-
     // Step 3: derive num_blocks = ceil(total_decomp / block_size)
     const uint64_t num_blocks = zxc_seek_block_count(total_decomp, block_size);
 

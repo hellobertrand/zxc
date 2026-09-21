@@ -1053,6 +1053,67 @@ static int inplace_padded_archive(void) {
     return ok;
 }
 
+/* The margin counts the seek table exactly when HAS_SEEK_TABLE announces it. A
+ * flag cleared over a table leaves those bytes uncounted, like inserted padding:
+ * the write cursor may then run into input it has not read, and the decode must
+ * refuse the archive, never return it. Mixed data (a compressible head, then
+ * incompressible blocks) is the shape where the uncounted bytes bite. */
+static int inplace_seek_flag_margin(void) {
+    const size_t bs = ZXC_BLOCK_SIZE_MIN;
+    const size_t nb = 256;
+    const size_t n = nb * bs;
+    const size_t cbound = (size_t)zxc_compress_bound(n);
+    uint8_t* const src = (uint8_t*)malloc(n);
+    uint8_t* const plain = (uint8_t*)malloc(cbound);
+    uint8_t* const seek = (uint8_t*)malloc(cbound);
+    int ok = src && plain && seek;
+    if (ok) {
+        gen_random_data(src, n);
+        memset(src, 0, 8 * bs);
+    }
+    for (int cs = 0; cs <= 1 && ok; cs++) {
+        zxc_compress_opts_t co = {.level = 1, .block_size = bs, .checksum_enabled = cs};
+        const int64_t pl = zxc_compress(src, n, plain, cbound, &co);
+        co.seekable = 1;
+        const int64_t sl = zxc_compress(src, n, seek, cbound, &co);
+        const size_t pb = pl > 0 ? zxc_decompress_inplace_bound(plain, (size_t)pl) : 0;
+        const size_t sb = sl > 0 ? zxc_decompress_inplace_bound(seek, (size_t)sl) : 0;
+        const size_t table = ZXC_BLOCK_HEADER_SIZE + (size_t)zxc_seek_table_bytes(nb);
+        if (!pb || sb != pb + table) {
+            printf("Failed [seek flag margin]: cs=%d bounds plain %zu, seekable %zu, want +%zu\n",
+                   cs, pb, sb, table);
+            ok = 0;
+            break;
+        }
+
+        seek[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
+        zxc_store_le16(seek + 14, 0);
+        zxc_store_le16(seek + 14, zxc_hash16(seek));
+        const size_t lb = zxc_decompress_inplace_bound(seek, (size_t)sl);
+        uint8_t* const buf = (uint8_t*)malloc(lb);
+        if (!buf) {
+            ok = 0;
+            break;
+        }
+        memcpy(buf + lb - (size_t)sl, seek, (size_t)sl);
+        const zxc_decompress_opts_t dop = {.checksum_enabled = 1};
+        const int64_t r = zxc_decompress_inplace(buf, lb, (size_t)sl, &dop);
+        free(buf);
+        if (lb != pb || r >= 0) {
+            printf(
+                "Failed [seek flag margin]: cs=%d cleared flag: bound %zu (plain %zu), "
+                "inplace %lld\n",
+                cs, lb, pb, (long long)r);
+            ok = 0;
+        }
+    }
+    free(src);
+    free(plain);
+    free(seek);
+    if (ok) printf("  [PASS] margin counts the seek table only when announced\n");
+    return ok;
+}
+
 int test_decompress_inplace(void) {
     printf("=== TEST: Unit - In-place decompression (single buffer) ===\n");
     const size_t N = 2 * 1024 * 1024;
@@ -1087,6 +1148,12 @@ int test_decompress_inplace(void) {
     ok &= inplace_case("seekable random, 64K blocks", a, M, 1, 0, 64 * 1024, 1);
     ok &= inplace_case("seekable random, default blocks", a, M, 3, 1, 0, 1);
 
+    /* Compressible head, incompressible tail: the separation is tightest where
+     * the first incompressible block starts, for both layouts. */
+    memset(a, 0, M / 8);
+    ok &= inplace_case("mixed, 4K blocks", a, M, 1, 0, ZXC_BLOCK_SIZE_MIN, 0);
+    ok &= inplace_case("mixed seekable, 4K blocks", a, M, 1, 1, ZXC_BLOCK_SIZE_MIN, 1);
+
     /* bound on garbage must be 0. */
     uint8_t junk[64];
     memset(junk, 0x5A, sizeof(junk));
@@ -1097,6 +1164,7 @@ int test_decompress_inplace(void) {
 
     ok &= inplace_forged_footer();
     ok &= inplace_padded_archive();
+    ok &= inplace_seek_flag_margin();
 
     free(a);
     if (!ok) return 0;
