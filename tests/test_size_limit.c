@@ -49,8 +49,7 @@ int test_footer_floor_density(void) {
             free(out);
         }
     }
-    if (ok) printf("  [PASS] %ld archives, none refused\n", checked);
-    if (ok) printf("PASS\n\n");
+    if (ok) printf("  [PASS] %ld archives, none refused\nPASS\n\n", checked);
     return ok;
 }
 
@@ -89,7 +88,7 @@ int test_decompressed_size(void) {
             int64_t want;
             const char* what;
         } bad[] = {{4, ZXC_ERROR_SRC_TOO_SMALL, "truncated"}, {64, ZXC_ERROR_BAD_MAGIC, "junk"}};
-        uint8_t junk[64] = {0};
+        const uint8_t junk[64] = {0};
         for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
             const int64_t got = zxc_decompressed_size(junk, bad[k].size);
             if (got != bad[k].want) {
