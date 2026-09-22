@@ -1362,14 +1362,16 @@ static int glo_split_synthetic(const char* label, const uint32_t esc_every, cons
     for (uint32_t i = 0; i < N; i++) {
         st = st * 1103515245U + 12345U;
         const uint32_t ll = (st >> 8) % 20U; /* 15-19 escape */
+        const int ll_esc = ll >= ZXC_TOKEN_LL_MASK;
         const int esc = esc_every ? (i % esc_every == 0) : ((st >> 13) % 4U == 0);
-        const uint32_t ml =
-            esc ? 15U + ((st >> 16) % 20U) : (st >> 16) % 15U; /* 15-34, some past cap */
+        const uint32_t ml = esc ? ZXC_TOKEN_ML_MASK + ((st >> 16) % 20U) /* 15-34, some past cap */
+                                : (st >> 16) % ZXC_TOKEN_ML_MASK;
         esc_in += esc;
-        tok[i] = (uint8_t)(((ll < 15U ? ll : 15U) << ZXC_TOKEN_LIT_BITS) | (ml < 15U ? ml : 15U));
+        tok[i] = (uint8_t)(((ll_esc ? ZXC_TOKEN_LL_MASK : ll) << ZXC_TOKEN_LIT_BITS) |
+                           (esc ? ZXC_TOKEN_ML_MASK : ml));
         off[i] = (uint16_t)(1U + (st >> 20) % 4000U);
-        if (ll >= 15U) ex_sz += put_varint(ex + ex_sz, ll - 15U);
-        if (ml >= 15U) ex_sz += put_varint(ex + ex_sz, ml - 15U);
+        if (ll_esc) ex_sz += put_varint(ex + ex_sz, ll - ZXC_TOKEN_LL_MASK);
+        if (esc) ex_sz += put_varint(ex + ex_sz, ml - ZXC_TOKEN_ML_MASK);
     }
     parse_seqs(tok, off, ex, ex_sz, N, in);
     memcpy(tok0, tok, N);
