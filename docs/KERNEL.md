@@ -6,8 +6,11 @@ decompresses fast: data written once, read many times. A backend compressing on
 every page write (zram, zswap) would pay the slow side on its hot path.
 
 The core uses no floating point, no VLA and no `alloca`, has no stack frame
-above 400 bytes, and reaches the standard library only through
-`src/lib/zxc_deps.h`.
+above 400 bytes, and calls the C library only through `src/lib/zxc_deps.h`.
+Two headers still have to resolve: the freestanding `<stddef.h>` and
+`<stdint.h>` the public headers include, which the compiler ships, and the
+`<string.h>` the vendored `rapidhash.h` includes for `memcpy`, a one-line shim
+over `<linux/string.h>` in a kernel tree.
 
 ## What to build
 
@@ -24,6 +27,9 @@ zxc_compress.c  zxc_decompress.c  zxc_huffman.c
 ```make
 ccflags-y += -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD
 ccflags-y += -std=gnu11 -Wno-declaration-after-statement
+# Where the sources were vendored, plus the compiler's freestanding headers.
+ccflags-y += -I$(src)/zxc/include -I$(src)/zxc/src/lib -I$(src)/zxc/src/lib/vendors
+ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
 
 # The per-ISA sources carry the suffix the dispatcher binds to; the other
 # translation units must NOT get it, hence per-file flags.
@@ -33,11 +39,12 @@ CFLAGS_zxc_huffman.o    := -DZXC_FUNCTION_SUFFIX=_default
 ```
 
 `ZXC_NO_FRAME_API` keeps the block, context and static-context APIs. It is
-required, not optional: the frame path references `zxc_dict.c`, so the subset
-above does not link without it. CI builds this configuration (block-only job in
+required, not optional: the frame path references `zxc_dict.c` and
+`zxc_seekable.c`, so the subset above does not link without it. CI builds this configuration (block-only job in
 `.github/workflows/packaging.yml`).
 
-`-std=gnu11` because the kernel builds `-std=gnu89` with C90 declaration checks.
+`-std=gnu11` because kernels before 5.18 build `-std=gnu89` with C90 declaration
+checks.
 
 ## No FPU region
 
@@ -74,7 +81,7 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
 |---------|-----------|-------------------|-------------------|
 | 4 KiB   | 15 872 B  | 306 304 B         | 396 480 B         |
 | 64 KiB  | 212 480 B | 492 288 B         | 1 025 024 B       |
-| 512 KiB | 1.68 MiB  | 1.87 MiB          | 6.13 MiB          |
+| 512 KiB | 1.60 MiB  | 1.78 MiB          | 5.84 MiB          |
 
 - `kvmalloc`, not `kmalloc`: a 306 KB request lands in a 512 KB slab, and an
   order-7 contiguous allocation is fragile under memory pressure.
@@ -165,9 +172,10 @@ static inline void zxc_kernel_aligned_free(void *ptr)
 #endif /* ZXC_DEPS_H */
 ```
 
-Overriding `ZXC_ALIGNED_MALLOC` drops the stock `posix_memalign` /
-`_aligned_malloc` defaults; override `ZXC_ALIGNED_FREE` with it, never one
-alone. `ZXC_USE_C11_ATOMICS` and `ZXC_NOINLINE` need no local edit.
+The stock `posix_memalign` / `_aligned_malloc` helpers are `static inline` in
+`zxc_deps.h` itself, so a replacement defines `ZXC_ALIGNED_MALLOC` and
+`ZXC_ALIGNED_FREE` both, as above; one without the other is a compile error.
+`ZXC_USE_C11_ATOMICS` and `ZXC_NOINLINE` need no local edit.
 
 ## Licensing
 

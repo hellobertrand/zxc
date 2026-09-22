@@ -21,10 +21,9 @@
 #include "zxc_internal.h"
 
 // ZXC_NO_FRAME_API keeps the block, context and static-context APIs and drops
-// everything that reads or writes a frame.
+// everything that reads or writes a frame; only the frame code needs zxc_dict.h.
 #ifndef ZXC_NO_FRAME_API
 #include "../../include/zxc_dict.h"
-#include "../../include/zxc_seekable.h"
 #endif
 
 // ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
@@ -326,9 +325,8 @@ static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = (zxc_compress_func_t)0;
  * @struct zxc_variant_set_t
  * @brief The four chunk entry points of one ISA variant, resolved together.
  *
- * The three lazy initialisers below differ only in which of these they publish,
- * so the per-architecture selection ladder lives in one place: adding an ISA
- * tier is one line here instead of three ladders to keep in step.
+ * zxc_dispatch_init publishes all four at once, so the per-architecture
+ * selection ladder lives in one place: adding an ISA tier is one line here.
  */
 typedef struct {
     zxc_decompress_func_t decompress;
@@ -349,15 +347,11 @@ typedef struct {
 /**
  * @brief Detects the CPU tier and returns the matching variant set.
  *
- * Falls back to the `_default` (baseline) set when no ISA extension applies or
- * the build is single-variant.
+ * Falls back to the `_default` (baseline) set when no ISA extension applies.
  */
 // LCOV_EXCL_START
 static zxc_variant_set_t zxc_select_variants(void) {
     const zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
-    (void)cpu;
-
-#ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
     if (cpu == ZXC_CPU_AVX512) ZXC_RETURN_VARIANT_SET(_avx512);
     if (cpu == ZXC_CPU_AVX2) ZXC_RETURN_VARIANT_SET(_avx2);
@@ -365,7 +359,8 @@ static zxc_variant_set_t zxc_select_variants(void) {
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) ZXC_RETURN_VARIANT_SET(_neon32);
-#endif
+#else
+    (void)cpu;
 #endif
     ZXC_RETURN_VARIANT_SET(_default);
 }

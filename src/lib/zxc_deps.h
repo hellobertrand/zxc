@@ -20,7 +20,8 @@
  * expands the macros to their libc equivalents.
  *
  * Per-symbol @c -D overrides are also accepted (each macro is guarded by
- * an @c ifndef), so vendoring is optional for ad-hoc consumers.
+ * an @c ifndef, the aligned pair as one), so vendoring is optional for ad-hoc
+ * consumers.
  */
 
 #ifndef ZXC_DEPS_H
@@ -92,16 +93,19 @@
  * workspace and per-context scratch buffers.
  *
  * The default is the pair defined below, wrapping @c _aligned_malloc on Windows
- * and @c posix_memalign elsewhere - the core's only use of either.
+ * and @c posix_memalign elsewhere - the core's only use of either. A host
+ * overrides both macros or neither; a vendored copy of this file defines both.
  *
- * Kernel builds typically map this to the slab allocator: @c kmalloc already
- * returns @c ARCH_KMALLOC_MINALIGN-aligned memory, which is greater than or
- * equal to the cache line size on every supported architecture.
+ * Kernel builds align by hand over the slab allocator (see docs/KERNEL.md):
+ * @c kmalloc guarantees only @c ARCH_KMALLOC_MINALIGN, 8 bytes on x86 and on
+ * arm64 since 6.5, short of the cache line the workspace layout assumes.
  * @{
  */
 
-// Defining ZXC_ALIGNED_MALLOC takes the whole block: the two helpers below are
-// then not compiled at all, and ZXC_ALIGNED_FREE has to come from the host too.
+#if defined(ZXC_ALIGNED_MALLOC) != defined(ZXC_ALIGNED_FREE)
+#error "ZXC_ALIGNED_MALLOC and ZXC_ALIGNED_FREE are overridden together"
+#endif
+
 #ifndef ZXC_ALIGNED_MALLOC
 
 /** @brief Default cache-line-aligned allocator; release with @ref zxc_aligned_free. */
@@ -131,8 +135,6 @@ static inline void zxc_aligned_free(void* ptr) {
  *  @brief Counterpart deallocator for @ref ZXC_ALIGNED_MALLOC. */
 #define ZXC_ALIGNED_FREE(ptr) zxc_aligned_free(ptr)
 
-#elif !defined(ZXC_ALIGNED_FREE)
-#error "ZXC_ALIGNED_MALLOC is defined without ZXC_ALIGNED_FREE: define both"
 #endif  // ZXC_ALIGNED_MALLOC
 
 /** @} */ /* end of Aligned Allocator Abstraction */

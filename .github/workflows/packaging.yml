@@ -190,25 +190,39 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Compile the block-only subset and check it is self-contained
+      - name: Compile the block-only subset and check what it reaches for
         run: |
+          # Twice: with the stock zxc_deps.h, then with the allocator and atomics
+          # overridden the way KERNEL.md prescribes, the host's allocators declared
+          # as its deps header would. -std=gnu11 as the kernel does.
           mkdir -p /tmp/nf
-          for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
-            # The per-ISA sources carry the suffix the dispatcher binds to.
-            suffix=""
-            case "$f" in zxc_compress|zxc_decompress|zxc_huffman) suffix="-DZXC_FUNCTION_SUFFIX=_default" ;; esac
-            cc -c -O2 -std=c11 -Wall -Wextra \
-               -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD $suffix \
-               -Iinclude -Isrc/lib -Isrc/lib/vendors \
-               -o "/tmp/nf/$f.o" "src/lib/$f.c"
+          printf 'void *host_aligned_alloc(unsigned long, unsigned long);\nvoid host_aligned_free(void *);\n' > /tmp/nf/host.h
+          hostflags=(-DZXC_USE_C11_ATOMICS=0 -include /tmp/nf/host.h
+                     '-DZXC_ALIGNED_MALLOC(s,a)=host_aligned_alloc(s,a)'
+                     '-DZXC_ALIGNED_FREE(p)=host_aligned_free(p)')
+          for deps in stock host; do
+            mkdir -p "/tmp/nf/$deps"
+            flags=(); [ "$deps" = host ] && flags=("${hostflags[@]}")
+            for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
+              # The per-ISA sources carry the suffix the dispatcher binds to.
+              suffix=""
+              case "$f" in zxc_compress|zxc_decompress|zxc_huffman) suffix="-DZXC_FUNCTION_SUFFIX=_default" ;; esac
+              cc -c -O2 -std=gnu11 -Wall -Wextra \
+                 -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD $suffix "${flags[@]}" \
+                 -Iinclude -Isrc/lib -Isrc/lib/vendors \
+                 -o "/tmp/nf/$deps/$f.o" "src/lib/$f.c"
+            done
+            # POSIX nm: one symbol per line, name then type; per-file headers have
+            # one field and drop out. Whatever the subset needs and does not
+            # define must be the libc it goes through zxc_deps.h for, the host
+            # allocators, or the compiler runtime (__*): a frame, dictionary or
+            # seekable symbol, or a new libc call, fails here.
+            nm -P /tmp/nf/$deps/*.o \
+              | awk 'NF > 1 && $2 == "U" { u[$1] } NF > 1 && $2 != "U" { d[$1] }
+                     END { for (s in u) if (!(s in d)) print s }' | sort > "/tmp/nf/$deps/needs"
+            allowed='^_?(memcpy|memmove|memset|bzero|memcmp|malloc|calloc|realloc|free|posix_memalign|host_aligned_alloc|host_aligned_free|__.*)$'
+            if grep -Ev "$allowed" "/tmp/nf/$deps/needs"; then
+              echo "::error::block-only build ($deps deps) reaches outside its sources and the libc"
+              exit 1
+            fi
           done
-          # A leftover reference means the block path still reaches into the
-          # frame, dictionary or seekable translation units.
-          nm -u /tmp/nf/*.o | grep -o 'zxc_[A-Za-z0-9_]*' | sort -u > /tmp/nf/undef
-          nm --defined-only /tmp/nf/*.o | awk '{print $NF}' | grep -o 'zxc_[A-Za-z0-9_]*' | sort -u > /tmp/nf/def
-          missing=$(comm -23 /tmp/nf/undef /tmp/nf/def)
-          if [ -n "$missing" ]; then
-            echo "::error::block-only build needs symbols outside its own sources:"
-            echo "$missing"
-            exit 1
-          fi
