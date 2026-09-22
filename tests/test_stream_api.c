@@ -1523,3 +1523,88 @@ int test_stream_footer_looks_like_sek(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* FILE* and buffer decoders must return @p want; push decodes @p n bytes, stops at @p push_end. */
+static int trailing_verdict(const uint8_t* arc, const size_t total, const size_t n,
+                            const uint8_t* src, uint8_t* out, const int64_t want,
+                            const size_t push_end, const char* what) {
+    FILE* const f = tmpfile();
+    int64_t rf = -1;
+    if (f && fwrite(arc, 1, total, f) == total && fseek(f, 0, SEEK_SET) == 0)
+        rf = zxc_stream_decompress(f, NULL, NULL);
+    if (f) fclose(f);
+    const int64_t rb = zxc_decompress(arc, total, out, n, NULL);
+
+    zxc_dstream* const ds = zxc_dstream_create(NULL);
+    zxc_inbuf_t in = {arc, total, 0};
+    zxc_outbuf_t ob = {out, n, 0};
+    const int64_t rp = ds ? zxc_dstream_decompress(ds, &ob, &in) : -1;
+    const int push_ok = rp == (int64_t)n && zxc_dstream_finished(ds) && in.pos == push_end &&
+                        memcmp(out, src, n) == 0;
+    zxc_dstream_free(ds);
+
+    if (rf == want && rb == want && push_ok) return 1;
+    printf("Failed: %s: FILE* %lld, buffer %lld (want %lld), push stopped at %zu (want %zu)\n",
+           what, (long long)rf, (long long)rb, (long long)want, in.pos, push_end);
+    return 0;
+}
+
+/* Bytes after the footer: corrupt for the FILE* and buffer decoders; the push API
+ * stops at the footer and leaves them to the caller. */
+int test_stream_trailing_bytes(void) {
+    printf("=== TEST: Stream - bytes after the footer ===\n");
+    const size_t n = 3 * 4096 + 5;
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const src = malloc(n);
+    uint8_t* const arc = malloc(2 * cap);
+    uint8_t* const forged = malloc(cap + ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE);
+    uint8_t* const out = malloc(n);
+    int ok = src && arc && forged && out;
+    if (ok) gen_lz_data(src, n);
+
+    for (int v = 0; ok && v < 4; v++) {
+        const zxc_compress_opts_t co = {
+            .level = 3, .block_size = 4096, .checksum_enabled = v & 1, .seekable = v >> 1};
+        const int64_t len = zxc_compress(src, n, arc, cap, &co);
+        if (len <= 0) {
+            ok = 0;
+            break;
+        }
+        char what[96];
+
+        // No tail, one byte, a second archive.
+        memcpy(arc + len, arc, (size_t)len);
+        const size_t tails[] = {0, 1, (size_t)len};
+        for (size_t t = 0; ok && t < sizeof(tails) / sizeof(tails[0]); t++) {
+            snprintf(what, sizeof(what), "checksum %d, seekable %d, %zu trailing bytes", v & 1,
+                     v >> 1, tails[t]);
+            ok =
+                trailing_verdict(arc, (size_t)len + tails[t], n, src, out,
+                                 tails[t] ? ZXC_ERROR_CORRUPT_DATA : (int64_t)n, (size_t)len, what);
+        }
+
+        // Flag cleared, [EOF][valid footer][SEK][footer]: the first footer checks
+        // out, only the end-of-input check catches the rest.
+        if (ok && co.seekable) {
+            const size_t fl = zxc_footer_bytes(co.checksum_enabled);
+            const size_t sek = (size_t)len - fl - ZXC_BLOCK_HEADER_SIZE -
+                               (size_t)zxc_seek_table_bytes(zxc_seek_block_count(n, 4096));
+            memcpy(forged, arc, sek);
+            memcpy(forged + sek, arc + len - fl, fl);
+            memcpy(forged + sek + fl, arc + sek, (size_t)len - sek);
+            forged[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
+            zxc_file_header_sign(forged);
+            snprintf(what, sizeof(what), "checksum %d, footer then an unannounced table", v & 1);
+            ok = trailing_verdict(forged, (size_t)len + fl, n, src, out, ZXC_ERROR_CORRUPT_DATA,
+                                  sek + fl, what);
+        }
+    }
+
+    free(src);
+    free(arc);
+    free(forged);
+    free(out);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

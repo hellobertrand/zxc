@@ -202,6 +202,8 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  *      Flag indicating whether checksum verification/generation is active.
  * @var zxc_stream_ctx_t::file_has_checksum
  *     Flag indicating whether the input file includes checksums.
+ * @var zxc_stream_ctx_t::file_has_seek
+ *     Flag indicating whether the file header announces a seek table.
  * @var zxc_stream_ctx_t::progress_cb
  *     Optional callback function for reporting progress during processing.
  * @var zxc_stream_ctx_t::progress_user_data
@@ -238,6 +240,7 @@ typedef struct {
     size_t chunk_size;
     int checksum_enabled;
     int file_has_checksum;
+    int file_has_seek;
     zxc_progress_callback_t progress_cb;
     void* progress_user_data;
     uint64_t total_input_bytes;
@@ -645,8 +648,8 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
     else
         w->total_bytes += ZXC_BLOCK_HEADER_SIZE;
 
-    // Seekable: write SEK block between EOF and footer
-    if (!ctx->io_error && w->seek_comp && w->seek_count > 0) {
+    // Seekable: write SEK block between EOF and footer, empty when no block was read
+    if (!ctx->io_error && w->seek_comp) {
         // Header, then one group at a time (seek_comp itself stays resident).
         uint8_t st_buf[ZXC_SEEK_GROUP_BYTES];
         const int h = zxc_seek_table_header(st_buf, sizeof(st_buf), w->seek_count);
@@ -683,34 +686,32 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
  */
 static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_args_t* w, FILE* f_in,
                                          const uint64_t d_digest) {
-    // After the EOF block: [SEK block]?[footer]. The footer is the 8-byte source size,
-    // 16 when the archive carries checksums (size, then digest). Its first 8 bytes and
-    // a SEK header are the same size; zxc_seek_tail_is_sek tells them apart.
+    // After the EOF block: the SEK block when the header announced one, then the
+    // footer: the 8-byte source size, 16 when the archive carries checksums (size,
+    // then digest).
     const size_t footer_len = zxc_footer_bytes(ctx->file_has_checksum);
     uint8_t footer[ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE];
 
-    if (UNLIKELY(fread(footer, 1, ZXC_BLOCK_HEADER_SIZE, f_in) != ZXC_BLOCK_HEADER_SIZE)) {
-        ctx->io_error = 1;
-    } else {
+    if (ctx->file_has_seek) {
+        uint8_t sek[ZXC_BLOCK_HEADER_SIZE];
         uint64_t remaining = 0;
-        if (zxc_seek_tail_is_sek(footer, (uint64_t)w->total_bytes, ctx->chunk_size, &remaining)) {
-            // Drain the SEK payload, then read the whole footer.
-            uint8_t discard[512];
-            while (remaining > 0 && !ctx->io_error) {
-                const size_t chunk =
-                    remaining < sizeof(discard) ? (size_t)remaining : sizeof(discard);
-                if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx->io_error = 1;
-                remaining -= chunk;
-            }
-            if (!ctx->io_error && UNLIKELY(fread(footer, 1, footer_len, f_in) != footer_len))
-                ctx->io_error = 1;  // LCOV_EXCL_LINE
-        } else if (footer_len > ZXC_BLOCK_HEADER_SIZE) {
-            // Not a SEK block: the 8 peeked bytes are the footer's head; read the rest.
-            const size_t rest = footer_len - ZXC_BLOCK_HEADER_SIZE;
-            if (UNLIKELY(fread(footer + ZXC_BLOCK_HEADER_SIZE, 1, rest, f_in) != rest))
-                ctx->io_error = 1;  // LCOV_EXCL_LINE
+        if (UNLIKELY(fread(sek, 1, sizeof(sek), f_in) != sizeof(sek))) {
+            ctx->io_error = 1;
+        } else if (UNLIKELY(!zxc_seek_header_ok(sek, (uint64_t)w->total_bytes, ctx->chunk_size,
+                                                &remaining))) {
+            if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
+            ctx->io_error = 1;
+        }
+        // Drain the SEK payload.
+        uint8_t discard[512];
+        while (remaining > 0 && !ctx->io_error) {
+            const size_t chunk = remaining < sizeof(discard) ? (size_t)remaining : sizeof(discard);
+            if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx->io_error = 1;
+            remaining -= chunk;
         }
     }
+    if (!ctx->io_error && UNLIKELY(fread(footer, 1, footer_len, f_in) != footer_len))
+        ctx->io_error = 1;
 
     // The size is the first 8 footer bytes; the digest, when present, the 8 after it.
     if (!ctx->io_error && UNLIKELY(zxc_le64(footer) != (uint64_t)w->total_bytes)) {
@@ -722,6 +723,13 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
         ctx->io_error = 1;
     }
+    // Nothing may follow the footer, as for the buffer decoders. EOF without feof
+    // is a read error.
+    if (!ctx->io_error && UNLIKELY(fgetc(f_in) != EOF)) {
+        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
+        ctx->io_error = 1;
+    }
+    if (!ctx->io_error && UNLIKELY(!feof(f_in))) ctx->io_error = 1;  // LCOV_EXCL_LINE
 }
 
 /**
@@ -778,6 +786,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     size_t runtime_chunk_sz = (block_size > 0) ? block_size : ZXC_BLOCK_SIZE_DEFAULT;
     int file_has_chk = 0;
+    int file_has_seek = 0;
 
     // Try to get input file size for progress tracking (compression mode only)
     // For decompression, the CLI precomputes the size and passes it via user_data
@@ -801,7 +810,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
             return ZXC_ERROR_SRC_TOO_SMALL;
 
         const int hrc = zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
-                                             &file_has_chk, &header_dict_id);
+                                             &file_has_chk, &header_dict_id, &file_has_seek);
         if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
         if (header_dict_id != 0) {
@@ -825,6 +834,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     ctx.chunk_size = runtime_chunk_sz;
     ctx.checksum_enabled = checksum_enabled;
     ctx.file_has_checksum = mode == 1 ? checksum_enabled : file_has_chk;
+    ctx.file_has_seek = file_has_seek;
     ctx.progress_cb = progress_cb;
     ctx.progress_user_data = user_data;
     ctx.total_input_bytes = total_file_size;
@@ -903,7 +913,8 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         if (f_out) {
             uint8_t h[ZXC_FILE_HEADER_SIZE];
             zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, runtime_chunk_sz, checksum_enabled,
-                                  (dict && dict_size) ? zxc_dict_id(dict, dict_size, dict_huf) : 0);
+                                  (dict && dict_size) ? zxc_dict_id(dict, dict_size, dict_huf) : 0,
+                                  seekable);
             if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
                 ctx.io_error = 1;
         }
@@ -1043,7 +1054,8 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     // from a verified header, not from a flag byte read on trust.
     size_t chunk_size = 0;
     int has_cs = 0;
-    const int hrc = zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &chunk_size, &has_cs, NULL);
+    const int hrc =
+        zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &chunk_size, &has_cs, NULL, NULL);
     if (UNLIKELY(hrc != ZXC_OK)) {
         fseeko(f_in, saved_pos, SEEK_SET);
         return hrc;

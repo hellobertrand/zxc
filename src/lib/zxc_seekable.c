@@ -27,7 +27,8 @@
  * field does not bound it.
  *
  * Detection from end of file:
- *   1. Read file header (first 16 bytes) => block_size
+ *   1. Read file header (first 16 bytes) => block_size, and HAS_SEEK_TABLE:
+ *      clear, the archive is not seekable
  *   2. Read file footer (last 8 bytes) => total_decompressed_size
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
  *   4. Read the EOF and SEK block headers in one go, validate both
@@ -206,10 +207,13 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
 
     size_t block_size_sz = 0;
     int file_has_chk = 0;
+    int file_has_seek = 0;
     uint32_t header_dict_id = 0;
     if (UNLIKELY(zxc_read_file_header(header, sizeof(header), &block_size_sz, &file_has_chk,
-                                      &header_dict_id) != ZXC_OK))
+                                      &header_dict_id, &file_has_seek) != ZXC_OK))
         return NULL;  // LCOV_EXCL_LINE
+    // No table announced: nothing to look for at the end.
+    if (!file_has_seek) return NULL;
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
@@ -225,9 +229,6 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
                  ZXC_OK))
         return NULL;
     const uint64_t total_decomp = zxc_le64(footer);
-
-    // A value of 0 means empty file - no seek table
-    if (UNLIKELY(total_decomp == 0)) return NULL;
 
     // Step 3: derive num_blocks = ceil(total_decomp / block_size)
     const uint64_t num_blocks = zxc_seek_block_count(total_decomp, block_size);
