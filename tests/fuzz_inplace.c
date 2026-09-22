@@ -15,8 +15,10 @@
  *  1. The raw input, as an archive.
  *  2. A payload compressed with header-chosen parameters, behind runs of zeros
  *     then noise (4 KiB units): the compressible-head shape short inputs never
- *     reach. It must decode bit-exact.
- *  3. The same archive padded before the footer: it must be refused.
+ *     reach. It must decode bit-exact, also with a header bit that re-encodes it
+ *     in blocks smaller than the header says (valid, uncounted by the bound).
+ *  3. The same archive padded before the footer: it must be refused. The tail
+ *     check alone would; ASan is the oracle for an overtaking write.
  */
 
 #include <assert.h>
@@ -61,6 +63,11 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const int checksum = data[1] & 1;
     const int seekable = (data[1] >> 1) & 1;
     const size_t block_size = kBlockSizes[(data[1] >> 2) & 3];
+    // Blocks half the header's size; not with checksum or seek table, which
+    // describe the real blocks.
+    const size_t short_bs = (data[1] & 16) && !checksum && !seekable && block_size > kBlockSizes[0]
+                                ? block_size / 2
+                                : 0;
     const size_t zero_len = (size_t)(data[2] & 15) * FUZZ_INPLACE_UNIT;
     const size_t noise_len = (size_t)(data[2] >> 4) * FUZZ_INPLACE_UNIT;
     const size_t pad = ((size_t)data[3] << 8 | data[4]) + 1;
@@ -88,7 +95,32 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                     .seekable = seekable};
     const size_t cbound = (size_t)zxc_compress_bound(n);
     uint8_t* const arc = (uint8_t*)malloc(cbound + pad);
-    const int64_t csize = arc ? zxc_compress(src, n, arc, cbound, &co) : -1;
+    int64_t csize = arc ? zxc_compress(src, n, arc, cbound, &co) : -1;
+    if (csize > 0 && short_bs) {
+        // Same header, EOF block and footer; blocks re-encoded at short_bs.
+        const zxc_compress_opts_t so = {.level = level, .block_size = short_bs};
+        zxc_cctx* const cc = zxc_create_cctx(&so);
+        const size_t tail = 8 + ZXC_FILE_FOOTER_SIZE; /* EOF block header, then footer */
+        uint8_t end[8 + ZXC_FILE_FOOTER_SIZE];
+        memcpy(end, arc + csize - tail, tail);
+        size_t pos = ZXC_FILE_HEADER_SIZE;
+        for (size_t off = 0; cc && off < n && pos + tail <= cbound; off += short_bs) {
+            const size_t take = n - off < short_bs ? n - off : short_bs;
+            const int64_t w = zxc_compress_block(cc, src + off, take, arc + pos, cbound - pos, &so);
+            if (w <= 0) {
+                pos = 0;
+                break;
+            }
+            pos += (size_t)w;
+        }
+        zxc_free_cctx(cc);
+        if (pos == 0)
+            csize = -1;
+        else {
+            memcpy(arc + pos, end, tail);
+            csize = (int64_t)(pos + tail);
+        }
+    }
     if (csize <= 0) {
         free(arc);
         free(src);
@@ -101,7 +133,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     assert(d == SKIPPED || (d == (int64_t)n && memcmp(out, src, n) == 0));
     free(out);
 
-    // Pad between the EOF block and the footer.
+    // Pad before the footer.
     const size_t footer = ZXC_FILE_FOOTER_SIZE + (checksum ? ZXC_FILE_DIGEST_SIZE : 0);
     memmove(arc + len - footer + pad, arc + len - footer, footer);
     memset(arc + len - footer, 0xA5, pad);

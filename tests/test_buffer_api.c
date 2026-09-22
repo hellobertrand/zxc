@@ -1123,37 +1123,59 @@ static int inplace_seek_flag_margin(void) {
     return ok;
 }
 
-/* Two-buffer entry points too: dst over unread input is refused, past the archive it decodes. */
-static int inplace_overlap_contract(void) {
-    const size_t n = 2 * ZXC_BLOCK_SIZE_MIN;
+/* Blocks shorter than the header's block_size are valid and the bound counts full
+ * ones: 1 MiB in 4 KiB blocks under a 64 KiB header, zero head then noise, must
+ * still decode at its bound. */
+static int inplace_short_blocks(void) {
+    const size_t hdr_bs = 64 * 1024, sub = ZXC_BLOCK_SIZE_MIN, n = 1 << 20;
     const size_t cap = (size_t)zxc_compress_bound(n);
     uint8_t* const src = (uint8_t*)malloc(n);
-    uint8_t* const buf = (uint8_t*)malloc(cap + n + 64);
-    zxc_dctx* const d = zxc_create_dctx();
-    int ok = src && buf && d;
+    uint8_t* const ref = (uint8_t*)malloc(cap);
+    uint8_t* const arc = (uint8_t*)malloc(cap);
+    uint8_t* const out = (uint8_t*)malloc(n);
+    const zxc_compress_opts_t bo = {.level = 3, .block_size = sub};
+    zxc_cctx* const cc = zxc_create_cctx(&bo);
+    int ok = src && ref && arc && out && cc;
     if (ok) {
         gen_random_data(src, n);
-        const zxc_compress_opts_t co = {.level = 1, .block_size = ZXC_BLOCK_SIZE_MIN};
-        const int64_t len = zxc_compress(src, n, buf + 64, cap, &co);
-        ok = len > 0;
+        memset(src, 0, 4 * sub);
+        // Header, EOF block and footer from a real archive of the same bytes.
+        const zxc_compress_opts_t ho = {.level = 3, .block_size = hdr_bs};
+        const int64_t rl = zxc_compress(src, n, ref, cap, &ho);
+        ok = rl > 0;
+        size_t pos = ZXC_FILE_HEADER_SIZE;
+        if (ok) memcpy(arc, ref, pos);
+        for (size_t off = 0; ok && off < n; off += sub) {
+            const int64_t w = zxc_compress_block(cc, src + off, sub, arc + pos, cap - pos, &bo);
+            ok = w > 0;
+            pos += ok ? (size_t)w : 0;
+        }
         if (ok) {
-            uint8_t* const arc = buf + 64;
-            const int64_t r1 = zxc_decompress(arc, (size_t)len, buf, n, NULL);
-            const int64_t r2 = zxc_decompress_dctx(d, arc, (size_t)len, buf, n, NULL);
-            uint8_t* const past = arc + len;
-            const int64_t r3 = zxc_decompress(arc, (size_t)len, past, n, NULL);
-            const int64_t r4 = zxc_decompress_dctx(d, arc, (size_t)len, past, n, NULL);
-            ok = r1 == ZXC_ERROR_CORRUPT_DATA && r2 == ZXC_ERROR_CORRUPT_DATA && r3 == (int64_t)n &&
-                 r4 == (int64_t)n && memcmp(past, src, n) == 0;
+            const size_t tail = ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+            memcpy(arc + pos, ref + rl - tail, tail);
+            pos += tail;
+            const int64_t two = zxc_decompress(arc, pos, out, n, NULL);
+            const size_t need = zxc_decompress_inplace_bound(arc, pos);
+            uint8_t* const buf = (uint8_t*)malloc(need);
+            int64_t one = -1;
+            if (buf) {
+                memcpy(buf + need - pos, arc, pos);
+                one = zxc_decompress_inplace(buf, need, pos, NULL);
+            }
+            ok = two == (int64_t)n && memcmp(out, src, n) == 0 && one == (int64_t)n && buf &&
+                 memcmp(buf, src, n) == 0;
             if (!ok)
-                printf("Failed [overlap contract]: over input %lld / %lld, past it %lld / %lld\n",
-                       (long long)r1, (long long)r2, (long long)r3, (long long)r4);
+                printf("Failed [short blocks]: two-buffer %lld, in-place at bound %zu: %lld\n",
+                       (long long)two, need, (long long)one);
+            free(buf);
         }
     }
-    zxc_free_dctx(d);
-    free(buf);
+    zxc_free_cctx(cc);
+    free(out);
+    free(arc);
+    free(ref);
     free(src);
-    if (ok) printf("  [PASS] destination over unread input refused, past the archive decoded\n");
+    if (ok) printf("  [PASS] short blocks under a larger header block size decode in place\n");
     return ok;
 }
 
@@ -1208,7 +1230,7 @@ int test_decompress_inplace(void) {
     ok &= inplace_forged_footer();
     ok &= inplace_padded_archive();
     ok &= inplace_seek_flag_margin();
-    ok &= inplace_overlap_contract();
+    ok &= inplace_short_blocks();
 
     free(a);
     if (!ok) return 0;

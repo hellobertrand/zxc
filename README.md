@@ -220,7 +220,7 @@ int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode i
 // buf[0 .. n) now holds the decompressed data
 ```
 
-The required margin is one block, the accumulated per-block framing overhead, the trailing framing the encoder writes after the last block (EOF block, seek table, footer), and the wild-copy tail (`block_size + nblocks x (12-16 B) + ~2 KB`) — about **1 %** overhead on a large archive; always size the buffer via `zxc_decompress_inplace_bound` rather than the formula. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, never silent corruption. This is a library/API capability: it targets embedded/firmware integrators.
+The required margin is one block, the accumulated per-block framing overhead, the trailing framing the encoder writes after the last block (EOF block, seek table, footer), and the wild-copy tail (`block_size + nblocks x (12-16 B) + ~2 KB`) — about **1 %** overhead on a large archive; always size the buffer via `zxc_decompress_inplace_bound` rather than the formula. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, and an archive whose output would reach input not yet read (padding, forged block sizes) with `ZXC_ERROR_CORRUPT_DATA`: never silent corruption. This is a library/API capability: it targets embedded/firmware integrators.
 
 ---
 
