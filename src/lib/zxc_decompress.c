@@ -789,7 +789,7 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RES
                  ctx->pivco_scratch_cap < required_size + ZXC_PIVCO_SCRATCH_PAD))
         return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
-                                       &ctx->dict_huf->ctree, &ctx->dict_huf->dec,
+                                       &ctx->dict_huf->tree, &ctx->dict_huf->dec,
                                        ctx->pivco_scratch);
 }
 

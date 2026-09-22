@@ -476,9 +476,8 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
     // Tree-at-attach: unpack + build the PivCo tree, codes and decoder tables
     // once here; the per-block encode/estimate/decode paths reuse them via
     // the context.
-    const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf->tree, &ctx->dict_huf->ctree,
-                                           ctx->dict_huf->codes, ctx->dict_huf->code_len,
-                                           &ctx->dict_huf->dec);
+    const int rc = zxc_huf_dict_tree_build(lengths, &ctx->dict_huf->tree, ctx->dict_huf->codes,
+                                           ctx->dict_huf->code_len, &ctx->dict_huf->dec);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     ctx->dict_huf_tree_ok = 1;
     return ZXC_OK;

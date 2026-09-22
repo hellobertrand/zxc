@@ -657,69 +657,35 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
  *         bit-reader. A structural fact of that unpacker, not tunable. */
 #define ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX 6
 
-/** @brief One PivCo Huffman tree node. */
-typedef struct {
-    int16_t child[2]; /* node index, -1 = absent */
-    int16_t sym;      /* >= 0: leaf symbol; -1: internal */
-} zxc_pivco_node_t;
-
-/**
- * @brief Canonical Huffman tree in PivCo (level-ordered) form.
- *
- * Derived deterministically from the 128-byte packed code lengths by
- * zxc_huf_dict_tree_build / the section decoders; pure value type (index-based,
- * no internal pointers), safe to copy or embed. Embedded in ::zxc_cctx_t so a
- * dictionary's shared table is built ONCE at attach instead of per block.
- */
-typedef struct {
-    zxc_pivco_node_t nd[ZXC_PIVCO_MAX_NODES];
-    int16_t bfs[ZXC_PIVCO_MAX_NODES]; /* node ids in BFS (== wire) order */
-    int16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];
-    int n_nodes;
-    int max_depth;
-    // Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
-    // complete subtree with all leaves exactly D levels down. Its wire run is
-    // the symbols' packed D-bit residuals instead of D partition bitmaps (same
-    // bits, decode = unpack+lookup), and covered[nid] marks its strict
-    // descendants, absent from the wire. Both sides derive this from the code
-    // lengths, so nothing is signalled.
-    uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
-    uint8_t covered[ZXC_PIVCO_MAX_NODES];
-} zxc_pivco_tree_t;
-
-/** @brief @c flat_d value of a node inside a flat root's run: it carries no
- *  symbols, so both decoder passes see an empty run and empty children. */
+/** @brief @c flat_d of a node inside a flat root: no run, no children. */
 #define ZXC_PIVCO_COVERED 0xFFU
 
 /**
- * @brief The decoder's view of a PivCo tree: its canonical shape, by depth.
+ * @brief A PivCo code tree: its canonical shape, by depth.
  *
- * Canonical codes fix the tree from the leaf count of each length alone. At
- * every depth the leaves come first, in symbol order, then the internal nodes,
- * and the k-th internal node's children are positions 2k and 2k+1 of the next
- * depth. BFS order (the wire order) is this position order, so no node records
- * are kept: a node is a (depth, position) pair, its symbol is read from
- * @c syms and its children are arithmetic.
+ * Canonical codes fix the tree from the leaf counts alone. At every depth the
+ * leaves come first, in symbol order, then the internal nodes; the k-th
+ * internal node's children are positions 2k and 2k+1 below. This position
+ * order is the wire order, so a node is a (depth, position) pair: no node
+ * records. A code's depth-d prefix is the node at position prefix - first_code[d].
  */
 typedef struct {
-    uint16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First node index of each depth. */
-    uint16_t n_leaves[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];  /**< Leaves at each depth. */
-    uint16_t leaf_base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First @c syms index of each depth. */
+    uint16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];  /**< First node index of each depth. */
+    uint16_t n_leaves[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];   /**< Leaves at each depth. */
+    uint16_t leaf_base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];  /**< First @c syms index of each depth. */
+    uint16_t first_code[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< Smallest d-bit prefix in use. */
     int max_depth;
     uint8_t syms[ZXC_HUF_NUM_SYMBOLS];   /**< Symbols by (code length, value). */
-    uint8_t flat_d[ZXC_PIVCO_MAX_NODES]; /**< Internal nodes, by index: flat-root depth
-                                              (>= 2), 0, or ::ZXC_PIVCO_COVERED. */
-} zxc_pivco_ctree_t;
+    uint8_t flat_d[ZXC_PIVCO_MAX_NODES]; /**< Flat-root depth, 0, or ::ZXC_PIVCO_COVERED. */
+} zxc_pivco_tree_t;
 
 /**
- * @brief Precomputed decode-side tables derived from a ::zxc_pivco_ctree_t.
+ * @brief Precomputed decode-side tables derived from a ::zxc_pivco_tree_t.
  *
- * A pure function of the tree: @c c2s_pool holds each flat root's packed-code
- * -> symbol table at @c c2s_off[node index]. Flat subtrees have disjoint
- * leaves, so the pool never exceeds ZXC_HUF_NUM_SYMBOLS entries; the +16 slack
- * covers zxc_pivco_unpack_flat's SIMD table loads, which round a table up to
- * 16 entries. Per-section trees fill a table inline in zxc_pivco_decode_core;
- * dictionary trees build them ONCE at attach.
+ * Each flat root's code -> symbol table, at @c c2s_off[node index]. Flat
+ * subtrees have disjoint leaves, so the pool fits ZXC_HUF_NUM_SYMBOLS entries;
+ * +16 covers the SIMD unpackers, which read a table as 16 entries. Built once
+ * at attach, for dictionary trees only.
  */
 typedef struct {
     uint16_t c2s_off[ZXC_PIVCO_MAX_NODES];      /**< Flat roots: offset into c2s_pool. */
@@ -736,8 +702,7 @@ typedef struct {
  * @ref zxc_huf_dict_tree_build via @c zxc_cctx_attach_dict_huf.
  */
 typedef struct {
-    zxc_pivco_tree_t tree;                 /**< PivCo tree from the shared literal table. */
-    zxc_pivco_ctree_t ctree;               /**< The same tree, decoder view. */
+    zxc_pivco_tree_t tree;                /**< PivCo tree from the shared literal table. */
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes (encoder side). */
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked code lengths. */
     zxc_pivco_decode_aux_t dec;            /**< Precomputed decoder tables. */
@@ -1724,8 +1689,8 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
  *  All outputs are frame-constant; per-block encode/estimate/decode then skip
  *  the rebuild. */
 int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tree_t* RESTRICT tree,
-                            zxc_pivco_ctree_t* RESTRICT ctree, uint32_t* RESTRICT codes,
-                            uint8_t* RESTRICT code_len, zxc_pivco_decode_aux_t* RESTRICT aux);
+                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len,
+                            zxc_pivco_decode_aux_t* RESTRICT aux);
 
 /** @brief zxc_huf_calc_size for a dict section: prebuilt @p tree, no header. */
 size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
@@ -1747,7 +1712,7 @@ int zxc_huf_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
  *  attach-time decoder tables @p aux. */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
                                 uint8_t* RESTRICT dst, size_t n,
-                                const zxc_pivco_ctree_t* RESTRICT tree,
+                                const zxc_pivco_tree_t* RESTRICT tree,
                                 const zxc_pivco_decode_aux_t* RESTRICT aux,
                                 uint8_t* RESTRICT scratch);
 
