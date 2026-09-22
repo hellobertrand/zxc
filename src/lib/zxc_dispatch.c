@@ -735,11 +735,11 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 }
 
 // Shared frame decode body for zxc_decompress and zxc_decompress_inplace. No
-// RESTRICT between src and dst, so the overlapping case stays defined; the
-// in-place margin still gives each block disjoint regions, and the per-block
-// wrappers keep their own RESTRICT.
+// RESTRICT between src and dst, which overlap in place; there a block's room ends
+// at the unread input, which keeps the per-block RESTRICT valid.
 static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t* dst,
-                                    size_t dst_capacity, const zxc_decompress_opts_t* opts);
+                                    size_t dst_capacity, const zxc_decompress_opts_t* opts,
+                                    int inplace);
 
 /**
  * @brief Validates a frame envelope without decoding it: file header, then the
@@ -814,7 +814,7 @@ static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t s
     const int rc = zxc_probe_reject_payload(src, src_size);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     uint8_t probe_dst[1];
-    return zxc_decompress_frame(src, src_size, probe_dst, 0, opts);
+    return zxc_decompress_frame(src, src_size, probe_dst, 0, opts, 0);
 }
 
 /**
@@ -833,11 +833,13 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
 
     if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size, opts);
 
-    return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts);
+    return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts,
+                                0);
 }
 
 static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, uint8_t* dst,
-                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
+                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts,
+                                    const int inplace) {
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
@@ -959,36 +961,37 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
             if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
         }
 
-        int res;
+        // Room for the block: the rest of dst, in place cut at the unread input. The
+        // fast decoder never writes past its capacity; a block that does not fit
+        // decodes aside and copies only its real output.
         const size_t rem_cap = (size_t)(op_end - op);
+        size_t room = rem_cap;
+        if (inplace) {
+            const size_t ahead = ip > op ? (size_t)(ip - op) : 0;
+            if (ahead < room) room = ahead;
+        }
+        int res;
+        const uint8_t* bounce = NULL;
         if (dict_dec) {
-            // Dict path: decode into bounce buffer with dict prefix so match
-            // copies that reference dict content resolve naturally.
+            // Decode behind the dict prefix so back-references into it resolve.
             res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, dict_dec + dict_size, work_sz,
                                                block_index);
-            if (LIKELY(res > 0)) {
-                // A no-destination probe lands here too.
-                if (UNLIKELY((size_t)res > rem_cap)) {
-                    if (ctx_ready) zxc_cctx_free(&ctx);
-                    return ZXC_ERROR_DST_TOO_SMALL;
-                }
-                ZXC_MEMCPY(op, dict_dec + dict_size, (size_t)res);
-            }
-        } else if (LIKELY(rem_cap >= work_sz)) {
-            // Fast path: decode directly into dst. Cap dst_cap to chunk_size + PAD
+            bounce = dict_dec + dict_size;
+        } else if (LIKELY(room >= work_sz)) {
             res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, work_sz, block_index);
         } else {
-            // Safe path: decode into bounce buffer, then copy exact result.
             res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, ctx.work_buf_cap,
                                                block_index);
-            if (LIKELY(res > 0)) {
-                // A no-destination probe lands here too.
-                if (UNLIKELY((size_t)res > rem_cap)) {
-                    if (ctx_ready) zxc_cctx_free(&ctx);
-                    return ZXC_ERROR_DST_TOO_SMALL;
-                }
-                ZXC_MEMCPY(op, ctx.work_buf, (size_t)res);
+            bounce = ctx.work_buf;
+        }
+        if (bounce && LIKELY(res > 0)) {
+            // A no-destination probe lands here too. In place, output past the
+            // room means padding or forged sizes.
+            if (UNLIKELY((size_t)res > room)) {
+                if (ctx_ready) zxc_cctx_free(&ctx);
+                return (size_t)res > rem_cap ? ZXC_ERROR_DST_TOO_SMALL : ZXC_ERROR_CORRUPT_DATA;
             }
+            ZXC_MEMCPY(op, bounce, (size_t)res);
         }
         if (UNLIKELY(res < 0)) {
             if (ctx_ready) zxc_cctx_free(&ctx);
@@ -1011,15 +1014,17 @@ static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, u
 /**
  * @brief Bytes an in-place decode needs on top of the decompressed size.
  *
- * Flush-right placement puts block 0 at `capacity - comp_size`, so the read
- * cursor before block k sits at `capacity - sum_{j>=k} (c_j + H) - trailing`,
- * and the no-overtake invariant `sum_{j<=k} o_j + PAD <= R_k` requires
+ * The walk never writes into unread input; the margin keeps a full block of room
+ * for an archive its header and footer describe, so every block takes the fast
+ * path. Flush-right placement puts block 0 at `capacity - comp_size`, so the read
+ * cursor before block k sits at `capacity - sum_{j>=k} (c_j + H) - trailing`, and
+ * `sum_{j<k} o_j + chunk_size + PAD <= R_k` requires
  *
- *     capacity >= max_k [ sum_{j<=k} o_j + sum_{j>=k} (c_j + H) ] + PAD + trailing
+ *     capacity >= max_k [ sum_{j<k} o_j + chunk_size + sum_{j>=k} (c_j + H) ] + PAD + trailing
  *
- * Incompressible input (all RAW, `c_j = o_j`) maximises the bracket at
- * `dsize + chunk_size + nblocks * H`: the margin carries the whole accumulated
- * per-block overhead, not just one block's.
+ * Incompressible input (all RAW, `c_j = o_j = chunk_size`) maximises the
+ * bracket at `dsize + chunk_size + nblocks * H`: the margin carries the whole
+ * accumulated per-block overhead, not just one block's.
  *
  * `trailing` is everything written after the last data block: EOF header, the
  * seek table when HAS_SEEK_TABLE announces one, and the footer. Like has_cs, the
@@ -1099,9 +1104,9 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
  * read cursor.
  *
  * Because src_size is attacker-controlled, inserted padding bytes can slide decoding dangerously
- * close to the output boundary. Enforcing a minimum bound via src_size + floor maintains the
- * required separation regardless of archive padding. For authentic archives, this adjustment grows
- * the bound by at most 16 bytes and guarantees it never shrinks.
+ * close to the output boundary. The src_size + floor term keeps block 0 clear; the walk checks
+ * every later block. For authentic archives, this adjustment grows the bound by at most 16 bytes
+ * and guarantees it never shrinks.
  */
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
@@ -1130,6 +1135,7 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
  * buffer carries a one-block + wild-copy margin (see
  * @ref zxc_decompress_inplace_bound), the write cursor provably never overtakes
  * the read cursor, so a single allocation replaces the usual input+output pair.
+ * An archive whose output would reach unread input is refused as corrupt first.
  * Dictionary archives are supported (they decode through the context's own
  * bounce buffer, which does not alias @p buffer).
  */
@@ -1149,9 +1155,9 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
     if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
         return ZXC_ERROR_DST_TOO_SMALL;
     /* The check above sizes the buffer against the payload, this one against the
-     * archive where it actually lies. Only the second bounds the read/write gap. */
+     * archive where it lies: block 0 starts a full block clear. */
     if (UNLIKELY((uint64_t)(buffer_capacity - comp_size) < floor)) return ZXC_ERROR_DST_TOO_SMALL;
-    return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts);
+    return zxc_decompress_frame(comp, comp_size, buf, buffer_capacity, opts, 1);
 }
 
 /**

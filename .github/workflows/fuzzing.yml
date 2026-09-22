@@ -123,6 +123,7 @@ jobs:
           echo "pstream inputs: $(find corpus/corpus/zxc_fuzzer_pstream -type f | wc -l)"
           echo "dict inputs: $(find corpus/corpus/zxc_fuzzer_dict -type f | wc -l)"
           echo "stream inputs: $(find corpus/corpus/zxc_fuzzer_stream -type f 2>/dev/null | wc -l)"
+          echo "inplace inputs: $(find corpus/corpus/zxc_fuzzer_inplace -type f 2>/dev/null | wc -l)"
 
       - name: Build Coverage Harnesses
         run: |
@@ -150,6 +151,9 @@ jobs:
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_stream.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_stream
 
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_inplace.c \
+            -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_inplace
+
       - name: Replay Corpora
         shell: bash
         run: |
@@ -173,6 +177,10 @@ jobs:
             LLVM_PROFILE_FILE="build-cov/stream.profraw" \
               build-cov/fuzz_stream corpus/corpus/zxc_fuzzer_stream/ -runs=0 2>&1 | tail -1
           fi
+          if [ -d corpus/corpus/zxc_fuzzer_inplace ]; then
+            LLVM_PROFILE_FILE="build-cov/inplace.profraw" \
+              build-cov/fuzz_inplace corpus/corpus/zxc_fuzzer_inplace/ -runs=0 2>&1 | tail -1
+          fi
 
       - name: Generate Coverage Report
         run: |
@@ -182,6 +190,7 @@ jobs:
             $([ -f build-cov/pstream.profraw ] && echo build-cov/pstream.profraw) \
             $([ -f build-cov/dict.profraw ] && echo build-cov/dict.profraw) \
             $([ -f build-cov/stream.profraw ] && echo build-cov/stream.profraw) \
+            $([ -f build-cov/inplace.profraw ] && echo build-cov/inplace.profraw) \
             -o build-cov/fuzz.profdata
 
           echo "=== COVERAGE SUMMARY ==="
@@ -191,6 +200,7 @@ jobs:
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
             $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
             $([ -f build-cov/fuzz_stream ] && echo "-object build-cov/fuzz_stream") \
+            $([ -f build-cov/fuzz_inplace ] && echo "-object build-cov/fuzz_inplace") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_)'
 
@@ -200,6 +210,7 @@ jobs:
             $([ -f build-cov/fuzz_pstream ] && echo "-object build-cov/fuzz_pstream") \
             $([ -f build-cov/fuzz_dict ] && echo "-object build-cov/fuzz_dict") \
             $([ -f build-cov/fuzz_stream ] && echo "-object build-cov/fuzz_stream") \
+            $([ -f build-cov/fuzz_inplace ] && echo "-object build-cov/fuzz_inplace") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_)' \
             --format=html -output-dir=build-cov/coverage_html

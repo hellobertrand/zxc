@@ -174,7 +174,9 @@ ZXC_EXPORT size_t zxc_decompress_inplace_bound(const void* src, const size_t src
  * The archive must sit **flush-right** in @p buffer (its last @p comp_size
  * bytes). Decoding runs left-to-right from @c buffer[0]; as long as
  * @p buffer_capacity is at least @ref zxc_decompress_inplace_bound, the write
- * cursor provably never overtakes the read cursor. One allocation instead of
+ * cursor provably never overtakes the read cursor; an archive whose output would
+ * reach unread input (padding, forged block sizes) is refused with
+ * @ref ZXC_ERROR_CORRUPT_DATA first. One allocation instead of
  * two, which is what makes this worthwhile on memory-constrained targets
  * (embedded, FOTA, firmware).
  *
