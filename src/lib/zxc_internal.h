@@ -675,13 +675,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
  * they are the decoder's code -> symbol table, and each leaf's code ends with
  * its packed code.
  *
- * Depth arrays cover 0 to max_depth, plus its end in lvl_start and leaf_base.
- * Node arrays cover every node and the slot.
+ * Depth arrays cover 0 to max_depth; node_base and leaf_base also mark where
+ * the last depth ends. Node arrays cover every node and the slot.
  */
 typedef struct {
-    uint16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First node index of each depth. */
+    uint16_t node_base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First node index of each depth. */
     uint16_t leaf_base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First @c syms index of each depth. */
-    uint16_t n_leaves[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];  /**< Leaves at each depth. */
     int16_t base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];       /**< Node index of the d-bit prefix 0. */
     int max_depth;
     uint8_t syms[ZXC_HUF_NUM_SYMBOLS];    /**< Leaf symbols, depth by depth. */

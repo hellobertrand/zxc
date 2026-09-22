@@ -1018,11 +1018,16 @@ static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(const uint64_t v) {
 #endif
 }
 
+/** @brief Leaves at depth @p d. */
+static ZXC_ALWAYS_INLINE int zxc_pivco_leaves(const zxc_pivco_tree_t* RESTRICT t, const int d) {
+    return t->leaf_base[d + 1] - t->leaf_base[d];
+}
+
 /** @brief @c syms index of flat root @p g's first leaf: its prefix, then D zero bits. */
 static ZXC_ALWAYS_INLINE int zxc_pivco_flat_leaves(const zxc_pivco_tree_t* RESTRICT t, const int g,
                                                    const int d, const int D) {
     const int e = d + D;
-    return t->leaf_base[e] + t->base[e] - t->lvl_start[e] + ((g - t->base[d]) << D);
+    return t->leaf_base[e] + t->base[e] - t->node_base[e] + ((g - t->base[d]) << D);
 }
 
 /** @brief Reorders @p s[0, 2^D) by bit-reversed index (an involution). */
@@ -1077,12 +1082,11 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     // The d-bit prefixes start at `first`.
     unsigned width = 1;
     unsigned first = 0;
-    t->lvl_start[0] = 0;
+    t->node_base[0] = 0;
     t->leaf_base[0] = 0;
     for (int d = 0; d <= max_depth; d++) {
-        t->n_leaves[d] = bl_count[d];
-        t->base[d] = (int16_t)(t->lvl_start[d] - (int)first);
-        t->lvl_start[d + 1] = (uint16_t)(t->lvl_start[d] + width);
+        t->base[d] = (int16_t)(t->node_base[d] - (int)first);
+        t->node_base[d + 1] = (uint16_t)(t->node_base[d] + width);
         t->leaf_base[d + 1] = (uint16_t)(t->leaf_base[d] + bl_count[d]);
         first = 2 * (first + bl_count[d]);
         width = (d == 0 && n_present == 1) ? 1U : 2 * (width - bl_count[d]);
@@ -1097,12 +1101,12 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     // (D = 1 is a leaf pair). Bottom-up, flat_d holds complete heights: 0 at
     // leaves and the slot, INCOMPLETE across depths.
     enum { INCOMPLETE = 0xFE };
-    t->flat_d[t->lvl_start[max_depth + 1]] = 0;
+    t->flat_d[t->node_base[max_depth + 1]] = 0;
     for (int d = max_depth; d >= 0; d--) {
-        uint8_t* const h = t->flat_d + t->lvl_start[d];
-        const uint8_t* const hc = t->flat_d + t->lvl_start[d + 1];
-        const int L = t->n_leaves[d];
-        const int N = t->lvl_start[d + 1] - t->lvl_start[d];
+        uint8_t* const h = t->flat_d + t->node_base[d];
+        const uint8_t* const hc = t->flat_d + t->node_base[d + 1];
+        const int L = zxc_pivco_leaves(t, d);
+        const int N = t->node_base[d + 1] - t->node_base[d];
         for (int i = 0; i < L; i++) h[i] = 0;
         for (int i = L; i < N; i++) {
             const uint8_t a = hc[2 * (i - L)];
@@ -1114,16 +1118,17 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     // nodes below are covered. The wire packs a path LSB first, so leaf r has
     // packed code r bit-reversed: store the leaves in that order.
     for (int d = 0; d < max_depth; d++) {
-        uint8_t* const fd = t->flat_d + t->lvl_start[d];
-        const uint8_t* const up = d ? t->flat_d + t->lvl_start[d - 1] + t->n_leaves[d - 1] : NULL;
-        const int N = t->lvl_start[d + 1] - t->lvl_start[d];
-        for (int i = t->n_leaves[d]; i < N; i++) {
+        uint8_t* const fd = t->flat_d + t->node_base[d];
+        const uint8_t* const up =
+            d ? t->flat_d + t->node_base[d - 1] + zxc_pivco_leaves(t, d - 1) : NULL;
+        const int N = t->node_base[d + 1] - t->node_base[d];
+        for (int i = zxc_pivco_leaves(t, d); i < N; i++) {
             if (up && up[i >> 1]) {
                 fd[i] = ZXC_PIVCO_COVERED;
             } else if (fd[i] < 2 || fd[i] == INCOMPLETE) {
                 fd[i] = 0;
             } else {
-                const int g = t->lvl_start[d] + i;
+                const int g = t->node_base[d] + i;
                 zxc_pivco_bitrev_permute(t->syms + zxc_pivco_flat_leaves(t, g, d, fd[i]), fd[i]);
             }
         }
@@ -1139,12 +1144,12 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
  */
 static void zxc_pivco_counts(const zxc_pivco_tree_t* RESTRICT t, const uint32_t* RESTRICT freq,
                              uint32_t* RESTRICT count) {
-    count[t->lvl_start[t->max_depth + 1]] = 0;
+    count[t->node_base[t->max_depth + 1]] = 0;
     for (int d = t->max_depth; d >= 0; d--) {
-        const int L = t->n_leaves[d];
-        const int N = t->lvl_start[d + 1] - t->lvl_start[d];
-        uint32_t* const cnt = count + t->lvl_start[d];
-        const uint32_t* const ccnt = count + t->lvl_start[d + 1];
+        const int L = zxc_pivco_leaves(t, d);
+        const int N = t->node_base[d + 1] - t->node_base[d];
+        uint32_t* const cnt = count + t->node_base[d];
+        const uint32_t* const ccnt = count + t->node_base[d + 1];
         const uint8_t* const sym = t->syms + t->leaf_base[d];
         for (int i = 0; i < L; i++) cnt[i] = freq[sym[i]];
         for (int i = L; i < N; i++) cnt[i] = ccnt[2 * (i - L)] + ccnt[2 * (i - L) + 1];
@@ -1154,8 +1159,8 @@ static void zxc_pivco_counts(const zxc_pivco_tree_t* RESTRICT t, const uint32_t*
 /** @brief Code of every leaf: the prefix of its slot (see ::zxc_pivco_tree_t). */
 static void zxc_pivco_codes(const zxc_pivco_tree_t* RESTRICT t, uint32_t* RESTRICT codes) {
     for (int d = 1; d <= t->max_depth; d++)
-        for (int i = 0; i < t->n_leaves[d]; i++)
-            codes[t->syms[t->leaf_base[d] + i]] = (uint32_t)(t->lvl_start[d] + i - t->base[d]);
+        for (int i = 0; i < zxc_pivco_leaves(t, d); i++)
+            codes[t->syms[t->leaf_base[d] + i]] = (uint32_t)(t->node_base[d] + i - t->base[d]);
 }
 
 /**
@@ -1185,18 +1190,18 @@ static ZXC_ALWAYS_INLINE size_t zxc_pivco_run_bytes(const uint32_t count, const 
 }
 
 /**
- * @brief Payload size, and each run's offset if @p off is set.
+ * @brief Payload size, and each run's first bit as a cursor if @p cur is set.
  *
  * Runs: every uncovered internal node, in wire order. Estimator and encoder
  * share this walk, so their sizes cannot drift.
  */
 static size_t zxc_pivco_layout(const zxc_pivco_tree_t* RESTRICT t, const uint32_t* RESTRICT count,
-                               uint32_t* RESTRICT off) {
+                               uint32_t* RESTRICT cur) {
     size_t total = 0;
     for (int d = 0; d < t->max_depth; d++) {
-        for (int g = t->lvl_start[d] + t->n_leaves[d]; g < t->lvl_start[d + 1]; g++) {
+        for (int g = t->node_base[d] + zxc_pivco_leaves(t, d); g < t->node_base[d + 1]; g++) {
             if (t->flat_d[g] == ZXC_PIVCO_COVERED) continue;
-            if (off) off[g] = (uint32_t)total;
+            if (cur) cur[g] = (uint32_t)(total << 3);
             total += zxc_pivco_run_bytes(count[g], t->flat_d[g]);
         }
     }
@@ -1250,8 +1255,8 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
 
     uint32_t count[ZXC_PIVCO_NODE_SLOTS];
     zxc_pivco_counts(t, freq, count);
-    uint32_t bit_off[ZXC_PIVCO_MAX_NODES];
-    const size_t payload = zxc_pivco_layout(t, count, bit_off);
+    uint32_t cur[ZXC_PIVCO_MAX_NODES]; /* per-node write cursor, in payload bits */
+    const size_t payload = zxc_pivco_layout(t, count, cur);
     const size_t hdr = with_header ? (size_t)ZXC_HUF_TABLE_SIZE : 0;
     // +2: the packed-code emitter uses a 3-byte read-modify-write that may
     // touch up to 2 bytes past the payload end.
@@ -1261,12 +1266,10 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
     uint8_t* const out = dst + hdr;
     ZXC_MEMSET(out, 0, payload + 2);
 
-    // Per-node bit cursors, emitting MSB-first while descending. At a flat root,
-    // emit the code's last D bits, its packed code, in one shot and stop.
-    // Batching the per-bit read-modify-write buys nothing: accumulators would
-    // still touch memory once per bit, and flat roots absorb the dense levels.
-    uint32_t wpos[ZXC_PIVCO_MAX_NODES];
-    ZXC_MEMSET(wpos, 0, (size_t)t->lvl_start[t->max_depth + 1] * sizeof(uint32_t));
+    // Emit MSB-first while descending. At a flat root, emit the code's last D
+    // bits, its packed code, in one shot and stop. Batching the per-bit
+    // read-modify-write buys nothing: accumulators would still touch memory
+    // once per bit, and flat roots absorb the dense levels.
     for (size_t i = 0; i < n_literals; i++) {
         const uint8_t s = literals[i];
         const uint32_t c = codes[s];
@@ -1275,9 +1278,9 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
             const int g = t->base[d] + (int)(c >> (l - d));
             const int fd = t->flat_d[g];
             if (fd) {
-                const uint32_t p = wpos[g];
-                wpos[g] += (uint32_t)fd;
-                uint8_t* q = out + bit_off[g] + (p >> 3);
+                const uint32_t p = cur[g];
+                cur[g] += (uint32_t)fd;
+                uint8_t* q = out + (p >> 3);
                 const uint32_t sh = p & 7U;
                 uint32_t w = (uint32_t)q[0] | ((uint32_t)q[1] << 8) | ((uint32_t)q[2] << 16);
                 w |= (c & ((1U << fd) - 1U)) << sh; /* fd <= 8, sh <= 7: fits 24 bits */
@@ -1287,8 +1290,8 @@ static int zxc_pivco_encode_core(const uint8_t* RESTRICT literals, const size_t 
                 break;
             }
             const uint32_t bit = (c >> (l - 1 - d)) & 1U;
-            const uint32_t p = wpos[g]++;
-            out[bit_off[g] + (p >> 3)] |= (uint8_t)(bit << (p & 7));
+            const uint32_t p = cur[g]++;
+            out[p >> 3] |= (uint8_t)(bit << (p & 7));
         }
     }
     return (int)(hdr + payload);
@@ -2172,19 +2175,19 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     // a flat root's inside get count 0: empty runs, nothing to flag.
     uint32_t count[ZXC_PIVCO_NODE_SLOTS];
     const uint8_t* lvl_run[ZXC_HUF_MAX_CODE_LEN_ULTRA];
-    const int slot = t->lvl_start[t->max_depth + 1];
+    const int slot = t->node_base[t->max_depth + 1];
     count[0] = (uint32_t)n;
     count[slot] = 0;
     const uint8_t* p = payload;
     const uint8_t* const pend = payload + payload_size;
     for (int d = 0; d < t->max_depth; d++) {
         lvl_run[d] = p;
-        const int L = t->n_leaves[d];
-        const int N = t->lvl_start[d + 1] - t->lvl_start[d];
-        const int Lc = t->n_leaves[d + 1];
-        const uint32_t* const cnt = count + t->lvl_start[d];
-        uint32_t* const ccnt = count + t->lvl_start[d + 1];
-        const uint8_t* const fd = t->flat_d + t->lvl_start[d];
+        const int L = zxc_pivco_leaves(t, d);
+        const int N = t->node_base[d + 1] - t->node_base[d];
+        const int Lc = zxc_pivco_leaves(t, d + 1);
+        const uint32_t* const cnt = count + t->node_base[d];
+        uint32_t* const ccnt = count + t->node_base[d + 1];
+        const uint8_t* const fd = t->flat_d + t->node_base[d];
         for (int i = L; i < N; i++) {
             const uint32_t c = cnt[i];
             const int k2 = 2 * (i - L); /* first child */
@@ -2231,21 +2234,21 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
     for (int d = t->max_depth; d >= 0; d--) {
         uint8_t* const buf_d = (d & 1) ? scratch : dst;
         const uint8_t* const buf_c = (d & 1) ? dst : scratch; /* children at d+1 (read-only) */
-        const int L = t->n_leaves[d];
-        const int N = t->lvl_start[d + 1] - t->lvl_start[d];
-        const uint32_t* const cnt = count + t->lvl_start[d];
+        const int L = zxc_pivco_leaves(t, d);
+        const int N = t->node_base[d + 1] - t->node_base[d];
+        const uint32_t* const cnt = count + t->node_base[d];
         const uint8_t* const sym = t->syms + t->leaf_base[d];
         size_t off = 0;
         for (int i = 0; i < L; i++) {
             if (cnt[i]) ZXC_MEMSET(buf_d + off, sym[i], cnt[i]);
             off += cnt[i];
         }
-        if (L == N) continue; /* leaves only */
+        if (d == t->max_depth) continue; /* leaves only, as in pass 1 */
         const uint8_t* run = lvl_run[d];
-        const uint32_t* const ccnt = count + t->lvl_start[d + 1];
+        const uint32_t* const ccnt = count + t->node_base[d + 1];
         const uint8_t* const csym = t->syms + t->leaf_base[d + 1];
-        const int Lc = t->n_leaves[d + 1];
-        const uint8_t* const fd = t->flat_d + t->lvl_start[d];
+        const int Lc = zxc_pivco_leaves(t, d + 1);
+        const uint8_t* const fd = t->flat_d + t->node_base[d];
         size_t coff = 0;
         for (int i = L; i < N; i++) {
             const uint32_t c = cnt[i];
@@ -2253,7 +2256,7 @@ static int zxc_pivco_decode_core(const uint8_t* RESTRICT payload, const size_t p
             if (c) {
                 if (fd[i]) {
                     const int D = fd[i];
-                    const int leaves = zxc_pivco_flat_leaves(t, t->lvl_start[d] + i, d, D);
+                    const int leaves = zxc_pivco_flat_leaves(t, t->node_base[d] + i, d, D);
                     zxc_pivco_unpack_flat(buf_d + off, c, D, run, t->syms + leaves);
                 } else if (k2 + 1 < Lc) {
                     zxc_pivco_emit_leaf_pair(buf_d + off, c, csym[k2], csym[k2 + 1], run);

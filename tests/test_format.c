@@ -149,13 +149,13 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
     /* Node counts, bottom-up; the lone root's missing child is the empty slot. */
     uint32_t count[ZXC_PIVCO_NODE_SLOTS] = {0};
     for (int d = tree.max_depth; d >= 0; d--) {
-        const int L = tree.n_leaves[d];
-        const int N = tree.lvl_start[d + 1] - tree.lvl_start[d];
+        const int L = tree.leaf_base[d + 1] - tree.leaf_base[d];
+        const int N = tree.node_base[d + 1] - tree.node_base[d];
         for (int i = 0; i < L; i++)
-            count[tree.lvl_start[d] + i] = freq[tree.syms[tree.leaf_base[d] + i]];
+            count[tree.node_base[d] + i] = freq[tree.syms[tree.leaf_base[d] + i]];
         for (int i = L; i < N; i++) {
-            const int k2 = tree.lvl_start[d + 1] + 2 * (i - L);
-            count[tree.lvl_start[d] + i] = count[k2] + count[k2 + 1];
+            const int k2 = tree.node_base[d + 1] + 2 * (i - L);
+            count[tree.node_base[d] + i] = count[k2] + count[k2 + 1];
         }
     }
 
@@ -163,20 +163,21 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
     for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) rbits += (uint64_t)code_len[s] * freq[s];
     uint64_t rtouches = 0;
     for (int d = 0; d <= tree.max_depth; d++) {
-        const int L = tree.n_leaves[d];
-        const int N = tree.lvl_start[d + 1] - tree.lvl_start[d];
+        const int L = tree.leaf_base[d + 1] - tree.leaf_base[d];
+        const int N = tree.node_base[d + 1] - tree.node_base[d];
         /* A flat or covered parent hides its children. */
         const uint8_t* parent =
-            d ? tree.flat_d + tree.lvl_start[d - 1] + tree.n_leaves[d - 1] : NULL;
+            d ? tree.flat_d + tree.node_base[d - 1] + tree.leaf_base[d] - tree.leaf_base[d - 1]
+              : NULL;
         for (int i = 0; i < N; i++) {
             if (parent && parent[i >> 1]) continue;
-            const uint32_t c = count[tree.lvl_start[d] + i];
+            const uint32_t c = count[tree.node_base[d] + i];
             if (i < L) {
                 /* Lone leaf memset; leaf-pair children are emitted by the parent. */
                 if ((i ^ 1) >= L) rtouches += c;
-            } else if (tree.flat_d[tree.lvl_start[d] + i]) {
+            } else if (tree.flat_d[tree.node_base[d] + i]) {
                 uint64_t t = 1;
-                if (tree.flat_d[tree.lvl_start[d] + i] > ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX)
+                if (tree.flat_d[tree.node_base[d] + i] > ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX)
                     t += ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY;
                 rtouches += (uint64_t)c * t;
             } else {
