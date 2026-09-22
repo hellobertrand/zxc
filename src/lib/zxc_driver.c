@@ -123,29 +123,6 @@ typedef struct {
 } zxc_stream_job_t;
 
 /**
- * @typedef zxc_chunk_processor_t
- * @brief Function pointer type for processing a chunk of data.
- *
- * This type defines the signature for internal functions responsible for
- * processing (compressing or transforming) a specific chunk of input data.
- *
- * @param ctx         Pointer to the compression context containing state and
- * configuration.
- * @param in          Pointer to the input data buffer.
- * @param in_sz       Size of the input data in bytes.
- * @param out         Pointer to the output buffer where processed data will be
- * written.
- * @param out_cap     Capacity of the output buffer in bytes.
- * @param block_index Frame position of the block: the checksum seed.
- *
- * @return The number of bytes written to the output buffer on success, or a
- * negative error code on failure.
- */
-typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT in,
-                                     const size_t in_sz, uint8_t* RESTRICT out,
-                                     const size_t out_cap, const uint64_t block_index);
-
-/**
  * @struct zxc_stream_ctx_t
  * @brief The main context structure managing the streaming
  * compression/decompression state.
@@ -189,9 +166,6 @@ typedef int (*zxc_chunk_processor_t)(zxc_cctx_t* RESTRICT ctx, const uint8_t* RE
  * @var zxc_stream_ctx_t::fail_code
  *      The first failure's actual error code, kept so a corrupt archive is not
  *      reported as an I/O problem. Written under @c lock, first writer wins.
- * @var zxc_stream_ctx_t::processor
- *      Function pointer or object responsible for the actual chunk processing
- * logic.
  * @var zxc_stream_ctx_t::write_idx
  *      The index of the next job slot to be written to by the main thread.
  * @var zxc_stream_ctx_t::compression_level
@@ -234,7 +208,6 @@ typedef struct {
     int compression_mode;
     ZXC_ATOMIC int io_error;
     int fail_code;
-    zxc_chunk_processor_t processor;
     int write_idx;
     int compression_level;
     size_t chunk_size;
@@ -292,10 +265,24 @@ typedef struct {
 } writer_args_t;
 
 /**
+ * @brief Runs one chunk through the codec the stream's mode selects.
+ *
+ * Both codecs are called by name: the compressor takes a mutable context, the
+ * decoder a const one, so no single function pointer type fits both.
+ */
+static ZXC_ALWAYS_INLINE int zxc_stream_process(const zxc_stream_ctx_t* ctx, zxc_cctx_t* cctx,
+                                                const uint8_t* in, const size_t in_sz, uint8_t* out,
+                                                const size_t out_cap, const uint64_t block_index) {
+    return ctx->compression_mode
+               ? zxc_compress_chunk_wrapper(cctx, in, in_sz, out, out_cap, block_index)
+               : zxc_decompress_chunk_wrapper(cctx, in, in_sz, out, out_cap, block_index);
+}
+
+/**
  * @brief Worker thread: pull a job, process it, hand it to the writer.
  *
  * Sleeps on @c cond_worker until @c worker_queue has a job, then runs
- * @c ctx->processor over it and marks it @c JOB_STATUS_PROCESSED. Each worker
+ * @ref zxc_stream_process over it and marks it @c JOB_STATUS_PROCESSED. Each worker
  * owns a thread-local @c zxc_cctx_t so the parallel part never touches a shared
  * context.
  *
@@ -357,15 +344,15 @@ static void* zxc_stream_worker(void* arg) {
         int res;
         if (dict_work && ctx->compression_mode == 1) {
             ZXC_MEMCPY(dict_work + dsz, job->in_buf, job->in_sz);
-            res = ctx->processor(&cctx, dict_work, dsz + job->in_sz, job->out_buf, job->out_cap,
-                                 job->block_index);
+            res = zxc_stream_process(ctx, &cctx, dict_work, dsz + job->in_sz, job->out_buf,
+                                     job->out_cap, job->block_index);
         } else if (dict_work && ctx->compression_mode == 0) {
-            res = ctx->processor(&cctx, job->in_buf, job->in_sz, dict_work + dsz,
-                                 ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD, job->block_index);
+            res = zxc_stream_process(ctx, &cctx, job->in_buf, job->in_sz, dict_work + dsz,
+                                     ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD, job->block_index);
             if (LIKELY(res > 0)) ZXC_MEMCPY(job->out_buf, dict_work + dsz, (size_t)res);
         } else {
-            res = ctx->processor(&cctx, job->in_buf, job->in_sz, job->out_buf, job->out_cap,
-                                 job->block_index);
+            res = zxc_stream_process(ctx, &cctx, job->in_buf, job->in_sz, job->out_buf,
+                                     job->out_cap, job->block_index);
         }
 
         pthread_mutex_lock(&ctx->lock);
@@ -763,7 +750,6 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
  * @param[in]  block_size       Block size in bytes (compression mode).
  * @param[in]  checksum_enabled Non-zero to generate / verify checksums.
  * @param[in]  seekable         Non-zero to emit a seek table (compression mode).
- * @param[in]  func             Chunk processor (compression or decompression).
  * @param[in]  progress_cb      Optional progress callback, or NULL.
  * @param[in]  user_data        Opaque pointer passed to @p progress_cb.
  * @param[in]  dict             Optional dictionary content, or NULL.
@@ -775,7 +761,6 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
 static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_threads, const int mode,
                                      const int level, const size_t block_size,
                                      const int checksum_enabled, const int seekable,
-                                     zxc_chunk_processor_t func,
                                      zxc_progress_callback_t progress_cb, void* user_data,
                                      const uint8_t* dict, const size_t dict_size,
                                      const uint8_t* dict_huf) {
@@ -826,7 +811,6 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     const int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
 
     ctx.compression_mode = mode;
-    ctx.processor = func;
     ctx.io_error = 0;
     ctx.fail_code = 0;
     ctx.compression_level = level;
@@ -973,8 +957,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
  *
  * Public API; full contract in @c zxc_stream.h. Resolves the options (threads,
  * level, block size, checksums, seekable, dictionary) with their defaults, then
- * drives @ref zxc_stream_engine_run in compression mode with the
- * compress chunk processor.
+ * drives @ref zxc_stream_engine_run in compression mode.
  */
 int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -993,16 +976,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
 
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
-                                 seekable, zxc_compress_chunk_wrapper, cb, ud, dict, dict_size,
-                                 dict_huf);
-}
-
-// The decoder takes a const context: calling it through a cast to the processor
-// type is undefined behaviour (trips UBSan "function" and CFI).
-static int zxc_decompress_chunk_processor(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT in,
-                                          const size_t in_sz, uint8_t* RESTRICT out,
-                                          const size_t out_cap, const uint64_t block_index) {
-    return zxc_decompress_chunk_wrapper(ctx, in, in_sz, out, out_cap, block_index);
+                                 seekable, cb, ud, dict, dict_size, dict_huf);
 }
 
 /**
@@ -1010,8 +984,8 @@ static int zxc_decompress_chunk_processor(zxc_cctx_t* RESTRICT ctx, const uint8_
  *
  * Public API; full contract in @c zxc_stream.h. Resolves the options (threads,
  * checksums, dictionary), then drives @ref zxc_stream_engine_run in
- * decompression mode with the decompress chunk processor. The block size and
- * level are recovered from the archive header, not from @p opts.
+ * decompression mode. The block size and level are recovered from the archive
+ * header, not from @p opts.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1024,8 +998,8 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     void* ud = opts ? opts->user_data : NULL;
 
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0,
-                                 zxc_decompress_chunk_processor, cb, ud, dict, dict_size, dict_huf);
+    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0, cb, ud, dict,
+                                 dict_size, dict_huf);
 }
 
 /**
