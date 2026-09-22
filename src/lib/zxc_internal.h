@@ -780,39 +780,26 @@ typedef struct {
  *  bounded ratio cost. Wire-compatible by construction: adjusted lengths stay
  *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
  *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
- *  Idea from pivco-huffman issue #20 (dougallj). All knobs are
- *  `#ifndef`-guarded so an A/B build can override them from CFLAGS; in
- *  particular `-DZXC_HUF_NUDGE_MERGE_Q8=0` makes the guard reject every
- *  candidate, restoring archives byte-identical to the unadjusted encoder.
+ *  Idea from pivco-huffman issue #20 (dougallj).
  *  @{ */
 /** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
  *         cost `J = 256*bits + lambda*touches`; 26 ~= 0.10 bit per touch. */
-#ifndef ZXC_HUF_NUDGE_LAMBDA_Q8
 #define ZXC_HUF_NUDGE_LAMBDA_Q8 26
-#endif
 /** @brief Adoption guard, ratio side (permil): adopt only while
  *         `bits' * 1000 <= bits0 * ZXC_HUF_NUDGE_BITS_PERMIL` (<= +1.5%). */
-#ifndef ZXC_HUF_NUDGE_BITS_PERMIL
 #define ZXC_HUF_NUDGE_BITS_PERMIL 1015
-#endif
 /** @brief Adoption guard, speed side (Q8): adopt only while
  *         `touches' * 256 <= touches0 * ZXC_HUF_NUDGE_MERGE_Q8` (<= ~0.90x). */
-#ifndef ZXC_HUF_NUDGE_MERGE_Q8
 #define ZXC_HUF_NUDGE_MERGE_Q8 230
-#endif
 /** @brief Extra level-touches charged per occurrence under a flat root deeper
  *         than ::ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX (scalar bit-reader unpack path).
  *         24 keeps low-mass deep-flat tails adoptable while making
  *         all-the-mass deep flats impossible to justify. */
-#ifndef ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY
 #define ZXC_HUF_NUDGE_DEEP_FLAT_PENALTY 24
-#endif
 /** @brief Fixed per-pass overhead (occurrence-equivalents) charged per merge
  *         level, modeling the pass-loop and node-dispatch cost so shallower
  *         trees also win on small sections. */
-#ifndef ZXC_HUF_NUDGE_LEVEL_COST
 #define ZXC_HUF_NUDGE_LEVEL_COST 64
-#endif
 /** @} */
 
 /** @name Space-speed section selection
@@ -913,16 +900,17 @@ static inline int zxc_level_clamp(const int level) {
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
 /** @name Per-block match splitting (zxc_glo_split_block), a level-table policy
  *
- *  Escaped matches up to split_max - in the token's units, length minus
- *  ZXC_LZ_MIN_MATCH_LEN, so 14 is the inline reach - go out as inline pieces
- *  at the same offset and the decoder skips its ML escape branch. The caps
- *  sit in the level table; the dense levels keep every escape. A block is
- *  split only when its escape branch looks mispredicted: a per-context
- *  predictor over the last CTX_BITS escapes must err on at least
- *  MIN_MISPREDICT_PCT of them, else the decoder already predicts them and the
- *  split would only add sequences. A value above 100 turns splitting off.
+ *  Escaped matches up to split_max (a length code; 14 is the inline reach) go
+ *  out as inline pieces at the same offset, so the decoder skips its ML escape.
+ *  Only blocks whose escape branch looks mispredicted are split: on a
+ *  predictable branch splitting only adds sequences. A MIN_MISPREDICT_PCT above
+ *  100 turns it off.
  *  @{ */
-#define ZXC_GLO_SPLIT_CTX_BITS 8 /* four 2 KB histogram lanes on the stack */
+/** @brief Longest escape history a context keys on, shortened in small blocks
+ *         to keep 16 samples per context. Sizes the four 2 KB stack histograms. */
+#define ZXC_GLO_SPLIT_CTX_BITS 8
+/** @brief Mispredict rate, in percent of a block's escapes, from which the
+ *         block is split. */
 #define ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT 80
 /** @} */
 
@@ -1099,8 +1087,7 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     // The distance floor stops at level 5: the slow levels keep every distance.
-    // Match splitting at the GLO speed levels only: levels 1-2 are GHI, and the
-    // dense levels keep every escape.
+    // Match splitting at levels 3-5 only: 1-2 are GHI, 6-7 keep every escape.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {

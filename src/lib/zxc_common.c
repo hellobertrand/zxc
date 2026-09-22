@@ -196,7 +196,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
         // buf_sequences (GHI, level <= ZXC_LEVEL_FAST) aliases buf_offsets + buf_tokens (GLO,
         // level >= ZXC_LEVEL_DEFAULT). Mutually exclusive per block; sized for the larger,
-        // whose fourth quarter GLO lends to its match-splitting side array (buf_split).
+        // whose last quarter holds GLO's buf_split.
         const size_t sz_seq_union = layout.max_seq * sizeof(uint32_t);
         const size_t vbyte_len = (offset_bits + 6) / 7;
         const size_t sz_extras = layout.max_seq * 2 * vbyte_len;

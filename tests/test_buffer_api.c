@@ -1318,11 +1318,9 @@ done:
     return ok;
 }
 
-// Exercises zxc_glo_split_block: data with escaped match-length matches (20-38
-// bytes, ML code >= 15) mixed irregularly with inline ones (6-19 bytes), so the
-// escapes are a mispredicted minority and levels 3-5 split them. Pins the
-// in-place compact/expand rewrite - a pointer-math regression corrupts the
-// round trip.
+// Exercises zxc_glo_split_block: escaped matches (20-38 bytes) mixed irregularly
+// with inline ones (6-19 bytes), a mispredicted minority that levels 3-5 split.
+// A regression in the in-place rewrite corrupts the round trip.
 int test_glo_match_split(void) {
     printf("=== TEST: Unit - GLO match splitting round trip ===\n");
     const size_t cap = 512 * 1024;

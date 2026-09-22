@@ -239,8 +239,8 @@ static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RE
 }
 
 /**
- * @brief Emits one GLO sequence: token, offset, the LL/ML escapes, and keeps
- *        @p max_offset, the widest biased offset of the block, current.
+ * @brief Emits one GLO sequence (token, offset, LL/ML escapes) and updates
+ *        @p max_offset, the block's widest biased offset.
  *
  * @param[in] ll         Literal length (raw).
  * @param[in] ml         Match length minus ZXC_LZ_MIN_MATCH_LEN.
@@ -286,16 +286,14 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_glo_split_piece(const uint32_t code) {
 }
 
 /**
- * @brief Analyses the block's ML-escape branch for the split decision.
+ * @brief Predictability of the block's ML-escape branch, for the split decision.
  *
- * A per-context predictor over the last `order` escape bits (order shrinks with
- * the block to keep 16 samples per context). Fills @p ctx_bad: 1 where an escape
- * is not the majority outcome of its context, i.e. the decoder's branch
- * predictor would guess "no escape" and miss. Sets @p block_bad when the summed
- * minority counts - the mispredict rate a static predictor would suffer - reach
- * ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT of the escapes. Returns the context mask.
- * Four histogram lanes in rotation keep the counters off one store-forwarding
- * chain when an inline run hits the same context back to back.
+ * Contexts are the last `order` escape bits. @p ctx_bad marks those where an
+ * escape is the minority outcome: the decoder's predictor guesses "no escape"
+ * and misses. @p block_bad is set when the minority counts, a static
+ * predictor's misses, reach ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT of the escapes.
+ * Four rotating histogram lanes keep an inline run off one store-forwarding
+ * chain. Returns the context mask.
  */
 static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t n_seq,
                                       uint8_t* RESTRICT ctx_bad, int* RESTRICT block_bad) {
@@ -332,22 +330,19 @@ static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint
 /**
  * @brief Per-block match splitting: escaped matches re-emitted as inline pieces.
  *
- * A match whose length code (length - ZXC_LZ_MIN_MATCH_LEN) exceeds the inline
- * reach but not @p cap becomes a chain of inline matches at the same offset, so
- * the decoder never takes its ML escape branch. Each extra piece costs a token
- * and an offset minus the escape varint it replaces.
+ * A match whose length code exceeds the inline reach but not @p cap becomes a
+ * chain of inline matches at the same offset: the decoder never takes its ML
+ * escape. Each extra piece costs a token and an offset, less the varint it
+ * replaces.
  *
- * Two gates, coarse then fine (see zxc_glo_split_analyze): the block must look
- * mispredicted overall - so regular data, whose branch the decoder predicts, is
- * left whole - and then within it only the escapes whose own context is
- * mispredicted are split, sparing the predictable ones.
+ * Two gates (zxc_glo_split_analyze): the block must look mispredicted, which
+ * leaves regular data whole, then only escapes of mispredicted contexts split.
  *
- * The rewrite is in place. The first pass replays the escape history to index
- * the per-context verdict, marks the matches to split in @p side (their length
- * code, 0 to keep) and compacts the kept extras forward; the second expands
- * tokens and offsets backward, every write landing at or past its read. A piece
- * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, so the count stays within
- * the block's sequence buffers.
+ * In place: pass 1 replays the escape history, marks the matches to split in
+ * @p side (length code, 0 = keep) and compacts the kept extras forward; pass 2
+ * expands tokens and offsets backward, each write at or past its read. A piece
+ * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, so the count fits the
+ * block's sequence buffers.
  *
  * @param[in] side zxc_cctx_t::buf_split, one byte per sequence.
  * @param[in] cap  zxc_lz77_params_t::split_max.
@@ -363,9 +358,9 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
     const uint32_t hmask = zxc_glo_split_analyze(tokens, n_seq, ctx_bad, &block_bad);
     if (!block_bad) return n_seq;
 
-    // 1. Mark the matches to split - escape mispredicted in its context and within
-    // the cap - and drop their varints; the other extras move forward. The escape
-    // history is replayed here, so this visits every sequence.
+    // 1. Mark the matches to split (mispredicted context, within the cap) and
+    // drop their varints; the other extras move forward. Replaying the escape
+    // history visits every sequence.
     ZXC_MEMSET(side, 0, n_seq);
     const uint8_t* const extras_end = extras + *extras_sz;
     size_t r = 0, w = 0;
@@ -391,9 +386,8 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
     *extras_sz = w;
     if (extra == 0) return n_seq;
 
-    // 2. Expand backward. A marked sequence takes the span of its pieces, written
-    // forward: the first keeps the literal nibble (and its escape), the remainder
-    // below the inline reach is the last.
+    // 2. Expand backward. A marked sequence spans its pieces, written forward: the
+    // first keeps the literal nibble and its escape, the last takes the remainder.
     uint32_t out = n_seq + extra;
     for (uint32_t i = n_seq; i-- > 0;) {
         const uint8_t tok = tokens[i];
