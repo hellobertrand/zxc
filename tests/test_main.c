@@ -100,6 +100,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_stream_footer_looks_like_sek),
     TEST_CASE(test_stream_get_decompressed_size_errors),
     TEST_CASE(test_stream_engine_errors),
+    TEST_CASE(test_stream_trailing_bytes),
 
     /* --- Push Streaming API --- */
     TEST_CASE(test_pstream_roundtrip_basic),
@@ -130,6 +131,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_forged_block_comp_size),
     TEST_CASE(test_swapped_blocks_oneshot),
     TEST_CASE(test_tail_between_eof_and_footer),
+    TEST_CASE(test_seek_flag_contract),
     TEST_CASE(test_footer_digest),
     TEST_CASE(test_seek_tail_rule),
     TEST_CASE(test_chunk_size_code),

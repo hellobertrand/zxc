@@ -386,7 +386,8 @@ Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
 `seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
-zero `src_size` (with `src` NULL or not) writes the 32-byte empty archive.
+zero `src_size` (with `src` NULL or not) writes the empty archive: 32 bytes, +8
+with `checksum_enabled`, +8 with `seekable`.
 
 ### `zxc_decompress`
 
@@ -442,9 +443,9 @@ accumulated per-block framing overhead (incompressible blocks make the
 compressed stream run that much longer than the output), everything the encoder
 writes after the last data block, and the wild-copy tail. The trailing bytes
 matter because they sit to the *right* of the read cursor and so push the
-flush-right archive left, into the write cursor's path; no header flag announces
-a seek table, so its worst case (one `u64` anchor per 64 blocks plus a `u32` per
-block, about 4.1 bytes per block) is always reserved. Always
+flush-right archive left, into the write cursor's path. The seek table (one `u64`
+anchor per 64 blocks plus a `u32` per block, about 4.1 bytes per block) counts
+only when the header's `HAS_SEEK_TABLE` announces it. Always
 size the buffer with this function rather than re-deriving the formula.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
@@ -932,7 +933,8 @@ must know it *before* calling `init`. Four patterns cover every use case:
    zxc_seekable* s = zxc_seekable_open_reader(&r);  /* parses SEK table only */
    const uint32_t bs = zxc_seekable_get_block_decomp_size(s, 0);
    /* For multi-block archives, block index 0 is always a full block.
-    * For a single-block archive, bs equals the total decompressed size. */
+    * For a single-block archive, bs equals the total decompressed size.
+    * An empty archive has 0 blocks: bs is 0, nothing to decode. */
    ```
 
 3. **Stream / buffer archive — peek the 16-byte file header.** The block
@@ -1009,7 +1011,8 @@ ZXC_EXPORT int64_t zxc_stream_decompress(
 );
 ```
 
-Decompresses `f_in` -> `f_out` using a parallel pipeline.
+Decompresses `f_in` -> `f_out` using a parallel pipeline. Bytes after the footer
+are `ZXC_ERROR_CORRUPT_DATA`.
 
 **Returns**: total decompressed bytes written, or negative `zxc_error_t`.
 
@@ -1282,7 +1285,8 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
 Opens a seekable archive from a memory buffer.  The buffer must remain
 valid for the lifetime of the handle.
 
-**Returns**: handle on success, or `NULL` if the buffer is not a valid seekable archive.
+**Returns**: handle (0 blocks if the archive is empty), or `NULL` if the buffer is not a valid
+seekable archive.
 
 ### `zxc_seekable_open_file`
 
@@ -1342,8 +1346,8 @@ range covers and once per block during decompression;
 `FILE*` is involved — this is the entry point to use for kernel space,
 networked storage, or any non-POSIX backend.
 
-**Returns**: handle on success, or `NULL` if `r`/`r->read_at` is `NULL`,
-`r->size` is `0`, the archive is not seekable, or any `read_at` call fails.
+**Returns**: handle (0 blocks if the archive is empty), or `NULL` if `r`/`r->read_at`
+is `NULL`, `r->size` is `0`, the archive is not seekable, or any `read_at` call fails.
 
 ### `zxc_seekable_get_num_blocks`
 

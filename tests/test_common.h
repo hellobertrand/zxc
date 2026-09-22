@@ -115,6 +115,7 @@ int test_stream_size_then_decompress(void);
 int test_stream_footer_looks_like_sek(void);
 int test_stream_get_decompressed_size_errors(void);
 int test_stream_engine_errors(void);
+int test_stream_trailing_bytes(void);
 
 /* Push Streaming API (zxc_pstream.h) */
 int test_pstream_roundtrip_basic(void);
@@ -213,6 +214,7 @@ int test_swapped_blocks_stream(void);
 int test_forged_block_comp_size(void);
 int test_swapped_blocks_oneshot(void);
 int test_tail_between_eof_and_footer(void);
+int test_seek_flag_contract(void);
 int test_footer_digest(void);
 int test_seek_tail_rule(void);
 int test_chunk_size_code(void);
