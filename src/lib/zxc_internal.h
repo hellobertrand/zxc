@@ -36,19 +36,6 @@
 #include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
 
-// Primary variant (_default, or a no-suffix build): ISA-independent cold code
-// compiles once there, not in every per-ISA copy.
-#ifdef ZXC_FUNCTION_SUFFIX
-#define ZXC_PRIMARY__default 1
-#define ZXC_PRIMARY_CAT_(a, b) a##b
-#define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
-#if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
-#define ZXC_VARIANT_PRIMARY 1
-#endif
-#else
-#define ZXC_VARIANT_PRIMARY 1
-#endif
-
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -1725,17 +1712,6 @@ void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRI
                         uint64_t* RESTRICT bits, uint64_t* RESTRICT touches);
 
 /**
- * @brief The per-block match split on caller-provided buffers.
- *
- * Introspection hook for the unit tests. @p side holds @p n_seq bytes; tokens
- * and offsets must hold the split count (twice @p n_seq at most for a cap of 33).
- */
-uint32_t zxc_glo_split_sequences(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
-                                 uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
-                                 uint8_t* RESTRICT side, zxc_glo_split_hist_t* RESTRICT hist,
-                                 uint32_t n_seq, uint8_t cap);
-
-/**
  * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.
  *
  * Nibble order follows the byte: `code_len[2*i]` low, `code_len[2*i + 1]` high.
@@ -1853,8 +1829,8 @@ typedef struct {
     uint8_t* buf_tokens;     /**< Buffer for token sequences. */
     uint16_t* buf_offsets;   /**< Buffer for offsets. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
-    uint8_t* buf_split;      /**< Match-splitting side array (zxc_glo_split_block). */
-    zxc_glo_split_hist_t* buf_split_hist; /**< Its escape histograms. */
+    uint8_t* buf_split;      /**< Match-splitting scratch, one byte per sequence. */
+    zxc_glo_split_hist_t* buf_split_hist; /**< Match-splitting escape histograms. */
     uint8_t* literals;                    /**< Buffer for literal bytes. */
 
     // Cold zone: configuration / scratch / resizeable.

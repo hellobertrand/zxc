@@ -355,9 +355,9 @@ static int zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t 
  * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, so the count fits the
  * block's sequence buffers.
  *
- * @param[in] side zxc_cctx_t::buf_split, one byte per sequence.
- * @param[in] hist_buf zxc_cctx_t::buf_split_hist.
- * @param[in] cap  zxc_lz77_params_t::split_max.
+ * @param[out] side     Scratch, one byte per sequence (zxc_cctx_t::buf_split).
+ * @param[out] hist_buf Scratch (zxc_cctx_t::buf_split_hist).
+ * @param[in]  cap      zxc_lz77_params_t::split_max.
  * @return The new sequence count (unchanged when the block is not split).
  */
 static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
@@ -421,15 +421,6 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
     }
     return n_seq + extra;
 }
-
-#if defined(ZXC_VARIANT_PRIMARY)
-uint32_t zxc_glo_split_sequences(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
-                                 uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
-                                 uint8_t* RESTRICT side, zxc_glo_split_hist_t* RESTRICT hist,
-                                 const uint32_t n_seq, const uint8_t cap) {
-    return zxc_glo_split_block(tokens, offsets, extras, extras_sz, side, hist, n_seq, cap);
-}
-#endif
 
 /**
  * @brief Stages a run of literals into the literal stream.

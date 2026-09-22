@@ -138,8 +138,9 @@ static void zxc_dctx_entropy_sizes(const size_t chunk_size, size_t* RESTRICT sz_
  * Decompress (@p mode == 0) reserves @c work_buf, @c lit_buffer (both padded
  * for wild-copy overshoot) and the token / PivCo decode scratch buffers.
  * Compress (@p mode == 1) reserves the LZ match-finder
- * tables (hash positions, tags, chain), the sequence / extras / literal buffers
- * and - only at @c level >= ZXC_LEVEL_DENSITY - the optimal-parser scratch. A
+ * tables (hash positions, tags, chain), the sequence buffers, the match-split
+ * histograms, the extras and literal buffers and - only at @c level >=
+ * ZXC_LEVEL_DENSITY - the optimal-parser scratch. A
  * @p dict_size > 0 appends the [dict | data] concat scratch in both modes.
  *
  * Every offset is cache-line aligned via @c ZXC_ALIGN_CL.
@@ -189,7 +190,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
         }
     } else {
-        // Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY.
+        // Compress: 7 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY.
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
         layout.max_seq = max_seq;
         layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
