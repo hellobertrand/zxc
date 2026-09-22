@@ -50,20 +50,23 @@ extern "C" {
  * @name Atomic Qualifier
  * @brief Provides a portable atomic / volatile qualifier.
  *
- * If C11 atomics are available, @c ZXC_ATOMIC expands to @c _Atomic;
- * otherwise it falls back to @c volatile.
+ * @c _Atomic with C11 atomics, else @c volatile; a host may predefine
+ * @c ZXC_USE_C11_ATOMICS to 0 or 1.
  * @{
  */
-#if !defined(ZXC_USE_C11_ATOMICS) && !defined(__cplusplus) && defined(__STDC_VERSION__) && \
-    __STDC_VERSION__ >= 201112L && !defined(__STDC_NO_ATOMICS__)
-#include <stdatomic.h>
-#define ZXC_ATOMIC _Atomic
+#ifndef ZXC_USE_C11_ATOMICS
+#if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && \
+    !defined(__STDC_NO_ATOMICS__)
 #define ZXC_USE_C11_ATOMICS 1
 #else
-#define ZXC_ATOMIC volatile
-#ifndef ZXC_USE_C11_ATOMICS
 #define ZXC_USE_C11_ATOMICS 0
 #endif
+#endif
+#if ZXC_USE_C11_ATOMICS
+#include <stdatomic.h>
+#define ZXC_ATOMIC _Atomic
+#else
+#define ZXC_ATOMIC volatile
 #endif
 /** @} */ /* end of Atomic Qualifier */
 

@@ -196,6 +196,13 @@ static inline uint64_t zxc_xgetbv0(void) {
 }
 #endif /* x86-64 && !ZXC_ONLY_DEFAULT */
 
+/** @brief Function pointer type for the chunk decompressor. */
+typedef int (*zxc_decompress_func_t)(const zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT,
+                                     const size_t, uint8_t* RESTRICT, const size_t, const uint64_t);
+/** @brief Function pointer type for the chunk compressor. */
+typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
+                                   uint8_t* RESTRICT, const size_t, const uint64_t);
+
 #ifndef ZXC_ONLY_DEFAULT
 
 /**
@@ -293,14 +300,8 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 // ============================================================================
 // DISPATCHERS
 // ============================================================================
-// We use a function pointer initialized on first use (lazy initialization).
-
-/** @brief Function pointer type for the chunk decompressor. */
-typedef int (*zxc_decompress_func_t)(const zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT,
-                                     const size_t, uint8_t* RESTRICT, const size_t, const uint64_t);
-/** @brief Function pointer type for the chunk compressor. */
-typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
-                                   uint8_t* RESTRICT, const size_t, const uint64_t);
+// A pointer per entry point, resolved on first use; ZXC_ONLY_DEFAULT binds
+// _default at compile time.
 
 /** @brief Lazily-resolved pointer to the best decompression variant. */
 static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = (zxc_decompress_func_t)0;
@@ -372,65 +373,63 @@ static zxc_variant_set_t zxc_select_variants(void) {
 
 #undef ZXC_RETURN_VARIANT_SET
 
-/**
- * @brief First-call initialiser for the decompression dispatcher.
- *
- * Publishes both decompression pointers, then tail-calls the one this context
- * needs (its @c dict_size picks the dict variant).
- */
+/** @brief Resolves the four variants once and publishes them together. */
 // LCOV_EXCL_START
-static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                        const size_t src_sz, uint8_t* RESTRICT dst,
-                                        const size_t dst_cap, const uint64_t block_index) {
+static void zxc_dispatch_init(void) {
     const zxc_variant_set_t v = zxc_select_variants();
     ZXC_DISPATCH_STORE(zxc_decompress_ptr, v.decompress);
     ZXC_DISPATCH_STORE(zxc_decompress_dict_ptr, v.decompress_dict);
-    return (ctx->dict_size ? v.decompress_dict : v.decompress)(ctx, src, src_sz, dst, dst_cap,
-                                                               block_index);
-}
-
-/**
- * @brief Same, for the `_safe_*` decoder used by @ref zxc_decompress_block_safe.
- */
-static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
-                                             const uint8_t* RESTRICT src, const size_t src_sz,
-                                             uint8_t* RESTRICT dst, const size_t dst_cap,
-                                             const uint64_t block_index) {
-    const zxc_variant_set_t v = zxc_select_variants();
     ZXC_DISPATCH_STORE(zxc_decompress_safe_ptr, v.decompress_safe);
-    return v.decompress_safe(ctx, src, src_sz, dst, dst_cap, block_index);
-}
-
-/** @brief Same, for the compressor. */
-static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                      const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap, const uint64_t block_index) {
-    const zxc_variant_set_t v = zxc_select_variants();
     ZXC_DISPATCH_STORE(zxc_compress_ptr, v.compress);
-    return v.compress(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 // LCOV_EXCL_STOP
 
-/**
- * @brief Public decompression dispatcher (calls lazily-resolved implementation).
- */
+#endif  // ZXC_ONLY_DEFAULT
+
+// One accessor per entry point: _default under ZXC_ONLY_DEFAULT, else the pointer
+// published on first call. The wrappers below then need one body each.
+#ifdef ZXC_ONLY_DEFAULT
+#define ZXC_DISPATCH_IMPL(name, type, slot, dflt) \
+    static ZXC_ALWAYS_INLINE type name(void) { return dflt; }
+#else
+#define ZXC_DISPATCH_IMPL(name, type, slot, dflt) \
+    static ZXC_ALWAYS_INLINE type name(void) {    \
+        type f = ZXC_DISPATCH_LOAD(slot);         \
+        if (UNLIKELY(!f)) {                       \
+            zxc_dispatch_init();                  \
+            f = ZXC_DISPATCH_LOAD(slot);          \
+        }                                         \
+        return f;                                 \
+    }
+#endif
+ZXC_DISPATCH_IMPL(zxc_decompress_impl, zxc_decompress_func_t, zxc_decompress_ptr,
+                  zxc_decompress_chunk_wrapper_default)
+ZXC_DISPATCH_IMPL(zxc_decompress_dict_impl, zxc_decompress_func_t, zxc_decompress_dict_ptr,
+                  zxc_decompress_chunk_wrapper_dict_default)
+ZXC_DISPATCH_IMPL(zxc_decompress_safe_impl, zxc_decompress_func_t, zxc_decompress_safe_ptr,
+                  zxc_decompress_chunk_wrapper_safe_default)
+ZXC_DISPATCH_IMPL(zxc_compress_impl, zxc_compress_func_t, zxc_compress_ptr,
+                  zxc_compress_chunk_wrapper_default)
+#undef ZXC_DISPATCH_IMPL
+#ifndef ZXC_ONLY_DEFAULT
+#undef ZXC_DISPATCH_STORE
+#undef ZXC_DISPATCH_LOAD
+#endif
+
+/** @brief Public decompression dispatcher. */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                  const uint64_t block_index) {
     // dict_size is constant for a stream; this per-block branch (outside the decode
     // loop) routes to the dict variant only when a dictionary is active, so the
     // no-dict path runs the dict-free chunk wrapper (identical codegen to main).
-    const zxc_decompress_func_t func = ctx->dict_size ? ZXC_DISPATCH_LOAD(zxc_decompress_dict_ptr)
-                                                      : ZXC_DISPATCH_LOAD(zxc_decompress_ptr);
-    if (UNLIKELY(!func))
-        return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap, block_index);
-    return func(ctx, src, src_sz, dst, dst_cap, block_index);
+    if (ctx->dict_size)
+        return zxc_decompress_dict_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_decompress_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 
 /**
  * @brief Internal safe-decompression dispatcher (strict dst_capacity == uncompressed_size).
- *
- * Calls the lazily-resolved `_safe_*` variant, running first-call init if needed.
  *
  * @param[in]  ctx      Decompression context.
  * @param[in]  src      Compressed input chunk.
@@ -444,57 +443,15 @@ static int zxc_decompress_chunk_wrapper_safe_public(const zxc_cctx_t* RESTRICT c
                                                     const size_t src_sz, uint8_t* RESTRICT dst,
                                                     const size_t dst_cap,
                                                     const uint64_t block_index) {
-    const zxc_decompress_func_t func = ZXC_DISPATCH_LOAD(zxc_decompress_safe_ptr);
-    if (UNLIKELY(!func))
-        return zxc_decompress_safe_dispatch_init(ctx, src, src_sz, dst, dst_cap, block_index);
-    return func(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_decompress_safe_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 
-/**
- * @brief Public compression dispatcher (calls lazily-resolved implementation).
- */
+/** @brief Public compression dispatcher. */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                const uint64_t block_index) {
-    const zxc_compress_func_t func = ZXC_DISPATCH_LOAD(zxc_compress_ptr);
-    if (UNLIKELY(!func))
-        return zxc_compress_dispatch_init(ctx, src, src_sz, dst, dst_cap, block_index);
-    return func(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_compress_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
 }
-
-#undef ZXC_DISPATCH_STORE
-#undef ZXC_DISPATCH_LOAD
-
-#else  // ZXC_ONLY_DEFAULT: one variant, bound at compile time
-
-/** @brief Public decompression dispatcher (direct binding, single variant). */
-int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                 const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
-                                 const uint64_t block_index) {
-    // Same per-block dict branch as the dispatching build.
-    if (ctx->dict_size)
-        return zxc_decompress_chunk_wrapper_dict_default(ctx, src, src_sz, dst, dst_cap,
-                                                         block_index);
-    return zxc_decompress_chunk_wrapper_default(ctx, src, src_sz, dst, dst_cap, block_index);
-}
-
-/** @brief Internal safe-decompression dispatcher (direct binding, single variant). */
-static int zxc_decompress_chunk_wrapper_safe_public(const zxc_cctx_t* RESTRICT ctx,
-                                                    const uint8_t* RESTRICT src,
-                                                    const size_t src_sz, uint8_t* RESTRICT dst,
-                                                    const size_t dst_cap,
-                                                    const uint64_t block_index) {
-    return zxc_decompress_chunk_wrapper_safe_default(ctx, src, src_sz, dst, dst_cap, block_index);
-}
-
-/** @brief Public compression dispatcher (direct binding, single variant). */
-int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                               const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
-                               const uint64_t block_index) {
-    return zxc_compress_chunk_wrapper_default(ctx, src, src_sz, dst, dst_cap, block_index);
-}
-
-#endif  // ZXC_ONLY_DEFAULT
 
 // ============================================================================
 // HUFFMAN TRAMPOLINES

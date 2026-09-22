@@ -1,7 +1,9 @@
 # Kernel and freestanding integration
 
-Porting zxc to a host with no libc: a kernel backend (zram, zswap, a
-filesystem), a bootloader, a firmware.
+Porting zxc to a host with no libc: a bootloader or firmware unpacking its
+payload, a read-only filesystem image, an initramfs. ZXC compresses slowly and
+decompresses fast: data written once, read many times. A backend compressing on
+every page write (zram, zswap) would pay the slow side on its hot path.
 
 The core uses no floating point, no VLA and no `alloca`, has no stack frame
 above 400 bytes, and reaches the standard library only through
@@ -122,7 +124,7 @@ Vendor a replacement for `src/lib/zxc_deps.h`:
 /* No <stdatomic.h> here; ZXC_DISABLE_SIMD removes the publication anyway. */
 #define ZXC_USE_C11_ATOMICS 0
 
-/* GFP_NOIO, not GFP_KERNEL: reclaim must not recurse into the swap path. */
+/* GFP_NOIO, not GFP_KERNEL: reclaim must not recurse into the I/O path. */
 #define ZXC_GFP (GFP_NOIO | __GFP_NOWARN)
 
 #define ZXC_MALLOC(size)          kvmalloc((size), ZXC_GFP)

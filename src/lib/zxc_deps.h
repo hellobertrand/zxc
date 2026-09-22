@@ -131,6 +131,8 @@ static inline void zxc_aligned_free(void* ptr) {
  *  @brief Counterpart deallocator for @ref ZXC_ALIGNED_MALLOC. */
 #define ZXC_ALIGNED_FREE(ptr) zxc_aligned_free(ptr)
 
+#elif !defined(ZXC_ALIGNED_FREE)
+#error "ZXC_ALIGNED_MALLOC is defined without ZXC_ALIGNED_FREE: define both"
 #endif  // ZXC_ALIGNED_MALLOC
 
 /** @} */ /* end of Aligned Allocator Abstraction */
