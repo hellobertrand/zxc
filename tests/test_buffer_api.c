@@ -1318,11 +1318,110 @@ done:
     return ok;
 }
 
-// Exercises zxc_glo_split_block: escaped matches (20-38 bytes) mixed irregularly
-// with inline ones (6-19 bytes), a mispredicted minority that levels 3-5 split.
-// A regression in the in-place rewrite corrupts the round trip.
+// zxc_write_varint's prefix varint, for values below 2^14.
+static size_t put_varint(uint8_t* dst, const uint32_t val) {
+    if (val < 128) {
+        dst[0] = (uint8_t)val;
+        return 1;
+    }
+    dst[0] = (uint8_t)(0x80 | (val & 0x3F));
+    dst[1] = (uint8_t)(val >> 6);
+    return 2;
+}
+
+typedef struct {
+    uint32_t ll, ml, off; /* ml: length code */
+} glo_seq_t;
+
+static void parse_seqs(const uint8_t* tok, const uint16_t* off, const uint8_t* ex, size_t ex_sz,
+                       uint32_t n, glo_seq_t* out) {
+    const uint8_t* p = ex;
+    const uint8_t* const end = ex + ex_sz;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t ll = tok[i] >> ZXC_TOKEN_LIT_BITS, ml = tok[i] & ZXC_TOKEN_ML_MASK;
+        if (ll == ZXC_TOKEN_LL_MASK) ll += zxc_read_varint(&p, end);
+        if (ml == ZXC_TOKEN_ML_MASK) ml += zxc_read_varint(&p, end);
+        out[i].ll = ll;
+        out[i].ml = ml;
+        out[i].off = off[i];
+    }
+}
+
+/* Splits a synthetic stream. esc_every > 0: periodic escapes, predictable, all
+ * kept; 0: an irregular minority. A split match must come back as inline pieces
+ * at its offset adding up to the original; every other sequence stays. */
+static int glo_split_synthetic(const char* label, const uint32_t esc_every, const uint8_t cap,
+                               const int expect_split) {
+    enum { N = 4096 };
+    static uint8_t tok[2 * N], tok0[N], side[N], ex[4 * N], ex0[4 * N];
+    static uint16_t off[2 * N], off0[N];
+    static glo_seq_t in[N], out[2 * N];
+    static zxc_glo_split_hist_t hist;
+    uint32_t st = 0x2545F491U, esc_in = 0;
+    size_t ex_sz = 0;
+    for (uint32_t i = 0; i < N; i++) {
+        st = st * 1103515245U + 12345U;
+        const uint32_t ll = (st >> 8) % 20U; /* 15-19 escape */
+        const int esc = esc_every ? (i % esc_every == 0) : ((st >> 13) % 4U == 0);
+        const uint32_t ml =
+            esc ? 15U + ((st >> 16) % 20U) : (st >> 16) % 15U; /* 15-34, some past cap */
+        esc_in += esc;
+        tok[i] = (uint8_t)(((ll < 15U ? ll : 15U) << ZXC_TOKEN_LIT_BITS) | (ml < 15U ? ml : 15U));
+        off[i] = (uint16_t)(1U + (st >> 20) % 4000U);
+        if (ll >= 15U) ex_sz += put_varint(ex + ex_sz, ll - 15U);
+        if (ml >= 15U) ex_sz += put_varint(ex + ex_sz, ml - 15U);
+    }
+    parse_seqs(tok, off, ex, ex_sz, N, in);
+    memcpy(tok0, tok, N);
+    memcpy(off0, off, sizeof(off0));
+    memcpy(ex0, ex, ex_sz);
+    const size_t ex_sz0 = ex_sz;
+
+    const uint32_t n = zxc_glo_split_sequences(tok, off, ex, &ex_sz, side, &hist, N, cap);
+    if (!expect_split) {
+        if (n != N || ex_sz != ex_sz0 || memcmp(tok, tok0, N) || memcmp(off, off0, sizeof(off0)) ||
+            memcmp(ex, ex0, ex_sz0)) {
+            printf("Failed [%s]: split ran where nothing should split\n", label);
+            return 0;
+        }
+        return 1;
+    }
+    if (n <= N) {
+        printf("Failed [%s]: no sequence was split\n", label);
+        return 0;
+    }
+    parse_seqs(tok, off, ex, ex_sz, n, out);
+    uint32_t j = 0, esc_out = 0;
+    for (uint32_t i = 0; i < N; i++) {
+        const glo_seq_t a = in[i];
+        if (j >= n || out[j].ll != a.ll || out[j].off != a.off) goto bad;
+        uint32_t len = out[j].ml + ZXC_LZ_MIN_MATCH_LEN;
+        esc_out += out[j].ml >= ZXC_TOKEN_ML_MASK;
+        j++;
+        while (len < a.ml + ZXC_LZ_MIN_MATCH_LEN) { /* the remaining pieces */
+            if (j >= n || out[j].ll != 0 || out[j].off != a.off ||
+                out[j].ml > ZXC_GLO_INLINE_ML_CODE)
+                goto bad;
+            len += out[j++].ml + ZXC_LZ_MIN_MATCH_LEN;
+        }
+        if (len != a.ml + ZXC_LZ_MIN_MATCH_LEN) goto bad;
+    }
+    if (j != n || esc_out >= esc_in) goto bad;
+    return 1;
+bad:
+    printf("Failed [%s]: the rewrite does not reproduce the sequences\n", label);
+    return 0;
+}
+
+// zxc_glo_split_block on synthetic sequences, then round trips of data whose
+// escaped matches (20-38 bytes) mix irregularly with inline ones (6-19 bytes):
+// a mispredicted minority that levels 3-5 split, each within its cap.
 int test_glo_match_split(void) {
     printf("=== TEST: Unit - GLO match splitting round trip ===\n");
+    if (!glo_split_synthetic("irregular escapes", 0, 33, 1) ||
+        !glo_split_synthetic("periodic escapes", 4, 33, 0) ||
+        !glo_split_synthetic("cap at the inline reach", 0, ZXC_GLO_INLINE_ML_CODE, 0))
+        return 0;
     const size_t cap = 512 * 1024;
     uint8_t* buf = malloc(cap);
     int ok = 0;

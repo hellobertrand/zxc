@@ -50,20 +50,6 @@
 #define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
 
-// Mark the primary variant (only _default, or a no-suffix build) so ISA-
-// independent cold code compiles once, not in every per-ISA copy. Keyed off the
-// suffix value, so every build gets it with no extra flag.
-#ifdef ZXC_FUNCTION_SUFFIX
-#define ZXC_PRIMARY__default 1
-#define ZXC_PRIMARY_CAT_(a, b) a##b
-#define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
-#if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
-#define ZXC_VARIANT_PRIMARY 1
-#endif
-#else
-#define ZXC_VARIANT_PRIMARY 1
-#endif
-
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 #include "zxc_pivco_tables.h"

@@ -36,6 +36,19 @@
 #include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
 
+// Primary variant (_default, or a no-suffix build): ISA-independent cold code
+// compiles once there, not in every per-ISA copy.
+#ifdef ZXC_FUNCTION_SUFFIX
+#define ZXC_PRIMARY__default 1
+#define ZXC_PRIMARY_CAT_(a, b) a##b
+#define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
+#if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
+#define ZXC_VARIANT_PRIMARY 1
+#endif
+#else
+#define ZXC_VARIANT_PRIMARY 1
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -901,12 +914,13 @@ static inline int zxc_level_clamp(const int level) {
  *
  *  Escaped matches up to split_max (a length code; 14 is the inline reach) go
  *  out as inline pieces at the same offset, so the decoder skips its ML escape.
- *  Only blocks whose escape branch looks mispredicted are split: on a
- *  predictable branch splitting only adds sequences. A MIN_MISPREDICT_PCT above
- *  100 turns it off.
+ *  Two gates: the block's escape branch must look mispredicted, then only the
+ *  escapes of mispredicted contexts split; a predictable one would only add
+ *  sequences. A split_max at or below the inline reach (levels 1, 2, 6, 7 in
+ *  the level table) turns the pass off.
  *  @{ */
-/** @brief Longest escape history a context keys on, shortened in small blocks
- *         to keep 16 samples per context. Sizes the four 2 KB stack histograms. */
+/** @brief Longest escape history a context keys on; small blocks shorten it
+ *         (down to 2 bits) towards 16 samples per context. Sizes the histograms. */
 #define ZXC_GLO_SPLIT_CTX_BITS 8
 /** @brief Mispredict rate, in percent of a block's escapes, from which the
  *         block is split. */
@@ -914,6 +928,9 @@ static inline int zxc_level_clamp(const int level) {
 /** @brief zxc_glo_split_analyze's escape histograms: four rotating lanes of
  *         [escape][context] counts, carved from the compression workspace. */
 typedef uint32_t zxc_glo_split_hist_t[4][2][1U << ZXC_GLO_SPLIT_CTX_BITS];
+#if ZXC_GLO_SPLIT_CTX_BITS > 8
+#error "a context is recorded in one byte of buf_split"
+#endif
 /** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
@@ -1706,6 +1723,17 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
  */
 void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRICT freq,
                         uint64_t* RESTRICT bits, uint64_t* RESTRICT touches);
+
+/**
+ * @brief The per-block match split on caller-provided buffers.
+ *
+ * Introspection hook for the unit tests. @p side holds @p n_seq bytes; tokens
+ * and offsets must hold the split count (twice @p n_seq at most for a cap of 33).
+ */
+uint32_t zxc_glo_split_sequences(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
+                                 uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
+                                 uint8_t* RESTRICT side, zxc_glo_split_hist_t* RESTRICT hist,
+                                 uint32_t n_seq, uint8_t cap);
 
 /**
  * @brief Pack per-symbol code lengths into the 128-byte (4-bit nibble) header.

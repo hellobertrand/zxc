@@ -245,7 +245,8 @@ static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RE
  * @param[in] ll         Literal length (raw).
  * @param[in] ml         Match length minus ZXC_LZ_MIN_MATCH_LEN.
  * @param[in] off_biased Offset minus ZXC_LZ_OFFSET_BIAS.
- * @return 1, or 0 when the extras buffer overflows.
+ * @return 1, or 0 when a length exceeds ZXC_MAX_VARINT_VALUE. The extras buffer
+ *         is sized by the layout, not checked here.
  */
 static ZXC_ALWAYS_INLINE int zxc_glo_put_seq(uint8_t* RESTRICT buf_tokens,
                                              uint16_t* RESTRICT buf_offsets,
@@ -420,6 +421,15 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
     }
     return n_seq + extra;
 }
+
+#if defined(ZXC_VARIANT_PRIMARY)
+uint32_t zxc_glo_split_sequences(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
+                                 uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
+                                 uint8_t* RESTRICT side, zxc_glo_split_hist_t* RESTRICT hist,
+                                 const uint32_t n_seq, const uint8_t cap) {
+    return zxc_glo_split_block(tokens, offsets, extras, extras_sz, side, hist, n_seq, cap);
+}
+#endif
 
 /**
  * @brief Stages a run of literals into the literal stream.
