@@ -265,12 +265,18 @@ static ZXC_ALWAYS_INLINE int zxc_glo_put_seq(uint8_t* RESTRICT buf_tokens,
     return 1;
 }
 
-/** @brief Moves the varint at extras[*r] down to extras[*w] (w <= r), advancing both. */
+/** @brief Moves extras[*r, to) down to extras[*w] (w <= r), advancing both. */
+static ZXC_ALWAYS_INLINE void zxc_extras_move(uint8_t* extras, size_t* RESTRICT w,
+                                              size_t* RESTRICT r, const uint8_t* to) {
+    while (extras + *r < to) extras[(*w)++] = extras[(*r)++];
+}
+
+/** @brief Keeps the varint at extras[*r]: moves it down to extras[*w]. */
 static ZXC_ALWAYS_INLINE void zxc_varint_keep(uint8_t* extras, size_t* RESTRICT w,
                                               size_t* RESTRICT r, const uint8_t* end) {
     const uint8_t* p = extras + *r;
     (void)zxc_read_varint(&p, end);
-    while (extras + *r < p) extras[(*w)++] = extras[(*r)++];
+    zxc_extras_move(extras, w, r, p);
 }
 
 /** @brief Inline pieces a match of length code @p code splits into: ceil(length / 19). */
@@ -288,16 +294,18 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_glo_split_piece(const uint32_t code) {
 /**
  * @brief Predictability of the block's ML-escape branch, for the split decision.
  *
- * Contexts are the last `order` escape bits. @p ctx_bad marks those where an
- * escape is the minority outcome: the decoder's predictor guesses "no escape"
- * and misses. @p block_bad is set when the minority counts, a static
- * predictor's misses, reach ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT of the escapes.
- * Four rotating histogram lanes keep an inline run off one store-forwarding
- * chain. Returns the context mask.
+ * Contexts are the last `order` escape bits; @p side records each sequence's.
+ * @p ctx_bad marks the contexts where an escape is the minority outcome: the
+ * decoder's predictor guesses "no escape" and misses. Four rotating histogram
+ * lanes keep an inline run off one store-forwarding chain.
+ *
+ * @return 1 when the minority counts, a static predictor's misses, reach
+ *         ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT of the escapes and some escape sits
+ *         in a bad context, so that a split can happen; else 0.
  */
-static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t n_seq,
-                                      zxc_glo_split_hist_t* RESTRICT hist_buf,
-                                      uint8_t* RESTRICT ctx_bad, int* RESTRICT block_bad) {
+static int zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t n_seq,
+                                 zxc_glo_split_hist_t* RESTRICT hist_buf, uint8_t* RESTRICT ctx_bad,
+                                 uint8_t* RESTRICT side) {
     uint32_t order = ZXC_GLO_SPLIT_CTX_BITS;
     while (order > 2 && (n_seq >> order) < 16) order--;
     const uint32_t hmask = (1U << order) - 1U;
@@ -309,11 +317,12 @@ static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint
     uint32_t hist = 0, n_esc = 0;
     for (uint32_t i = 0; i < n_seq; i++) {
         const uint32_t esc = (tokens[i] & ZXC_TOKEN_ML_MASK) == ZXC_TOKEN_ML_MASK;
+        side[i] = (uint8_t)hist;
         ctx_hist[i & 3][esc][hist]++;
         hist = ((hist << 1) | esc) & hmask;
         n_esc += esc;
     }
-    uint32_t errors = 0;
+    uint32_t errors = 0, bad_esc = 0;
     for (uint32_t c = 0; c <= hmask; c++) {
         uint32_t n0 = 0, n1 = 0;
         for (uint32_t l = 0; l < 4; l++) {
@@ -321,11 +330,11 @@ static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint
             n1 += ctx_hist[l][1][c];
         }
         ctx_bad[c] = (n1 < n0);  // escape a strict minority in its context
+        bad_esc += ctx_bad[c] ? n1 : 0;
         errors += (n0 < n1) ? n0 : n1;
     }
-    *block_bad =
-        n_esc != 0 && (uint64_t)errors * 100 >= (uint64_t)ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT * n_esc;
-    return hmask;
+    return bad_esc != 0 &&
+           (uint64_t)errors * 100 >= (uint64_t)ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT * n_esc;
 }
 
 /**
@@ -339,9 +348,9 @@ static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint
  * Two gates (zxc_glo_split_analyze): the block must look mispredicted, which
  * leaves regular data whole, then only escapes of mispredicted contexts split.
  *
- * In place: pass 1 replays the escape history, marks the matches to split in
- * @p side (length code, 0 = keep) and compacts the kept extras forward; pass 2
- * expands tokens and offsets backward, each write at or past its read. A piece
+ * In place: pass 1 turns @p side from each sequence's context into its length
+ * code to split (0 = keep) and compacts the kept extras forward; pass 2 expands
+ * tokens and offsets backward, each write at or past its read. A piece
  * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, so the count fits the
  * block's sequence buffers.
  *
@@ -356,34 +365,29 @@ static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT
                                     const uint32_t n_seq, const uint8_t cap) {
     if (cap <= ZXC_GLO_INLINE_ML_CODE || n_seq == 0) return n_seq;
     uint8_t ctx_bad[1U << ZXC_GLO_SPLIT_CTX_BITS];
-    int block_bad = 0;
-    const uint32_t hmask = zxc_glo_split_analyze(tokens, n_seq, hist_buf, ctx_bad, &block_bad);
-    if (!block_bad) return n_seq;
+    if (!zxc_glo_split_analyze(tokens, n_seq, hist_buf, ctx_bad, side)) return n_seq;
 
-    // 1. Mark the matches to split (mispredicted context, within the cap) and
-    // drop their varints; the other extras move forward. Replaying the escape
-    // history visits every sequence.
-    ZXC_MEMSET(side, 0, n_seq);
+    // 1. Mark the matches to split (bad context, within the cap) and drop their
+    // varints; the other extras move forward.
     const uint8_t* const extras_end = extras + *extras_sz;
     size_t r = 0, w = 0;
-    uint32_t extra = 0, hist = 0;
+    uint32_t extra = 0;
     for (uint32_t i = 0; i < n_seq; i++) {
         const uint8_t tok = tokens[i];
+        const int bad = ctx_bad[side[i]];
+        side[i] = 0;
         if ((tok >> ZXC_TOKEN_LIT_BITS) == ZXC_TOKEN_LL_MASK)
             zxc_varint_keep(extras, &w, &r, extras_end);
-        const uint32_t esc = (tok & ZXC_TOKEN_ML_MASK) == ZXC_TOKEN_ML_MASK;
-        if (esc) {
-            const uint8_t* p = extras + r;
-            const uint32_t code = zxc_read_varint(&p, extras_end) + ZXC_TOKEN_ML_MASK;
-            if (ctx_bad[hist] && code <= cap) {
-                side[i] = (uint8_t)code;
-                extra += zxc_glo_split_pieces(code) - 1;
-                r = (size_t)(p - extras);
-            } else {  // keep: move the varint we already read down, no second decode
-                while (extras + r < p) extras[w++] = extras[r++];
-            }
+        if ((tok & ZXC_TOKEN_ML_MASK) != ZXC_TOKEN_ML_MASK) continue;
+        const uint8_t* p = extras + r;
+        const uint32_t code = zxc_read_varint(&p, extras_end) + ZXC_TOKEN_ML_MASK;
+        if (bad && code <= cap) {
+            side[i] = (uint8_t)code;
+            extra += zxc_glo_split_pieces(code) - 1;
+            r = (size_t)(p - extras);
+        } else {
+            zxc_extras_move(extras, &w, &r, p);
         }
-        hist = ((hist << 1) | esc) & hmask;
     }
     *extras_sz = w;
     if (extra == 0) return n_seq;
