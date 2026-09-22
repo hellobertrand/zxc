@@ -139,10 +139,11 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
     uint8_t packed[ZXC_HUF_TABLE_SIZE];
     zxc_huf_pack_lengths(code_len, packed);
     static zxc_pivco_tree_t tree;
+    static zxc_pivco_ctree_t ctree;
     static zxc_pivco_decode_aux_t aux;
     static uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     uint8_t len2[ZXC_HUF_NUM_SYMBOLS];
-    if (zxc_huf_dict_tree_build(packed, &tree, codes, len2, &aux) != ZXC_OK) {
+    if (zxc_huf_dict_tree_build(packed, &tree, &ctree, codes, len2, &aux) != ZXC_OK) {
         printf("Failed [%s]: reference tree build rejected the lengths\n", label);
         return 0;
     }
@@ -160,6 +161,17 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
         }
     }
 
+    /* Children of a leaf-pair parent are emitted by the parent, never materialised. */
+    uint8_t skip[ZXC_PIVCO_MAX_NODES] = {0};
+    for (int i = 0; i < tree.n_nodes; i++) {
+        const zxc_pivco_node_t* nd = &tree.nd[tree.bfs[i]];
+        if (nd->sym >= 0) continue;
+        const int c0 = nd->child[0];
+        const int c1 = nd->child[1];
+        if (c0 >= 0 && c1 >= 0 && tree.nd[c0].sym >= 0 && tree.nd[c1].sym >= 0)
+            skip[c0] = skip[c1] = 1;
+    }
+
     uint64_t rbits = 0;
     for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) rbits += (uint64_t)code_len[s] * freq[s];
     uint64_t rtouches = 0;
@@ -168,7 +180,7 @@ static int nudge_cost_matches_tree(const char* label, const uint8_t* code_len,
         if (tree.covered[nid]) continue;
         if (tree.nd[nid].sym >= 0) {
             /* Lone leaf memset; leaf-pair children are emitted by the parent. */
-            if (!aux.skip[nid]) rtouches += count[nid];
+            if (!skip[nid]) rtouches += count[nid];
         } else if (tree.flat_d[nid]) {
             uint64_t t = 1;
             if (tree.flat_d[nid] > ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX)
@@ -436,10 +448,11 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
      * once, as zxc_cctx_attach_dict_huf does; the dict codec entry points
      * take them. */
     zxc_pivco_tree_t tree;
+    zxc_pivco_ctree_t ctree;
     zxc_pivco_decode_aux_t aux;
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
-    if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) != ZXC_OK ||
+    if (zxc_huf_dict_tree_build(packed, &tree, &ctree, codes, tree_len, &aux) != ZXC_OK ||
         memcmp(tree_len, code_len, sizeof(tree_len)) != 0) {
         printf("Failed [%s]: dict_tree_build\n", label);
         return 0;
@@ -477,14 +490,14 @@ static int huf_dict_roundtrip_case(const char* label, const uint8_t* literals, s
         goto fail;
     }
 
-    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, &tree, &aux, scr) != ZXC_OK ||
+    if (zxc_huf_decode_section_dict(enc, (size_t)written, dec, n, &ctree, &aux, scr) != ZXC_OK ||
         memcmp(literals, dec, n) != 0) {
         printf("Failed [%s]: decode_section_dict roundtrip mismatch\n", label);
         goto fail;
     }
 
     /* Error paths: truncated payload, undersized dst_cap. */
-    if (zxc_huf_decode_section_dict(enc, 0, dec, n, &tree, &aux, scr) == ZXC_OK) {
+    if (zxc_huf_decode_section_dict(enc, 0, dec, n, &ctree, &aux, scr) == ZXC_OK) {
         printf("Failed [%s]: truncated payload accepted\n", label);
         goto fail;
     }
@@ -556,12 +569,13 @@ int test_huffman_codec_dict() {
         freq['!']++;    /* keep the histogram in sync with the mutated buffer */
         uint8_t enc[1024];
         zxc_pivco_tree_t tree;
+        zxc_pivco_ctree_t ctree;
         zxc_pivco_decode_aux_t aux;
         uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
         uint8_t packed[ZXC_HUF_TABLE_SIZE];
         uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
         zxc_huf_pack_lengths(code_len, packed);
-        if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) != ZXC_OK) {
+        if (zxc_huf_dict_tree_build(packed, &tree, &ctree, codes, tree_len, &aux) != ZXC_OK) {
             printf("Failed: dict_tree_build (code-less literal case)\n");
             free(buf);
             return 0;
@@ -587,6 +601,7 @@ int test_huffman_single_symbol_validation() {
     printf("=== TEST: Unit - Huffman single-symbol table validation ===\n");
 
     zxc_pivco_tree_t tree;
+    zxc_pivco_ctree_t ctree;
     zxc_pivco_decode_aux_t aux;
     uint32_t codes[ZXC_HUF_NUM_SYMBOLS];
     uint8_t tree_len[ZXC_HUF_NUM_SYMBOLS];
@@ -597,7 +612,7 @@ int test_huffman_single_symbol_validation() {
     memset(code_len, 0, sizeof(code_len));
     code_len['A'] = 1;
     zxc_huf_pack_lengths(code_len, packed);
-    if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) != ZXC_OK) {
+    if (zxc_huf_dict_tree_build(packed, &tree, &ctree, codes, tree_len, &aux) != ZXC_OK) {
         printf("Failed: single symbol with code_len=1 must be accepted\n");
         return 0;
     }
@@ -608,7 +623,7 @@ int test_huffman_single_symbol_validation() {
         memset(code_len, 0, sizeof(code_len));
         code_len['A'] = (uint8_t)len;
         zxc_huf_pack_lengths(code_len, packed);
-        if (zxc_huf_dict_tree_build(packed, &tree, codes, tree_len, &aux) !=
+        if (zxc_huf_dict_tree_build(packed, &tree, &ctree, codes, tree_len, &aux) !=
             ZXC_ERROR_CORRUPT_DATA) {
             printf("Failed: single symbol with code_len=%d must be rejected\n", len);
             return 0;
