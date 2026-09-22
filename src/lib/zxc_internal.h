@@ -778,8 +778,7 @@ typedef struct {
  *  lengths toward power-of-two class counts and shallower caps, adopting a
  *  candidate only when its modeled decode win clears the guard below at a
  *  bounded ratio cost. Wire-compatible by construction: adjusted lengths stay
- *  canonical, Kraft-exact and within the level cap, so any v7 decoder reads
- *  the section unchanged (selection is encoder policy, FORMAT.md 5.2.1).
+ *  canonical, Kraft-exact and within the level cap.
  *  Idea from pivco-huffman issue #20 (dougallj).
  *  @{ */
 /** @brief Exchange rate (Q8 bits per modeled level-touch) in the candidate
@@ -912,6 +911,9 @@ static inline int zxc_level_clamp(const int level) {
 /** @brief Mispredict rate, in percent of a block's escapes, from which the
  *         block is split. */
 #define ZXC_GLO_SPLIT_MIN_MISPREDICT_PCT 80
+/** @brief zxc_glo_split_analyze's escape histograms: four rotating lanes of
+ *         [escape][context] counts, carved from the compression workspace. */
+typedef uint32_t zxc_glo_split_hist_t[4][2][1U << ZXC_GLO_SPLIT_CTX_BITS];
 /** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
@@ -1824,7 +1826,8 @@ typedef struct {
     uint16_t* buf_offsets;   /**< Buffer for offsets. */
     uint8_t* buf_extras;     /**< Buffer for extra lengths (vbytes for LL/ML). */
     uint8_t* buf_split;      /**< Match-splitting side array (zxc_glo_split_block). */
-    uint8_t* literals;       /**< Buffer for literal bytes. */
+    zxc_glo_split_hist_t* buf_split_hist; /**< Its escape histograms. */
+    uint8_t* literals;                    /**< Buffer for literal bytes. */
 
     // Cold zone: configuration / scratch / resizeable.
     uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */

@@ -296,11 +296,12 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_glo_split_piece(const uint32_t code) {
  * chain. Returns the context mask.
  */
 static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t n_seq,
+                                      zxc_glo_split_hist_t* RESTRICT hist_buf,
                                       uint8_t* RESTRICT ctx_bad, int* RESTRICT block_bad) {
     uint32_t order = ZXC_GLO_SPLIT_CTX_BITS;
     while (order > 2 && (n_seq >> order) < 16) order--;
     const uint32_t hmask = (1U << order) - 1U;
-    uint32_t ctx_hist[4][2][1U << ZXC_GLO_SPLIT_CTX_BITS];
+    uint32_t (*const ctx_hist)[2][1U << ZXC_GLO_SPLIT_CTX_BITS] = *hist_buf;
     for (uint32_t l = 0; l < 4; l++) {
         ZXC_MEMSET(ctx_hist[l][0], 0, (hmask + 1) * sizeof(uint32_t));
         ZXC_MEMSET(ctx_hist[l][1], 0, (hmask + 1) * sizeof(uint32_t));
@@ -345,17 +346,18 @@ static uint32_t zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint
  * block's sequence buffers.
  *
  * @param[in] side zxc_cctx_t::buf_split, one byte per sequence.
+ * @param[in] hist_buf zxc_cctx_t::buf_split_hist.
  * @param[in] cap  zxc_lz77_params_t::split_max.
  * @return The new sequence count (unchanged when the block is not split).
  */
 static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
                                     uint8_t* RESTRICT extras, size_t* RESTRICT extras_sz,
-                                    uint8_t* RESTRICT side, const uint32_t n_seq,
-                                    const uint8_t cap) {
+                                    uint8_t* RESTRICT side, zxc_glo_split_hist_t* RESTRICT hist_buf,
+                                    const uint32_t n_seq, const uint8_t cap) {
     if (cap <= ZXC_GLO_INLINE_ML_CODE || n_seq == 0) return n_seq;
     uint8_t ctx_bad[1U << ZXC_GLO_SPLIT_CTX_BITS];
     int block_bad = 0;
-    const uint32_t hmask = zxc_glo_split_analyze(tokens, n_seq, ctx_bad, &block_bad);
+    const uint32_t hmask = zxc_glo_split_analyze(tokens, n_seq, hist_buf, ctx_bad, &block_bad);
     if (!block_bad) return n_seq;
 
     // 1. Mark the matches to split (mispredicted context, within the cap) and
@@ -1500,7 +1502,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 parse_done:;
     // Per-block match splitting on the parsed block (see zxc_glo_split_block).
     seq_c = zxc_glo_split_block(buf_tokens, buf_offsets, buf_extras, &extras_sz, ctx->buf_split,
-                                seq_c, lzp.split_max);
+                                ctx->buf_split_hist, seq_c, lzp.split_max);
     // Dictionary-table trainer hook: accumulate the REAL post-LZ literal
     // frequencies (see zxc_train_dict_huf). Cold path, NULL outside training.
     if (UNLIKELY(ctx->lit_freq_acc)) {

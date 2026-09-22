@@ -86,6 +86,7 @@ typedef struct {
     size_t off_hash_tags;
     size_t off_chain;
     size_t off_seq_union;
+    size_t off_split_hist;
     size_t off_extras;
     size_t off_lit_cctx;
     // meaningful only when sz_opt > 0 (level >= ZXC_LEVEL_DENSITY).
@@ -225,6 +226,8 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_chain);
         layout.off_seq_union = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_seq_union);
+        layout.off_split_hist = layout.total;
+        layout.total += ZXC_ALIGN_CL(sizeof(zxc_glo_split_hist_t));
         layout.off_extras = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_extras);
         layout.off_lit_cctx = layout.total;
@@ -325,6 +328,7 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     ctx->buf_offsets = (uint16_t*)(mem + layout.off_seq_union);
     ctx->buf_tokens = mem + layout.off_seq_union + layout.max_seq * sizeof(uint16_t);
     ctx->buf_split = ctx->buf_tokens + layout.max_seq;
+    ctx->buf_split_hist = (zxc_glo_split_hist_t*)(void*)(mem + layout.off_split_hist);
     ctx->buf_extras = mem + layout.off_extras;
     ctx->literals = mem + layout.off_lit_cctx;
     if (layout.sz_opt) {
@@ -428,6 +432,7 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
     ctx->buf_split = NULL;
+    ctx->buf_split_hist = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;

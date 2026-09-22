@@ -323,8 +323,8 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
 //
 // Compiled once in the primary variant: this is ISA-independent cold encoder
 // policy, and a single copy guarantees cross-ISA identical archives. For an
-// A/B build without the nudge, override the guard from CFLAGS
-// (-DZXC_HUF_NUDGE_MERGE_Q8=0 rejects every candidate).
+// A/B build without the nudge, set ZXC_HUF_NUDGE_MERGE_Q8 to 0 in
+// zxc_internal.h: the guard then rejects every candidate.
 #if defined(ZXC_VARIANT_PRIMARY)
 
 /** @brief Modeled cost of one code-length candidate (see zxc_huf_nudge_eval). */
