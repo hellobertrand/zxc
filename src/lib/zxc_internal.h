@@ -652,74 +652,53 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
 
 /** @brief Upper bound on PivCo tree nodes (full binary tree over the alphabet). */
 #define ZXC_PIVCO_MAX_NODES (2 * ZXC_HUF_NUM_SYMBOLS - 1)
+/** @brief Node-indexed array size: every node, plus a slot for the lone-symbol
+ *  root's missing child. */
+#define ZXC_PIVCO_NODE_SLOTS (ZXC_PIVCO_MAX_NODES + 1)
 /** @brief Deepest flat subtree ::zxc_pivco_unpack_flat unpacks with a SIMD
  *         kernel (its D == 2..6 cases); deeper flat roots take the scalar
  *         bit-reader. A structural fact of that unpacker, not tunable. */
 #define ZXC_PIVCO_UNPACK_FLAT_SIMD_MAX 6
 
-/** @brief One PivCo Huffman tree node. */
-typedef struct {
-    int16_t child[2]; /* node index, -1 = absent */
-    int16_t sym;      /* >= 0: leaf symbol; -1: internal */
-} zxc_pivco_node_t;
+/** @brief @c flat_d of a node inside a flat root: no run, no children. */
+#define ZXC_PIVCO_COVERED 0xFFU
 
 /**
- * @brief Canonical Huffman tree in PivCo (level-ordered) form.
+ * @brief A PivCo code tree: its canonical shape, by depth.
  *
- * Derived deterministically from the 128-byte packed code lengths by
- * zxc_huf_dict_tree_build / the section decoders; pure value type (index-based,
- * no internal pointers), safe to copy or embed. Embedded in ::zxc_cctx_t so a
- * dictionary's shared table is built ONCE at attach instead of per block.
+ * Canonical codes fix the tree from the leaf counts alone. Each depth holds
+ * its leaves, then its internal nodes; the k-th internal node's children are
+ * positions 2k and 2k+1 below. That is the wire order, so a node is a (depth,
+ * position) pair, and the d-bit prefix p is node base[d] + p.
+ *
+ * Under a flat root the leaves sit in packed-code order, not symbol order:
+ * they are the decoder's code -> symbol table, and each leaf's code ends with
+ * its packed code.
+ *
+ * Depth arrays cover 0 to max_depth; node_base and leaf_base also mark where
+ * the last depth ends. Node arrays cover every node and the slot.
  */
 typedef struct {
-    zxc_pivco_node_t nd[ZXC_PIVCO_MAX_NODES];
-    int16_t bfs[ZXC_PIVCO_MAX_NODES]; /* node ids in BFS (== wire) order */
-    int16_t lvl_start[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2];
-    int n_nodes;
+    uint16_t node_base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First node index of each depth. */
+    uint16_t leaf_base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 2]; /**< First @c syms index of each depth. */
+    int16_t base[ZXC_HUF_MAX_CODE_LEN_ULTRA + 1];       /**< Node index of the d-bit prefix 0. */
     int max_depth;
-    // Flat-subtree fast path: flat_d[nid] = D (>= 2) when nid roots a MAXIMAL
-    // complete subtree with all leaves exactly D levels down. Its wire run is
-    // the symbols' packed D-bit residuals instead of D partition bitmaps (same
-    // bits, decode = unpack+lookup), and covered[nid] marks its strict
-    // descendants, absent from the wire. Both sides derive this from the code
-    // lengths, so nothing is signalled.
-    uint8_t flat_d[ZXC_PIVCO_MAX_NODES];
-    uint8_t covered[ZXC_PIVCO_MAX_NODES];
+    uint8_t syms[ZXC_HUF_NUM_SYMBOLS];    /**< Leaf symbols, depth by depth. */
+    uint8_t flat_d[ZXC_PIVCO_NODE_SLOTS]; /**< Flat-root depth, 0, or ::ZXC_PIVCO_COVERED. */
 } zxc_pivco_tree_t;
-
-/**
- * @brief Precomputed decode-side tables derived from a ::zxc_pivco_tree_t.
- *
- * Pure functions of the tree topology (no dependence on section data):
- * @c skip flags the children of leaf-pair parents (emitted directly by the
- * parent's XOR-blend, never materialised), and @c c2s_pool holds each flat
- * root's packed-code -> symbol table at @c c2s_off[nid]. Flat subtrees have
- * disjoint leaves, so the pool never exceeds ZXC_HUF_NUM_SYMBOLS entries; the
- * +16 slack covers zxc_pivco_unpack_flat's SIMD table loads, which round a
- * table up to 16 entries. Per-section trees rebuild these inline in
- * zxc_pivco_decode_core; dictionary trees build them ONCE at attach so the
- * small-block dict decode path stops repaying the DFS + fills per block.
- */
-typedef struct {
-    uint8_t skip[ZXC_PIVCO_MAX_NODES];          /**< 1 = child of a leaf-pair parent. */
-    uint16_t c2s_off[ZXC_PIVCO_MAX_NODES];      /**< Flat roots: offset into c2s_pool. */
-    uint8_t c2s_pool[ZXC_HUF_NUM_SYMBOLS + 16]; /**< Concatenated c2s tables. */
-} zxc_pivco_decode_aux_t;
 
 /**
  * @brief Frame-constant dictionary Huffman state, prebuilt once at attach.
  *
- * Bundles everything the per-block dict paths reuse: the PivCo @c tree (decoder
- * + estimator), the canonical @c codes / @c code_len (encoder), and the
- * decode-side @c dec tables. Carved from the context workspace only when
- * @c dict_size > 0, so no-dict contexts pay nothing for it. Built by
- * @ref zxc_huf_dict_tree_build via @c zxc_cctx_attach_dict_huf.
+ * The PivCo @c tree (decoder and estimator) and the @c codes / @c code_len
+ * (encoder), reused by every dict block. Carved from the workspace only when
+ * @c dict_size > 0. Built by @ref zxc_huf_dict_tree_build via
+ * @c zxc_cctx_attach_dict_huf.
  */
 typedef struct {
     zxc_pivco_tree_t tree;                 /**< PivCo tree from the shared literal table. */
-    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];   /**< Canonical codes (encoder side). */
+    uint32_t codes[ZXC_HUF_NUM_SYMBOLS];   /**< Leaf codes as laid out in @c tree. */
     uint8_t code_len[ZXC_HUF_NUM_SYMBOLS]; /**< Unpacked code lengths. */
-    zxc_pivco_decode_aux_t dec;            /**< Precomputed decoder tables. */
 } zxc_dict_huf_state_t;
 /** @brief RLE margin shift: source of the legacy below-ULTRA premium used by
  *         ::zxc_ss_prem_rle_q8 (256 >> shift reproduces the historical
@@ -1698,13 +1677,10 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, size_t n_literals,
                            const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
                            uint8_t* RESTRICT dst, size_t dst_cap);
 
-/** @brief Unpack a dict table's 128-byte packed lengths and prebuild its PivCo
- *  tree, canonical codes, code lengths and decoder tables (tree-at-attach).
- *  All outputs are frame-constant; per-block encode/estimate/decode then skip
- *  the rebuild. */
+/** @brief Unpack a dict table's packed lengths and prebuild its tree, codes and
+ *  code lengths, once per frame. */
 int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tree_t* RESTRICT tree,
-                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len,
-                            zxc_pivco_decode_aux_t* RESTRICT aux);
+                            uint32_t* RESTRICT codes, uint8_t* RESTRICT code_len);
 
 /** @brief zxc_huf_calc_size for a dict section: prebuilt @p tree, no header. */
 size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
@@ -1722,13 +1698,10 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, size_t n_liter
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, size_t payload_size,
                            uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch);
 
-/** @brief Decode a PivCo dict section against a prebuilt dict @p tree and its
- *  attach-time decoder tables @p aux. */
+/** @brief Decode a PivCo dict section against a prebuilt dict @p tree. */
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, size_t payload_size,
                                 uint8_t* RESTRICT dst, size_t n,
-                                const zxc_pivco_tree_t* RESTRICT tree,
-                                const zxc_pivco_decode_aux_t* RESTRICT aux,
-                                uint8_t* RESTRICT scratch);
+                                const zxc_pivco_tree_t* RESTRICT tree, uint8_t* RESTRICT scratch);
 
 // ---------------------------------------------------------------------------
 // Compression / decompression context.
@@ -1838,9 +1811,8 @@ int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, cons
 /**
  * @brief Attach the shared dictionary literal table to an initialised context.
  *
- * Validates the 128-byte packed code-lengths header and builds the PivCo tree,
- * canonical codes and decoder tables ONCE into the context (tree-at-attach);
- * per-block encode/estimate/decode reuse them. @p lengths need only be valid
+ * Validates the 128-byte packed code-lengths header and builds the PivCo tree
+ * and codes once into the context, for every block to reuse. @p lengths need only be valid
  * during this call (everything is copied into the context workspace). A NULL
  * @p lengths is a no-op.
  *
