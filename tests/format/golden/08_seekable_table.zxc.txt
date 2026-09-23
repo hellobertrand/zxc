@@ -1,19 +1,20 @@
 file:             08_seekable_table
-size:             1104 bytes
+size:             1116 bytes
 
 [file header]
-raw:              F5 2E B0 9C 08 0C 80 00 00 00 00 00 00 00 CB 39
+raw:              F5 2E B0 9C 09 0C A0 00 00 00 00 00 00 00 6C E6
 magic:            0x9CB02EF5
-version:          8
+version:          9
 chunk_code:       12  (4096 bytes)
-flags:            0x80  (checksum=1 dict=0)
-header_checksum:  0x39CB
+flags:            0xA0  (checksum=1 dict=0 seek=1)
+header_checksum:  0xE66C
 
 [block 0 @16]
-raw:              01 00 00 A7 00 00 00 17
+raw:              01 00 00 A7 00 00 00 BE
 type:             GLO (1)
 comp_size:        167
-header_checksum:  0x17
+header_checksum:  0xBE
+raw_range:        [0, 4096)
   raw:            01 00 00 00 7B 00 00 00 00 00 00 01
   n_sequences:    1
   n_literals:     123
@@ -24,13 +25,14 @@ header_checksum:  0x17
   lit_comp:       123
   sect_total:     125
 payload_hash:     0xE0347B89
-block_checksum:   0xE0347B89
+block_checksum:   0x978E2C98
 
 [block 1 @195]
-raw:              01 00 00 9C 00 00 00 95
+raw:              01 00 00 9C 00 00 00 B6
 type:             GLO (1)
 comp_size:        156
-header_checksum:  0x95
+header_checksum:  0xB6
+raw_range:        [4096, 8192)
   raw:            02 00 00 00 70 00 00 00 00 00 00 01
   n_sequences:    2
   n_literals:     112
@@ -41,13 +43,14 @@ header_checksum:  0x95
   lit_comp:       112
   sect_total:     116
 payload_hash:     0x9DBA393A
-block_checksum:   0x9DBA393A
+block_checksum:   0x1EACD52B
 
 [block 2 @363]
-raw:              01 00 00 A7 00 00 00 17
+raw:              01 00 00 A7 00 00 00 BE
 type:             GLO (1)
 comp_size:        167
-header_checksum:  0x17
+header_checksum:  0xBE
+raw_range:        [8192, 12288)
   raw:            01 00 00 00 7B 00 00 00 00 00 00 01
   n_sequences:    1
   n_literals:     123
@@ -58,13 +61,14 @@ header_checksum:  0x17
   lit_comp:       123
   sect_total:     125
 payload_hash:     0x922BA02D
-block_checksum:   0x922BA02D
+block_checksum:   0x776EB629
 
 [block 3 @542]
-raw:              01 00 00 9C 00 00 00 95
+raw:              01 00 00 9C 00 00 00 B6
 type:             GLO (1)
 comp_size:        156
-header_checksum:  0x95
+header_checksum:  0xB6
+raw_range:        [12288, 16384)
   raw:            02 00 00 00 70 00 00 00 00 00 00 01
   n_sequences:    2
   n_literals:     112
@@ -75,13 +79,14 @@ header_checksum:  0x95
   lit_comp:       112
   sect_total:     116
 payload_hash:     0x14B60CCC
-block_checksum:   0x14B60CCC
+block_checksum:   0x68C8FA21
 
 [block 4 @710]
-raw:              01 00 00 97 00 00 00 DB
+raw:              01 00 00 97 00 00 00 56
 type:             GLO (1)
 comp_size:        151
-header_checksum:  0xDB
+header_checksum:  0x56
+raw_range:        [16384, 20480)
   raw:            03 00 00 00 6B 00 00 00 00 00 00 01
   n_sequences:    3
   n_literals:     107
@@ -92,13 +97,14 @@ header_checksum:  0xDB
   lit_comp:       107
   sect_total:     113
 payload_hash:     0x08BD5E0E
-block_checksum:   0x08BD5E0E
+block_checksum:   0x359E4258
 
 [block 5 @873]
-raw:              01 00 00 A7 00 00 00 17
+raw:              01 00 00 A7 00 00 00 BE
 type:             GLO (1)
 comp_size:        167
-header_checksum:  0x17
+header_checksum:  0xBE
+raw_range:        [20480, 21257)
   raw:            01 00 00 00 7B 00 00 00 00 00 00 01
   n_sequences:    1
   n_literals:     123
@@ -109,27 +115,28 @@ header_checksum:  0x17
   lit_comp:       123
   sect_total:     125
 payload_hash:     0x2C372D44
-block_checksum:   0x2C372D44
+block_checksum:   0xDB16CBF4
 
 [block 6 @1052]
-raw:              FF 00 00 00 00 00 00 02
+raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
-header_checksum:  0x02
+header_checksum:  0x83
 
 [seek table @1060]
-raw:              FE 00 00 18 00 00 00 25
+raw:              FE 00 00 20 00 00 00 F1
 type:             SEK (254)
-comp_size:        24
-header_checksum:  0x25
+comp_size:        32
+header_checksum:  0xF1
 entries:          6
-  block[0]:       179 bytes
-  block[1]:       168 bytes
-  block[2]:       179 bytes
-  block[3]:       168 bytes
-  block[4]:       163 bytes
-  block[5]:       179 bytes
+  group[0]:       anchor 16
+  block[0]:       size 179
+  block[1]:       size 168
+  block[2]:       size 179
+  block[3]:       size 168
+  block[4]:       size 163
+  block[5]:       size 179
 
 [footer]
-raw:              09 53 00 00 00 00 00 00 91 41 E4 23
+raw:              09 53 00 00 00 00 00 00 D8 AA D6 86 CE 49 97 51
+digest:           0x519749CE86D6AAD8
 src_size:         21257
-global_hash:      0x23E44191

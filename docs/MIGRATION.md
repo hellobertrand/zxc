@@ -1,13 +1,14 @@
 # Migrating ZXC archives across format versions
 
-ZXC's on-disk format has had three deliberate, **non-backward-compatible** breaks.
+ZXC's on-disk format has had four deliberate, **non-backward-compatible** breaks.
 A decoder accepts **only its own format version** — it compares the header
 version byte for exact equality and rejects anything else with
 `ZXC_ERROR_BAD_VERSION`, rather than risk misreading it.
 
 | Format | Introduced by | A decoder reads | Headline change |
 | :--- | :--- | :--- | :--- |
-| **v8** | ZXC **0.14.x** | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
+| **v9** | ZXC **0.15.x** | v9 only | Multiplicative header and block checksums; block checksums cover the decoded bytes and the footer carries an optional archive digest; seek table rebuilt as self-validating groups, announced by `HAS_SEEK_TABLE` |
+| **v8** | ZXC 0.14.x | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
 | **v7** | ZXC 0.13.x | v7 only | Huffman bits use the **PivCo** wire layout; new **level 7 (ULTRA)** adds Huffman-coded tokens |
 | **v6** | ZXC 0.12.x | v6 only | **NUM** block removed; **GHI** renumbered type 3 → 2 |
 | **v5** | earlier | v5 only | — |

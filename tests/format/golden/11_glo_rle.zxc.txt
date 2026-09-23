@@ -1,19 +1,20 @@
 file:             11_glo_rle
-size:             7573 bytes
+size:             7569 bytes
 
 [file header]
-raw:              F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
+raw:              F5 2E B0 9C 09 13 00 00 00 00 00 00 00 00 ED 80
 magic:            0x9CB02EF5
-version:          8
+version:          9
 chunk_code:       19  (524288 bytes)
-flags:            0x00  (checksum=0 dict=0)
-header_checksum:  0x5BEF
+flags:            0x00  (checksum=0 dict=0 seek=0)
+header_checksum:  0x80ED
 
 [block 0 @16]
-raw:              01 00 00 69 1D 00 00 81
+raw:              01 00 00 69 1D 00 00 BA
 type:             GLO (1)
 comp_size:        7529
-header_checksum:  0x81
+header_checksum:  0xBA
+raw_range:        [0, 16384)
   raw:            70 07 00 00 7E 07 00 00 01 00 00 00
   n_sequences:    1904
   n_literals:     1918
@@ -26,11 +27,10 @@ header_checksum:  0x81
 payload_hash:     0x97F546E2
 
 [block 1 @7553]
-raw:              FF 00 00 00 00 00 00 02
+raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
-header_checksum:  0x02
+header_checksum:  0x83
 
 [footer]
-raw:              00 40 00 00 00 00 00 00 00 00 00 00
+raw:              00 40 00 00 00 00 00 00
 src_size:         16384
-global_hash:      0x00000000

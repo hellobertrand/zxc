@@ -1,19 +1,20 @@
 file:             10_glo_offset16
-size:             4184 bytes
+size:             4180 bytes
 
 [file header]
-raw:              F5 2E B0 9C 08 13 00 00 00 00 00 00 00 00 EF 5B
+raw:              F5 2E B0 9C 09 13 00 00 00 00 00 00 00 00 ED 80
 magic:            0x9CB02EF5
-version:          8
+version:          9
 chunk_code:       19  (524288 bytes)
-flags:            0x00  (checksum=0 dict=0)
-header_checksum:  0x5BEF
+flags:            0x00  (checksum=0 dict=0 seek=0)
+header_checksum:  0x80ED
 
 [block 0 @16]
-raw:              01 00 00 2C 10 00 00 69
+raw:              01 00 00 2C 10 00 00 6A
 type:             GLO (1)
 comp_size:        4140
-header_checksum:  0x69
+header_checksum:  0x6A
+raw_range:        [0, 8192)
   raw:            01 00 00 00 00 10 00 00 00 00 00 00
   n_sequences:    1
   n_literals:     4096
@@ -26,11 +27,10 @@ header_checksum:  0x69
 payload_hash:     0x9311BB5C
 
 [block 1 @4164]
-raw:              FF 00 00 00 00 00 00 02
+raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
-header_checksum:  0x02
+header_checksum:  0x83
 
 [footer]
-raw:              00 20 00 00 00 00 00 00 00 00 00 00
+raw:              00 20 00 00 00 00 00 00
 src_size:         8192
-global_hash:      0x00000000

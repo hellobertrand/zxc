@@ -5,12 +5,13 @@ Reference test vectors for validating any ZXC decoder implementation.
 ## Contents
 
 ```
-v8/                 Corpus for format version 8 (FORMAT_VERSION declares it)
-  valid/            *.zxc archives, *.expected outputs, *.zxd dictionaries
-  invalid/          *.zxc archives that must be rejected
+v9/                 Corpus for format version 9 (FORMAT_VERSION declares it)
+  valid/            15 *.zxc archives, *.expected outputs, *.zxd dictionaries
+  invalid/          30 *.zxc archives that must be rejected
   vectors.sha256    Byte-stability manifest
+v8/                 Corpus for format version 8, kept as-is
 valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
-invalid_cases.h     Recipe for the 22 generated invalid ones; gen_invalid.c likewise
+invalid_cases.h     Recipe for the 24 generated invalid ones; gen_invalid.c likewise
 ```
 
 Vectors are frozen **per format version**. Older directories are kept, never regenerated.
@@ -32,7 +33,7 @@ if you do not implement the feature:
   with no dictionary a decoder stops earlier, which is `dict_required`'s case.
 
 ```sh
-cd conformance/v8            # from the repository root, or wherever you
+cd conformance/v9            # from the repository root, or wherever you
                              # unpacked the corpus; pick the version you decode
 [ -d valid ] || { echo "no corpus here"; exit 1; }
 
@@ -99,9 +100,9 @@ CI job fails on any changed byte, and checks the file set matches the manifest.
 Refresh it whenever the corpus changes on purpose:
 
 ```sh
-sha256sum conformance/v8/valid/*.zxc conformance/v8/valid/*.expected \
-          conformance/v8/valid/*.zxd conformance/v8/invalid/*.zxc \
-  | sort -k2 > conformance/v8/vectors.sha256
+sha256sum conformance/v9/valid/*.zxc conformance/v9/valid/*.expected \
+          conformance/v9/valid/*.zxd conformance/v9/invalid/*.zxc \
+  | sort -k2 > conformance/v9/vectors.sha256
 ```
 
 ## Regenerating
@@ -114,8 +115,8 @@ manifest guards them.
 
 ```sh
 cmake --build build --target zxc_valid_gen zxc_invalid_gen
-./build/zxc_valid_gen   conformance/v8/valid
-./build/zxc_invalid_gen conformance/v8/invalid
+./build/zxc_valid_gen   conformance/v9/valid
+./build/zxc_invalid_gen conformance/v9/invalid
 ```
 
 The `.expected` plaintexts and the `.zxd` dictionaries are inputs, never

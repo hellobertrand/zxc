@@ -64,6 +64,8 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
     {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
     {"sek_forged_entry", 0, NULL, 1, .generated = 1},
+    {"sek_flag_no_table", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"sek_table_no_flag", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_footer_digest", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
@@ -232,7 +234,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     } else if (!strcmp(name, "ghi_forged_offset")) {
         n = b->n_ghi;
         src = b->ghi;
-    } else if (!strcmp(name, "sek_forged_entry")) {
+    } else if (!strcmp(name, "sek_forged_entry") || !strcmp(name, "sek_table_no_flag")) {
         n = b->n_seek;
         src = b->seek;
     }
@@ -264,6 +266,16 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         d[8] = 0xBE;
         d[9] = 0xAD;
         d[10] = 0xDE;
+        zxc_file_header_sign(d);
+    } else if (!strcmp(name, "sek_flag_no_table")) {
+        /* Sec 11.1: the flag announces a seek table between EOF and the footer.
+         * Set on an archive that carries none, the tail no longer parses. */
+        d[6] |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
+        zxc_file_header_sign(d);
+    } else if (!strcmp(name, "sek_table_no_flag")) {
+        /* The mirror case: a real table, but the flag says the footer follows
+         * EOF. Reading the table as a footer must fail, never half-succeed. */
+        d[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
         zxc_file_header_sign(d);
     } else if (!strcmp(name, "dict_id_mismatch")) {
         /* Same shape, with an id matching no committed .zxd: offered a real

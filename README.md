@@ -361,9 +361,9 @@ Community-maintained bindings:
 
 ## Format & Conformance
 
-The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 8), so any third party can build an independent, interoperable decoder.
+The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 9), so any third party can build an independent, interoperable decoder.
 
-> **Upgrading?** The current format is **v8** — block sub-headers cut from 16 to 12 bytes, section descriptors reduced to the sizes the header cannot imply (GHI carries none at all), and a mandatory 32-byte payload tail that gives the literal decoder its read-ahead slack. Like the v6->v7 change, this is a deliberate clean break: v8 tools reject v7 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
+> **Upgrading?** The current format is **v9** — block checksums now cover the decoded bytes and are seeded by block position, the footer carries an optional archive digest, and the seek table became self-validating groups announced by a header flag. Like every break before it, this one is clean: v9 tools reject v8 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
 
 Two complementary, byte-frozen suites guard that format:
 

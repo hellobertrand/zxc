@@ -1,10 +1,10 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: August 2026
-**Format Version**: 8
+**Date**: September 2026
+**Format Version**: 9
 
 This document describes the on-disk binary format of a ZXC compressed file.
-It formalizes the current reference implementation of format version **8**.
+It formalizes the current reference implementation of format version **9**.
 
 ## 1. Conventions
 
@@ -54,7 +54,7 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `8`. Any other value is rejected as an unsupported version;
+- **Format Version** (`u8`): `9`. Any other value is rejected as an unsupported version;
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -773,7 +773,7 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 ### 10.4 Minimum conforming decoder
 
-A minimal conforming decoder for version 8 **MUST** support:
+A minimal conforming decoder for version 9 **MUST** support:
 - File header parsing and checksum validation
 - **RAW** blocks (type 0) - passthrough copy.
 - **GLO** blocks (type 1) - full LZ decode with extras varint, including Huffman
@@ -983,7 +983,7 @@ Generated archive size: **62 bytes**.
 ### 14.1 Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 3C 35
+00000000: F5 2E B0 9C 09 13 80 00 00 00 00 00 00 00 6D 86
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 0A 00
 00000030: 00 00 00 00 00 00 BD 8A 9E 74 2A A2 9A B6
@@ -994,15 +994,15 @@ Generated archive size: **62 bytes**.
 #### A) File Header (offset `0x00`, 16 bytes)
 
 ```text
-F5 2E B0 9C | 08 | 13 | 80 | 00 00 00 00 00 00 00 | 3C 35
+F5 2E B0 9C | 09 | 13 | 80 | 00 00 00 00 00 00 00 | 6D 86
 ```
 
 - `F5 2E B0 9C` -> magic word (LE) = `0x9CB02EF5`.
-- `08` -> format version 8.
+- `09` -> format version 9.
 - `13` -> chunk-size code 19 (exponent encoding: `2^19 = 524288` bytes, i.e. 512 KiB, the default).
 - `80` -> checksum enabled (`HAS_CHECKSUM=1`, algo id 0).
 - next 7 bytes are reserved zeros.
-- `3C 35` -> header checksum (LE value `0x353C`).
+- `6D 86` -> header checksum (LE value `0x866D`).
 
 #### B) Data Block #0 (RAW)
 

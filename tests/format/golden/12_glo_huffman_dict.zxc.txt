@@ -1,20 +1,21 @@
 file:             12_glo_huffman_dict
-size:             548 bytes
+size:             544 bytes
 
 [file header]
-raw:              F5 2E B0 9C 08 13 40 4F A2 87 7B 00 00 00 E4 4E
+raw:              F5 2E B0 9C 09 13 40 4F A2 87 7B 00 00 00 19 27
 magic:            0x9CB02EF5
-version:          8
+version:          9
 chunk_code:       19  (524288 bytes)
-flags:            0x40  (checksum=0 dict=1)
+flags:            0x40  (checksum=0 dict=1 seek=0)
 dict_id:          0x7B87A24F
-header_checksum:  0x4EE4
+header_checksum:  0x2719
 
 [block 0 @16]
-raw:              01 00 00 F8 01 00 00 DD
+raw:              01 00 00 F8 01 00 00 8D
 type:             GLO (1)
 comp_size:        504
-header_checksum:  0xDD
+header_checksum:  0x8D
+raw_range:        [0, 3969)
   raw:            54 00 00 00 71 01 00 00 03 00 00 00
   n_sequences:    84
   n_literals:     369
@@ -27,11 +28,10 @@ header_checksum:  0xDD
 payload_hash:     0x9D747094
 
 [block 1 @528]
-raw:              FF 00 00 00 00 00 00 02
+raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
-header_checksum:  0x02
+header_checksum:  0x83
 
 [footer]
-raw:              81 0F 00 00 00 00 00 00 00 00 00 00
+raw:              81 0F 00 00 00 00 00 00
 src_size:         3969
-global_hash:      0x00000000
