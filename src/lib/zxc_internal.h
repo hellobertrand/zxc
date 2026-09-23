@@ -380,8 +380,10 @@ extern "C" {
 #define ZXC_DICT_MAGIC 0x9CB0D1C7U
 /** @brief Current dictionary file format version. A 128-byte packed Huffman
  *         code-lengths table (shared literal table) always follows the
- *         dictionary content. */
-#define ZXC_DICT_VERSION 1
+ *         dictionary content. Version 2 re-signs the header with the
+ *         multiplicative hash of FORMAT.md section 7.1, so version 1 fails on
+ *         the version byte instead of on an unmatchable checksum. */
+#define ZXC_DICT_VERSION 2
 /** @brief K-gram length scanned by the dictionary trainer. Aligned on the LZ
  *         minimum match length so trained patterns are matchable at encode time. */
 #define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN

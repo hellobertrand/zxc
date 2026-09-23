@@ -7,7 +7,7 @@ version byte for exact equality and rejects anything else with
 
 | Format | Introduced by | A decoder reads | Headline change |
 | :--- | :--- | :--- | :--- |
-| **v9** | ZXC **0.15.x** | v9 only | Multiplicative header and block checksums; block checksums cover the decoded bytes and the footer carries an optional archive digest; seek table rebuilt as self-validating groups, announced by `HAS_SEEK_TABLE` |
+| **v9** | ZXC **0.15.x** | v9 only | Multiplicative header and block checksums; block checksums cover the decoded bytes and the footer carries an optional archive digest; seek table rebuilt as self-validating groups, announced by `HAS_SEEK_TABLE`; dictionaries move to `.zxd` version 2 |
 | **v8** | ZXC 0.14.x | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
 | **v7** | ZXC 0.13.x | v7 only | Huffman bits use the **PivCo** wire layout; new **level 7 (ULTRA)** adds Huffman-coded tokens |
 | **v6** | ZXC 0.12.x | v6 only | **NUM** block removed; **GHI** renumbered type 3 → 2 |
@@ -17,6 +17,11 @@ Because each decoder rejects other versions outright, migrating an archive means
 a one-time **transcode**: decompress it with a build that understands the *old*
 format, then recompress the bytes with the *new* build. The same recipe covers
 every jump.
+
+Dictionaries carry their own version byte. A `.zxd` from 0.14.x declares version
+1 and a v9 build rejects it as unsupported: re-save it with the new build. Only
+the version byte and the header checksum change — content, shared table and
+`dict_id` are untouched, so the archives bound to it stay valid.
 
 ---
 

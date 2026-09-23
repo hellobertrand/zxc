@@ -894,7 +894,7 @@ Dictionaries are stored as standalone `.zxd` files with the following layout:
 ```text
 Offset  Size  Field
 0x00    4     Magic Word (0x9CB0D1C7 LE)
-0x04    1     Dictionary format version (currently 1)
+0x04    1     Dictionary format version (currently 2)
 0x05    1     Flags (bits 0..3: checksum algorithm id; bits 4..7 reserved)
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, binds content AND shared table, see below)
@@ -906,8 +906,9 @@ Offset  Size  Field
 ```
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
-- **Version**: `1`. Decoders reject any other version with
-  an unsupported dictionary version.
+- **Version**: `2`. Decoders reject any other version with
+  an unsupported dictionary version. Version 1 shipped with format v8 and carries
+  the older header checksum of § 7.1, so it fails on the version byte.
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
 - **Shared literal Huffman table**: code lengths for the Literal Encoding `3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
@@ -1156,7 +1157,7 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 ### 15.1 Full hexdump
 
 ```text
-00000000: C7 D1 B0 9C 01 00 05 00 34 07 FC 0C 00 00 58 45
+00000000: C7 D1 B0 9C 02 00 05 00 34 07 FC 0C 00 00 C6 51
 00000010: 68 65 6C 6C 6F 00 00 00 00 00 00 00 00 00 00 00
 00000020: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 00000030: 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
@@ -1173,16 +1174,16 @@ A minimal dictionary whose content is the 5 ASCII bytes `hello`. Total file size
 #### A) Dictionary Header (offset `0x00`, 16 bytes)
 
 ```text
-C7 D1 B0 9C | 01 | 00 | 05 00 | 34 07 FC 0C | 00 00 | 58 45
+C7 D1 B0 9C | 02 | 00 | 05 00 | 34 07 FC 0C | 00 00 | C6 51
 ```
 
 - `C7 D1 B0 9C` -> magic word (LE) = `0x9CB0D1C7` (`.zxd` dictionary).
-- `01` -> dictionary format version 1.
+- `02` -> dictionary format version 2.
 - `00` -> flags (bits 0..3 = checksum algorithm id `0` = RapidHash; bits 4..7 reserved).
 - `05 00` -> content size (LE) = `5` bytes.
 - `34 07 FC 0C` -> `dict_id` (LE) = `0x0CFC0734`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `58 45` -> header checksum (LE) = `0x4558`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
+- `C6 51` -> header checksum (LE) = `0x51C6`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 
