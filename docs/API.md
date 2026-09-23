@@ -654,10 +654,10 @@ Returns an accurate estimate of the peak memory used when compressing a single
 block of `src_size` bytes at the given `level` via `zxc_compress_block()`.
 
 The estimate covers all per-chunk working buffers (chain table, literals,
-sequence/token/offset/extras buffers) plus the fixed hash tables and the
-cache-line alignment padding. At `level >= 6` it also includes the transient
-DP scratch (~18 × `src_size` bytes) malloc'd by the price-based optimal parser
-for the duration of each block. It scales roughly linearly with `src_size` and
+sequence/token/offset/extras buffers), the fixed hash tables and match-split
+histograms, and the cache-line alignment padding. At `level >= 6` it also
+includes the optimal parser's scratch (~8.125 × `src_size`), allocated once and
+reused. It scales roughly linearly with `src_size` and
 is intended for integrators that need to build an accurate memory budget
 (filesystems, embedded devices, sandboxed workloads).
 

@@ -86,6 +86,7 @@ typedef struct {
     size_t off_hash_tags;
     size_t off_chain;
     size_t off_seq_union;
+    size_t off_split_hist;
     size_t off_extras;
     size_t off_lit_cctx;
     // meaningful only when sz_opt > 0 (level >= ZXC_LEVEL_DENSITY).
@@ -137,8 +138,9 @@ static void zxc_dctx_entropy_sizes(const size_t chunk_size, size_t* RESTRICT sz_
  * Decompress (@p mode == 0) reserves @c work_buf, @c lit_buffer (both padded
  * for wild-copy overshoot) and the token / PivCo decode scratch buffers.
  * Compress (@p mode == 1) reserves the LZ match-finder
- * tables (hash positions, tags, chain), the sequence / extras / literal buffers
- * and - only at @c level >= ZXC_LEVEL_DENSITY - the optimal-parser scratch. A
+ * tables (hash positions, tags, chain), the sequence buffers, the match-split
+ * histograms, the extras and literal buffers and - only at @c level >=
+ * ZXC_LEVEL_DENSITY - the optimal-parser scratch. A
  * @p dict_size > 0 appends the [dict | data] concat scratch in both modes.
  *
  * Every offset is cache-line aligned via @c ZXC_ALIGN_CL.
@@ -188,14 +190,14 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             layout.total += ZXC_ALIGN_CL(layout.sz_pivco_dctx);
         }
     } else {
-        // Compress: 6 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY.
+        // Compress: 7 partitions + optional opt_scratch at level >= ZXC_LEVEL_DENSITY.
         const uint32_t offset_bits = zxc_log2_u32((uint32_t)chunk_size);
         layout.max_seq = max_seq;
         layout.sz_hash_pos = ZXC_LZ_HASH_SIZE * sizeof(uint32_t);
         layout.sz_hash_tags = ZXC_LZ_HASH_SIZE * sizeof(uint8_t);
         const size_t sz_chain = ZXC_LZ_WINDOW_SIZE * sizeof(uint16_t);
-        // buf_sequences (GHI, level <= ZXC_LEVEL_FAST) aliases buf_offsets + buf_tokens (GLO,
-        // level >= ZXC_LEVEL_DEFAULT). Mutually exclusive per block; sized for the larger.
+        // buf_sequences (GHI, level <= ZXC_LEVEL_FAST) aliases buf_offsets, buf_tokens and
+        // buf_split (GLO, level >= ZXC_LEVEL_DEFAULT): 4 bytes per sequence either way.
         const size_t sz_seq_union = layout.max_seq * sizeof(uint32_t);
         const size_t vbyte_len = (offset_bits + 6) / 7;
         const size_t sz_extras = layout.max_seq * 2 * vbyte_len;
@@ -224,6 +226,8 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         layout.total += ZXC_ALIGN_CL(sz_chain);
         layout.off_seq_union = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_seq_union);
+        layout.off_split_hist = layout.total;
+        layout.total += ZXC_ALIGN_CL(sizeof(zxc_glo_split_hist_t));
         layout.off_extras = layout.total;
         layout.total += ZXC_ALIGN_CL(sz_extras);
         layout.off_lit_cctx = layout.total;
@@ -323,6 +327,8 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     ctx->buf_sequences = (uint32_t*)(mem + layout.off_seq_union);
     ctx->buf_offsets = (uint16_t*)(mem + layout.off_seq_union);
     ctx->buf_tokens = mem + layout.off_seq_union + layout.max_seq * sizeof(uint16_t);
+    ctx->buf_split = ctx->buf_tokens + layout.max_seq;
+    ctx->buf_split_hist = (zxc_glo_split_hist_t*)(void*)(mem + layout.off_split_hist);
     ctx->buf_extras = mem + layout.off_extras;
     ctx->literals = mem + layout.off_lit_cctx;
     if (layout.sz_opt) {
@@ -425,6 +431,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     ctx->buf_tokens = NULL;
     ctx->buf_offsets = NULL;
     ctx->buf_extras = NULL;
+    ctx->buf_split = NULL;
+    ctx->buf_split_hist = NULL;
     ctx->literals = NULL;
     ctx->work_buf = NULL;
     ctx->tok_buffer = NULL;

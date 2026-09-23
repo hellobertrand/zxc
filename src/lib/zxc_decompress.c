@@ -33,60 +33,6 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-/**
- * @brief Reads a Prefix Varint encoded integer.
- *
- * Unary prefix bits in the first byte give the total length, at most 3 bytes
- * here since that covers every length this decoder can meet:
- *
- * Format:
- * - 1 byte  (0xxxxxxx):  7-bit payload (val < 2^7  = 128)
- * - 2 bytes (10xxxxxx): 14-bit payload (val < 2^14 = 16384)
- * - 3 bytes (110xxxxx): 21-bit payload (val < 2^21 = 2097152)
- *
- * @param[in,out] ptr Pointer to a pointer to the current position in the stream.
- * @param[in] end Pointer to the end of the readable stream (for bounds checking).
- * @return The decoded 32-bit integer, or 0 if reading would overflow bounds (safe default).
- */
-static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uint8_t* end) {
-    const uint8_t* p = *ptr;
-    if (UNLIKELY(p >= end)) return 0;
-
-    const uint32_t b0 = p[0];
-
-    // 1 Byte: 0xxxxxxx (7 bits) -> val < 128 (2^7)
-    if (LIKELY(b0 < 0x80)) {
-        *ptr = p + 1;
-        return b0;
-    }
-
-    // 2 Bytes: 10xxxxxx xxxxxxxx (14 bits) -> val < 16384 (2^14)
-    if (LIKELY(b0 < 0xC0)) {
-        if (UNLIKELY(p + 1 >= end)) {
-            *ptr = end;
-            return 0;
-        }
-        *ptr = p + 2;
-        return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
-    }
-
-    // 3 Bytes: 110xxxxx xxxxxxxx xxxxxxxx (21 bits) -> val < 2^21. The longest
-    // a legitimate varint can be: values are (ll - MASK) or (ml - MASK), always
-    // strictly below block_size_max = 2^21.
-    if (LIKELY(b0 < 0xE0)) {
-        if (UNLIKELY(p + 2 >= end)) {
-            *ptr = end;
-            return 0;
-        }
-        *ptr = p + 3;
-        return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
-    }
-
-    // extra encoding: out-of-spec for the current format, reject.
-    *ptr = end;
-    return 0;
-}
-
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
     defined(ZXC_USE_AVX512)
 /**
