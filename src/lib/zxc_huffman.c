@@ -472,11 +472,11 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_huf_nudge_j(const zxc_huf_nudge_cost_t* c)
 static uint32_t zxc_huf_nudge_clamp(const uint32_t want, const uint32_t s, const uint32_t n_rem,
                                     const int l, const int cap) {
     if (n_rem <= s || l >= cap) return n_rem; /* forced finish */
-    const uint64_t m = (uint64_t)1 << (cap - l);
+    const uint32_t m = 1U << (cap - l);
     const uint32_t lo = (2 * s > n_rem) ? 2 * s - n_rem : 0;
-    uint32_t hi = s - 1; /* s < n_rem here, so min(s-1, n_rem-1) == s-1 */
-    const uint64_t cap_hi = ((uint64_t)s * m - n_rem) / (m - 1);
-    if (cap_hi < hi) hi = (uint32_t)cap_hi;
+    uint32_t hi = s - 1;
+    const uint32_t cap_hi = (s * m - n_rem) / (m - 1);
+    if (cap_hi < hi) hi = cap_hi;
     const uint32_t c = want < lo ? lo : want;
     return c > hi ? hi : c;
 }
@@ -557,12 +557,12 @@ static void zxc_huf_nudge_walk(const uint32_t* RESTRICT blc0, const uint64_t* RE
             // Uniform finish: c leaves here, the rest as i complete depth-D
             // subtrees (c*(2^D - 1) == s*2^D - n_rem must divide exactly).
             for (int d = 1; d <= cap - l && n_cand < 6; d++) {
-                const uint64_t den = ((uint64_t)1 << d) - 1;
-                const int64_t num = (int64_t)((uint64_t)s << d) - (int64_t)n_rem;
-                if (num < 0 || (uint64_t)num % den) continue;
-                const uint64_t c64 = (uint64_t)num / den;
-                if (c64 >= s || c64 >= n_rem) continue; /* need i >= 1 and a remainder */
-                cand[n_cand].c = (uint32_t)c64;
+                const uint32_t den = (1U << d) - 1;
+                const int32_t num = (int32_t)(s << d) - (int32_t)n_rem;
+                if (num < 0 || (uint32_t)num % den) continue;
+                const uint32_t c = (uint32_t)num / den;
+                if (c >= s || c >= n_rem) continue; /* need i >= 1 and a remainder */
+                cand[n_cand].c = c;
                 cand[n_cand++].flat_d = d;
                 break; /* the shallowest exact finish is the aggressive one */
             }
@@ -719,11 +719,11 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
                     continue;
                 }
                 if (lc == cap_c) continue; /* must finish at the cap */
-                const uint64_t mm = (uint64_t)1 << (cap_c - lc);
+                const uint32_t mm = 1U << (cap_c - lc);
                 const uint32_t lo = (2 * s > n_rem) ? 2 * s - n_rem : 0;
                 uint32_t hi = s - 1;
-                const uint64_t cap_hi = ((uint64_t)s * mm - n_rem) / (mm - 1);
-                if (cap_hi < hi) hi = (uint32_t)cap_hi;
+                const uint32_t cap_hi = (s * mm - n_rem) / (mm - 1);
+                if (cap_hi < hi) hi = cap_hi;
                 for (uint32_t c = lo; c <= hi; c++) {
                     const uint64_t j =
                         j0 + zxc_huf_nudge_dp_run_j(lu, lc, g_log2, s, c, pfg, (uint32_t)k);

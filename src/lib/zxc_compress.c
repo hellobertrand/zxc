@@ -1038,11 +1038,12 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     // Sample-weighted sum of code lengths = predicted Huffman bits; divide by
     // the sample count for bits/byte, rounded up. The DP is integer, and
     // rounding up favours matches over fractional-cost literals.
-    uint64_t total_bits = 0;
+    uint32_t total_bits = 0;
     for (int k = 0; k < ZXC_HUF_NUM_SYMBOLS; k++) {
-        total_bits += (uint64_t)hist[k] * (uint64_t)code_len[k];
+        total_bits += hist[k] * (uint32_t)code_len[k];
     }
-    const uint32_t avg = (uint32_t)((total_bits + sampled - 1) / sampled);
+    const uint32_t n = (uint32_t)sampled;
+    const uint32_t avg = (total_bits + n - 1) / n;
 
     // Cap at RAW cost: if Huffman can't beat 8 bits/byte on the sample,
     // the encoder will pick RAW anyway and 8 is the actual literal cost.
