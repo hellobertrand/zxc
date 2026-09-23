@@ -1,9 +1,11 @@
 # Kernel and freestanding integration
 
-Porting zxc to a host with no libc: a bootloader or firmware unpacking its
+Porting ZXC to a host with no libc: a bootloader or firmware unpacking its
 payload, a read-only filesystem image, an initramfs. ZXC compresses slowly and
-decompresses fast: data written once, read many times. A backend compressing on
-every page write (zram, zswap) would pay the slow side on its hot path.
+decompresses fast: data written once, read many times. So compress in userspace,
+once and at any level - the image builder, the initramfs generator, the firmware
+toolchain - and decompress in the kernel. A backend compressing on every page
+write (zram, zswap) would pay the slow side on its hot path.
 
 The core uses no floating point, no VLA and no `alloca`, and calls the C
 library only through `src/lib/zxc_deps.h`.
@@ -23,9 +25,9 @@ headers) and `<string.h>` (`rapidhash.h`, for `memcpy`). The compiler's
 #include <linux/string.h>
 ```
 
-Decoding peaks at 4.5 KiB of stack, inside a 16 KiB kernel stack and an 8 KiB
-one on 32-bit.
-Compression is the level-dependent one (see [Contexts](#contexts)).
+Decoding peaks at 4.5 KiB of stack whatever level the archive was written at,
+inside a 16 KiB kernel stack and an 8 KiB one on 32-bit. Compressing in the
+kernel is the exception, and bounded by level (see [Contexts](#contexts)).
 
 ## What to build
 
@@ -106,12 +108,13 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
 - A heap context (`zxc_create_dctx`) allocates on the first decode, and again on
   the first entropy-coded block. With preemption disabled, that is a
   `BUG: scheduling while atomic`.
-- Compression allocates per block from `ZXC_LEVEL_DENSITY` (6) upward: the joint
-  Huffman nudge sizes a scratch pool from the data. Stay below 6.
 - Stack, measured with a painted thread stack and with GCC's `-fstack-usage`
-  worst path, both under the flags above: decoding 4.5 KiB, compression 5.9 KiB
-  up to level 5 (tight on an 8 KiB 32-bit stack). Level 6 and 7 reach 21 KiB in
-  the nudge, past a 16 KiB kernel stack - a second reason to stay below 6.
+  worst path, both under the flags above: decoding 4.5 KiB at every level,
+  compression 5.9 KiB up to level 5 (tight on an 8 KiB 32-bit stack).
+- Compressing in the kernel means levels 1-5. From `ZXC_LEVEL_DENSITY` (6) up,
+  the joint Huffman nudge allocates a scratch pool per block and reaches 21 KiB
+  of stack, past a 16 KiB kernel stack. Archives written at 6-7 in userspace
+  decode like any other.
 
 ## Exactly-sized destinations
 

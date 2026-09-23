@@ -60,7 +60,8 @@ MODULE_LICENSE("Dual BSD/GPL");
 
 def main(doc_path, out):
     root = os.path.dirname(os.path.dirname(os.path.abspath(doc_path)))
-    blocks = re.findall(r"```(\w*)\n(.*?)```", open(doc_path).read(), re.S)
+    with open(doc_path) as f:
+        blocks = re.findall(r"```(\w*)\n(.*?)```", f.read(), re.S)
     make = [b for lang, b in blocks if lang == "make"]
     deps = [b for lang, b in blocks if lang == "c" and "#define ZXC_DEPS_H" in b]
     shims = [b for lang, b in blocks if lang == "c" and b.startswith("/* shim/")]
