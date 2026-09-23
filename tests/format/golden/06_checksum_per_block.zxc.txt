@@ -1,19 +1,20 @@
 file:             06_checksum_per_block
-size:             215 bytes
+size:             219 bytes
 
 [file header]
-raw:              F5 2E B0 9C 08 13 80 00 00 00 00 00 00 00 6E 5B
+raw:              F5 2E B0 9C 09 13 80 00 00 00 00 00 00 00 6D 86
 magic:            0x9CB02EF5
-version:          8
+version:          9
 chunk_code:       19  (524288 bytes)
-flags:            0x80  (checksum=1 dict=0)
-header_checksum:  0x5B6E
+flags:            0x80  (checksum=1 dict=0 seek=0)
+header_checksum:  0x866D
 
 [block 0 @16]
-raw:              01 00 00 A7 00 00 00 17
+raw:              01 00 00 A7 00 00 00 BE
 type:             GLO (1)
 comp_size:        167
-header_checksum:  0x17
+header_checksum:  0xBE
+raw_range:        [0, 8192)
   raw:            01 00 00 00 7B 00 00 00 00 00 00 01
   n_sequences:    1
   n_literals:     123
@@ -24,14 +25,14 @@ header_checksum:  0x17
   lit_comp:       123
   sect_total:     125
 payload_hash:     0x9B5CCFC1
-block_checksum:   0x9B5CCFC1
+block_checksum:   0x6AB267A0
 
 [block 1 @195]
-raw:              FF 00 00 00 00 00 00 02
+raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
-header_checksum:  0x02
+header_checksum:  0x83
 
 [footer]
-raw:              00 20 00 00 00 00 00 00 C1 CF 5C 9B
+raw:              00 20 00 00 00 00 00 00 E1 06 7F 41 20 51 77 99
+digest:           0x99775120417F06E1
 src_size:         8192
-global_hash:      0x9B5CCFC1

@@ -45,6 +45,57 @@ static int has_suffix(const char* s, const char* suffix) {
 
 /* ---------- valid vector test -------------------------------------------- */
 
+/* Reads a seekable vector's last block through the random-access path.
+ *
+ * Whole-archive decompression walks the blocks in order and never consults the
+ * seek table. The last block is the one worth seeking to: past ZXC_SEEK_GROUP
+ * blocks it sits in the second group, so reaching it means resolving that
+ * group's anchor. Returns 1 on success. */
+static int check_seekable_vector(const char* zxc_path, const uint8_t* comp, const size_t comp_sz,
+                                 const uint8_t* expected, const size_t expected_sz,
+                                 const void* dict, const size_t dict_size, const void* dict_huf) {
+    zxc_seekable* s = zxc_seekable_open(comp, comp_sz);
+    if (!s) {
+        fprintf(stderr, "FAIL: %s  header announces a seek table but open failed\n", zxc_path);
+        return 0;
+    }
+    zxc_seekable_set_checksum(s, 1);
+    if (dict) zxc_seekable_set_dict(s, dict, dict_size, dict_huf);
+
+    int ok = 1;
+    const uint64_t nblocks = zxc_seekable_get_num_blocks(s);
+    const uint32_t last_sz = nblocks ? zxc_seekable_get_block_decomp_size(s, nblocks - 1) : 0;
+
+    if (nblocks == 0 || last_sz == 0 || last_sz > expected_sz) {
+        fprintf(stderr, "FAIL: %s  %llu blocks, last decompresses to %u of %zu bytes\n", zxc_path,
+                (unsigned long long)nblocks, last_sz, expected_sz);
+        ok = 0;
+    } else {
+        const uint64_t offset = expected_sz - last_sz;
+        uint8_t* out = (uint8_t*)malloc(last_sz);
+        if (!out) {
+            fprintf(stderr, "FAIL: %s  OOM\n", zxc_path);
+            ok = 0;
+        } else {
+            const int64_t got = zxc_seekable_decompress_range(s, out, last_sz, offset, last_sz);
+            if (got != (int64_t)last_sz) {
+                fprintf(stderr, "FAIL: %s  seek to block %llu -> %s\n", zxc_path,
+                        (unsigned long long)nblocks - 1,
+                        got < 0 ? zxc_error_name((int)got) : "short read");
+                ok = 0;
+            } else if (memcmp(out, expected + offset, last_sz) != 0) {
+                fprintf(stderr, "FAIL: %s  seek to block %llu returned another block's bytes\n",
+                        zxc_path, (unsigned long long)nblocks - 1);
+                ok = 0;
+            }
+            free(out);
+        }
+    }
+
+    zxc_seekable_free(s);
+    return ok;
+}
+
 /**
  * @brief Searches for a .zxd dictionary file in the same directory as @p zxc_path
  *        whose dict_id matches @p target_id. Returns the loaded content (caller frees)
@@ -156,7 +207,10 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
             fprintf(stderr, "FAIL: %s  OOM\n", zxc_path);
             ok = 0;
         } else {
-            zxc_decompress_opts_t dopts = {0};
+            /* A vector that stores checksums only proves the block-checksum
+             * rules if the decoder is asked to check them; the opt is a no-op
+             * on vectors carrying none. Same reason as test_invalid_vector. */
+            zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
             if (dict) {
                 dopts.dict = dict;
                 dopts.dict_size = dict_size;
@@ -178,6 +232,10 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
             free(output);
         }
     }
+
+    if (ok && comp_sz >= ZXC_FILE_HEADER_SIZE && (comp[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE))
+        ok = check_seekable_vector(zxc_path, comp, comp_sz, expected, expected_sz, dict, dict_size,
+                                   dict_huf);
 
     free(dict_buf);
     free(comp);

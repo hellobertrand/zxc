@@ -219,10 +219,11 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     uint8_t flags = buf[6];
     int has_checksum = (flags & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
     int has_dict = (flags & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
+    int has_seek = (flags & ZXC_FILE_FLAG_HAS_SEEK_TABLE) ? 1 : 0;
     const int want_dict = (gc->opts.dict && gc->opts.dict_size > 0);
     CHECK((flags & 0x0FU) == 0, "checksum algo id %u, expected 0", flags & 0x0FU);
-    CHECK((flags & 0x30U) == 0, "reserved flag bits set (0x%02X)",
-          flags); /* bit 6 = HAS_DICTIONARY */
+    CHECK((flags & 0x10U) == 0, "reserved flag bit 4 set (0x%02X)", flags);
+    CHECK(has_seek == gc->expect_seek, "HAS_SEEK_TABLE=%d, expected %d", has_seek, gc->expect_seek);
     CHECK(has_checksum == gc->opts.checksum_enabled, "HAS_CHECKSUM=%d, expected %d", has_checksum,
           gc->opts.checksum_enabled);
     CHECK(has_dict == want_dict, "HAS_DICTIONARY=%d, expected %d", has_dict, want_dict);
@@ -243,7 +244,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         uint16_t want = zxc_hash16(tmp);
         uint16_t got = zxc_le16(buf + 14);
         CHECK(got == want, "file header checksum mismatch: got 0x%04X want 0x%04X", got, want);
-        EMIT("flags:            0x%02X  (checksum=%d dict=%d)\n", flags, has_checksum, has_dict);
+        EMIT("flags:            0x%02X  (checksum=%d dict=%d seek=%d)\n", flags, has_checksum,
+             has_dict, has_seek);
         if (has_dict) EMIT("dict_id:          0x%08X\n", zxc_le32(buf + 7));
         EMIT("header_checksum:  0x%04X\n", got);
     }
@@ -390,6 +392,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         off += ZXC_BLOCK_HEADER_SIZE + (size_t)table;
         seek_present = 1;
     }
+    CHECK(seek_present == has_seek, "SEK present=%d but header flag=%d", seek_present, has_seek);
     CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
           gc->expect_seek);
 

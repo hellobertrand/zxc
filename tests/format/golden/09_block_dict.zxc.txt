@@ -1,20 +1,21 @@
 file:             09_block_dict
-size:             100 bytes
+size:             96 bytes
 
 [file header]
-raw:              F5 2E B0 9C 08 13 40 AD FB 05 F0 00 00 00 57 3E
+raw:              F5 2E B0 9C 09 13 40 AD FB 05 F0 00 00 00 59 E8
 magic:            0x9CB02EF5
-version:          8
+version:          9
 chunk_code:       19  (524288 bytes)
-flags:            0x40  (checksum=0 dict=1)
+flags:            0x40  (checksum=0 dict=1 seek=0)
 dict_id:          0xF005FBAD
-header_checksum:  0x3E57
+header_checksum:  0xE859
 
 [block 0 @16]
-raw:              01 00 00 38 00 00 00 AC
+raw:              01 00 00 38 00 00 00 AD
 type:             GLO (1)
 comp_size:        56
-header_checksum:  0xAC
+header_checksum:  0xAD
+raw_range:        [0, 4096)
   raw:            03 00 00 00 0C 00 00 00 00 00 00 01
   n_sequences:    3
   n_literals:     12
@@ -27,11 +28,10 @@ header_checksum:  0xAC
 payload_hash:     0x75262757
 
 [block 1 @80]
-raw:              FF 00 00 00 00 00 00 02
+raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
-header_checksum:  0x02
+header_checksum:  0x83
 
 [footer]
-raw:              00 10 00 00 00 00 00 00 00 00 00 00
+raw:              00 10 00 00 00 00 00 00
 src_size:         4096
-global_hash:      0x00000000

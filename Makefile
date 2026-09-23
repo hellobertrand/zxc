@@ -21,6 +21,9 @@
 BUILD       ?= build
 CMAKE       ?= cmake
 CMAKE_EXTRA ?=
+# Older corpus are frozen, so `vectors` must not touch
+# their manifests (conformance/README.md).
+FORMAT_VERSION := $(shell sed -n 's/^\#define ZXC_FILE_FORMAT_VERSION \([0-9]*\).*/\1/p' src/lib/zxc_internal.h)
 JOBS        ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 .PHONY: all test conformance golden vectors format format-check lint doc clean
@@ -65,10 +68,9 @@ vectors:
 	@./$(BUILD)/zxc_valid_gen
 	@./$(BUILD)/zxc_invalid_gen
 	@$(SHA256) tests/format/golden/*.zxc | sort -k2 > tests/format/golden.sha256
-	@for d in conformance/v*/; do d=$${d%/}; \
+	@d=conformance/v$(FORMAT_VERSION); \
 	    $(SHA256) $$d/valid/*.zxc $$d/valid/*.expected $$d/valid/*.zxd $$d/invalid/*.zxc \
-	      | sort -k2 > $$d/vectors.sha256; \
-	done
+	      | sort -k2 > $$d/vectors.sha256
 	@./$(BUILD)/zxc_format_golden_test --dump tests/format/golden
 	@echo "Vectors regenerated. Review the .zxc.txt dump diff before committing."
 

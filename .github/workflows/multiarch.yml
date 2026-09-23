@@ -285,12 +285,11 @@ jobs:
               echo "Running Tests for $LIB_TYPE via QEMU..."
               ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT ./$BUILD_DIR/zxc_test
 
-              # ZXC-TEMP-NO-VECTORS: vectors are frozen on v8, this branch is moving off it.
-              # echo "Running conformance + golden vectors for $LIB_TYPE via QEMU..."
-              # ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
-              #     ./$BUILD_DIR/zxc_conformance_test ./conformance
-              # ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
-              #     ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
+              echo "Running conformance + golden vectors for $LIB_TYPE via QEMU..."
+              ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
+                  ./$BUILD_DIR/zxc_conformance_test ./conformance
+              ${{ matrix.qemu_binary }} $QEMU_CPU_ARG -L $SYSROOT \
+                  ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
@@ -374,9 +373,8 @@ jobs:
 
               echo "Running Tests for $LIB_TYPE under Intel SDE (${{ matrix.tier }})..."
               $SDE ./"$BUILD_DIR"/zxc_test
-              # ZXC-TEMP-NO-VECTORS: see the note in the QEMU job.
-              # $SDE ./"$BUILD_DIR"/zxc_conformance_test ./conformance
-              # $SDE ./"$BUILD_DIR"/zxc_format_golden_test ./tests/format/golden
+              $SDE ./"$BUILD_DIR"/zxc_conformance_test ./conformance
+              $SDE ./"$BUILD_DIR"/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
