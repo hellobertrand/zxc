@@ -5,12 +5,15 @@ payload, a read-only filesystem image, an initramfs. ZXC compresses slowly and
 decompresses fast: data written once, read many times. A backend compressing on
 every page write (zram, zswap) would pay the slow side on its hot path.
 
-The core uses no floating point, no VLA and no `alloca`, has no stack frame
-above 400 bytes, and calls the C library only through `src/lib/zxc_deps.h`.
+The core uses no floating point, no VLA and no `alloca`, and calls the C
+library only through `src/lib/zxc_deps.h`.
 Two headers still have to resolve: the freestanding `<stddef.h>` and
 `<stdint.h>` the public headers include, which the compiler ships, and the
 `<string.h>` the vendored `rapidhash.h` includes for `memcpy`, a one-line shim
 over `<linux/string.h>` in a kernel tree.
+
+Decoding peaks at 4.5 KiB of stack, well inside a 16 KiB kernel stack.
+Compression is the level-dependent one (see [Contexts](#contexts)).
 
 ## What to build
 
@@ -79,11 +82,11 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
 
 | blocks  | dctx      | cctx (levels 1-5) | cctx (levels 6-7) |
 |---------|-----------|-------------------|-------------------|
-| 4 KiB   | 15 872 B  | 306 304 B         | 396 480 B         |
-| 64 KiB  | 212 480 B | 492 288 B         | 1 025 024 B       |
-| 512 KiB | 1.60 MiB  | 1.78 MiB          | 5.84 MiB          |
+| 4 KiB   | 15 872 B  | 314 496 B         | 404 672 B         |
+| 64 KiB  | 212 480 B | 500 480 B         | 1 033 216 B       |
+| 512 KiB | 1.60 MiB  | 1.79 MiB          | 5.85 MiB          |
 
-- `kvmalloc`, not `kmalloc`: a 306 KB request lands in a 512 KB slab, and an
+- `kvmalloc`, not `kmalloc`: a 314 KB request lands in a 512 KB slab, and an
   order-7 contiguous allocation is fragile under memory pressure.
 - Never put a workspace on the stack.
 - A heap context (`zxc_create_dctx`) allocates on the first decode, and again on
@@ -91,6 +94,10 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
   `BUG: scheduling while atomic`.
 - Compression allocates per block from `ZXC_LEVEL_DENSITY` (6) upward: the joint
   Huffman nudge sizes a scratch pool from the data. Stay below 6.
+- Stack, measured with a painted thread stack and with GCC's `-fstack-usage`
+  worst path, both under the flags above: decoding 4.5 KiB, compression 5.9 KiB
+  up to level 5. Level 6 and 7 reach 21 KiB in the nudge, past a 16 KiB kernel
+  stack - a second reason to stay below 6.
 
 ## Exactly-sized destinations
 
