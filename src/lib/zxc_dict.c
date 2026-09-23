@@ -19,6 +19,21 @@
 //  Dictionary ID
 // -------------------------------------------------------------------------
 
+/**
+ * @brief Computes the dictionary identifier for @p dict (and optional table).
+ *
+ * Public API; see @c zxc_dict.h. A checksum over the content, then a second one
+ * over the packed Huffman lengths seeded by the first, so a single id covers
+ * both. Stored in the archive header and re-checked on decode.
+ */
+uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
+                     const void* RESTRICT huf_lengths) {
+    if (UNLIKELY(!dict || dict_size == 0)) return 0;
+    const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
+    if (!huf_lengths) return base;
+    return zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, base, ZXC_CHECKSUM_RAPIDHASH);
+}
+
 // -------------------------------------------------------------------------
 //  .zxd format: save / load / bound
 //

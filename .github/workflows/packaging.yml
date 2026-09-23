@@ -210,7 +210,7 @@ jobs:
           # names: kernel exports (string, clz_ctz, stack protector), stock libc
           # allocators, libgcc popcount.
           mkdir -p /tmp/nf32
-          for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
+          for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_dict zxc_compress zxc_decompress zxc_huffman; do
             cc -m32 -fno-pic -c -O2 -std=gnu11 -Wall -Wextra -Wmissing-prototypes -Werror \
                -U_FORTIFY_SOURCE -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD \
                -DZXC_FUNCTION_SUFFIX=_default -Iinclude -Isrc/lib -Isrc/lib/vendors \

@@ -29,16 +29,16 @@ Compression is the level-dependent one (see [Contexts](#contexts)).
 
 ## What to build
 
-Six translation units:
+Seven translation units:
 
 ```
-zxc_common.c  zxc_pivco_tables.c  zxc_dispatch.c
+zxc_common.c  zxc_pivco_tables.c  zxc_dispatch.c  zxc_dict.c
 zxc_compress.c  zxc_decompress.c  zxc_huffman.c
 ```
 
-They carry the whole buffer API, frame included. `zxc_driver.c` needs
-`<stdio.h>`; `zxc_dict.c` (dictionary training) and `zxc_seekable.c` (random
-access) are separate features a kernel host does without.
+They carry the whole buffer API, frame and dictionaries included. Left out:
+`zxc_driver.c` (`<stdio.h>`) and `zxc_seekable.c` (the random-access reader,
+threaded).
 
 ```make
 ccflags-y += -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD

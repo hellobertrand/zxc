@@ -7,14 +7,14 @@
 
 Kbuild lines, dependency header and shims are cut from the doc's code blocks,
 so building <out-dir> tests the recipe as published. The smoke module round-trips
-a block and a frame, which pulls the six translation units in.
+a block and a frame, which pulls the seven translation units in.
 """
 import os
 import re
 import shutil
 import sys
 
-UNITS = "zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman".split()
+UNITS = "zxc_common zxc_pivco_tables zxc_dispatch zxc_dict zxc_compress zxc_decompress zxc_huffman".split()
 
 SMOKE = r"""
 #include <linux/module.h>

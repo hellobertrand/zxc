@@ -15,7 +15,6 @@
  */
 
 #include "../../include/zxc_buffer.h"
-#include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 #include "zxc_internal.h"
@@ -470,22 +469,6 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
 // ============================================================================
 
 /**
- * @brief Computes the dictionary identifier for @p dict (and optional table).
- *
- * Public API; see @c zxc_dict.h. Here, not with the trainer, so the frame
- * header links alone. A checksum over the content, then a second one
- * over the packed Huffman lengths seeded by the first, so a single id covers
- * both. Stored in the archive header and re-checked on decode.
- */
-uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
-                     const void* RESTRICT huf_lengths) {
-    if (UNLIKELY(!dict || dict_size == 0)) return 0;
-    const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
-    if (!huf_lengths) return base;
-    return zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, base, ZXC_CHECKSUM_RAPIDHASH);
-}
-
-/**
  * @brief Serialises a ZXC file header into @p dst.
  *
  * Layout (16 bytes): Magic (4) | Version (1) | Chunk (1) | Flags (1) |
@@ -594,7 +577,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 }
 
 // =========================================================================
-// SEEK TABLE WRITER (here, not with the reader, so the frame API links alone)
+// SEEK TABLE WRITER (a frame block; zxc_seekable.c is the random-access reader)
 // =========================================================================
 
 /**
