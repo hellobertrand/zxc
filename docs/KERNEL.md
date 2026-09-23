@@ -23,7 +23,8 @@ headers) and `<string.h>` (`rapidhash.h`, for `memcpy`). The compiler's
 #include <linux/string.h>
 ```
 
-Decoding peaks at 4.5 KiB of stack, well inside a 16 KiB kernel stack.
+Decoding peaks at 4.5 KiB of stack, inside a 16 KiB kernel stack and an 8 KiB
+one on 32-bit.
 Compression is the level-dependent one (see [Contexts](#contexts)).
 
 ## What to build
@@ -47,12 +48,16 @@ ccflags-y += -std=gnu11 -Wno-declaration-after-statement
 ccflags-y += -I$(src)/shim
 ccflags-y += -I$(src)/zxc/include -I$(src)/zxc/src/lib -I$(src)/zxc/src/lib/vendors
 ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
+# Several frames pass CONFIG_FRAME_WARN (2 KiB on 64-bit), an error under
+# CONFIG_WERROR. What bounds the stack is the whole path, measured below.
+ccflags-y += -Wframe-larger-than=12288
 ```
 
 `ZXC_NO_FRAME_API` keeps the block, context and static-context APIs. It is
 required, not optional: the frame path references `zxc_dict.c` and
-`zxc_seekable.c`, so the subset above does not link without it. CI builds this configuration (block-only job in
-`.github/workflows/packaging.yml`).
+`zxc_seekable.c`, so the subset above does not link without it. CI builds a
+module from this page's own snippets (`tests/kernel/module_from_doc.py`, job
+`no-frame-api` in `.github/workflows/packaging.yml`).
 
 `-std=gnu11` because kernels before 5.18 build `-std=gnu89` with C90 declaration
 checks.
@@ -104,8 +109,8 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
   Huffman nudge sizes a scratch pool from the data. Stay below 6.
 - Stack, measured with a painted thread stack and with GCC's `-fstack-usage`
   worst path, both under the flags above: decoding 4.5 KiB, compression 5.9 KiB
-  up to level 5. Level 6 and 7 reach 21 KiB in the nudge, past a 16 KiB kernel
-  stack - a second reason to stay below 6.
+  up to level 5 (tight on an 8 KiB 32-bit stack). Level 6 and 7 reach 21 KiB in
+  the nudge, past a 16 KiB kernel stack - a second reason to stay below 6.
 
 ## Exactly-sized destinations
 
@@ -125,7 +130,9 @@ Vendor a replacement for `src/lib/zxc_deps.h`:
 #include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/limits.h>
+#include <linux/mm.h>
 #include <linux/overflow.h>
+#include <linux/sched/mm.h>
 #include <linux/slab.h>
 #include <linux/string.h>
 #include <linux/types.h>
@@ -148,14 +155,20 @@ Vendor a replacement for `src/lib/zxc_deps.h`:
 #define ZXC_POPCOUNT32(v) hweight32(v)
 #define ZXC_POPCOUNT64(v) hweight64(v)
 
-/* No <stdatomic.h> here; ZXC_DISABLE_SIMD removes the publication anyway. */
-#define ZXC_USE_C11_ATOMICS 0
+/* Reclaim must not recurse into the I/O path: a no-I/O scope around
+ * GFP_KERNEL, not GFP_NOIO, which costs kvmalloc its vmalloc fallback
+ * before 5.17. */
+static inline void *zxc_kernel_alloc(size_t size, gfp_t zero)
+{
+	unsigned int noio = memalloc_noio_save();
+	void *p = kvmalloc(size, GFP_KERNEL | __GFP_NOWARN | zero);
 
-/* GFP_NOIO, not GFP_KERNEL: reclaim must not recurse into the I/O path. */
-#define ZXC_GFP (GFP_NOIO | __GFP_NOWARN)
+	memalloc_noio_restore(noio);
+	return p;
+}
 
-#define ZXC_MALLOC(size)          kvmalloc((size), ZXC_GFP)
-#define ZXC_CALLOC(nmemb, size)   kvcalloc((nmemb), (size), ZXC_GFP)
+#define ZXC_MALLOC(size)          zxc_kernel_alloc((size), 0)
+#define ZXC_CALLOC(nmemb, size)   zxc_kernel_alloc(array_size((nmemb), (size)), __GFP_ZERO)
 #define ZXC_FREE(ptr)             kvfree(ptr)
 
 /* No ZXC_REALLOC: krealloc() only accepts kmalloc'd memory, and the block-only
@@ -172,7 +185,7 @@ static inline void *zxc_kernel_aligned_alloc(size_t size, size_t alignment)
 		alignment = sizeof(void *);
 	if (check_add_overflow(size, alignment + sizeof(void *), &total))
 		return NULL;
-	mem = kvmalloc(total, ZXC_GFP);
+	mem = zxc_kernel_alloc(total, 0);
 	if (!mem)
 		return NULL;
 	ptr = (void *)ALIGN((uintptr_t)mem + sizeof(void *), alignment);
@@ -195,7 +208,7 @@ static inline void zxc_kernel_aligned_free(void *ptr)
 The stock `posix_memalign` / `_aligned_malloc` helpers are `static inline` in
 `zxc_deps.h` itself, so a replacement defines `ZXC_ALIGNED_MALLOC` and
 `ZXC_ALIGNED_FREE` both, as above; one without the other is a compile error.
-`ZXC_USE_C11_ATOMICS` and `ZXC_NOINLINE` need no local edit.
+`ZXC_NOINLINE` needs no local edit.
 
 ## Licensing
 

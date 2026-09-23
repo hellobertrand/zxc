@@ -139,8 +139,38 @@ static inline void zxc_aligned_free(void* ptr) {
 
 /** @} */ /* end of Aligned Allocator Abstraction */
 
-// Optional ZXC_POPCOUNT32/64(v): replace the popcount builtins, libgcc calls
-// without a hardware count (a kernel maps them to hweight32/64).
+/**
+ * @name Population Count
+ * @brief @c ZXC_POPCOUNT32 / @c ZXC_POPCOUNT64. Default: the builtins, libgcc
+ * calls without a hardware count; a kernel maps them onto @c hweight32/64.
+ * @{
+ */
+
+#if defined(ZXC_POPCOUNT32) != defined(ZXC_POPCOUNT64)
+#error "ZXC_POPCOUNT32 and ZXC_POPCOUNT64 are overridden together"
+#endif
+
+#ifndef ZXC_POPCOUNT32
+#if defined(__GNUC__) || defined(__clang__)
+#define ZXC_POPCOUNT32(v) __builtin_popcount(v)
+#define ZXC_POPCOUNT64(v) __builtin_popcountll(v)
+#else
+/** @brief Portable SWAR popcount (MSVC). */
+static inline int zxc_popcount32(const uint32_t v) {
+    uint32_t x = v - ((v >> 1) & 0x55555555U);
+    x = (x & 0x33333333U) + ((x >> 2) & 0x33333333U);
+    x = (x + (x >> 4)) & 0x0F0F0F0FU;
+    return (int)((x * 0x01010101U) >> 24);
+}
+static inline int zxc_popcount64(const uint64_t v) {
+    return zxc_popcount32((uint32_t)v) + zxc_popcount32((uint32_t)(v >> 32));
+}
+#define ZXC_POPCOUNT32(v) zxc_popcount32(v)
+#define ZXC_POPCOUNT64(v) zxc_popcount64(v)
+#endif
+#endif  // ZXC_POPCOUNT32
+
+/** @} */ /* end of Population Count */
 
 /** @} */ /* end of addtogroup internal */
 

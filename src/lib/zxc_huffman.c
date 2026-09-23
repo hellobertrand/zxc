@@ -998,30 +998,9 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
 // ZXC_PAD_SIZE on dst (already true for lit/token buffers), and
 // ZXC_PIVCO_SCRATCH_PAD on scratch.
 
-// ZXC_POPCOUNT32/64 (zxc_deps.h) first: the builtins may be libgcc calls.
-static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(const uint32_t v) {
-#if defined(ZXC_POPCOUNT32)
-    return (int)ZXC_POPCOUNT32(v);
-#elif defined(__GNUC__) || defined(__clang__)
-    return __builtin_popcount(v);
-#else
-    // Portable SWAR popcount for MSVC
-    uint32_t x = v - ((v >> 1) & 0x55555555U);
-    x = (x & 0x33333333U) + ((x >> 2) & 0x33333333U);
-    x = (x + (x >> 4)) & 0x0F0F0F0FU;
-    return (int)((x * 0x01010101U) >> 24);
-#endif
-}
+static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(const uint32_t v) { return (int)ZXC_POPCOUNT32(v); }
 
-static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(const uint64_t v) {
-#if defined(ZXC_POPCOUNT64)
-    return (int)ZXC_POPCOUNT64(v);
-#elif defined(__GNUC__) || defined(__clang__)
-    return __builtin_popcountll(v);
-#else
-    return zxc_pivco_popcnt32((uint32_t)v) + zxc_pivco_popcnt32((uint32_t)(v >> 32));
-#endif
-}
+static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(const uint64_t v) { return (int)ZXC_POPCOUNT64(v); }
 
 /** @brief Leaves at depth @p d. */
 static ZXC_ALWAYS_INLINE int zxc_pivco_leaves(const zxc_pivco_tree_t* RESTRICT t, const int d) {

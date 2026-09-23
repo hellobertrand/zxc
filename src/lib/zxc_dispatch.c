@@ -296,37 +296,18 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 }
 // LCOV_EXCL_STOP
 
+#endif  // ZXC_ONLY_DEFAULT
+
 // ============================================================================
 // DISPATCHERS
 // ============================================================================
-// A pointer per entry point, resolved on first use; ZXC_ONLY_DEFAULT binds
-// _default at compile time.
-
-/** @brief Lazily-resolved pointer to the best decompression variant. */
-static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = (zxc_decompress_func_t)0;
-/** @brief Lazily-resolved pointer to the best dict-decompression variant. */
-static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_dict_ptr = (zxc_decompress_func_t)0;
-/** @brief Lazily-resolved pointer to the best safe-decompression variant. */
-static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_safe_ptr = (zxc_decompress_func_t)0;
-/** @brief Lazily-resolved pointer to the best compression variant. */
-static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = (zxc_compress_func_t)0;
-
-// Publication of a resolved pointer, and the matching acquire load. One pair of
-// definitions instead of an #if around every access.
-#if ZXC_USE_C11_ATOMICS
-#define ZXC_DISPATCH_STORE(ptr, val) atomic_store_explicit(&(ptr), (val), memory_order_release)
-#define ZXC_DISPATCH_LOAD(ptr) atomic_load_explicit(&(ptr), memory_order_acquire)
-#else
-#define ZXC_DISPATCH_STORE(ptr, val) ((ptr) = (val))
-#define ZXC_DISPATCH_LOAD(ptr) (ptr)
-#endif
+// One constant variant set per ISA, one published pointer to the selected one;
+// ZXC_ONLY_DEFAULT binds _default at compile time.
 
 /**
  * @struct zxc_variant_set_t
- * @brief The four chunk entry points of one ISA variant, resolved together.
- *
- * zxc_dispatch_init publishes all four at once, so the per-architecture
- * selection ladder lives in one place: adding an ISA tier is one line here.
+ * @brief The four chunk entry points of one ISA variant; adding a tier is one
+ *        line here.
  */
 typedef struct {
     zxc_decompress_func_t decompress;
@@ -335,81 +316,69 @@ typedef struct {
     zxc_compress_func_t compress;
 } zxc_variant_set_t;
 
-/** @brief Returns the variant set of suffix @p sfx from the enclosing function. */
-#define ZXC_RETURN_VARIANT_SET(sfx)                                                    \
-    do {                                                                               \
-        const zxc_variant_set_t v_ = {                                                 \
-            zxc_decompress_chunk_wrapper##sfx, zxc_decompress_chunk_wrapper_dict##sfx, \
-            zxc_decompress_chunk_wrapper_safe##sfx, zxc_compress_chunk_wrapper##sfx};  \
-        return v_;                                                                     \
-    } while (0)
+/** @brief Defines the constant variant set of suffix @p sfx. */
+#define ZXC_VARIANT_SET(sfx)                                                       \
+    static const zxc_variant_set_t zxc_variants##sfx = {                           \
+        zxc_decompress_chunk_wrapper##sfx, zxc_decompress_chunk_wrapper_dict##sfx, \
+        zxc_decompress_chunk_wrapper_safe##sfx, zxc_compress_chunk_wrapper##sfx}
 
+ZXC_VARIANT_SET(_default);
+#ifndef ZXC_ONLY_DEFAULT
+#if defined(__x86_64__) || defined(_M_X64)
+ZXC_VARIANT_SET(_avx2);
+ZXC_VARIANT_SET(_avx512);
+#elif defined(__arm__) || defined(_M_ARM)
+ZXC_VARIANT_SET(_neon32);
+#endif
+#endif
+#undef ZXC_VARIANT_SET
+
+#ifdef ZXC_ONLY_DEFAULT
+/** @brief The variant set in use: `_default`, bound at compile time. */
+static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
+    return &zxc_variants_default;
+}
+#else
 /**
  * @brief Detects the CPU tier and returns the matching variant set.
  *
  * Falls back to the `_default` (baseline) set when no ISA extension applies.
  */
 // LCOV_EXCL_START
-static zxc_variant_set_t zxc_select_variants(void) {
+static const zxc_variant_set_t* zxc_select_variants(void) {
     const zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
 #if defined(__x86_64__) || defined(_M_X64)
-    if (cpu == ZXC_CPU_AVX512) ZXC_RETURN_VARIANT_SET(_avx512);
-    if (cpu == ZXC_CPU_AVX2) ZXC_RETURN_VARIANT_SET(_avx2);
+    if (cpu == ZXC_CPU_AVX512) return &zxc_variants_avx512;
+    if (cpu == ZXC_CPU_AVX2) return &zxc_variants_avx2;
 #elif defined(__arm__) || defined(_M_ARM)
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
-    if (cpu == ZXC_CPU_NEON) ZXC_RETURN_VARIANT_SET(_neon32);
+    if (cpu == ZXC_CPU_NEON) return &zxc_variants_neon32;
 #else
     (void)cpu;
 #endif
-    ZXC_RETURN_VARIANT_SET(_default);
+    return &zxc_variants_default;
 }
 // LCOV_EXCL_STOP
 
-#undef ZXC_RETURN_VARIANT_SET
+/** @brief The selection, NULL until the first call. */
+static const zxc_variant_set_t* ZXC_ATOMIC zxc_variants_ptr = NULL;
 
-/** @brief Resolves the four variants once and publishes them together. */
-// LCOV_EXCL_START
-static void zxc_dispatch_init(void) {
-    const zxc_variant_set_t v = zxc_select_variants();
-    ZXC_DISPATCH_STORE(zxc_decompress_ptr, v.decompress);
-    ZXC_DISPATCH_STORE(zxc_decompress_dict_ptr, v.decompress_dict);
-    ZXC_DISPATCH_STORE(zxc_decompress_safe_ptr, v.decompress_safe);
-    ZXC_DISPATCH_STORE(zxc_compress_ptr, v.compress);
-}
-// LCOV_EXCL_STOP
-
-#endif  // ZXC_ONLY_DEFAULT
-
-// One accessor per entry point: _default under ZXC_ONLY_DEFAULT, else the pointer
-// published on first call. The wrappers below then need one body each.
-#ifdef ZXC_ONLY_DEFAULT
-#define ZXC_DISPATCH_IMPL(name, type, slot, dflt) \
-    static ZXC_ALWAYS_INLINE type name(void) { return dflt; }
-#else
-#define ZXC_DISPATCH_IMPL(name, type, slot, dflt) \
-    static ZXC_ALWAYS_INLINE type name(void) {    \
-        type f = ZXC_DISPATCH_LOAD(slot);         \
-        if (UNLIKELY(!f)) {                       \
-            zxc_dispatch_init();                  \
-            f = ZXC_DISPATCH_LOAD(slot);          \
-        }                                         \
-        return f;                                 \
+/** @brief The variant set in use, selected on the first call. */
+static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
+#if ZXC_USE_C11_ATOMICS
+    const zxc_variant_set_t* v = atomic_load_explicit(&zxc_variants_ptr, memory_order_acquire);
+    if (UNLIKELY(!v)) {
+        v = zxc_select_variants();
+        atomic_store_explicit(&zxc_variants_ptr, v, memory_order_release);
     }
+#else
+    const zxc_variant_set_t* v = zxc_variants_ptr;
+    if (UNLIKELY(!v)) zxc_variants_ptr = v = zxc_select_variants();
 #endif
-ZXC_DISPATCH_IMPL(zxc_decompress_impl, zxc_decompress_func_t, zxc_decompress_ptr,
-                  zxc_decompress_chunk_wrapper_default)
-ZXC_DISPATCH_IMPL(zxc_decompress_dict_impl, zxc_decompress_func_t, zxc_decompress_dict_ptr,
-                  zxc_decompress_chunk_wrapper_dict_default)
-ZXC_DISPATCH_IMPL(zxc_decompress_safe_impl, zxc_decompress_func_t, zxc_decompress_safe_ptr,
-                  zxc_decompress_chunk_wrapper_safe_default)
-ZXC_DISPATCH_IMPL(zxc_compress_impl, zxc_compress_func_t, zxc_compress_ptr,
-                  zxc_compress_chunk_wrapper_default)
-#undef ZXC_DISPATCH_IMPL
-#ifndef ZXC_ONLY_DEFAULT
-#undef ZXC_DISPATCH_STORE
-#undef ZXC_DISPATCH_LOAD
-#endif
+    return v;
+}
+#endif  // ZXC_ONLY_DEFAULT
 
 /** @brief Public decompression dispatcher. */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
@@ -418,9 +387,9 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
     // dict_size is constant for a stream; this per-block branch (outside the decode
     // loop) routes to the dict variant only when a dictionary is active, so the
     // no-dict path runs the dict-free chunk wrapper (identical codegen to main).
-    if (ctx->dict_size)
-        return zxc_decompress_dict_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
-    return zxc_decompress_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
+    const zxc_variant_set_t* v = zxc_variants();
+    return (ctx->dict_size ? v->decompress_dict : v->decompress)(ctx, src, src_sz, dst, dst_cap,
+                                                                 block_index);
 }
 
 /**
@@ -429,23 +398,24 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
  * @param[in]  ctx      Decompression context.
  * @param[in]  src      Compressed input chunk.
  * @param[in]  src_sz   Size of @p src in bytes.
- * @param[out] dst      Destination buffer (capacity == exact uncompressed size).
- * @param[in]  dst_cap  Capacity of @p dst in bytes.
- * @return Decompressed size in bytes, or a negative @ref zxc_error_t.
+ * @param[out] dst      Destination buffer (exactly the decoded size).
+ * @param[in]  dst_cap  Capacity of @p dst.
+ * @param[in]  block_index Frame position of the block: the checksum seed.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 static int zxc_decompress_chunk_wrapper_safe_public(const zxc_cctx_t* RESTRICT ctx,
                                                     const uint8_t* RESTRICT src,
                                                     const size_t src_sz, uint8_t* RESTRICT dst,
                                                     const size_t dst_cap,
                                                     const uint64_t block_index) {
-    return zxc_decompress_safe_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_variants()->decompress_safe(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 
 /** @brief Public compression dispatcher. */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                const uint64_t block_index) {
-    return zxc_compress_impl()(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_variants()->compress(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 
 // ============================================================================

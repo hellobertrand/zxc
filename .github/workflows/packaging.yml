@@ -182,65 +182,45 @@ jobs:
           done
 
   no-frame-api:
-    name: "Consume vendored sources (block-only)"
+    name: "Kernel module from KERNEL.md (block-only)"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Compile the block-only subset and check what it reaches for
+      - name: Install the running kernel's headers and the 32-bit toolchain
         run: |
-          # Twice: stock zxc_deps.h, then with the overrides KERNEL.md prescribes.
-          # Kernel flags: gnu11, -Wmissing-prototypes (6.8+), no glibc fortify.
-          mkdir -p /tmp/nf
-          cat > /tmp/nf/host.h <<'EOF'
-          void *host_malloc(unsigned long);
-          void *host_calloc(unsigned long, unsigned long);
-          void host_free(void *);
-          void *host_aligned_alloc(unsigned long, unsigned long);
-          void host_aligned_free(void *);
-          unsigned int host_popcount32(unsigned int);
-          unsigned int host_popcount64(unsigned long long);
-          /* Undefined in KERNEL.md: a use must fail. */
-          void *zxc_realloc_unused_in_the_kernel_port(void *, unsigned long);
-          EOF
-          hostflags=(-DZXC_USE_C11_ATOMICS=0 -include /tmp/nf/host.h
-                     '-DZXC_MALLOC(s)=host_malloc(s)'
-                     '-DZXC_CALLOC(n,s)=host_calloc(n,s)'
-                     '-DZXC_FREE(p)=host_free(p)'
-                     '-DZXC_REALLOC(p,s)=zxc_realloc_unused_in_the_kernel_port(p,s)'
-                     '-DZXC_ALIGNED_MALLOC(s,a)=host_aligned_alloc(s,a)'
-                     '-DZXC_ALIGNED_FREE(p)=host_aligned_free(p)'
-                     '-DZXC_POPCOUNT32(v)=host_popcount32(v)'
-                     '-DZXC_POPCOUNT64(v)=host_popcount64(v)')
-          # Exact names: kernel-exported string functions and stack protector,
-          # plus libc allocators and libgcc popcount (stock) or host_* (host).
-          common='memcpy|memmove|memset|memcmp|__stack_chk_fail|__stack_chk_guard'
-          for deps in stock host; do
-            mkdir -p "/tmp/nf/$deps"
-            flags=(); [ "$deps" = host ] && flags=("${hostflags[@]}")
-            for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
-              cc -c -O2 -std=gnu11 -Wall -Wextra -Wmissing-prototypes -Werror -U_FORTIFY_SOURCE \
-                 -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD \
-                 -DZXC_FUNCTION_SUFFIX=_default "${flags[@]}" \
-                 -Iinclude -Isrc/lib -Isrc/lib/vendors \
-                 -o "/tmp/nf/$deps/$f.o" "src/lib/$f.c"
-            done
-            # POSIX nm: one symbol per line, name then type; per-file headers have
-            # one field and drop out. Whatever the subset needs and does not
-            # define must be on the list: a frame, dictionary or seekable
-            # symbol, a new libc call or a compiler-runtime helper fails here.
-            nm -P /tmp/nf/$deps/*.o \
-              | awk 'NF > 1 && $2 == "U" { u[$1] } NF > 1 && $2 != "U" { d[$1] }
-                     END { for (s in u) if (!(s in d)) print s }' | sort > "/tmp/nf/$deps/needs"
-            case "$deps" in
-              stock) allowed="^($common|malloc|calloc|realloc|free|posix_memalign|__popcountsi2|__popcountdi2)\$" ;;
-              host)  allowed="^($common|host_[a-z0-9_]+)\$" ;;
-            esac
-            if grep -Ev "$allowed" "/tmp/nf/$deps/needs"; then
-              echo "::error::block-only build ($deps deps) reaches outside its sources and the libc"
-              exit 1
-            fi
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "linux-headers-$(uname -r)" gcc-multilib
+
+      - name: Build the module KERNEL.md describes
+        run: |
+          # Kbuild lines, dependency header and shims are cut from the doc: what
+          # is published is what gets built. -Werror stands in for CONFIG_WERROR.
+          python3 tests/kernel/module_from_doc.py docs/KERNEL.md /tmp/mod
+          make -C "/lib/modules/$(uname -r)/build" M=/tmp/mod KCFLAGS=-Werror modules
+          modinfo /tmp/mod/zxctest.ko
+
+      - name: Check what the 32-bit block-only subset reaches for
+        run: |
+          # No i386 headers here: compile the subset hosted and non-PIC, then read
+          # its imports; a 32-bit kernel exports no 64-bit division helper. Exact
+          # names: kernel exports (string, clz_ctz, stack protector), stock libc
+          # allocators, libgcc popcount.
+          mkdir -p /tmp/nf32
+          for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
+            cc -m32 -fno-pic -c -O2 -std=gnu11 -Wall -Wextra -Wmissing-prototypes -Werror \
+               -U_FORTIFY_SOURCE -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD \
+               -DZXC_FUNCTION_SUFFIX=_default -Iinclude -Isrc/lib -Isrc/lib/vendors \
+               -o "/tmp/nf32/$f.o" "src/lib/$f.c"
           done
+          nm -P /tmp/nf32/*.o \
+            | awk 'NF > 1 && $2 == "U" { u[$1] } NF > 1 && $2 != "U" { d[$1] }
+                   END { for (s in u) if (!(s in d)) print s }' | sort > /tmp/nf32/needs
+          allowed='^(memcpy|memmove|memset|memcmp|malloc|calloc|realloc|free|posix_memalign|__popcount[sd]i2|__[cl]tz[sd]i2|__stack_chk_fail|__stack_chk_guard)$'
+          if grep -Ev "$allowed" /tmp/nf32/needs; then
+            echo "::error::the 32-bit block-only subset reaches outside its sources and the libc"
+            exit 1
+          fi
