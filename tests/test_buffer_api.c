@@ -1281,6 +1281,7 @@ int test_min_dist_policy(void) {
     // count switches between its floor, the proportional band, and its cap.
     // These pin the verdict across all three regimes; they are far enough from
     // the threshold that they would not catch an off-by-one in that count.
+#if ZXC_LZ_MINDIST > 1
     static const size_t sizes[] = {4096, 16384, 40960, 65536, 256 * 1024};
     for (size_t k = 0; k < sizeof(sizes) / sizeof(sizes[0]); k++) {
         const unsigned long sz = (unsigned long)sizes[k];
@@ -1298,6 +1299,11 @@ int test_min_dist_policy(void) {
         printf("Failed: probe judged a block too small to sample\n");
         goto done;
     }
+#else
+    // Floor off (ZXC_LZ_MINDIST == 1): nothing is "short", so the probe has no
+    // verdict to give; only the round trips below apply.
+    printf("(distance floor off: probe checks skipped)\n");
+#endif
     // Whichever way it goes, the archive stays ordinary at every level.
     for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++) {
         if (!test_round_trip("mindist text", text, n, lvl, 0)) goto done;
@@ -1309,5 +1315,52 @@ int test_min_dist_policy(void) {
 done:
     free(text);
     free(per);
+    return ok;
+}
+
+// Round trips through zxc_glo_split_block, where a rewrite regression shows:
+// escaped matches (20-38 bytes) mixed irregularly with inline ones (6-19 bytes),
+// which levels 3-5 split within their caps.
+int test_glo_match_split(void) {
+    printf("=== TEST: Unit - GLO match splitting round trip ===\n");
+    const size_t cap = 512 * 1024;
+    uint8_t* buf = malloc(cap);
+    int ok = 0;
+    if (!buf) goto done;
+
+    uint32_t st = 0x9E3779B9U;
+    uint8_t src[96];  // shared match source; back-references clear the distance floor
+    for (size_t k = 0; k < sizeof(src); k++) {
+        st = st * 1103515245U + 12345U;
+        src[k] = (uint8_t)(st >> 16);
+    }
+    size_t n = 0;
+    for (size_t k = 0; k < sizeof(src) && n < cap; k++) buf[n++] = src[k];
+    while (n + sizeof(src) + 64 < cap) {
+        st = st * 1103515245U + 12345U;
+        const size_t lit = (st >> 16) % 8U;  // 0-7 literals, LL mostly inline
+        for (size_t k = 0; k < lit && n < cap; k++) {
+            st = st * 1103515245U + 12345U;
+            buf[n++] = (uint8_t)(st >> 16);
+        }
+        st = st * 1103515245U + 12345U;
+        // ~1 in 4 matches escapes the ML field (20-38 bytes); the rest stay inline.
+        const size_t m =
+            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 19U) : 6U + ((st >> 18) % 14U);
+        for (size_t k = 0; k < m && n < cap; k++) buf[n++] = src[k % sizeof(src)];
+    }
+
+    // Levels 3-5 run the split; 1-2 (GHI) and 6-7 must round-trip cleanly too.
+    for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++)
+        if (!test_round_trip("glo split", buf, n, lvl, 0)) goto done;
+    // Text-like data reaches the split by a different route (irregular escapes).
+    fill_text_like(buf, cap);
+    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_DENSITY; lvl++)
+        if (!test_round_trip("glo split text", buf, cap, lvl, 0)) goto done;
+
+    printf("PASS\n\n");
+    ok = 1;
+done:
+    free(buf);
     return ok;
 }
