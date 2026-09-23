@@ -192,35 +192,53 @@ jobs:
 
       - name: Compile the block-only subset and check what it reaches for
         run: |
-          # Twice: with the stock zxc_deps.h, then with the allocator and atomics
-          # overridden the way KERNEL.md prescribes, the host's allocators declared
-          # as its deps header would. -std=gnu11 as the kernel does.
+          # Twice: stock zxc_deps.h, then with the overrides KERNEL.md prescribes.
+          # Kernel flags: gnu11, -Wmissing-prototypes (6.8+), no glibc fortify.
           mkdir -p /tmp/nf
-          printf 'void *host_aligned_alloc(unsigned long, unsigned long);\nvoid host_aligned_free(void *);\n' > /tmp/nf/host.h
+          cat > /tmp/nf/host.h <<'EOF'
+          void *host_malloc(unsigned long);
+          void *host_calloc(unsigned long, unsigned long);
+          void host_free(void *);
+          void *host_aligned_alloc(unsigned long, unsigned long);
+          void host_aligned_free(void *);
+          unsigned int host_popcount32(unsigned int);
+          unsigned int host_popcount64(unsigned long long);
+          /* Undefined in KERNEL.md: a use must fail. */
+          void *zxc_realloc_unused_in_the_kernel_port(void *, unsigned long);
+          EOF
           hostflags=(-DZXC_USE_C11_ATOMICS=0 -include /tmp/nf/host.h
+                     '-DZXC_MALLOC(s)=host_malloc(s)'
+                     '-DZXC_CALLOC(n,s)=host_calloc(n,s)'
+                     '-DZXC_FREE(p)=host_free(p)'
+                     '-DZXC_REALLOC(p,s)=zxc_realloc_unused_in_the_kernel_port(p,s)'
                      '-DZXC_ALIGNED_MALLOC(s,a)=host_aligned_alloc(s,a)'
-                     '-DZXC_ALIGNED_FREE(p)=host_aligned_free(p)')
+                     '-DZXC_ALIGNED_FREE(p)=host_aligned_free(p)'
+                     '-DZXC_POPCOUNT32(v)=host_popcount32(v)'
+                     '-DZXC_POPCOUNT64(v)=host_popcount64(v)')
+          # Exact names: kernel-exported string functions and stack protector,
+          # plus libc allocators and libgcc popcount (stock) or host_* (host).
+          common='memcpy|memmove|memset|memcmp|__stack_chk_fail|__stack_chk_guard'
           for deps in stock host; do
             mkdir -p "/tmp/nf/$deps"
             flags=(); [ "$deps" = host ] && flags=("${hostflags[@]}")
             for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_compress zxc_decompress zxc_huffman; do
-              # The per-ISA sources carry the suffix the dispatcher binds to.
-              suffix=""
-              case "$f" in zxc_compress|zxc_decompress|zxc_huffman) suffix="-DZXC_FUNCTION_SUFFIX=_default" ;; esac
-              cc -c -O2 -std=gnu11 -Wall -Wextra \
-                 -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD $suffix "${flags[@]}" \
+              cc -c -O2 -std=gnu11 -Wall -Wextra -Wmissing-prototypes -Werror -U_FORTIFY_SOURCE \
+                 -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD \
+                 -DZXC_FUNCTION_SUFFIX=_default "${flags[@]}" \
                  -Iinclude -Isrc/lib -Isrc/lib/vendors \
                  -o "/tmp/nf/$deps/$f.o" "src/lib/$f.c"
             done
             # POSIX nm: one symbol per line, name then type; per-file headers have
             # one field and drop out. Whatever the subset needs and does not
-            # define must be the libc it goes through zxc_deps.h for, the host
-            # allocators, or the compiler runtime (__*): a frame, dictionary or
-            # seekable symbol, or a new libc call, fails here.
+            # define must be on the list: a frame, dictionary or seekable
+            # symbol, a new libc call or a compiler-runtime helper fails here.
             nm -P /tmp/nf/$deps/*.o \
               | awk 'NF > 1 && $2 == "U" { u[$1] } NF > 1 && $2 != "U" { d[$1] }
                      END { for (s in u) if (!(s in d)) print s }' | sort > "/tmp/nf/$deps/needs"
-            allowed='^_?(memcpy|memmove|memset|bzero|memcmp|malloc|calloc|realloc|free|posix_memalign|host_aligned_alloc|host_aligned_free|__.*)$'
+            case "$deps" in
+              stock) allowed="^($common|malloc|calloc|realloc|free|posix_memalign|__popcountsi2|__popcountdi2)\$" ;;
+              host)  allowed="^($common|host_[a-z0-9_]+)\$" ;;
+            esac
             if grep -Ev "$allowed" "/tmp/nf/$deps/needs"; then
               echo "::error::block-only build ($deps deps) reaches outside its sources and the libc"
               exit 1

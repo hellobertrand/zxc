@@ -7,10 +7,21 @@ every page write (zram, zswap) would pay the slow side on its hot path.
 
 The core uses no floating point, no VLA and no `alloca`, and calls the C
 library only through `src/lib/zxc_deps.h`.
-Two headers still have to resolve: the freestanding `<stddef.h>` and
-`<stdint.h>` the public headers include, which the compiler ships, and the
-`<string.h>` the vendored `rapidhash.h` includes for `memcpy`, a one-line shim
-over `<linux/string.h>` in a kernel tree.
+Two libc headers need a shim over their kernel counterpart: `<stdint.h>` (public
+headers) and `<string.h>` (`rapidhash.h`, for `memcpy`). The compiler's
+`<stdint.h>` will not do: GCC's reaches for libc's, and its LP64 `uint64_t` is
+`unsigned long`, the kernel's `unsigned long long`. `<stddef.h>` and
+`<stdalign.h>` stay the compiler's.
+
+```c
+/* shim/stdint.h */
+#include <linux/types.h>
+```
+
+```c
+/* shim/string.h */
+#include <linux/string.h>
+```
 
 Decoding peaks at 4.5 KiB of stack, well inside a 16 KiB kernel stack.
 Compression is the level-dependent one (see [Contexts](#contexts)).
@@ -29,16 +40,13 @@ zxc_compress.c  zxc_decompress.c  zxc_huffman.c
 
 ```make
 ccflags-y += -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD
+# The dispatcher binds the per-ISA sources by this suffix; the rest ignore it.
+ccflags-y += -DZXC_FUNCTION_SUFFIX=_default
 ccflags-y += -std=gnu11 -Wno-declaration-after-statement
-# Where the sources were vendored, plus the compiler's freestanding headers.
+# Shims first, then the sources, then the compiler's freestanding headers.
+ccflags-y += -I$(src)/shim
 ccflags-y += -I$(src)/zxc/include -I$(src)/zxc/src/lib -I$(src)/zxc/src/lib/vendors
 ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
-
-# The per-ISA sources carry the suffix the dispatcher binds to; the other
-# translation units must NOT get it, hence per-file flags.
-CFLAGS_zxc_compress.o   := -DZXC_FUNCTION_SUFFIX=_default
-CFLAGS_zxc_decompress.o := -DZXC_FUNCTION_SUFFIX=_default
-CFLAGS_zxc_huffman.o    := -DZXC_FUNCTION_SUFFIX=_default
 ```
 
 `ZXC_NO_FRAME_API` keeps the block, context and static-context APIs. It is
@@ -114,6 +122,7 @@ Vendor a replacement for `src/lib/zxc_deps.h`:
 #ifndef ZXC_DEPS_H
 #define ZXC_DEPS_H
 
+#include <linux/bitops.h>
 #include <linux/kernel.h>
 #include <linux/limits.h>
 #include <linux/overflow.h>
@@ -134,6 +143,10 @@ Vendor a replacement for `src/lib/zxc_deps.h`:
 #ifndef UINT64_MAX
 #define UINT64_MAX U64_MAX
 #endif
+
+/* Without FP/SIMD the popcount builtins are unexported libgcc calls. */
+#define ZXC_POPCOUNT32(v) hweight32(v)
+#define ZXC_POPCOUNT64(v) hweight64(v)
 
 /* No <stdatomic.h> here; ZXC_DISABLE_SIMD removes the publication anyway. */
 #define ZXC_USE_C11_ATOMICS 0

@@ -139,6 +139,9 @@ static inline void zxc_aligned_free(void* ptr) {
 
 /** @} */ /* end of Aligned Allocator Abstraction */
 
+// Optional ZXC_POPCOUNT32/64(v): replace the popcount builtins, libgcc calls
+// without a hardware count (a kernel maps them to hweight32/64).
+
 /** @} */ /* end of addtogroup internal */
 
 #endif /* ZXC_DEPS_H */

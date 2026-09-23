@@ -1998,6 +1998,10 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
 int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap, const uint64_t block_index);
+/** @brief Exact-capacity variant for the safe block API; dispatch table only. */
+int zxc_decompress_chunk_wrapper_safe(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap, const uint64_t block_index);
 
 /**
  * @brief Compresses one chunk through the runtime ISA dispatch.
