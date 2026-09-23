@@ -907,8 +907,9 @@ Offset  Size  Field
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
 - **Version**: `2`. Decoders reject any other version with
-  an unsupported dictionary version. Version 1 shipped with format v8 and carries
-  the older header checksum of § 7.1, so it fails on the version byte.
+  an unsupported dictionary version. Version 1 shipped with format v8: its header
+  was signed with the pre-v9 checksum, not the one § 7.1 now specifies, so it is
+  rejected on the version byte before the checksum is ever compared.
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
 - **Shared literal Huffman table**: code lengths for the Literal Encoding `3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
@@ -1080,7 +1081,7 @@ Generated archive size: **82 bytes** (20 bytes larger than the non-seekable vari
 #### Full hexdump
 
 ```text
-00000000: F5 2E B0 9C 08 13 A0 00 00 00 00 00 00 00 DC F3
+00000000: F5 2E B0 9C 09 13 A0 00 00 00 00 00 00 00 0D 45
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
 00000030: 00 0C 00 00 00 6F 10 00 00 00 00 00 00 00 16 00
@@ -1093,7 +1094,7 @@ Generated archive size: **82 bytes** (20 bytes larger than the non-seekable vari
 **A) File Header** (offset `0x00`, 16 bytes) - as non-seekable, but for two fields:
 
 - `A0` -> `HAS_CHECKSUM=1` and `HAS_SEEK_TABLE=1` (`0x80 | 0x20`), algo id 0.
-- `DC F3` -> header checksum (LE value `0xF3DC`).
+- `0D 45` -> header checksum (LE value `0x450D`).
 
 **B) Data Block #0 (RAW)** (offset `0x10`, 22 bytes) - identical to non-seekable.
 

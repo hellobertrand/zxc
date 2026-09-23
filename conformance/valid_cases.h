@@ -52,13 +52,21 @@ static const valid_case_t VALID_CASES[] = {
     {"glo_tok_huffman_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
 
     /* Checksums on their own, so a failure here is not confounded with the
-     * dictionary vectors below (the only other place they are exercised). */
+     * dictionary vectors below (the only other place they are exercised).
+     * random_4k_checksum is one block, seed 0, which a v8-era decoder still
+     * passes; multiblock_checksum seeds block j with j, so seed-0 decoding
+     * fails at block 1. */
     {"random_4k_checksum", NULL, {.level = 3, .block_size = VC_KB(512), .checksum_enabled = 1}},
+    {"multiblock_checksum", NULL, {.level = 3, .block_size = VC_KB(4), .checksum_enabled = 1}},
 
-    /* Chunk sizes, block counts, seek table. */
+    /* Chunk sizes, block counts, seek table. seekable_2groups is the only vector
+     * past ZXC_SEEK_GROUP blocks (66 at the 4 KB floor), so the only one whose
+     * table has a second group; its blocks differ in size, so an entry read at
+     * the wrong group offset lands on the wrong block. */
     {"multiblock_mixed", NULL, {.level = 3, .block_size = VC_KB(4)}},
     {"text_64k_bs2m", NULL, {.level = 3, .block_size = VC_MB(2)}},
     {"seekable_4blocks", NULL, {.level = 3, .block_size = VC_KB(8), .seekable = 1}},
+    {"seekable_2groups", NULL, {.level = 3, .block_size = VC_KB(4), .seekable = 1}},
 
     /* Both dictionary modes: without a shared Huffman table (enc_lit = 0) and
      * with one (enc_lit = 3). A decoder can pass one and fail the other.

@@ -6,15 +6,15 @@ Reference test vectors for validating any ZXC decoder implementation.
 
 ```
 v9/                 Corpus for format version 9 (FORMAT_VERSION declares it)
-  valid/            15 *.zxc archives, *.expected outputs, *.zxd dictionaries
+  valid/            17 *.zxc archives, *.expected outputs, *.zxd dictionaries
   invalid/          30 *.zxc archives that must be rejected
   vectors.sha256    Byte-stability manifest
-v8/                 Corpus for format version 8, kept as-is
+v8/                 Corpus for format version 8, kept until 0.15.x ships
 valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
 invalid_cases.h     Recipe for the 24 generated invalid ones; gen_invalid.c likewise
 ```
 
-Vectors are frozen **per format version**. Older directories are kept, never regenerated.
+Vectors are frozen **per format version** and never regenerated once that version ships.
 
 ## Validating a decoder
 
@@ -58,7 +58,7 @@ echo "Passed: $pass  Failed: $fail"
 
 ## Coverage
 
-15 valid vectors, one per decoder-visible trait — a decoder never sees the
+17 valid vectors, one per decoder-visible trait — a decoder never sees the
 compression level, only the block type and the encodings it selects:
 
 | Vector               | What it alone covers                                    |
@@ -72,9 +72,11 @@ compression level, only the block type and the encodings it selects:
 | `glo_pivco_wide_l7`  | PivCo literals, `enc_lit=2`                             |
 | `glo_tok_huffman_l7` | Huffman-coded token section, `enc_tok=2`                |
 | `random_4k_checksum` | Checksums on their own, clear of the dictionary path    |
+| `multiblock_checksum`| Checksums past block 0, where the seed is the block index |
 | `multiblock_mixed`   | 16 data blocks; the 4 KB minimum chunk size             |
 | `text_64k_bs2m`      | The 2 MB maximum chunk size                             |
 | `seekable_4blocks`   | Seek table with several entries                         |
+| `seekable_2groups`   | 66 blocks: the only table with a second group           |
 | `dict_http`          | Dictionary **without** a shared Huffman table           |
 | `dict_no_checksum`   | Same input and dictionary, checksums off                |
 | `dict_seekable_l7`   | Dictionary **with** one (`enc_lit=3`), plus seek + checksum |
@@ -82,7 +84,7 @@ compression level, only the block type and the encodings it selects:
 All four literal encodings (`enc_lit` 0 to 3) and both token encodings
 (`enc_tok` 0 and 2) are exercised.
 
-28 invalid vectors, covering every row of the error table in `FORMAT.md` §11.1,
+30 invalid vectors, covering every row of the error table in `FORMAT.md` §11.1,
 each a well-formed archive with exactly one field corrupted (except the six
 malformed-preamble cases, which never reach version-dependent parsing).
 

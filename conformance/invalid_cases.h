@@ -268,7 +268,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         d[10] = 0xDE;
         zxc_file_header_sign(d);
     } else if (!strcmp(name, "sek_flag_no_table")) {
-        /* Sec 11.1: the flag announces a seek table between EOF and the footer.
+        /* Sec 3.1: the flag announces a seek table between EOF and the footer.
          * Set on an archive that carries none, the tail no longer parses. */
         d[6] |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
         zxc_file_header_sign(d);
