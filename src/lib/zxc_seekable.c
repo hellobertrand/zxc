@@ -43,68 +43,6 @@
 #include "zxc_threads.h"
 
 // =========================================================================
-// Seek Table Writer
-// =========================================================================
-
-/**
- * @brief Byte size of a seek table holding @p num_blocks blocks: header, then groups.
- *
- * Public API; sizes the destination of @ref zxc_write_seek_table. 0 when the table
- * does not fit size_t (32-bit hosts) or @p num_blocks is past what one can describe.
- */
-size_t zxc_seek_table_size(const uint64_t num_blocks) {
-    if (UNLIKELY(num_blocks > UINT64_MAX / ZXC_SEEK_ANCHOR_SIZE)) return 0;
-    const uint64_t bytes = zxc_seek_table_bytes(num_blocks);
-    if (UNLIKELY(bytes > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return 0;
-    return ZXC_BLOCK_HEADER_SIZE + (size_t)bytes;
-}
-
-int zxc_seek_table_header(uint8_t* dst, const size_t dst_capacity, const uint64_t num_blocks) {
-    // The field keeps the table size modulo 2^32; readers derive the count from the footer.
-    const zxc_block_header_t bh = {
-        .block_type = ZXC_BLOCK_SEK,
-        .block_flags = 0,
-        .reserved = 0,
-        .comp_size = zxc_seek_size_field(zxc_seek_table_bytes(num_blocks))};
-    return zxc_write_block_header(dst, dst_capacity, &bh);
-}
-
-size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t* RESTRICT anchor,
-                            const uint32_t* RESTRICT sizes, const uint32_t cnt) {
-    zxc_store_le64(dst, *anchor);
-    uint8_t* p = dst + ZXC_SEEK_ANCHOR_SIZE;
-    for (uint32_t k = 0; k < cnt; k++, p += ZXC_SEEK_SIZE_ENTRY) {
-        zxc_store_le32(p, sizes[k]);
-        *anchor += sizes[k];
-    }
-    return (size_t)(p - dst);
-}
-
-/**
- * @brief Serialises a seek table (a @c ZXC_BLOCK_SEK block) into @p dst.
- *
- * Public API; contract in @c zxc_seekable.h. Block header, then the groups.
- */
-int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint32_t* comp_sizes,
-                             const uint64_t num_blocks) {
-    const size_t total = zxc_seek_table_size(num_blocks);
-    if (UNLIKELY(total == 0)) return ZXC_ERROR_OVERFLOW;
-    if (UNLIKELY(dst_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
-    if (UNLIKELY(!dst || !comp_sizes)) return ZXC_ERROR_NULL_INPUT;
-
-    const int hdr_res = zxc_seek_table_header(dst, dst_capacity, num_blocks);
-    if (UNLIKELY(hdr_res < 0)) return hdr_res;
-    uint8_t* p = dst + hdr_res;
-
-    uint64_t anchor = ZXC_FILE_HEADER_SIZE;
-    for (uint64_t i = 0; i < num_blocks; i += ZXC_SEEK_GROUP)
-        p += zxc_seek_write_group(p, &anchor, comp_sizes + i,
-                                  zxc_seek_group_len(num_blocks, i / ZXC_SEEK_GROUP));
-
-    return (int64_t)(p - dst);
-}
-
-// =========================================================================
 // Seekable Reader (Opaque Handle)
 // =========================================================================
 

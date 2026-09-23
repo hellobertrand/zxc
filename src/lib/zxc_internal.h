@@ -442,14 +442,6 @@ extern "C" {
 /** @brief Full group: anchor + ZXC_SEEK_GROUP sizes. */
 #define ZXC_SEEK_GROUP_BYTES (ZXC_SEEK_ANCHOR_SIZE + ZXC_SEEK_GROUP * ZXC_SEEK_SIZE_ENTRY)
 
-/** @brief Blocks in @p total_decomp bytes of @p block_size: the seek table's entry
- *  count, which the SEK header's field (table size modulo 2^32) cannot give. */
-static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
-                                                       const size_t block_size) {
-    // Not (total + bs - 1) / bs: it wraps near 2^64, turning a forged footer into 0 blocks.
-    return block_size ? total_decomp / block_size + (total_decomp % block_size != 0) : 0;
-}
-
 /** @brief Groups holding @p nblocks blocks; the last one may be partial. */
 static ZXC_ALWAYS_INLINE uint64_t zxc_seek_group_count(const uint64_t nblocks) {
     return (nblocks + ZXC_SEEK_GROUP - 1) / ZXC_SEEK_GROUP;
@@ -1508,6 +1500,17 @@ static ZXC_ALWAYS_INLINE int zxc_ctz64(const uint64_t x) {
 #endif
 }
 
+/** @brief Blocks in @p total_decomp bytes of @p block_size: the seek table's entry
+ *  count, which the SEK header's field (table size modulo 2^32) cannot give. */
+static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_decomp,
+                                                       const size_t block_size) {
+    // A shift, block_size being a header power of two: no 64-bit division on 32-bit
+    // hosts. Not (total + bs - 1) >> s, which wraps near 2^64 on a forged footer.
+    if (UNLIKELY(!block_size)) return 0;
+    const int s = zxc_ctz32((uint32_t)block_size);
+    return (total_decomp >> s) + ((total_decomp & (block_size - 1)) != 0);
+}
+
 // ============================================================================
 // COMPRESSION CONTEXT & STRUCTS
 // ============================================================================
@@ -2154,8 +2157,6 @@ static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
  * size. The cap also keeps @ref zxc_inplace_margin's block count from
  * overflowing. Every reader that sizes anything from the footer goes through it.
  *
- * Division rather than the usual ceil, which would wrap near @c UINT64_MAX.
- *
  * @param[in] dsize      Decompressed size read from the footer.
  * @param[in] chunk_size Block size from the file header; never 0 after a
  *                       @ref ZXC_OK from @ref zxc_read_file_header.
@@ -2165,9 +2166,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
 static ZXC_ALWAYS_INLINE int zxc_footer_dsize_plausible(const uint64_t dsize,
                                                         const size_t chunk_size,
                                                         const uint64_t comp_size) {
-    const uint64_t blocks_needed =
-        dsize / (uint64_t)chunk_size + (dsize % (uint64_t)chunk_size != 0);
-    return blocks_needed <= comp_size / ZXC_BLOCK_HEADER_SIZE;
+    return zxc_seek_block_count(dsize, chunk_size) <= comp_size / ZXC_BLOCK_HEADER_SIZE;
 }
 
 /**
@@ -2245,7 +2244,7 @@ void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
 /**
  * @brief Writes a seek table's block header for @p num_blocks entries.
  *
- * Shared with the streaming writer, which emits the entries in slices after it.
+ * Shared by the frame and streaming writers, which emit the entries after it.
  *
  * @return @ref ZXC_BLOCK_HEADER_SIZE, or a negative @ref zxc_error_t.
  */

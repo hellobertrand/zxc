@@ -36,11 +36,12 @@ zxc_common.c  zxc_pivco_tables.c  zxc_dispatch.c
 zxc_compress.c  zxc_decompress.c  zxc_huffman.c
 ```
 
-`zxc_driver.c` needs `<stdio.h>`. `zxc_dict.c` (dictionary training) and
-`zxc_seekable.c` (seek table) are reachable only from the frame API.
+They carry the whole buffer API, frame included. `zxc_driver.c` needs
+`<stdio.h>`; `zxc_dict.c` (dictionary training) and `zxc_seekable.c` (random
+access) are separate features a kernel host does without.
 
 ```make
-ccflags-y += -DZXC_STATIC_DEFINE -DZXC_NO_FRAME_API -DZXC_DISABLE_SIMD
+ccflags-y += -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD
 # The dispatcher binds the per-ISA sources by this suffix; the rest ignore it.
 ccflags-y += -DZXC_FUNCTION_SUFFIX=_default
 ccflags-y += -std=gnu11 -Wno-declaration-after-statement
@@ -53,11 +54,9 @@ ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
 ccflags-y += -Wframe-larger-than=12288
 ```
 
-`ZXC_NO_FRAME_API` keeps the block, context and static-context APIs. It is
-required, not optional: the frame path references `zxc_dict.c` and
-`zxc_seekable.c`, so the subset above does not link without it. CI builds a
-module from this page's own snippets (`tests/kernel/module_from_doc.py`, job
-`no-frame-api` in `.github/workflows/packaging.yml`).
+CI builds a module from this page's own snippets and round-trips a block and a
+frame with it (`tests/kernel/module_from_doc.py`, job `kernel-module` in
+`.github/workflows/packaging.yml`).
 
 `-std=gnu11` because kernels before 5.18 build `-std=gnu89` with C90 declaration
 checks.
@@ -74,11 +73,13 @@ scalar, with `ZXC_DISABLE_SIMD`.
 - The calls are arch-specific and `EXPORT_SYMBOL_GPL`.
 - `irq_fpu_usable()` can refuse, so a scalar path is needed anyway.
 
-## Block API
+## Frame or block
 
-Use `zxc_compress_block()` and `zxc_decompress_block_safe()`. The frame API adds
-a header, a footer and per-frame setup that a block-at-a-time host pays for
-nothing.
+A payload, an image or an initramfs is a `.zxc` frame: `zxc_decompress()`, or
+`zxc_decompress_dctx()` on a static context. A host that works page by page
+(a zram-like backend) uses `zxc_compress_block()` and
+`zxc_decompress_block_safe()` instead: the frame's header, footer and per-frame
+setup would be paid on every page for nothing.
 
 ## Contexts
 

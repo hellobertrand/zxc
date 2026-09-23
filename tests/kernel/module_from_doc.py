@@ -7,7 +7,7 @@
 
 Kbuild lines, dependency header and shims are cut from the doc's code blocks,
 so building <out-dir> tests the recipe as published. The smoke module round-trips
-one block, which pulls the six translation units in.
+a block and a frame, which pulls the six translation units in.
 """
 import os
 import re
@@ -25,18 +25,24 @@ static int __init zxctest_init(void)
 {
 	static const char msg[] = "zxc kernel smoke test, zxc kernel smoke test, zxc kernel";
 	zxc_compress_opts_t opts = { .level = 3 };
-	size_t cap = (size_t)zxc_compress_block_bound(sizeof(msg));
+	size_t cap = (size_t)zxc_compress_bound(sizeof(msg)); /* >= the block bound */
 	u8 *comp = kmalloc(cap, GFP_KERNEL), *back = kmalloc(sizeof(msg), GFP_KERNEL);
 	zxc_cctx *cctx = zxc_create_cctx(&opts);
 	zxc_dctx *dctx = zxc_create_dctx();
 	int64_t n = -1, m = -1;
 
+	int64_t fn = -1, fm = -1;
+
 	if (comp && back && cctx && dctx) {
 		n = zxc_compress_block(cctx, msg, sizeof(msg), comp, cap, &opts);
 		if (n > 0)
 			m = zxc_decompress_block_safe(dctx, comp, (size_t)n, back, sizeof(msg), NULL);
+		fn = zxc_compress(msg, sizeof(msg), comp, cap, &opts);
+		if (fn > 0)
+			fm = zxc_decompress(comp, (size_t)fn, back, sizeof(msg), NULL);
 	}
-	pr_info("zxctest: %lld -> %lld\n", (long long)n, (long long)m);
+	pr_info("zxctest: block %lld -> %lld, frame %lld -> %lld\n", (long long)n, (long long)m,
+		(long long)fn, (long long)fm);
 	zxc_free_cctx(cctx);
 	zxc_free_dctx(dctx);
 	kfree(comp);

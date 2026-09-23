@@ -17,14 +17,9 @@
  * @ref zxc_decompress, @ref zxc_get_decompressed_size).
  */
 
+#include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
-
-// ZXC_NO_FRAME_API keeps the block, context and static-context APIs and drops
-// everything that reads or writes a frame; only the frame code needs zxc_dict.h.
-#ifndef ZXC_NO_FRAME_API
-#include "../../include/zxc_dict.h"
-#endif
 
 // ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
 // an AVX2/AVX512/NEON variant.
@@ -498,8 +493,6 @@ void zxc_huf_pack_lengths(const uint8_t* RESTRICT code_len, uint8_t* RESTRICT ou
 int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_len) {
     return zxc_huf_unpack_lengths_default(in, code_len);
 }
-
-#ifndef ZXC_NO_FRAME_API  // frame-level one-shot and in-place API
 
 // ============================================================================
 // PUBLIC UTILITY API
@@ -1146,8 +1139,6 @@ uint32_t zxc_get_dict_id(const void* src, const size_t src_size) {
     return (p[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? zxc_le32(p + 7) : 0;
 }
 
-#endif  // ZXC_NO_FRAME_API
-
 // ============================================================================
 // REUSABLE CONTEXT API (Opaque)
 // ============================================================================
@@ -1244,8 +1235,6 @@ void zxc_free_cctx(zxc_cctx* cctx) {
     if (cctx->initialized) zxc_cctx_free(&cctx->inner);
     ZXC_FREE(cctx);
 }
-
-#ifndef ZXC_NO_FRAME_API  // frame compressor on a reusable context
 
 /**
  * @brief Compresses data using a reusable context.
@@ -1382,8 +1371,6 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
 
 // --- Decompression -------------------------------------------------------
 
-#endif  // ZXC_NO_FRAME_API
-
 /**
  * @brief Opaque reusable decompression context (public handle @ref zxc_dctx).
  *
@@ -1421,8 +1408,6 @@ void zxc_free_dctx(zxc_dctx* dctx) {
     if (dctx->initialized) zxc_cctx_free(&dctx->inner);
     ZXC_FREE(dctx);
 }
-
-#ifndef ZXC_NO_FRAME_API  // frame decompressor on a reusable context
 
 /**
  * @brief Answers a no-destination decode on a reusable context.
@@ -1606,8 +1591,6 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 
     return (int64_t)(op - op_start);
 }
-
-#endif  // ZXC_NO_FRAME_API
 
 // =========================================================================
 // Block-Level API (no file framing)
