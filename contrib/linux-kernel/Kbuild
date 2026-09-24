@@ -1,0 +1,22 @@
+# ZXC - High-performance lossless compression
+#
+# Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
+# SPDX-License-Identifier: BSD-3-Clause
+
+# The Makefile stages zxc/ and shim/ next to this file.
+ccflags-y += -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD
+# The dispatcher binds the per-ISA sources by this suffix; the rest ignore it.
+ccflags-y += -DZXC_FUNCTION_SUFFIX=_default
+ccflags-y += -std=gnu11 -Wno-declaration-after-statement
+# Shims first, then the sources, then the compiler's freestanding headers.
+ccflags-y += -I$(src)/shim
+ccflags-y += -I$(src)/zxc/include -I$(src)/zxc/src/lib -I$(src)/zxc/src/lib/vendors
+ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
+# A few frames pass CONFIG_FRAME_WARN; the whole path is what the README measures.
+ccflags-y += -Wframe-larger-than=8192
+
+obj-m += zxc_selftest.o
+zxc_selftest-y := selftest.o \
+    zxc/src/lib/zxc_common.o zxc/src/lib/zxc_pivco_tables.o zxc/src/lib/zxc_dispatch.o \
+    zxc/src/lib/zxc_dict.o zxc/src/lib/zxc_compress.o zxc/src/lib/zxc_decompress.o \
+    zxc/src/lib/zxc_huffman.o

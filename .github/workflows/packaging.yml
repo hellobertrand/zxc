@@ -7,13 +7,16 @@ name: Packaging (Consumer Integration)
 # Four consumption paths, static and shared: find_package(zxc), pkg-config,
 # direct integration (-I + raw library, no defines at all), and pkg-config from
 # a relocated install prefix.
+#
+# A fifth path consumes no install at all: kernel ports vendor the sources;
+# kernel.yml builds contrib/linux-kernel.
 
 on:
   workflow_dispatch:
   push:
     branches: [ main ]
   pull_request:
-    branches: [ main ]
+    branches: [ main, candidate ]
 
 permissions:
   contents: read

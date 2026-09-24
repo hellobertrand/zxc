@@ -75,6 +75,8 @@ callback. It is opt-in only because most consumers do not need
 random-access decompression; it does not pull `<stdio.h>`. Kernel /
 embedded consumers can include it directly.
 
+Porting to a libc-less target: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
+
 `zxc_stream.h` is the only header that requires `<stdio.h>`. It groups
 every `FILE*`-flavored entry point: the multi-threaded streaming driver
 (`zxc_stream_compress` / `zxc_stream_decompress`) and the seekable
@@ -807,7 +809,7 @@ wrapper plus every persistent sub-buffer the library would partition.
 (non-power-of-two `block_size`, out-of-range level, ...).
 
 **Note**: level 6 (`ZXC_LEVEL_DENSITY`) adds the optimal-parser scratch
-(~8.125 × `block_size`); levels 1–5 share the same workspace size.
+(~8.125 × `block_size`, at least ~213 KiB); levels 1–5 share the same workspace size.
 
 ### `zxc_init_static_cctx`
 

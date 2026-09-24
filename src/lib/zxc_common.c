@@ -23,32 +23,6 @@
 // ============================================================================
 
 /**
- * @brief Allocates memory aligned to the specified boundary.
- *
- * Uses `_aligned_malloc` on Windows and `posix_memalign` elsewhere.
- */
-void* zxc_aligned_malloc(const size_t size, const size_t alignment) {
-#if defined(_WIN32)
-    return _aligned_malloc(size, alignment);
-#else
-    void* ptr = NULL;
-    if (posix_memalign(&ptr, alignment, size) != 0) return NULL;
-    return ptr;
-#endif
-}
-
-/**
- * @brief Frees memory previously allocated by zxc_aligned_malloc().
- */
-void zxc_aligned_free(void* ptr) {
-#if defined(_WIN32)
-    _aligned_free(ptr);
-#else
-    free(ptr);
-#endif
-}
-
-/**
  * @brief Returns @c sizeof(zxc_compress_opts_t) for ABI-safe allocation.
  *
  * Public API; see @c zxc_buffer.h. Lets callers (other languages, or a
@@ -204,9 +178,9 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
         // opt_scratch (level >= ZXC_LEVEL_DENSITY): the optimal parser's DP arrays,
-        // reused transiently as package-merge scratch by the code-length builder,
-        // so sized to the larger demand. Keep in sync with zxc_estimate_cctx_size()
-        // and its consumer in zxc_compress.c.
+        // reused transiently by the code-length builder and its nudge, so sized to
+        // the larger demand. Keep in sync with zxc_estimate_cctx_size() and its
+        // consumer in zxc_compress.c.
         if (level >= ZXC_LEVEL_DENSITY) {
             size_t sz_dp;
             size_t sz_pl;
@@ -215,7 +189,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             zxc_opt_dp_sizes(chunk_size, &sz_dp, &sz_pl, &sz_po, &sz_bm);
             const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
             layout.sz_opt =
-                (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
+                (dp_needed > ZXC_HUF_NUDGE_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_NUDGE_SCRATCH_SIZE;
         }
 
         layout.off_hash_pos = layout.total;
@@ -599,6 +573,68 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     bh->header_checksum = src[7];
 
     return ZXC_OK;
+}
+
+// =========================================================================
+// SEEK TABLE WRITER (a frame block; zxc_seekable.c is the random-access reader)
+// =========================================================================
+
+/**
+ * @brief Byte size of a seek table holding @p num_blocks blocks: header, then groups.
+ *
+ * Public API; sizes the destination of @ref zxc_write_seek_table. 0 when the table
+ * does not fit size_t (32-bit hosts) or @p num_blocks is past what one can describe.
+ */
+size_t zxc_seek_table_size(const uint64_t num_blocks) {
+    if (UNLIKELY(num_blocks > UINT64_MAX / ZXC_SEEK_ANCHOR_SIZE)) return 0;
+    const uint64_t bytes = zxc_seek_table_bytes(num_blocks);
+    if (UNLIKELY(bytes > SIZE_MAX - ZXC_BLOCK_HEADER_SIZE)) return 0;
+    return ZXC_BLOCK_HEADER_SIZE + (size_t)bytes;
+}
+
+int zxc_seek_table_header(uint8_t* dst, const size_t dst_capacity, const uint64_t num_blocks) {
+    // The field keeps the table size modulo 2^32; readers derive the count from the footer.
+    const zxc_block_header_t bh = {
+        .block_type = ZXC_BLOCK_SEK,
+        .block_flags = 0,
+        .reserved = 0,
+        .comp_size = zxc_seek_size_field(zxc_seek_table_bytes(num_blocks))};
+    return zxc_write_block_header(dst, dst_capacity, &bh);
+}
+
+size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t* RESTRICT anchor,
+                            const uint32_t* RESTRICT sizes, const uint32_t cnt) {
+    zxc_store_le64(dst, *anchor);
+    uint8_t* p = dst + ZXC_SEEK_ANCHOR_SIZE;
+    for (uint32_t k = 0; k < cnt; k++, p += ZXC_SEEK_SIZE_ENTRY) {
+        zxc_store_le32(p, sizes[k]);
+        *anchor += sizes[k];
+    }
+    return (size_t)(p - dst);
+}
+
+/**
+ * @brief Serialises a seek table (a @c ZXC_BLOCK_SEK block) into @p dst.
+ *
+ * Public API; contract in @c zxc_seekable.h. Block header, then the groups.
+ */
+int64_t zxc_write_seek_table(uint8_t* dst, const size_t dst_capacity, const uint32_t* comp_sizes,
+                             const uint64_t num_blocks) {
+    const size_t total = zxc_seek_table_size(num_blocks);
+    if (UNLIKELY(total == 0)) return ZXC_ERROR_OVERFLOW;
+    if (UNLIKELY(dst_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
+    if (UNLIKELY(!dst || !comp_sizes)) return ZXC_ERROR_NULL_INPUT;
+
+    const int hdr_res = zxc_seek_table_header(dst, dst_capacity, num_blocks);
+    if (UNLIKELY(hdr_res < 0)) return hdr_res;
+    uint8_t* p = dst + hdr_res;
+
+    uint64_t anchor = ZXC_FILE_HEADER_SIZE;
+    for (uint64_t i = 0; i < num_blocks; i += ZXC_SEEK_GROUP)
+        p += zxc_seek_write_group(p, &anchor, comp_sizes + i,
+                                  zxc_seek_group_len(num_blocks, i / ZXC_SEEK_GROUP));
+
+    return (int64_t)(p - dst);
 }
 
 /**

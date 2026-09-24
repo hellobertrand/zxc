@@ -19,7 +19,6 @@
 
 #include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
-#include "../../include/zxc_seekable.h"
 #include "zxc_internal.h"
 
 // ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
@@ -191,6 +190,15 @@ static inline uint64_t zxc_xgetbv0(void) {
 }
 #endif /* x86-64 && !ZXC_ONLY_DEFAULT */
 
+/** @brief Function pointer type for the chunk decompressor. */
+typedef int (*zxc_decompress_func_t)(const zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT,
+                                     const size_t, uint8_t* RESTRICT, const size_t, const uint64_t);
+/** @brief Function pointer type for the chunk compressor. */
+typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
+                                   uint8_t* RESTRICT, const size_t, const uint64_t);
+
+#ifndef ZXC_ONLY_DEFAULT
+
 /**
  * @enum zxc_cpu_feature_t
  * @brief Detected CPU SIMD capability level.
@@ -215,9 +223,6 @@ typedef enum {
  */
 // LCOV_EXCL_START
 static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
-#ifdef ZXC_ONLY_DEFAULT
-    return ZXC_CPU_GENERIC;
-#else
     zxc_cpu_feature_t features = ZXC_CPU_GENERIC;
 
 #if defined(__x86_64__) || defined(_M_X64)
@@ -283,48 +288,21 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 #endif
 
     return features;
-#endif
 }
 // LCOV_EXCL_STOP
+
+#endif  // ZXC_ONLY_DEFAULT
 
 // ============================================================================
 // DISPATCHERS
 // ============================================================================
-// We use a function pointer initialized on first use (lazy initialization).
-
-/** @brief Function pointer type for the chunk decompressor. */
-typedef int (*zxc_decompress_func_t)(const zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT,
-                                     const size_t, uint8_t* RESTRICT, const size_t, const uint64_t);
-/** @brief Function pointer type for the chunk compressor. */
-typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
-                                   uint8_t* RESTRICT, const size_t, const uint64_t);
-
-/** @brief Lazily-resolved pointer to the best decompression variant. */
-static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_ptr = (zxc_decompress_func_t)0;
-/** @brief Lazily-resolved pointer to the best dict-decompression variant. */
-static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_dict_ptr = (zxc_decompress_func_t)0;
-/** @brief Lazily-resolved pointer to the best safe-decompression variant. */
-static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_safe_ptr = (zxc_decompress_func_t)0;
-/** @brief Lazily-resolved pointer to the best compression variant. */
-static ZXC_ATOMIC zxc_compress_func_t zxc_compress_ptr = (zxc_compress_func_t)0;
-
-// Publication of a resolved pointer, and the matching acquire load. One pair of
-// definitions instead of an #if around every access.
-#if ZXC_USE_C11_ATOMICS
-#define ZXC_DISPATCH_STORE(ptr, val) atomic_store_explicit(&(ptr), (val), memory_order_release)
-#define ZXC_DISPATCH_LOAD(ptr) atomic_load_explicit(&(ptr), memory_order_acquire)
-#else
-#define ZXC_DISPATCH_STORE(ptr, val) ((ptr) = (val))
-#define ZXC_DISPATCH_LOAD(ptr) (ptr)
-#endif
+// One constant variant set per ISA, one published pointer to the selected one;
+// ZXC_ONLY_DEFAULT binds _default at compile time.
 
 /**
  * @struct zxc_variant_set_t
- * @brief The four chunk entry points of one ISA variant, resolved together.
- *
- * The three lazy initialisers below differ only in which of these they publish,
- * so the per-architecture selection ladder lives in one place: adding an ISA
- * tier is one line here instead of three ladders to keep in step.
+ * @brief The four chunk entry points of one ISA variant; adding a tier is one
+ *        line here.
  */
 typedef struct {
     zxc_decompress_func_t decompress;
@@ -333,134 +311,117 @@ typedef struct {
     zxc_compress_func_t compress;
 } zxc_variant_set_t;
 
-/** @brief Returns the variant set of suffix @p sfx from the enclosing function. */
-#define ZXC_RETURN_VARIANT_SET(sfx)                                                    \
-    do {                                                                               \
-        const zxc_variant_set_t v_ = {                                                 \
-            zxc_decompress_chunk_wrapper##sfx, zxc_decompress_chunk_wrapper_dict##sfx, \
-            zxc_decompress_chunk_wrapper_safe##sfx, zxc_compress_chunk_wrapper##sfx};  \
-        return v_;                                                                     \
-    } while (0)
+/** @brief Defines the constant variant set of suffix @p sfx. */
+#define ZXC_VARIANT_SET(sfx)                                                       \
+    static const zxc_variant_set_t zxc_variants##sfx = {                           \
+        zxc_decompress_chunk_wrapper##sfx, zxc_decompress_chunk_wrapper_dict##sfx, \
+        zxc_decompress_chunk_wrapper_safe##sfx, zxc_compress_chunk_wrapper##sfx}
 
+ZXC_VARIANT_SET(_default);
+#ifndef ZXC_ONLY_DEFAULT
+#if defined(__x86_64__) || defined(_M_X64)
+ZXC_VARIANT_SET(_avx2);
+ZXC_VARIANT_SET(_avx512);
+#elif defined(__arm__) || defined(_M_ARM)
+ZXC_VARIANT_SET(_neon32);
+#endif
+#endif
+#undef ZXC_VARIANT_SET
+
+#ifdef ZXC_ONLY_DEFAULT
+/** @brief The variant set in use: `_default`, bound at compile time. */
+static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
+    return &zxc_variants_default;
+}
+#else
 /**
  * @brief Detects the CPU tier and returns the matching variant set.
  *
- * Falls back to the `_default` (baseline) set when no ISA extension applies or
- * the build is single-variant.
+ * Falls back to the `_default` (baseline) set when no ISA extension applies.
  */
 // LCOV_EXCL_START
-static zxc_variant_set_t zxc_select_variants(void) {
+static const zxc_variant_set_t* zxc_select_variants(void) {
     const zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
-    (void)cpu;
-
-#ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
-    if (cpu == ZXC_CPU_AVX512) ZXC_RETURN_VARIANT_SET(_avx512);
-    if (cpu == ZXC_CPU_AVX2) ZXC_RETURN_VARIANT_SET(_avx2);
+    if (cpu == ZXC_CPU_AVX512) return &zxc_variants_avx512;
+    if (cpu == ZXC_CPU_AVX2) return &zxc_variants_avx2;
 #elif defined(__arm__) || defined(_M_ARM)
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
-    if (cpu == ZXC_CPU_NEON) ZXC_RETURN_VARIANT_SET(_neon32);
+    if (cpu == ZXC_CPU_NEON) return &zxc_variants_neon32;
+#else
+    (void)cpu;
 #endif
-#endif
-    ZXC_RETURN_VARIANT_SET(_default);
+    return &zxc_variants_default;
 }
 // LCOV_EXCL_STOP
 
-#undef ZXC_RETURN_VARIANT_SET
+/** @brief The selection, NULL until the first call. */
+static const zxc_variant_set_t* ZXC_ATOMIC zxc_variants_ptr = NULL;
 
-/**
- * @brief First-call initialiser for the decompression dispatcher.
- *
- * Publishes both decompression pointers, then tail-calls the one this context
- * needs (its @c dict_size picks the dict variant).
- */
+/** @brief First call: selects and publishes. Cold and out of line, so the
+ *         dispatchers inline only the load and the branch. */
 // LCOV_EXCL_START
-static int zxc_decompress_dispatch_init(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                        const size_t src_sz, uint8_t* RESTRICT dst,
-                                        const size_t dst_cap, const uint64_t block_index) {
-    const zxc_variant_set_t v = zxc_select_variants();
-    ZXC_DISPATCH_STORE(zxc_decompress_ptr, v.decompress);
-    ZXC_DISPATCH_STORE(zxc_decompress_dict_ptr, v.decompress_dict);
-    return (ctx->dict_size ? v.decompress_dict : v.decompress)(ctx, src, src_sz, dst, dst_cap,
-                                                               block_index);
-}
-
-/**
- * @brief Same, for the `_safe_*` decoder used by @ref zxc_decompress_block_safe.
- */
-static int zxc_decompress_safe_dispatch_init(const zxc_cctx_t* RESTRICT ctx,
-                                             const uint8_t* RESTRICT src, const size_t src_sz,
-                                             uint8_t* RESTRICT dst, const size_t dst_cap,
-                                             const uint64_t block_index) {
-    const zxc_variant_set_t v = zxc_select_variants();
-    ZXC_DISPATCH_STORE(zxc_decompress_safe_ptr, v.decompress_safe);
-    return v.decompress_safe(ctx, src, src_sz, dst, dst_cap, block_index);
-}
-
-/** @brief Same, for the compressor. */
-static int zxc_compress_dispatch_init(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
-                                      const size_t src_sz, uint8_t* RESTRICT dst,
-                                      const size_t dst_cap, const uint64_t block_index) {
-    const zxc_variant_set_t v = zxc_select_variants();
-    ZXC_DISPATCH_STORE(zxc_compress_ptr, v.compress);
-    return v.compress(ctx, src, src_sz, dst, dst_cap, block_index);
+static ZXC_COLD ZXC_NOINLINE const zxc_variant_set_t* zxc_variants_resolve(void) {
+    const zxc_variant_set_t* v = zxc_select_variants();
+#if ZXC_USE_C11_ATOMICS
+    atomic_store_explicit(&zxc_variants_ptr, v, memory_order_release);
+#else
+    zxc_variants_ptr = v;
+#endif
+    return v;
 }
 // LCOV_EXCL_STOP
 
-/**
- * @brief Public decompression dispatcher (calls lazily-resolved implementation).
- */
+/** @brief The variant set in use, selected on the first call. */
+static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
+#if ZXC_USE_C11_ATOMICS
+    const zxc_variant_set_t* v = atomic_load_explicit(&zxc_variants_ptr, memory_order_acquire);
+#else
+    const zxc_variant_set_t* v = zxc_variants_ptr;
+#endif
+    if (UNLIKELY(!v)) v = zxc_variants_resolve();
+    return v;
+}
+#endif  // ZXC_ONLY_DEFAULT
+
+/** @brief Public decompression dispatcher. */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                  const uint64_t block_index) {
     // dict_size is constant for a stream; this per-block branch (outside the decode
     // loop) routes to the dict variant only when a dictionary is active, so the
     // no-dict path runs the dict-free chunk wrapper (identical codegen to main).
-    const zxc_decompress_func_t func = ctx->dict_size ? ZXC_DISPATCH_LOAD(zxc_decompress_dict_ptr)
-                                                      : ZXC_DISPATCH_LOAD(zxc_decompress_ptr);
-    if (UNLIKELY(!func))
-        return zxc_decompress_dispatch_init(ctx, src, src_sz, dst, dst_cap, block_index);
-    return func(ctx, src, src_sz, dst, dst_cap, block_index);
+    const zxc_variant_set_t* v = zxc_variants();
+    return (ctx->dict_size ? v->decompress_dict : v->decompress)(ctx, src, src_sz, dst, dst_cap,
+                                                                 block_index);
 }
 
 /**
  * @brief Internal safe-decompression dispatcher (strict dst_capacity == uncompressed_size).
  *
- * Calls the lazily-resolved `_safe_*` variant, running first-call init if needed.
- *
  * @param[in]  ctx      Decompression context.
  * @param[in]  src      Compressed input chunk.
  * @param[in]  src_sz   Size of @p src in bytes.
- * @param[out] dst      Destination buffer (capacity == exact uncompressed size).
- * @param[in]  dst_cap  Capacity of @p dst in bytes.
- * @return Decompressed size in bytes, or a negative @ref zxc_error_t.
+ * @param[out] dst      Destination buffer (exactly the decoded size).
+ * @param[in]  dst_cap  Capacity of @p dst.
+ * @param[in]  block_index Frame position of the block: the checksum seed.
+ * @return Bytes written on success, or a negative @ref zxc_error_t.
  */
 static int zxc_decompress_chunk_wrapper_safe_public(const zxc_cctx_t* RESTRICT ctx,
                                                     const uint8_t* RESTRICT src,
                                                     const size_t src_sz, uint8_t* RESTRICT dst,
                                                     const size_t dst_cap,
                                                     const uint64_t block_index) {
-    const zxc_decompress_func_t func = ZXC_DISPATCH_LOAD(zxc_decompress_safe_ptr);
-    if (UNLIKELY(!func))
-        return zxc_decompress_safe_dispatch_init(ctx, src, src_sz, dst, dst_cap, block_index);
-    return func(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_variants()->decompress_safe(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 
-/**
- * @brief Public compression dispatcher (calls lazily-resolved implementation).
- */
+/** @brief Public compression dispatcher. */
 int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
                                const uint64_t block_index) {
-    const zxc_compress_func_t func = ZXC_DISPATCH_LOAD(zxc_compress_ptr);
-    if (UNLIKELY(!func))
-        return zxc_compress_dispatch_init(ctx, src, src_sz, dst, dst_cap, block_index);
-    return func(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_variants()->compress(ctx, src, src_sz, dst, dst_cap, block_index);
 }
-
-#undef ZXC_DISPATCH_STORE
-#undef ZXC_DISPATCH_LOAD
 
 // ============================================================================
 // HUFFMAN TRAMPOLINES
