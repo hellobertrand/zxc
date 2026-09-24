@@ -514,7 +514,7 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
             if (rc == ZXC_OK) {
                 // Dict tables serve the most literal-bound decode path, so the
                 // flat/length nudge pays off most here.
-                (void)zxc_huf_nudge_code_lengths(freq, code_len, NULL,
+                (void)zxc_huf_nudge_code_lengths(freq, code_len, NULL, 0,
                                                  ZXC_HUF_MAX_CODE_LEN_DENSITY);
                 zxc_huf_pack_lengths(code_len, huf_lengths_out);
             }

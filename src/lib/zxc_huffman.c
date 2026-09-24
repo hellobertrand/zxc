@@ -784,7 +784,8 @@ void zxc_huf_nudge_cost(const uint8_t* RESTRICT code_len, const uint32_t* RESTRI
 }
 
 int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
-                               void* RESTRICT scratch, const int max_code_len) {
+                               void* RESTRICT scratch, const size_t scratch_cap,
+                               const int max_code_len) {
     enum { LU = ZXC_HUF_MAX_CODE_LEN_ULTRA };
     uint32_t blc0[LU + 1];
     const int n = zxc_huf_nudge_classes(code_len, blc0);
@@ -792,11 +793,12 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     // to code length exactly 1): leave them untouched.
     if (n < 4) return 0;
 
-    // Tables and DP planes come from the workspace: a 10 KiB frame otherwise,
-    // and a per-block allocation for the planes.
+    // Tables and DP planes live past the rebuilds' region of the scratch when it
+    // has the room (opt_scratch does), else in one allocation: no 10 KiB frame.
+    const int owned = !scratch || scratch_cap < ZXC_HUF_NUDGE_SCRATCH_SIZE;
     zxc_huf_nudge_ws_t* const ws =
-        scratch ? (zxc_huf_nudge_ws_t*)((uint8_t*)scratch + ZXC_HUF_NUDGE_SCRATCH_OFF)
-                : (zxc_huf_nudge_ws_t*)ZXC_MALLOC(sizeof(*ws));
+        owned ? (zxc_huf_nudge_ws_t*)ZXC_MALLOC(sizeof(*ws))
+              : (zxc_huf_nudge_ws_t*)((uint8_t*)scratch + ZXC_HUF_NUDGE_SCRATCH_OFF);
     if (UNLIKELY(!ws)) return 0;
 
     // Baseline cost, exact (canonical-order frequency weighting).
@@ -858,7 +860,8 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     // ghost leaves on unused byte values - wire-legal, empty runs, and the
     // evaluator prices the burnt code space like anything else.
     {
-        const int g_log2 = n <= 64 ? 0 : (n <= 128 ? 1 : 2);
+        int g_log2 = 0; /* coarsen until the groups fit the DP plane */
+        while (((n + (1 << g_log2) - 1) >> g_log2) > ZXC_HUF_NUDGE_DP_M) g_log2++;
         const int g = 1 << g_log2;
         const int m = (n + g - 1) / g;
         const int cap_c = max_code_len - g_log2;
@@ -930,7 +933,7 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         }
     }
     if (best >= 0) ZXC_MEMCPY(code_len, cand[best], ZXC_HUF_NUM_SYMBOLS);
-    if (!scratch) ZXC_FREE(ws);
+    if (owned) ZXC_FREE(ws);
     return best >= 0;
 }
 #endif /* ZXC_VARIANT_PRIMARY */

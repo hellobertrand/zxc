@@ -658,7 +658,7 @@ block of `src_size` bytes at the given `level` via `zxc_compress_block()`.
 The estimate covers all per-chunk working buffers (chain table, literals,
 sequence/token/offset/extras buffers), the fixed hash tables and match-split
 histograms, and the cache-line alignment padding. At `level >= 6` it also
-includes the optimal parser's scratch (~8.125 × `src_size`), allocated once and
+includes the optimal parser's scratch (~8.125 × `src_size`, at least ~213 KiB), allocated once and
 reused. It scales roughly linearly with `src_size` and
 is intended for integrators that need to build an accurate memory budget
 (filesystems, embedded devices, sandboxed workloads).
@@ -809,7 +809,7 @@ wrapper plus every persistent sub-buffer the library would partition.
 (non-power-of-two `block_size`, out-of-range level, ...).
 
 **Note**: level 6 (`ZXC_LEVEL_DENSITY`) adds the optimal-parser scratch
-(~8.125 × `block_size`); levels 1–5 share the same workspace size.
+(~8.125 × `block_size`, at least ~213 KiB); levels 1–5 share the same workspace size.
 
 ### `zxc_init_static_cctx`
 

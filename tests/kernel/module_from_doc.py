@@ -19,35 +19,51 @@ UNITS = "zxc_common zxc_pivco_tables zxc_dispatch zxc_dict zxc_compress zxc_deco
 SMOKE = r"""
 #include <linux/module.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 #include "zxc.h"
 
+/* Round-trips one block and one frame at a fast and a dense level; a mismatch
+ * refuses the load, so `insmod` is the test. */
 static int __init zxctest_init(void)
 {
 	static const char msg[] = "zxc kernel smoke test, zxc kernel smoke test, zxc kernel";
-	zxc_compress_opts_t opts = { .level = 3 };
-	size_t cap = (size_t)zxc_compress_bound(sizeof(msg)); /* >= the block bound */
+	static const int levels[] = { 3, 7 };
+	size_t cap = (size_t)zxc_compress_bound(sizeof(msg));
 	u8 *comp = kmalloc(cap, GFP_KERNEL), *back = kmalloc(sizeof(msg), GFP_KERNEL);
-	zxc_cctx *cctx = zxc_create_cctx(&opts);
-	zxc_dctx *dctx = zxc_create_dctx();
-	int64_t n = -1, m = -1;
+	int rc = -ENOMEM, i;
 
-	int64_t fn = -1, fm = -1;
+	if (!comp || !back)
+		goto out;
+	for (i = 0; i < 2; i++) {
+		zxc_compress_opts_t opts = { .level = levels[i] };
+		zxc_cctx *cctx = zxc_create_cctx(&opts);
+		zxc_dctx *dctx = zxc_create_dctx();
+		int64_t n = -1, m = -1, fn = -1, fm = -1;
 
-	if (comp && back && cctx && dctx) {
-		n = zxc_compress_block(cctx, msg, sizeof(msg), comp, cap, &opts);
-		if (n > 0)
-			m = zxc_decompress_block_safe(dctx, comp, (size_t)n, back, sizeof(msg), NULL);
-		fn = zxc_compress(msg, sizeof(msg), comp, cap, &opts);
-		if (fn > 0)
-			fm = zxc_decompress(comp, (size_t)fn, back, sizeof(msg), NULL);
+		rc = -ENOMEM;
+		if (cctx && dctx) {
+			n = zxc_compress_block(cctx, msg, sizeof(msg), comp, cap, &opts);
+			if (n > 0)
+				m = zxc_decompress_block_safe(dctx, comp, (size_t)n, back, sizeof(msg), NULL);
+			rc = (m == sizeof(msg) && !memcmp(back, msg, sizeof(msg))) ? 0 : -EINVAL;
+			memset(back, 0, sizeof(msg));
+			fn = zxc_compress(msg, sizeof(msg), comp, cap, &opts);
+			if (fn > 0)
+				fm = zxc_decompress(comp, (size_t)fn, back, sizeof(msg), NULL);
+			if (!rc && (fm != sizeof(msg) || memcmp(back, msg, sizeof(msg))))
+				rc = -EINVAL;
+		}
+		pr_info("zxctest: level %d block %lld -> %lld, frame %lld -> %lld: %s\n", levels[i],
+			(long long)n, (long long)m, (long long)fn, (long long)fm, rc ? "FAIL" : "ok");
+		zxc_free_cctx(cctx);
+		zxc_free_dctx(dctx);
+		if (rc)
+			break;
 	}
-	pr_info("zxctest: block %lld -> %lld, frame %lld -> %lld\n", (long long)n, (long long)m,
-		(long long)fn, (long long)fm);
-	zxc_free_cctx(cctx);
-	zxc_free_dctx(dctx);
+out:
 	kfree(comp);
 	kfree(back);
-	return 0;
+	return rc;
 }
 
 static void __exit zxctest_exit(void) {}

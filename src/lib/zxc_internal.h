@@ -963,18 +963,17 @@ typedef struct {
      (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
          sizeof(zxc_huf_pm_frame_t))
 
-/** @brief Slot-ledger DP bound: coarse symbols per plane axis. The nudge groups
- *         frequency-adjacent symbols so that at most 64 groups remain. */
+/** @brief Slot-ledger DP bound, coarse symbols per plane axis; the nudge groups
+ *         symbols to stay under it. */
 #define ZXC_HUF_NUDGE_DP_M 64
 
-/** @brief Workspace of ::zxc_huf_nudge_code_lengths: its tables and the DP planes,
- *         which a 10 KiB stack frame and a per-block allocation used to hold.
- *         Placed ::ZXC_HUF_NUDGE_SCRATCH_OFF into the scratch, past the region
- *         the reduced-cap rebuilds use, so one scratch serves both. */
+/** @brief Workspace of ::zxc_huf_nudge_code_lengths: tables and DP planes, once a
+ *         10 KiB frame and a per-block allocation. Sits ::ZXC_HUF_NUDGE_SCRATCH_OFF
+ *         into the scratch, past the rebuilds' region. */
 typedef struct {
     uint64_t pf[ZXC_HUF_NUM_SYMBOLS + 1];      /**< Canonical-order prefix sums. */
     uint64_t pf_rank[ZXC_HUF_NUM_SYMBOLS + 1]; /**< Frequency-rank prefix sums. */
-    uint64_t pfg[ZXC_HUF_NUM_SYMBOLS + 1];     /**< Group-mass prefix sums. */
+    uint64_t pfg[ZXC_HUF_NUDGE_DP_M + 1];      /**< Group-mass prefix sums. */
     uint64_t jcur[(ZXC_HUF_NUDGE_DP_M + 1) * (ZXC_HUF_NUDGE_DP_M + 1)]; /**< DP plane. */
     uint64_t jnxt[(ZXC_HUF_NUDGE_DP_M + 1) * (ZXC_HUF_NUDGE_DP_M + 1)]; /**< Next plane. */
     /** Per-level arrival choice, c <= ZXC_HUF_NUDGE_DP_M. */
@@ -987,8 +986,7 @@ typedef struct {
 
 /** @brief Offset of the ::zxc_huf_nudge_ws_t inside a nudge scratch. */
 #define ZXC_HUF_NUDGE_SCRATCH_OFF ZXC_ALIGN_CL(ZXC_HUF_BUILD_SCRATCH_SIZE)
-/** @brief Scratch size (bytes) for ::zxc_huf_nudge_code_lengths: the builder's,
- *         then its own workspace. */
+/** @brief Scratch size (bytes) for ::zxc_huf_nudge_code_lengths: builder's, then workspace. */
 #define ZXC_HUF_NUDGE_SCRATCH_SIZE (ZXC_HUF_NUDGE_SCRATCH_OFF + sizeof(zxc_huf_nudge_ws_t))
 
 /**
@@ -1715,14 +1713,15 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
  *
  * @param[in]     freq         Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
  * @param[in,out] code_len     Lengths from ::zxc_huf_build_code_lengths.
- * @param[in]     scratch      Optional ::ZXC_HUF_NUDGE_SCRATCH_SIZE scratch: the
- *                             rebuilds' region, then the ::zxc_huf_nudge_ws_t
- *                             (NULL = allocate one for the call).
+ * @param[in]     scratch      Optional: the rebuilds' region, plus the workspace
+ *                             when @p scratch_cap reaches ::ZXC_HUF_NUDGE_SCRATCH_SIZE
+ *                             (else the workspace is allocated for the call).
+ * @param[in]     scratch_cap  Bytes at @p scratch.
  * @param[in]     max_code_len Cap the caller built with (level cap).
  * @return 1 if @p code_len was adjusted, 0 if kept.
  */
 int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT code_len,
-                               void* RESTRICT scratch, int max_code_len);
+                               void* RESTRICT scratch, size_t scratch_cap, int max_code_len);
 
 /**
  * @brief Modeled (bits, level-touches) decode cost of one code-length vector.

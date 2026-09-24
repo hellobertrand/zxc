@@ -214,15 +214,32 @@ static int huf_nudge_case(const char* label, const uint8_t* literals, size_t n_l
 
     uint8_t nudged[ZXC_HUF_NUM_SYMBOLS];
     memcpy(nudged, base_len, sizeof(nudged));
-    const int adopted = zxc_huf_nudge_code_lengths(freq, nudged, NULL, max_code_len);
+    const int adopted = zxc_huf_nudge_code_lengths(freq, nudged, NULL, 0, max_code_len);
 
     /* Determinism: a second independent run must reproduce the result. */
     uint8_t nudged2[ZXC_HUF_NUM_SYMBOLS];
     memcpy(nudged2, base_len, sizeof(nudged2));
-    const int adopted2 = zxc_huf_nudge_code_lengths(freq, nudged2, NULL, max_code_len);
+    const int adopted2 = zxc_huf_nudge_code_lengths(freq, nudged2, NULL, 0, max_code_len);
     if (adopted != adopted2 || memcmp(nudged, nudged2, sizeof(nudged)) != 0) {
         printf("Failed [%s]: nudge is not deterministic\n", label);
         return 0;
+    }
+
+    /* A builder-sized scratch (workspace allocated) and a full one: same result. */
+    {
+        const size_t caps[2] = {ZXC_HUF_BUILD_SCRATCH_SIZE, ZXC_HUF_NUDGE_SCRATCH_SIZE};
+        for (int i = 0; i < 2; i++) {
+            uint8_t* scratch = (uint8_t*)malloc(caps[i]);
+            if (!scratch) return 0;
+            memcpy(nudged2, base_len, sizeof(nudged2));
+            const int adopted3 =
+                zxc_huf_nudge_code_lengths(freq, nudged2, scratch, caps[i], max_code_len);
+            free(scratch);
+            if (adopted3 != adopted || memcmp(nudged, nudged2, sizeof(nudged)) != 0) {
+                printf("Failed [%s]: nudge differs with a %zu-byte scratch\n", label, caps[i]);
+                return 0;
+            }
+        }
     }
 
     if (!adopted) {
@@ -346,7 +363,7 @@ int test_huffman_nudge() {
         } else {
             uint8_t kept[ZXC_HUF_NUM_SYMBOLS];
             memcpy(kept, len, sizeof(kept));
-            if (zxc_huf_nudge_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
+            if (zxc_huf_nudge_code_lengths(freq, len, NULL, 0, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
                 memcmp(kept, len, sizeof(kept)) != 0) {
                 printf("Failed [Uniform-256]: expected a no-op nudge\n");
                 ok = 0;
@@ -367,7 +384,7 @@ int test_huffman_nudge() {
             continue;
         }
         memcpy(kept, len, sizeof(kept));
-        if (zxc_huf_nudge_code_lengths(freq, len, NULL, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
+        if (zxc_huf_nudge_code_lengths(freq, len, NULL, 0, ZXC_HUF_MAX_CODE_LEN_DENSITY) != 0 ||
             memcmp(kept, len, sizeof(kept)) != 0) {
             printf("Failed [Degenerate n=%d]: expected untouched lengths\n", nsym);
             ok = 0;
@@ -397,7 +414,7 @@ int test_huffman_nudge() {
                 break;
             }
             checked++;
-            if (zxc_huf_nudge_code_lengths(freq, len, NULL, cap)) {
+            if (zxc_huf_nudge_code_lengths(freq, len, NULL, 0, cap)) {
                 adopted_cnt++;
                 if (!nudge_cost_matches_tree("Fuzz nudged", len, freq)) {
                     ok = 0;

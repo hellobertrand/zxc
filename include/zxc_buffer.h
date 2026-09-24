@@ -403,10 +403,10 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
  * Totals everything @ref zxc_compress_block reserves for a @p src_size block:
  * per-chunk working buffers (chain table, literals, sequence/token/offset/extras),
  * the fixed hash tables and match-split histograms, and cache-line padding. At
- * @p level >= 6 it also counts the `opt_scratch` region (~8.125 x @p src_size)
- * used by the price-based optimal parser, which is lazy-allocated on the first
- * level-6 call and then reused for the lifetime of the cctx. Scales roughly
- * linearly with @p src_size.
+ * @p level >= 6 it also counts the `opt_scratch` region: ~8.125 x @p src_size for
+ * the optimal parser, floored at the ~213 KiB the code-length nudge needs (a
+ * 4 KiB block's level-6 cctx is about 520 KiB). Lazy-allocated on the first
+ * level-6 call, then kept for the cctx's lifetime.
  *
  * @param[in] src_size Uncompressed block size in bytes.
  * @param[in] level    Compression level (1..7). Levels <= 5 share the same
@@ -591,7 +591,7 @@ ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t s
  *                        [@ref ZXC_BLOCK_SIZE_MIN, @ref ZXC_BLOCK_SIZE_MAX]).
  * @param[in] level       Compression level (1..7); levels at or above
  *                        @ref ZXC_LEVEL_DENSITY add the optimal-parser
- *                        scratch (~8.125 x block_size).
+ *                        scratch (~8.125 x block_size, at least ~213 KiB).
  * @return Workspace size in bytes, or 0 if either argument is invalid.
  */
 ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const int level);

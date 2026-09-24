@@ -39,9 +39,10 @@ zxc_common.c  zxc_pivco_tables.c  zxc_dispatch.c  zxc_dict.c
 zxc_compress.c  zxc_decompress.c  zxc_huffman.c
 ```
 
-They carry the whole buffer API, frame and dictionaries included. Left out:
-`zxc_driver.c` (`<stdio.h>`) and `zxc_seekable.c` (the random-access reader,
-threaded).
+They carry the whole buffer API: frame, blocks, dictionaries. Left out:
+`zxc_driver.c` (`<stdio.h>`), `zxc_seekable.c` (the random-access reader,
+threaded) and `zxc_pstream.c` (the push streams grow their buffers with
+`ZXC_REALLOC`, which the header below leaves undefined).
 
 ```make
 ccflags-y += -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD
@@ -57,9 +58,9 @@ ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
 ccflags-y += -Wframe-larger-than=8192
 ```
 
-CI builds a module from this page's own snippets and round-trips a block and a
-frame with it (`tests/kernel/module_from_doc.py`, job `kernel-module` in
-`.github/workflows/packaging.yml`).
+CI builds a module from this page's own snippets (`tests/kernel/module_from_doc.py`,
+job `kernel-module` in `.github/workflows/packaging.yml`); its init round-trips a
+block and a frame at levels 3 and 7 and refuses to load on a mismatch.
 
 `-std=gnu11` because kernels before 5.18 build `-std=gnu89` with C90 declaration
 checks.
@@ -176,8 +177,8 @@ static inline void *zxc_kernel_alloc(size_t size, gfp_t zero)
 #define ZXC_CALLOC(nmemb, size)   zxc_kernel_alloc(array_size((nmemb), (size)), __GFP_ZERO)
 #define ZXC_FREE(ptr)             kvfree(ptr)
 
-/* No ZXC_REALLOC: krealloc() only accepts kmalloc'd memory, and the block-only
- * subset never reallocates - undefined, a future use fails to build. */
+/* No ZXC_REALLOC: krealloc() only accepts kmalloc'd memory, and these units
+ * never reallocate - undefined, a future use fails to build. */
 
 /* kmalloc need not reach a cache line, so align by hand; kvmalloc keeps the
  * big workspaces off the power-of-two slabs. */

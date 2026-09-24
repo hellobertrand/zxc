@@ -359,18 +359,28 @@ static const zxc_variant_set_t* zxc_select_variants(void) {
 /** @brief The selection, NULL until the first call. */
 static const zxc_variant_set_t* ZXC_ATOMIC zxc_variants_ptr = NULL;
 
+/** @brief First call: selects and publishes. Cold and out of line, so the
+ *         dispatchers inline only the load and the branch. */
+// LCOV_EXCL_START
+static ZXC_COLD ZXC_NOINLINE const zxc_variant_set_t* zxc_variants_resolve(void) {
+    const zxc_variant_set_t* v = zxc_select_variants();
+#if ZXC_USE_C11_ATOMICS
+    atomic_store_explicit(&zxc_variants_ptr, v, memory_order_release);
+#else
+    zxc_variants_ptr = v;
+#endif
+    return v;
+}
+// LCOV_EXCL_STOP
+
 /** @brief The variant set in use, selected on the first call. */
 static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
 #if ZXC_USE_C11_ATOMICS
     const zxc_variant_set_t* v = atomic_load_explicit(&zxc_variants_ptr, memory_order_acquire);
-    if (UNLIKELY(!v)) {
-        v = zxc_select_variants();
-        atomic_store_explicit(&zxc_variants_ptr, v, memory_order_release);
-    }
 #else
     const zxc_variant_set_t* v = zxc_variants_ptr;
-    if (UNLIKELY(!v)) zxc_variants_ptr = v = zxc_select_variants();
 #endif
+    if (UNLIKELY(!v)) v = zxc_variants_resolve();
     return v;
 }
 #endif  // ZXC_ONLY_DEFAULT

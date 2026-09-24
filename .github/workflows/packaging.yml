@@ -9,7 +9,7 @@ name: Packaging (Consumer Integration)
 # a relocated install prefix.
 #
 # A fifth path consumes no install at all: kernel ports vendor the sources and
-# build a subset of them behind defines (see the block-only job below).
+# build a subset of them (see the kernel-module job below).
 
 on:
   workflow_dispatch:
@@ -182,7 +182,7 @@ jobs:
           done
 
   kernel-module:
-    name: "Kernel module from KERNEL.md (block-only)"
+    name: "Kernel module from KERNEL.md"
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
@@ -203,7 +203,7 @@ jobs:
           make -C "/lib/modules/$(uname -r)/build" M=/tmp/mod KCFLAGS=-Werror modules
           modinfo /tmp/mod/zxctest.ko
 
-      - name: Check what the 32-bit block-only subset reaches for
+      - name: Check what the 32-bit kernel subset reaches for
         run: |
           # No i386 headers here: compile the subset hosted and non-PIC, then read
           # its imports; a 32-bit kernel exports no 64-bit division helper. Exact
@@ -221,6 +221,6 @@ jobs:
                    END { for (s in u) if (!(s in d)) print s }' | sort > /tmp/nf32/needs
           allowed='^(memcpy|memmove|memset|memcmp|malloc|calloc|realloc|free|posix_memalign|__popcount[sd]i2|__[cl]tz[sd]i2|__stack_chk_fail|__stack_chk_guard)$'
           if grep -Ev "$allowed" /tmp/nf32/needs; then
-            echo "::error::the 32-bit block-only subset reaches outside its sources and the libc"
+            echo "::error::the 32-bit kernel subset reaches outside its sources and the libc"
             exit 1
           fi
