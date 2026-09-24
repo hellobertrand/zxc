@@ -1,4 +1,18 @@
-# Kernel and freestanding integration
+# ZXC in the Linux kernel
+
+Everything an out-of-tree module needs: the dependency header, two header
+shims, a Kbuild and a self-test module, plus this guide. `make` here stages the
+library sources next to the Kbuild and builds `build/zxc_selftest.ko` against
+the running kernel's headers (`KDIR=` for another tree). Loading it round-trips
+a block and a frame at levels 3 and 7 and refuses to load on a mismatch.
+
+```
+zxc_deps.h     the kernel replacement for src/lib/zxc_deps.h
+shim/          <stdint.h> and <string.h> over their kernel counterparts
+Kbuild         flags and object list
+selftest.c     the module's init: the round trips
+Makefile       stages the sources into build/ and calls the kernel's make
+```
 
 Porting ZXC to a host with no libc: a bootloader or firmware unpacking its
 payload, a read-only filesystem image, an initramfs. ZXC compresses slowly and
@@ -9,21 +23,11 @@ write (zram, zswap) would pay the slow side on its hot path.
 
 The core uses no floating point, no VLA and no `alloca`, and calls the C
 library only through `src/lib/zxc_deps.h`.
-Two libc headers need a shim over their kernel counterpart: `<stdint.h>` (public
-headers) and `<string.h>` (`rapidhash.h`, for `memcpy`). The compiler's
-`<stdint.h>` will not do: GCC's reaches for libc's, and its LP64 `uint64_t` is
-`unsigned long`, the kernel's `unsigned long long`. `<stddef.h>` and
-`<stdalign.h>` stay the compiler's.
-
-```c
-/* shim/stdint.h */
-#include <linux/types.h>
-```
-
-```c
-/* shim/string.h */
-#include <linux/string.h>
-```
+Two libc headers need a shim over their kernel counterpart (`shim/`):
+`<stdint.h>` (public headers) and `<string.h>` (`rapidhash.h`, for `memcpy`).
+The compiler's `<stdint.h>` will not do: GCC's reaches for libc's, and its LP64
+`uint64_t` is `unsigned long`, the kernel's `unsigned long long`. `<stddef.h>`
+and `<stdalign.h>` stay the compiler's.
 
 Decoding peaks at 4.5 KiB of stack whatever level the archive was written at,
 inside a 16 KiB kernel stack and an 8 KiB one on 32-bit. Compressing in the
@@ -42,28 +46,25 @@ zxc_compress.c  zxc_decompress.c  zxc_huffman.c
 They carry the whole buffer API: frame, blocks, dictionaries. Left out:
 `zxc_driver.c` (`<stdio.h>`), `zxc_seekable.c` (the random-access reader,
 threaded) and `zxc_pstream.c` (the push streams grow their buffers with
-`ZXC_REALLOC`, which the header below leaves undefined).
+`ZXC_REALLOC`, which `zxc_deps.h` leaves undefined).
 
-```make
-ccflags-y += -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD
-# The dispatcher binds the per-ISA sources by this suffix; the rest ignore it.
-ccflags-y += -DZXC_FUNCTION_SUFFIX=_default
-ccflags-y += -std=gnu11 -Wno-declaration-after-statement
-# Shims first, then the sources, then the compiler's freestanding headers.
-ccflags-y += -I$(src)/shim
-ccflags-y += -I$(src)/zxc/include -I$(src)/zxc/src/lib -I$(src)/zxc/src/lib/vendors
-ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
-# A few frames pass CONFIG_FRAME_WARN (2 KiB on 64-bit), an error under
-# CONFIG_WERROR. What bounds the stack is the whole path, measured below.
-ccflags-y += -Wframe-larger-than=8192
-```
+The `Kbuild` flags, and why:
 
-CI builds a module from this page's own snippets (`tests/kernel/module_from_doc.py`,
-job `kernel-module` in `.github/workflows/packaging.yml`); its init round-trips a
-block and a frame at levels 3 and 7 and refuses to load on a mismatch.
+- `-DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD`: no export decorations, scalar code
+  (see [No FPU region](#no-fpu-region)).
+- `-DZXC_FUNCTION_SUFFIX=_default`: the dispatcher binds the per-ISA sources by
+  this suffix; the other units ignore it.
+- `-std=gnu11 -Wno-declaration-after-statement`: kernels before 5.18 build
+  `-std=gnu89` with C90 declaration checks.
+- `-I` order: the shims, then the sources, then the compiler's freestanding
+  headers (`-isystem $(CC) -print-file-name=include`).
+- `-Wframe-larger-than=8192`: a few frames pass `CONFIG_FRAME_WARN` (2 KiB on
+  64-bit), an error under `CONFIG_WERROR`. What bounds the stack is the whole
+  path, measured below.
 
-`-std=gnu11` because kernels before 5.18 build `-std=gnu89` with C90 declaration
-checks.
+CI builds this module against the runner's kernel under `-Werror`
+(`.github/workflows/kernel.yml`) when this directory or the library change, and
+weekly.
 
 ## No FPU region
 
@@ -126,94 +127,26 @@ past the output for its wild copies, which a page-sized buffer does not have.
 
 ## The dependency header
 
-Vendor a replacement for `src/lib/zxc_deps.h`:
+`zxc_deps.h` here replaces `src/lib/zxc_deps.h` (the Makefile copies it over).
+What it maps, and why:
 
-```c
-/* SPDX-License-Identifier: BSD-3-Clause */
-#ifndef ZXC_DEPS_H
-#define ZXC_DEPS_H
-
-#include <linux/bitops.h>
-#include <linux/kernel.h>
-#include <linux/limits.h>
-#include <linux/mm.h>
-#include <linux/overflow.h>
-#include <linux/sched/mm.h>
-#include <linux/slab.h>
-#include <linux/string.h>
-#include <linux/types.h>
-
-/* zxc spells these the libc way; the kernel ships the U*_MAX family. */
-#ifndef CHAR_BIT
-#define CHAR_BIT 8
-#endif
-#ifndef UINT16_MAX
-#define UINT16_MAX U16_MAX
-#endif
-#ifndef UINT32_MAX
-#define UINT32_MAX U32_MAX
-#endif
-#ifndef UINT64_MAX
-#define UINT64_MAX U64_MAX
-#endif
-
-/* Without FP/SIMD the popcount builtins are unexported libgcc calls. */
-#define ZXC_POPCOUNT32(v) hweight32(v)
-#define ZXC_POPCOUNT64(v) hweight64(v)
-
-/* Reclaim must not recurse into the I/O path: a no-I/O scope around
- * GFP_KERNEL, not GFP_NOIO, which costs kvmalloc its vmalloc fallback
- * before 5.17. */
-static inline void *zxc_kernel_alloc(size_t size, gfp_t zero)
-{
-	unsigned int noio = memalloc_noio_save();
-	void *p = kvmalloc(size, GFP_KERNEL | __GFP_NOWARN | zero);
-
-	memalloc_noio_restore(noio);
-	return p;
-}
-
-#define ZXC_MALLOC(size)          zxc_kernel_alloc((size), 0)
-#define ZXC_CALLOC(nmemb, size)   zxc_kernel_alloc(array_size((nmemb), (size)), __GFP_ZERO)
-#define ZXC_FREE(ptr)             kvfree(ptr)
-
-/* No ZXC_REALLOC: krealloc() only accepts kmalloc'd memory, and these units
- * never reallocate - undefined, a future use fails to build. */
-
-/* kmalloc need not reach a cache line, so align by hand; kvmalloc keeps the
- * big workspaces off the power-of-two slabs. */
-static inline void *zxc_kernel_aligned_alloc(size_t size, size_t alignment)
-{
-	void *mem, *ptr;
-	size_t total;
-
-	if (alignment < sizeof(void *))
-		alignment = sizeof(void *);
-	if (check_add_overflow(size, alignment + sizeof(void *), &total))
-		return NULL;
-	mem = zxc_kernel_alloc(total, 0);
-	if (!mem)
-		return NULL;
-	ptr = (void *)ALIGN((uintptr_t)mem + sizeof(void *), alignment);
-	((void **)ptr)[-1] = mem;
-	return ptr;
-}
-
-static inline void zxc_kernel_aligned_free(void *ptr)
-{
-	if (ptr)
-		kvfree(((void **)ptr)[-1]);
-}
-
-#define ZXC_ALIGNED_MALLOC(size, alignment) zxc_kernel_aligned_alloc((size), (alignment))
-#define ZXC_ALIGNED_FREE(ptr)               zxc_kernel_aligned_free(ptr)
-
-#endif /* ZXC_DEPS_H */
-```
+- `ZXC_MALLOC` / `ZXC_CALLOC` / `ZXC_FREE`: `kvmalloc` under a no-I/O scope
+  (`memalloc_noio_save`), not `GFP_NOIO`, which costs `kvmalloc` its vmalloc
+  fallback before 5.17. Reclaim still stays out of the I/O path.
+- No `ZXC_REALLOC`: `krealloc()` only accepts kmalloc'd memory, and these units
+  never reallocate - undefined, a future use fails to build.
+- `ZXC_ALIGNED_MALLOC` / `ZXC_ALIGNED_FREE`: `kmalloc` need not reach a cache
+  line, so the header aligns by hand over `kvmalloc`, which also keeps the big
+  workspaces off the power-of-two slabs.
+- `ZXC_POPCOUNT32` / `ZXC_POPCOUNT64`: `hweight32` / `hweight64`. Without
+  FP/SIMD registers the popcount builtins are libgcc calls the kernel does not
+  export.
+- `CHAR_BIT`, `UINT16_MAX`, `UINT32_MAX`, `UINT64_MAX`: the kernel spells them
+  `U*_MAX`.
 
 The stock `posix_memalign` / `_aligned_malloc` helpers are `static inline` in
 `zxc_deps.h` itself, so a replacement defines `ZXC_ALIGNED_MALLOC` and
-`ZXC_ALIGNED_FREE` both, as above; one without the other is a compile error.
+`ZXC_ALIGNED_FREE` both, as here; one without the other is a compile error.
 `ZXC_NOINLINE` needs no local edit.
 
 ## Licensing

@@ -845,7 +845,7 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
  * next to the per-chunk buffers and is intentionally omitted.
  *
  * For @p level >= 6 the figure includes the optimal-parser scratch
- * (@c opt_scratch, ~8.125 bytes per chunk_size byte, at least the nudge's) used by the optimal
+ * (@c opt_scratch, ~8.125 bytes per chunk_size byte) used by the optimal
  * parser and reused as transient package-merge scratch for the Huffman
  * code-length builder.
  */

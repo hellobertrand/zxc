@@ -1,0 +1,52 @@
+name: Kernel Module
+
+# Builds contrib/linux-kernel against the runner kernel's headers. Off the PR
+# path: it runs when that tree or the library change, and weekly, so the
+# recipe cannot rot for long.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * 2'
+  push:
+    branches: [ main ]
+    paths:
+      - 'contrib/linux-kernel/**'
+      - 'include/**'
+      - 'src/lib/**'
+      - '.github/workflows/kernel.yml'
+  pull_request:
+    branches: [ main, candidate ]
+    paths:
+      - 'contrib/linux-kernel/**'
+      - 'include/**'
+      - 'src/lib/**'
+      - '.github/workflows/kernel.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  kernel-module:
+    name: "Kernel module (contrib/linux-kernel)"
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the running kernel's headers
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq "linux-headers-$(uname -r)"
+
+      - name: Build the module
+        run: |
+          # -Werror stands in for CONFIG_WERROR.
+          make -C contrib/linux-kernel KCFLAGS=-Werror
+          modinfo contrib/linux-kernel/build/zxc_selftest.ko

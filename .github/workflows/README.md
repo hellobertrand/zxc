@@ -67,6 +67,11 @@ contract broke.
 
 The field-level structural validation runs separately, as the `format_golden` and `conformance` ctests in `build.yml`.
 
+### kernel.yml - Kernel Module
+**Triggers:** Changes to `contrib/linux-kernel/`, `include/` or `src/lib/`; weekly; manual dispatch
+
+Builds [`contrib/linux-kernel`](../../contrib/linux-kernel/README.md) - the dependency header, the shims, the Kbuild and the self-test module - against the runner kernel's headers, under `-Werror`. The module's init round-trips a block and a frame at levels 3 and 7 and refuses to load on a mismatch. Off the PR path on purpose.
+
 ### scorecard.yml - OSSF Scorecard
 **Triggers:** Push to main, scheduled (weekly), manual dispatch
 

@@ -8,8 +8,8 @@ name: Packaging (Consumer Integration)
 # direct integration (-I + raw library, no defines at all), and pkg-config from
 # a relocated install prefix.
 #
-# A fifth path consumes no install at all: kernel ports vendor the sources and
-# build a subset of them (see the kernel-module job below).
+# A fifth path consumes no install at all: kernel ports vendor the sources;
+# kernel.yml builds contrib/linux-kernel.
 
 on:
   workflow_dispatch:
@@ -180,47 +180,3 @@ jobs:
             LD_LIBRARY_PATH="$(pkg-config --variable=libdir libzxc)" \
               "./consumer_relocated_$LIB_TYPE"
           done
-
-  kernel-module:
-    name: "Kernel module from KERNEL.md"
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Install the running kernel's headers and the 32-bit toolchain
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq "linux-headers-$(uname -r)" gcc-multilib
-
-      - name: Build the module KERNEL.md describes
-        run: |
-          # Kbuild lines, dependency header and shims are cut from the doc: what
-          # is published is what gets built. -Werror stands in for CONFIG_WERROR.
-          python3 tests/kernel/module_from_doc.py docs/KERNEL.md /tmp/mod
-          make -C "/lib/modules/$(uname -r)/build" M=/tmp/mod KCFLAGS=-Werror modules
-          modinfo /tmp/mod/zxctest.ko
-
-      - name: Check what the 32-bit kernel subset reaches for
-        run: |
-          # No i386 headers here: compile the subset hosted and non-PIC, then read
-          # its imports; a 32-bit kernel exports no 64-bit division helper. Exact
-          # names: kernel exports (string, clz_ctz, stack protector), stock libc
-          # allocators, libgcc popcount.
-          mkdir -p /tmp/nf32
-          for f in zxc_common zxc_pivco_tables zxc_dispatch zxc_dict zxc_compress zxc_decompress zxc_huffman; do
-            cc -m32 -fno-pic -c -O2 -std=gnu11 -Wall -Wextra -Wmissing-prototypes -Werror \
-               -U_FORTIFY_SOURCE -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD \
-               -DZXC_FUNCTION_SUFFIX=_default -Iinclude -Isrc/lib -Isrc/lib/vendors \
-               -o "/tmp/nf32/$f.o" "src/lib/$f.c"
-          done
-          nm -P /tmp/nf32/*.o \
-            | awk 'NF > 1 && $2 == "U" { u[$1] } NF > 1 && $2 != "U" { d[$1] }
-                   END { for (s in u) if (!(s in d)) print s }' | sort > /tmp/nf32/needs
-          allowed='^(memcpy|memmove|memset|memcmp|malloc|calloc|realloc|free|posix_memalign|__popcount[sd]i2|__[cl]tz[sd]i2|__stack_chk_fail|__stack_chk_guard)$'
-          if grep -Ev "$allowed" /tmp/nf32/needs; then
-            echo "::error::the 32-bit kernel subset reaches outside its sources and the libc"
-            exit 1
-          fi

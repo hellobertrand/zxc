@@ -379,7 +379,7 @@ uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint64_
  * @return Zero-based index of the block that holds @p offset.
  */
 static uint64_t zxc_seek_find_block(const uint32_t block_size, const uint64_t offset) {
-    return offset >> zxc_ctz32(block_size); /* no 64-bit division on 32-bit hosts */
+    return offset >> zxc_ctz32(block_size);
 }
 
 /**

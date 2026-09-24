@@ -96,7 +96,7 @@
  * and @c posix_memalign elsewhere - the core's only use of either. A host
  * overrides both macros or neither; a vendored copy of this file defines both.
  *
- * Kernel builds align by hand over the slab allocator (see docs/KERNEL.md):
+ * Kernel builds align by hand over the slab allocator (see contrib/linux-kernel):
  * @c kmalloc guarantees only @c ARCH_KMALLOC_MINALIGN, 8 bytes on x86 and on
  * arm64 since 6.5, short of the cache line the workspace layout assumes.
  * @{

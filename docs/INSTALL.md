@@ -4,7 +4,7 @@ Prebuilt binaries, package managers and the release archives are covered in the
 [README](../README.md#installation). This document is for the two cases that
 need more room: **vendoring** zxc into another build, and **building it from
 source**. Vendoring into a libc-less target (a kernel module, a firmware) has
-its own guide: [KERNEL.md](KERNEL.md).
+its own tree: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
 
 ## Building from source (CMake)
 

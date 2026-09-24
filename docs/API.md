@@ -75,7 +75,7 @@ callback. It is opt-in only because most consumers do not need
 random-access decompression; it does not pull `<stdio.h>`. Kernel /
 embedded consumers can include it directly.
 
-Porting to a libc-less target: [KERNEL.md](KERNEL.md).
+Porting to a libc-less target: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
 
 `zxc_stream.h` is the only header that requires `<stdio.h>`. It groups
 every `FILE*`-flavored entry point: the multi-threaded streaming driver
@@ -658,7 +658,7 @@ block of `src_size` bytes at the given `level` via `zxc_compress_block()`.
 The estimate covers all per-chunk working buffers (chain table, literals,
 sequence/token/offset/extras buffers), the fixed hash tables and match-split
 histograms, and the cache-line alignment padding. At `level >= 6` it also
-includes the optimal parser's scratch (~8.125 × `src_size`, at least ~213 KiB), allocated once and
+includes the optimal parser's scratch (~8.125 × `src_size`), allocated once and
 reused. It scales roughly linearly with `src_size` and
 is intended for integrators that need to build an accurate memory budget
 (filesystems, embedded devices, sandboxed workloads).
