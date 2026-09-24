@@ -81,10 +81,7 @@
 
 typedef zxc_huf_pm_item_t pm_item_t;
 
-typedef struct {
-    uint32_t w;
-    int16_t sym;
-} pm_leaf_t;
+typedef zxc_huf_pm_leaf_t pm_leaf_t;
 
 typedef zxc_huf_pm_frame_t frame_t;
 
@@ -667,25 +664,21 @@ static uint64_t zxc_huf_nudge_dp_run_j(const int lu, const int lc, const int g_l
  * @param[in]  lu       Coarse code-space scale (see ::zxc_huf_nudge_dp_run_j).
  * @param[in]  g_log2   Granularity exponent.
  * @param[out] out_cblc Optimal coarse class counts (indexed by coarse level).
- * @return 1 on success; 0 on allocation failure or no feasible finish
- *         (callers then simply keep their other candidates).
+ * @return 1 on success; 0 on no feasible finish (callers then simply keep
+ *         their other candidates).
  */
-static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, const int cap_c,
-                                  const int lu, const int g_log2, uint32_t* RESTRICT out_cblc) {
-    if (UNLIKELY(m < 2 || cap_c < 1)) return 0;
+static int zxc_huf_nudge_dp_solve(zxc_huf_nudge_ws_t* ws, const uint64_t* RESTRICT pfg, const int m,
+                                  const int cap_c, const int lu, const int g_log2,
+                                  uint32_t* RESTRICT out_cblc) {
+    if (UNLIKELY(m < 2 || m > ZXC_HUF_NUDGE_DP_M || cap_c < 1 ||
+                 cap_c > ZXC_HUF_MAX_CODE_LEN_ULTRA))
+        return 0;
 
     const size_t plane = (size_t)(m + 1) * (size_t)(m + 1);
     const size_t arrive_cnt = (size_t)(cap_c + 1) * plane;
-    const size_t arrive_slots =
-        (arrive_cnt * sizeof(uint16_t) + sizeof(uint64_t) - 1) / sizeof(uint64_t);
-    const size_t pool_slots = 2 * plane + arrive_slots;
-
-    uint64_t* pool = (uint64_t*)ZXC_MALLOC(pool_slots * sizeof(uint64_t));
-    if (UNLIKELY(!pool)) return 0;
-
-    uint64_t* jcur = pool;
-    uint64_t* jnxt = pool + plane;
-    uint16_t* arrive = (uint16_t*)(pool + 2 * plane);
+    uint64_t* jcur = ws->jcur;
+    uint64_t* jnxt = ws->jnxt;
+    uint8_t* const arrive = ws->arrive;
     int ok = 0;
 
 #define ZXC_NUDGE_DP_IDX(k, s) ((size_t)(k) * (size_t)(m + 1) + (size_t)(s))
@@ -733,7 +726,7 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
                     if (UNLIKELY(to >= plane || arr >= arrive_cnt)) continue;
                     if (j < jnxt[to]) {
                         jnxt[to] = j;
-                        arrive[arr] = (uint16_t)c;
+                        arrive[arr] = (uint8_t)c;
                     }
                 }
             }
@@ -759,7 +752,6 @@ static int zxc_huf_nudge_dp_solve(const uint64_t* RESTRICT pfg, const int m, con
     ok = 1;
 done:
 #undef ZXC_NUDGE_DP_IDX
-    ZXC_FREE(pool);
     return ok;
 }
 
@@ -800,15 +792,22 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     // to code length exactly 1): leave them untouched.
     if (n < 4) return 0;
 
+    // Tables and DP planes come from the workspace: a 10 KiB frame otherwise,
+    // and a per-block allocation for the planes.
+    zxc_huf_nudge_ws_t* const ws =
+        scratch ? (zxc_huf_nudge_ws_t*)((uint8_t*)scratch + ZXC_HUF_NUDGE_SCRATCH_OFF)
+                : (zxc_huf_nudge_ws_t*)ZXC_MALLOC(sizeof(*ws));
+    if (UNLIKELY(!ws)) return 0;
+
     // Baseline cost, exact (canonical-order frequency weighting).
-    uint64_t pf[ZXC_HUF_NUM_SYMBOLS + 1];
+    uint64_t* const pf = ws->pf;
     zxc_huf_nudge_pf_canonical(code_len, freq, blc0, pf);
     zxc_huf_nudge_cost_t c0;
     zxc_huf_nudge_eval(blc0, pf, &c0);
 
     // Frequency-rank order shared by every candidate (rank 0 = most frequent;
     // pm_leaves_sort is ascending, ties on symbol, so read it backwards).
-    pm_leaf_t leaves[ZXC_HUF_NUM_SYMBOLS];
+    pm_leaf_t* const leaves = ws->leaves;
     int k = 0;
     for (int s = 0; s < ZXC_HUF_NUM_SYMBOLS; s++) {
         if (!freq[s]) continue;
@@ -817,8 +816,8 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         k++;
     }
     pm_leaves_sort(leaves, n);
-    int16_t sym_order[ZXC_HUF_NUM_SYMBOLS];
-    uint64_t pf_rank[ZXC_HUF_NUM_SYMBOLS + 1];
+    int16_t* const sym_order = ws->sym_order;
+    uint64_t* const pf_rank = ws->pf_rank;
     pf_rank[0] = 0;
     for (int r = 0; r < n; r++) {
         sym_order[r] = leaves[n - 1 - r].sym;
@@ -828,7 +827,7 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
     // Candidates: the greedy ledger walk, package-merge rebuilt at reduced caps
     // (the pass loop runs max_depth + 1 times, so depth cuts attack the decoder's
     // biggest fixed cost), and the slot-ledger DP below. All Kraft-exact.
-    uint8_t cand[4][ZXC_HUF_NUM_SYMBOLS];
+    uint8_t (*const cand)[ZXC_HUF_NUM_SYMBOLS] = ws->cand;
     int n_cand = 0;
     {
         uint32_t blc_w[LU + 1];
@@ -864,14 +863,14 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
         const int m = (n + g - 1) / g;
         const int cap_c = max_code_len - g_log2;
         if (m >= 2 && cap_c >= 1 && m <= (1 << cap_c)) {
-            uint64_t pfg[ZXC_HUF_NUM_SYMBOLS + 1];
+            uint64_t* const pfg = ws->pfg;
             for (int j2 = 0; j2 <= m; j2++) {
                 int r = j2 * g;
                 if (r > n) r = n;
                 pfg[j2] = pf_rank[r];
             }
             uint32_t cblc[LU + 1];
-            if (zxc_huf_nudge_dp_solve(pfg, m, cap_c, LU - g_log2, g_log2, cblc)) {
+            if (zxc_huf_nudge_dp_solve(ws, pfg, m, cap_c, LU - g_log2, g_log2, cblc)) {
                 uint8_t* const cl = cand[n_cand];
                 ZXC_MEMSET(cl, 0, ZXC_HUF_NUM_SYMBOLS);
                 int r = 0;
@@ -930,9 +929,9 @@ int zxc_huf_nudge_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
             best = ci;
         }
     }
-    if (best < 0) return 0;
-    ZXC_MEMCPY(code_len, cand[best], ZXC_HUF_NUM_SYMBOLS);
-    return 1;
+    if (best >= 0) ZXC_MEMCPY(code_len, cand[best], ZXC_HUF_NUM_SYMBOLS);
+    if (!scratch) ZXC_FREE(ws);
+    return best >= 0;
 }
 #endif /* ZXC_VARIANT_PRIMARY */
 

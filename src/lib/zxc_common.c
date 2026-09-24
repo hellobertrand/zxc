@@ -179,9 +179,9 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
         const size_t sz_lit = chunk_size + ZXC_PAD_SIZE;
 
         // opt_scratch (level >= ZXC_LEVEL_DENSITY): the optimal parser's DP arrays,
-        // reused transiently as package-merge scratch by the code-length builder,
-        // so sized to the larger demand. Keep in sync with zxc_estimate_cctx_size()
-        // and its consumer in zxc_compress.c.
+        // reused transiently by the code-length builder and its nudge, so sized to
+        // the larger demand. Keep in sync with zxc_estimate_cctx_size() and its
+        // consumer in zxc_compress.c.
         if (level >= ZXC_LEVEL_DENSITY) {
             size_t sz_dp;
             size_t sz_pl;
@@ -190,7 +190,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
             zxc_opt_dp_sizes(chunk_size, &sz_dp, &sz_pl, &sz_po, &sz_bm);
             const size_t dp_needed = sz_dp + sz_pl + sz_po + sz_bm;
             layout.sz_opt =
-                (dp_needed > ZXC_HUF_BUILD_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_BUILD_SCRATCH_SIZE;
+                (dp_needed > ZXC_HUF_NUDGE_SCRATCH_SIZE) ? dp_needed : ZXC_HUF_NUDGE_SCRATCH_SIZE;
         }
 
         layout.off_hash_pos = layout.total;

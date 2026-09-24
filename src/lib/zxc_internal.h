@@ -942,6 +942,12 @@ typedef struct {
     int16_t idx; /**< Item index within that level. */
 } zxc_huf_pm_frame_t;
 
+/** @brief A live symbol and its weight, the package-merge sort key. */
+typedef struct {
+    uint32_t w;  /**< Frequency. */
+    int16_t sym; /**< Byte value. */
+} zxc_huf_pm_leaf_t;
+
 /** @brief Per-level item bound: at most leaves + paired packages from the
  *         previous level. */
 #define ZXC_HUF_PM_LEVEL_BOUND (2 * ZXC_HUF_NUM_SYMBOLS)
@@ -956,6 +962,34 @@ typedef struct {
      8U + (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * sizeof(int) + 8U +          \
      (size_t)ZXC_HUF_MAX_CODE_LEN_ULTRA * (size_t)ZXC_HUF_PM_LEVEL_BOUND * \
          sizeof(zxc_huf_pm_frame_t))
+
+/** @brief Slot-ledger DP bound: coarse symbols per plane axis. The nudge groups
+ *         frequency-adjacent symbols so that at most 64 groups remain. */
+#define ZXC_HUF_NUDGE_DP_M 64
+
+/** @brief Workspace of ::zxc_huf_nudge_code_lengths: its tables and the DP planes,
+ *         which a 10 KiB stack frame and a per-block allocation used to hold.
+ *         Placed ::ZXC_HUF_NUDGE_SCRATCH_OFF into the scratch, past the region
+ *         the reduced-cap rebuilds use, so one scratch serves both. */
+typedef struct {
+    uint64_t pf[ZXC_HUF_NUM_SYMBOLS + 1];      /**< Canonical-order prefix sums. */
+    uint64_t pf_rank[ZXC_HUF_NUM_SYMBOLS + 1]; /**< Frequency-rank prefix sums. */
+    uint64_t pfg[ZXC_HUF_NUM_SYMBOLS + 1];     /**< Group-mass prefix sums. */
+    uint64_t jcur[(ZXC_HUF_NUDGE_DP_M + 1) * (ZXC_HUF_NUDGE_DP_M + 1)]; /**< DP plane. */
+    uint64_t jnxt[(ZXC_HUF_NUDGE_DP_M + 1) * (ZXC_HUF_NUDGE_DP_M + 1)]; /**< Next plane. */
+    /** Per-level arrival choice, c <= ZXC_HUF_NUDGE_DP_M. */
+    uint8_t arrive[(ZXC_HUF_MAX_CODE_LEN_ULTRA + 1) * (ZXC_HUF_NUDGE_DP_M + 1) *
+                   (ZXC_HUF_NUDGE_DP_M + 1)];
+    zxc_huf_pm_leaf_t leaves[ZXC_HUF_NUM_SYMBOLS]; /**< Live symbols, sorted. */
+    int16_t sym_order[ZXC_HUF_NUM_SYMBOLS];        /**< Symbols by descending frequency. */
+    uint8_t cand[4][ZXC_HUF_NUM_SYMBOLS];          /**< Candidate code lengths. */
+} zxc_huf_nudge_ws_t;
+
+/** @brief Offset of the ::zxc_huf_nudge_ws_t inside a nudge scratch. */
+#define ZXC_HUF_NUDGE_SCRATCH_OFF ZXC_ALIGN_CL(ZXC_HUF_BUILD_SCRATCH_SIZE)
+/** @brief Scratch size (bytes) for ::zxc_huf_nudge_code_lengths: the builder's,
+ *         then its own workspace. */
+#define ZXC_HUF_NUDGE_SCRATCH_SIZE (ZXC_HUF_NUDGE_SCRATCH_OFF + sizeof(zxc_huf_nudge_ws_t))
 
 /**
  * @brief The four DP partitions the optimal parser carves out of opt_scratch.
@@ -1681,8 +1715,9 @@ int zxc_huf_build_code_lengths(const uint32_t* RESTRICT freq, uint8_t* RESTRICT 
  *
  * @param[in]     freq         Frequency table of length `ZXC_HUF_NUM_SYMBOLS`.
  * @param[in,out] code_len     Lengths from ::zxc_huf_build_code_lengths.
- * @param[in]     scratch      Optional ::ZXC_HUF_BUILD_SCRATCH_SIZE scratch for
- *                             the reduced-cap rebuilds (NULL = allocate).
+ * @param[in]     scratch      Optional ::ZXC_HUF_NUDGE_SCRATCH_SIZE scratch: the
+ *                             rebuilds' region, then the ::zxc_huf_nudge_ws_t
+ *                             (NULL = allocate one for the call).
  * @param[in]     max_code_len Cap the caller built with (level cap).
  * @return 1 if @p code_len was adjusted, 0 if kept.
  */
@@ -1839,8 +1874,8 @@ typedef struct {
                                          Freed by zxc_cctx_free. */
     uint8_t* opt_scratch;           /**< Optimal-parser DP scratch (level >= 6 only,
                                          lazy-allocated, packs dp/parent_len/parent_off/actions).
-                                         Also reused as transient scratch for the
-                                         length-limited Huffman code-length builder. */
+                                         Also the Huffman code-length builder's and
+                                         nudge's scratch (::ZXC_HUF_NUDGE_SCRATCH_SIZE). */
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */

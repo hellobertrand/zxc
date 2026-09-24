@@ -27,7 +27,8 @@ headers) and `<string.h>` (`rapidhash.h`, for `memcpy`). The compiler's
 
 Decoding peaks at 4.5 KiB of stack whatever level the archive was written at,
 inside a 16 KiB kernel stack and an 8 KiB one on 32-bit. Compressing in the
-kernel is the exception, and bounded by level (see [Contexts](#contexts)).
+kernel is the exception; it allocates nothing per block and peaks at 12.3 KiB at
+levels 6-7 (see [Contexts](#contexts)).
 
 ## What to build
 
@@ -51,9 +52,9 @@ ccflags-y += -std=gnu11 -Wno-declaration-after-statement
 ccflags-y += -I$(src)/shim
 ccflags-y += -I$(src)/zxc/include -I$(src)/zxc/src/lib -I$(src)/zxc/src/lib/vendors
 ccflags-y += -isystem $(shell $(CC) -print-file-name=include)
-# Several frames pass CONFIG_FRAME_WARN (2 KiB on 64-bit), an error under
+# A few frames pass CONFIG_FRAME_WARN (2 KiB on 64-bit), an error under
 # CONFIG_WERROR. What bounds the stack is the whole path, measured below.
-ccflags-y += -Wframe-larger-than=12288
+ccflags-y += -Wframe-larger-than=8192
 ```
 
 CI builds a module from this page's own snippets and round-trips a block and a
@@ -98,7 +99,7 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
 
 | blocks  | dctx      | cctx (levels 1-5) | cctx (levels 6-7) |
 |---------|-----------|-------------------|-------------------|
-| 4 KiB   | 15 872 B  | 314 496 B         | 404 672 B         |
+| 4 KiB   | 15 872 B  | 314 496 B         | 532 736 B         |
 | 64 KiB  | 212 480 B | 500 480 B         | 1 033 216 B       |
 | 512 KiB | 1.60 MiB  | 1.79 MiB          | 5.85 MiB          |
 
@@ -110,11 +111,11 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
   `BUG: scheduling while atomic`.
 - Stack, measured with a painted thread stack and with GCC's `-fstack-usage`
   worst path, both under the flags above: decoding 4.5 KiB at every level,
-  compression 5.9 KiB up to level 5 (tight on an 8 KiB 32-bit stack).
-- Compressing in the kernel means levels 1-5. From `ZXC_LEVEL_DENSITY` (6) up,
-  the joint Huffman nudge allocates a scratch pool per block and reaches 21 KiB
-  of stack, past a 16 KiB kernel stack. Archives written at 6-7 in userspace
-  decode like any other.
+  compression 5.9 KiB up to level 5 and 12.3 KiB at 6-7. On an 8 KiB 32-bit
+  stack, compress at levels 1-5 only.
+- Nothing is allocated per block at any level: the code-length builder and its
+  nudge work in the context's scratch, which is what makes the level 6-7
+  workspace larger at 4 KiB blocks.
 
 ## Exactly-sized destinations
 
