@@ -358,6 +358,39 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 // ==========================================================================
 
 /**
+ * @brief Copies @p len bytes in 32-byte wild chunks (the @ref zxc_copy32 width).
+ *
+ * Always writes at least one full chunk and may **overshoot** by up to 31 bytes
+ * past @p len; the caller guarantees @ref ZXC_PAD_SIZE bytes of headroom. @p src
+ * must be at least 32 bytes ahead of @p dst when the ranges overlap, so no chunk
+ * reads bytes still being written. Shared by the literal and match copiers.
+ *
+ * The tail is a counted loop on purpose: a pointer-bounded `do { } while (p <
+ * last)` compiles to the same copy count but costs a register in the fully
+ * inlined GLO 4x loop, which clang pays by spilling `d_floor` and reloading it
+ * on every sequence (see perf/w-copy A/B, 2026-09-24).
+ *
+ * @param[out] dst Output cursor with @ref ZXC_PAD_SIZE bytes of overshoot headroom.
+ * @param[in]  src Source, >= 32 bytes behind @p dst or disjoint.
+ * @param[in]  len Number of bytes to copy (>= 1).
+ */
+static ZXC_ALWAYS_INLINE void zxc_wild_copy32(uint8_t* dst, const uint8_t* src, const size_t len) {
+    zxc_copy32(dst, src);
+    if (UNLIKELY(len > 32)) {
+        size_t rem = len - 32;
+        dst += 32;
+        src += 32;
+        while (rem > 32) {
+            zxc_copy32(dst, src);
+            dst += 32;
+            src += 32;
+            rem -= 32;
+        }
+        zxc_copy32(dst, src);
+    }
+}
+
+/**
  * @brief Copies @p ll literal bytes from @p src to @p dst using 32-byte wild copies.
  *
  * Writes in 32-byte chunks -- the width of @ref zxc_copy32 -- and may
@@ -375,15 +408,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
                                                        const uint8_t* RESTRICT src,
                                                        const uint64_t ll) {
-    zxc_copy32(dst, src);
-    if (UNLIKELY(ll > 32)) {
-        const uint8_t* const last = dst + ll - 32;
-        do {
-            dst += 32;
-            src += 32;
-            zxc_copy32(dst, src);
-        } while (dst < last);
-    }
+    zxc_wild_copy32(dst, src, ll);
 }
 
 /**
@@ -413,16 +438,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
                                                     const uint64_t ml) {
     const uint8_t* match_src = d_ptr - off;
     if (LIKELY(off >= 32)) {
-        zxc_copy32(d_ptr, match_src);
-        if (UNLIKELY(ml > 32)) {
-            uint8_t* out = d_ptr;
-            const uint8_t* const last = d_ptr + ml - 32;
-            do {
-                out += 32;
-                match_src += 32;
-                zxc_copy32(out, match_src);
-            } while (out < last);
-        }
+        zxc_wild_copy32(d_ptr, match_src, ml);
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
