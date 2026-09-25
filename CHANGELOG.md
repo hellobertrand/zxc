@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.15.0] - 2026-10-XX
+api: Introduces kernel zxc support (#454)
+api: Introduce format v9 and .zxd dictionary v2 (#452)
+api: Announce the seek table with a HAS_SEEK_TABLE header flag (#448)
+api: Support 64-bit block counts for seekable archives (#438)
+api: Validate the seek table per group of 64 blocks and load it lazily (#436)
+api: Checksum decompressed blocks, seeded by position, and add an archive digest (#434)
+api: Replace xor/shift header checksums with multiplication-based hashing (#432)
+perf: Simplify the PivCo Huffman tree representation (#451)
+perf: Split long GLO matches into inline sequences at L3-L5 (#441)
+fix: Enforce strict read/write separation in in-place decompression (#450)
+fix: Make the stream processor callback type-safe (#449)
+fix: Throw on failed WASM heap allocation (#459)
+build: Add Linux kernel module support and its CI workflow (#454)
+build: Flush stream output and report write errors (#453)
+build: Prevent auxv header inclusion when ZXC_ONLY_DEFAULT is defined (#447)
+
 ## [0.14.1] - 2026-09-19
 api: Enforces strict block size and EOF validation (#428)
 api: Implements reusable compression contexts (#424)
