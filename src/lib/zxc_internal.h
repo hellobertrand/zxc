@@ -461,7 +461,15 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_seek_table_bytes(const uint64_t nblocks) {
 /** @brief SEK header size field: @p table_bytes with its high half folded onto the low
  *  one. Exact below 4 GiB; above, all 64 bits count. */
 static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes) {
+#if defined(_MSC_VER) && !defined(__clang__) && (defined(_M_ARM64) || defined(_M_ARM64EC))
+    // MSVC 19.51 ARM64 /O2 sees the table size as 4u and compiles this fold into
+    // `ror w, #30` on the low half of u, dropping the high word: tables of 4 GiB
+    // and more get a wrong field. A volatile copy hides that shape. Once per table.
+    const volatile uint64_t t = table_bytes;
+    return (uint32_t)(t ^ (t >> 32));
+#else
     return (uint32_t)(table_bytes ^ (table_bytes >> 32));
+#endif
 }
 
 /** @} */ /* end of Seekable Format Constants */
