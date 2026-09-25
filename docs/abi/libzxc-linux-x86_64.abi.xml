@@ -1,4 +1,4 @@
-<abi-corpus version='2.2' path='build/libzxc.so.0.14.1' architecture='elf-amd-x86_64' soname='libzxc.so.5'>
+<abi-corpus version='2.2' path='build/libzxc.so.0.15.0' architecture='elf-amd-x86_64' soname='libzxc.so.5'>
   <elf-needed>
     <dependency name='libc.so.6'/>
   </elf-needed>
