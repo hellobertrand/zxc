@@ -301,21 +301,23 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 
 /**
  * @struct zxc_variant_set_t
- * @brief The four chunk entry points of one ISA variant; adding a tier is one
+ * @brief The three chunk entry points of one ISA variant; adding a tier is one
  *        line here.
+ *
+ * The `_safe` decoder is kept out on purpose: a table entry is a reference the
+ * linker cannot prove dead, so every static link would carry its decoders.
  */
 typedef struct {
     zxc_decompress_func_t decompress;
     zxc_decompress_func_t decompress_dict;
-    zxc_decompress_func_t decompress_safe;
     zxc_compress_func_t compress;
 } zxc_variant_set_t;
 
 /** @brief Defines the constant variant set of suffix @p sfx. */
-#define ZXC_VARIANT_SET(sfx)                                                       \
-    static const zxc_variant_set_t zxc_variants##sfx = {                           \
-        zxc_decompress_chunk_wrapper##sfx, zxc_decompress_chunk_wrapper_dict##sfx, \
-        zxc_decompress_chunk_wrapper_safe##sfx, zxc_compress_chunk_wrapper##sfx}
+#define ZXC_VARIANT_SET(sfx)                                                                    \
+    static const zxc_variant_set_t zxc_variants##sfx = {zxc_decompress_chunk_wrapper##sfx,      \
+                                                        zxc_decompress_chunk_wrapper_dict##sfx, \
+                                                        zxc_compress_chunk_wrapper##sfx}
 
 ZXC_VARIANT_SET(_default);
 #ifndef ZXC_ONLY_DEFAULT
@@ -385,6 +387,49 @@ static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
 }
 #endif  // ZXC_ONLY_DEFAULT
 
+#ifdef ZXC_ONLY_DEFAULT
+/** @brief The `_safe` decoder in use: `_default`, bound at compile time. */
+static ZXC_ALWAYS_INLINE zxc_decompress_func_t zxc_decompress_safe_variant(void) {
+    return zxc_decompress_chunk_wrapper_safe_default;
+}
+#else
+/** @brief The `_safe` decoder in use, NULL until the first call. */
+static ZXC_ATOMIC zxc_decompress_func_t zxc_decompress_safe_ptr = (zxc_decompress_func_t)0;
+
+/** @brief First call: the `_safe` decoder of the selected set, published. */
+// LCOV_EXCL_START
+static ZXC_COLD ZXC_NOINLINE zxc_decompress_func_t zxc_decompress_safe_resolve(void) {
+    const zxc_variant_set_t* v = zxc_variants();
+    zxc_decompress_func_t f = zxc_decompress_chunk_wrapper_safe_default;
+#if defined(__x86_64__) || defined(_M_X64)
+    if (v == &zxc_variants_avx512) f = zxc_decompress_chunk_wrapper_safe_avx512;
+    if (v == &zxc_variants_avx2) f = zxc_decompress_chunk_wrapper_safe_avx2;
+#elif defined(__arm__) || defined(_M_ARM)
+    if (v == &zxc_variants_neon32) f = zxc_decompress_chunk_wrapper_safe_neon32;
+#else
+    (void)v;
+#endif
+#if ZXC_USE_C11_ATOMICS
+    atomic_store_explicit(&zxc_decompress_safe_ptr, f, memory_order_release);
+#else
+    zxc_decompress_safe_ptr = f;
+#endif
+    return f;
+}
+// LCOV_EXCL_STOP
+
+/** @brief The `_safe` decoder in use, selected on the first call. */
+static ZXC_ALWAYS_INLINE zxc_decompress_func_t zxc_decompress_safe_variant(void) {
+#if ZXC_USE_C11_ATOMICS
+    zxc_decompress_func_t f = atomic_load_explicit(&zxc_decompress_safe_ptr, memory_order_acquire);
+#else
+    zxc_decompress_func_t f = zxc_decompress_safe_ptr;
+#endif
+    if (UNLIKELY(!f)) f = zxc_decompress_safe_resolve();
+    return f;
+}
+#endif  // ZXC_ONLY_DEFAULT
+
 /** @brief Public decompression dispatcher. */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                  const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
@@ -413,7 +458,7 @@ static int zxc_decompress_chunk_wrapper_safe_public(const zxc_cctx_t* RESTRICT c
                                                     const size_t src_sz, uint8_t* RESTRICT dst,
                                                     const size_t dst_cap,
                                                     const uint64_t block_index) {
-    return zxc_variants()->decompress_safe(ctx, src, src_sz, dst, dst_cap, block_index);
+    return zxc_decompress_safe_variant()(ctx, src, src_sz, dst, dst_cap, block_index);
 }
 
 /** @brief Public compression dispatcher. */
