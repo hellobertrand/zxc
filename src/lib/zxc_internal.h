@@ -1467,14 +1467,15 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
     // AVX2/AVX512: Single 256-bit (32 byte) unaligned load/store
     _mm256_storeu_si256((__m256i*)dst, _mm256_loadu_si256((const __m256i*)src));
 #elif defined(ZXC_USE_SSE2)
-    // SSE2: Two 128-bit (16 byte) unaligned load/stores (no 256-bit regs)
-    _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
-    _mm_storeu_si128((__m128i*)((uint8_t*)dst + 16),
-                     _mm_loadu_si128((const __m128i*)((const uint8_t*)src + 16)));
+    const __m128i a = _mm_loadu_si128((const __m128i*)src);
+    const __m128i b = _mm_loadu_si128((const __m128i*)((const uint8_t*)src + 16));
+    _mm_storeu_si128((__m128i*)dst, a);
+    _mm_storeu_si128((__m128i*)((uint8_t*)dst + 16), b);
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
-    // NEON: Two 128-bit (16 byte) unaligned load/stores
-    vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
-    vst1q_u8((uint8_t*)dst + 16, vld1q_u8((const uint8_t*)src + 16));
+    const uint8x16_t a = vld1q_u8((const uint8_t*)src);
+    const uint8x16_t b = vld1q_u8((const uint8_t*)src + 16);
+    vst1q_u8((uint8_t*)dst, a);
+    vst1q_u8((uint8_t*)dst + 16, b);
 #else
     ZXC_MEMCPY(dst, src, 32);
 #endif

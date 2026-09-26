@@ -312,46 +312,38 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
     const __m256i v = _mm256_set1_epi8((char)byte);
     _mm256_storeu_si256((__m256i*)dst, v);
     if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            _mm256_storeu_si256((__m256i*)out, v);
-            out += 32;
-            rem -= 32;
-        }
-        _mm256_storeu_si256((__m256i*)out, v);
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            _mm256_storeu_si256((__m256i*)p, v);
+        } while (p < last);
     }
 #elif defined(ZXC_USE_SSE2)
     const __m128i v = _mm_set1_epi8((char)byte);
     _mm_storeu_si128((__m128i*)dst, v);
     _mm_storeu_si128((__m128i*)(dst + 16), v);
     if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            _mm_storeu_si128((__m128i*)out, v);
-            _mm_storeu_si128((__m128i*)(out + 16), v);
-            out += 32;
-            rem -= 32;
-        }
-        _mm_storeu_si128((__m128i*)out, v);
-        _mm_storeu_si128((__m128i*)(out + 16), v);
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            _mm_storeu_si128((__m128i*)p, v);
+            _mm_storeu_si128((__m128i*)(p + 16), v);
+        } while (p < last);
     }
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     const uint8x16_t v = vdupq_n_u8(byte);
     vst1q_u8(dst, v);
     vst1q_u8(dst + 16, v);
     if (UNLIKELY(ml > 32)) {
-        uint8_t* out = dst + 32;
-        size_t rem = ml - 32;
-        while (rem > 32) {
-            vst1q_u8(out, v);
-            vst1q_u8(out + 16, v);
-            out += 32;
-            rem -= 32;
-        }
-        vst1q_u8(out, v);
-        vst1q_u8(out + 16, v);
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            vst1q_u8(p, v);
+            vst1q_u8(p + 16, v);
+        } while (p < last);
     }
 #else
     ZXC_MEMSET(dst, byte, ml);
@@ -364,6 +356,34 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 // They reference the local names l_ptr, d_ptr, d_floor that every call site
 // has in scope. #undef-ed at the end of the last consumer.
 // ==========================================================================
+
+/**
+ * @brief Copies @p len bytes in 32-byte wild chunks (the @ref zxc_copy32 width).
+ *
+ * Writes at least one chunk and may overshoot @p len by up to 31 bytes, into
+ * the caller's @ref ZXC_PAD_SIZE headroom. The tail loop is counted on purpose:
+ * a pointer bound costs one more register in the inlined GLO 4x loop, which
+ * clang pays by reloading `d_floor` from the stack on every sequence.
+ *
+ * @param[out] dst Output cursor.
+ * @param[in]  src Source, disjoint from @p dst or at least 32 bytes behind it.
+ * @param[in]  len Bytes to copy, >= 1.
+ */
+static ZXC_ALWAYS_INLINE void zxc_wild_copy32(uint8_t* dst, const uint8_t* src, const size_t len) {
+    zxc_copy32(dst, src);
+    if (UNLIKELY(len > 32)) {
+        size_t rem = len - 32;
+        dst += 32;
+        src += 32;
+        while (rem > 32) {
+            zxc_copy32(dst, src);
+            dst += 32;
+            src += 32;
+            rem -= 32;
+        }
+        zxc_copy32(dst, src);
+    }
+}
 
 /**
  * @brief Copies @p ll literal bytes from @p src to @p dst using 32-byte wild copies.
@@ -383,19 +403,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_literals(uint8_t* RESTRICT dst,
                                                        const uint8_t* RESTRICT src,
                                                        const uint64_t ll) {
-    zxc_copy32(dst, src);
-    if (UNLIKELY(ll > 32)) {
-        dst += 32;
-        src += 32;
-        size_t rem = ll - 32;
-        while (rem > 32) {
-            zxc_copy32(dst, src);
-            dst += 32;
-            src += 32;
-            rem -= 32;
-        }
-        zxc_copy32(dst, src);
-    }
+    zxc_wild_copy32(dst, src, ll);
 }
 
 /**
@@ -425,19 +433,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match(uint8_t* RESTRICT d_ptr, con
                                                     const uint64_t ml) {
     const uint8_t* match_src = d_ptr - off;
     if (LIKELY(off >= 32)) {
-        zxc_copy32(d_ptr, match_src);
-        if (UNLIKELY(ml > 32)) {
-            uint8_t* out = d_ptr + 32;
-            const uint8_t* ref = match_src + 32;
-            size_t rem = ml - 32;
-            while (rem > 32) {
-                zxc_copy32(out, ref);
-                out += 32;
-                ref += 32;
-                rem -= 32;
-            }
-            zxc_copy32(out, ref);
-        }
+        zxc_wild_copy32(d_ptr, match_src, ml);
     } else if (off == 1) {
         zxc_decode_fill_run(d_ptr, match_src[0], ml);
     } else {
@@ -606,46 +602,48 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
 /**
  * @brief One full GLO 4x batch: token word, four offsets (1- or 2-byte form),
  *        four @ref DECODE_GLO_SEQ emissions, sequence-count update.
+ *
+ * The offsets stay packed in one u64 of 16-bit lanes, 1-byte offsets spread
+ * into it, and each sequence extracts its own: four decoded offsets held live
+ * cost x86-64 spills.
  */
-#define DECODE_GLO_BATCH_4X(DECODE, ON_FAIL)                                                      \
-    do {                                                                                          \
-        uint32_t tokens = zxc_le32(t_ptr);                                                        \
-        t_ptr += sizeof(uint32_t);                                                                \
-        uint32_t off1 = ZXC_LZ_OFFSET_BIAS, off2 = ZXC_LZ_OFFSET_BIAS, off3 = ZXC_LZ_OFFSET_BIAS, \
-                 off4 = ZXC_LZ_OFFSET_BIAS;                                                       \
-        if (GLO_OFF8) {                                                                           \
-            uint32_t offsets = zxc_le32(o_ptr);                                                   \
-            o_ptr += sizeof(uint32_t);                                                            \
-            off1 += offsets & 0xFF;                                                               \
-            off2 += (offsets >> 8) & 0xFF;                                                        \
-            off3 += (offsets >> 16) & 0xFF;                                                       \
-            off4 += (offsets >> 24) & 0xFF;                                                       \
-        } else {                                                                                  \
-            uint64_t offsets = zxc_le64(o_ptr);                                                   \
-            o_ptr += sizeof(uint64_t);                                                            \
-            off1 += (uint32_t)(offsets & 0xFFFF);                                                 \
-            off2 += (uint32_t)((offsets >> 16) & 0xFFFF);                                         \
-            off3 += (uint32_t)((offsets >> 32) & 0xFFFF);                                         \
-            off4 += (uint32_t)((offsets >> 48) & 0xFFFF);                                         \
-        }                                                                                         \
-        DECODE_GLO_SEQ((tokens & 0x0F0) >> 4, (tokens & 0x00F), off1,                             \
-                       ((tokens >> 12) & 0xF) + ((tokens >> 20) & 0xF) + (tokens >> 28), 3U,      \
-                       DECODE, ON_FAIL);                                                          \
-        DECODE_GLO_SEQ((tokens & 0x0F000) >> 12, (tokens & 0x00F00) >> 8, off2,                   \
-                       ((tokens >> 20) & 0xF) + (tokens >> 28), 2U, DECODE, ON_FAIL);             \
-        DECODE_GLO_SEQ((tokens & 0x0F00000) >> 20, (tokens & 0x00F0000) >> 16, off3,              \
-                       (tokens >> 28), 1U, DECODE, ON_FAIL);                                      \
-        DECODE_GLO_SEQ((tokens >> 28), (tokens >> 24) & 0x0F, off4, 0, 0U, DECODE, ON_FAIL);      \
-        n_seq -= 4;                                                                               \
+#define DECODE_GLO_BATCH_4X(DECODE, ON_FAIL)                                                       \
+    do {                                                                                           \
+        uint32_t tokens = zxc_le32(t_ptr);                                                         \
+        t_ptr += sizeof(uint32_t);                                                                 \
+        uint64_t offs;                                                                             \
+        if (GLO_OFF8) {                                                                            \
+            uint64_t x = zxc_le32(o_ptr);                                                          \
+            o_ptr += sizeof(uint32_t);                                                             \
+            x = (x | (x << 16)) & 0x0000FFFF0000FFFFULL;                                           \
+            offs = (x | (x << 8)) & 0x00FF00FF00FF00FFULL;                                         \
+        } else {                                                                                   \
+            offs = zxc_le64(o_ptr);                                                                \
+            o_ptr += sizeof(uint64_t);                                                             \
+        }                                                                                          \
+        DECODE_GLO_SEQ((tokens & 0x0F0) >> 4, (tokens & 0x00F),                                    \
+                       ZXC_LZ_OFFSET_BIAS + (uint32_t)(offs & 0xFFFF),                             \
+                       ((tokens >> 12) & 0xF) + ((tokens >> 20) & 0xF) + (tokens >> 28), 3U,       \
+                       DECODE, ON_FAIL);                                                           \
+        DECODE_GLO_SEQ((tokens & 0x0F000) >> 12, (tokens & 0x00F00) >> 8,                          \
+                       ZXC_LZ_OFFSET_BIAS + (uint32_t)((offs >> 16) & 0xFFFF),                     \
+                       ((tokens >> 20) & 0xF) + (tokens >> 28), 2U, DECODE, ON_FAIL);              \
+        DECODE_GLO_SEQ((tokens & 0x0F00000) >> 20, (tokens & 0x00F0000) >> 16,                     \
+                       ZXC_LZ_OFFSET_BIAS + (uint32_t)((offs >> 32) & 0xFFFF), (tokens >> 28), 1U, \
+                       DECODE, ON_FAIL);                                                           \
+        DECODE_GLO_SEQ((tokens >> 28), (tokens >> 24) & 0x0F,                                      \
+                       ZXC_LZ_OFFSET_BIAS + (uint32_t)(offs >> 48), 0, 0U, DECODE, ON_FAIL);       \
+        n_seq -= 4;                                                                                \
     } while (0)
 
 /**
- * @brief GHI twin of @ref DECODE_GLO_SEQ, decoding one sequence word @p S
- *        (ll in the top byte, ml bits, 16-bit offset). References the call
- *        site's extras_ptr/extras_end instead of e_ptr/e_end.
+ * @brief GHI twin of @ref DECODE_GLO_SEQ, decoding one sequence word @p S_EXPR,
+ *        evaluated once (ll in the top byte, ml bits, 16-bit offset). References
+ *        the call site's extras_ptr/extras_end instead of e_ptr/e_end.
  */
-#define DECODE_GHI_SEQ(S, RESERVE, N_REM, DECODE, ON_FAIL)                                   \
+#define DECODE_GHI_SEQ(S_EXPR, RESERVE, N_REM, DECODE, ON_FAIL)                              \
     do {                                                                                     \
+        const uint32_t S = (S_EXPR);                                                         \
         uint64_t ll = (S) >> 24;                                                             \
         const uint32_t mb = ((S) >> 16) & 0xFF;                                              \
         uint64_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;                                             \
@@ -676,20 +674,20 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * @brief One full GHI 4x batch. @p PREFETCH is the literal-stream prefetch
  *        statement of the post-threshold FAST loops ((void)0 elsewhere),
  *        placed exactly where the hand-unrolled bodies had it.
+ *
+ * Each word is read by its own sequence, and the cold escape path rereads the
+ * later literal lengths from memory: four words held live cost x86-64 spills.
  */
-#define DECODE_GHI_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                 \
-    do {                                                                               \
-        uint32_t s1 = zxc_le32(seq_ptr);                                               \
-        uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));                            \
-        uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));                        \
-        uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));                        \
-        seq_ptr += 4 * sizeof(uint32_t);                                               \
-        PREFETCH;                                                                      \
-        DECODE_GHI_SEQ(s1, (s2 >> 24) + (s3 >> 24) + (s4 >> 24), 3U, DECODE, ON_FAIL); \
-        DECODE_GHI_SEQ(s2, (s3 >> 24) + (s4 >> 24), 2U, DECODE, ON_FAIL);              \
-        DECODE_GHI_SEQ(s3, (s4 >> 24), 1U, DECODE, ON_FAIL);                           \
-        DECODE_GHI_SEQ(s4, 0, 0U, DECODE, ON_FAIL);                                    \
-        n_seq -= 4;                                                                    \
+#define DECODE_GHI_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                        \
+    do {                                                                                      \
+        const uint8_t* const sq = seq_ptr;                                                    \
+        seq_ptr += 4 * sizeof(uint32_t);                                                      \
+        PREFETCH;                                                                             \
+        DECODE_GHI_SEQ(zxc_le32(sq), (uint32_t)sq[7] + sq[11] + sq[15], 3U, DECODE, ON_FAIL); \
+        DECODE_GHI_SEQ(zxc_le32(sq + 4), (uint32_t)sq[11] + sq[15], 2U, DECODE, ON_FAIL);     \
+        DECODE_GHI_SEQ(zxc_le32(sq + 8), (uint32_t)sq[15], 1U, DECODE, ON_FAIL);              \
+        DECODE_GHI_SEQ(zxc_le32(sq + 12), 0, 0U, DECODE, ON_FAIL);                            \
+        n_seq -= 4;                                                                           \
     } while (0)
 
 /**
