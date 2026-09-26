@@ -637,13 +637,12 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
     } while (0)
 
 /**
- * @brief GHI twin of @ref DECODE_GLO_SEQ, decoding one sequence word @p S_EXPR,
- *        evaluated once (ll in the top byte, ml bits, 16-bit offset). References
- *        the call site's extras_ptr/extras_end instead of e_ptr/e_end.
+ * @brief GHI twin of @ref DECODE_GLO_SEQ, decoding one sequence word @p S
+ *        (ll in the top byte, ml bits, 16-bit offset). References the call
+ *        site's extras_ptr/extras_end instead of e_ptr/e_end.
  */
-#define DECODE_GHI_SEQ(S_EXPR, RESERVE, N_REM, DECODE, ON_FAIL)                              \
+#define DECODE_GHI_SEQ(S, RESERVE, N_REM, DECODE, ON_FAIL)                                   \
     do {                                                                                     \
-        const uint32_t S = (S_EXPR);                                                         \
         uint64_t ll = (S) >> 24;                                                             \
         const uint32_t mb = ((S) >> 16) & 0xFF;                                              \
         uint64_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;                                             \
@@ -674,20 +673,20 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  * @brief One full GHI 4x batch. @p PREFETCH is the literal-stream prefetch
  *        statement of the post-threshold FAST loops ((void)0 elsewhere),
  *        placed exactly where the hand-unrolled bodies had it.
- *
- * Each word is read by its own sequence, and the cold escape path rereads the
- * later literal lengths from memory: four words held live cost x86-64 spills.
  */
-#define DECODE_GHI_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                        \
-    do {                                                                                      \
-        const uint8_t* const sq = seq_ptr;                                                    \
-        seq_ptr += 4 * sizeof(uint32_t);                                                      \
-        PREFETCH;                                                                             \
-        DECODE_GHI_SEQ(zxc_le32(sq), (uint32_t)sq[7] + sq[11] + sq[15], 3U, DECODE, ON_FAIL); \
-        DECODE_GHI_SEQ(zxc_le32(sq + 4), (uint32_t)sq[11] + sq[15], 2U, DECODE, ON_FAIL);     \
-        DECODE_GHI_SEQ(zxc_le32(sq + 8), (uint32_t)sq[15], 1U, DECODE, ON_FAIL);              \
-        DECODE_GHI_SEQ(zxc_le32(sq + 12), 0, 0U, DECODE, ON_FAIL);                            \
-        n_seq -= 4;                                                                           \
+#define DECODE_GHI_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                 \
+    do {                                                                               \
+        uint32_t s1 = zxc_le32(seq_ptr);                                               \
+        uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));                            \
+        uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));                        \
+        uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));                        \
+        seq_ptr += 4 * sizeof(uint32_t);                                               \
+        PREFETCH;                                                                      \
+        DECODE_GHI_SEQ(s1, (s2 >> 24) + (s3 >> 24) + (s4 >> 24), 3U, DECODE, ON_FAIL); \
+        DECODE_GHI_SEQ(s2, (s3 >> 24) + (s4 >> 24), 2U, DECODE, ON_FAIL);              \
+        DECODE_GHI_SEQ(s3, (s4 >> 24), 1U, DECODE, ON_FAIL);                           \
+        DECODE_GHI_SEQ(s4, 0, 0U, DECODE, ON_FAIL);                                    \
+        n_seq -= 4;                                                                    \
     } while (0)
 
 /**
