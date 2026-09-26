@@ -269,6 +269,29 @@ export default async function createZXC(moduleOverrides, factory) {
   const _malloc = Module._malloc;
   const _free = Module._free;
 
+  /**
+   * Allocate `size` bytes on the WASM heap or throw.
+   *
+   * Built with ALLOW_MEMORY_GROWTH, malloc returns 0 on exhaustion instead
+   * of aborting; copying input to that pointer would overwrite the bottom
+   * of linear memory. Sizes past the 2 GB wasm32 heap are refused up front,
+   * since malloc takes a uint32 and would wrap them to a small request.
+   * @param {number} size
+   * @returns {number} Non-zero pointer (caller must free).
+   */
+  function _alloc(size) {
+    if (size > 0x7fffffff) {
+      throw new Error(
+        `ZXC: allocation of ${size} bytes exceeds wasm32 addressable memory`,
+      );
+    }
+    const ptr = _malloc(size || 1);
+    if (!ptr) {
+      throw new Error(`ZXC: out of WASM memory allocating ${size} bytes`);
+    }
+    return ptr;
+  }
+
   const _getTempRet0 =
     typeof Module.getTempRet0 === "function" ? Module.getTempRet0 : null;
   function _u64(low) {
@@ -329,7 +352,7 @@ export default async function createZXC(moduleOverrides, factory) {
     dictSize,
     dictHufPtr,
   ) {
-    const ptr = _malloc(COMPRESS_OPTS_SIZE);
+    const ptr = _alloc(COMPRESS_OPTS_SIZE);
     // Zero-fill covers n_threads (0), block_size (8, default),
     // progress_cb (32) and user_data (36).
     Module.HEAPU8.fill(0, ptr, ptr + COMPRESS_OPTS_SIZE);
@@ -351,7 +374,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {number} Pointer to the struct (caller must free).
    */
   function _writeDecompressOpts(checksum, dictPtr, dictSize, dictHufPtr) {
-    const ptr = _malloc(DECOMPRESS_OPTS_SIZE);
+    const ptr = _alloc(DECOMPRESS_OPTS_SIZE);
     // Zero-fill covers n_threads (0), progress_cb (20) and user_data (24).
     Module.HEAPU8.fill(0, ptr, ptr + DECOMPRESS_OPTS_SIZE);
     // checksum_enabled (offset 4)
@@ -391,12 +414,21 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function _allocDictOpts(opts, writeOpts) {
     const { dict, dictHuf } = _splitDictOption(opts);
-    const dictPtr = dict && dict.length > 0 ? _malloc(dict.length) : 0;
-    if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
-    // A table only travels with a dictionary, as the C side reads it.
-    const dictHufPtr = dictPtr && dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
-    if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-    const optsPtr = writeOpts(dictPtr, dictPtr ? dict.length : 0, dictHufPtr);
+    let dictPtr = 0;
+    let dictHufPtr = 0;
+    let optsPtr;
+    try {
+      dictPtr = dict && dict.length > 0 ? _alloc(dict.length) : 0;
+      if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+      // A table only travels with a dictionary, as the C side reads it.
+      dictHufPtr = dictPtr && dictHuf ? _alloc(ZXC_HUF_TABLE_SIZE) : 0;
+      if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
+      optsPtr = writeOpts(dictPtr, dictPtr ? dict.length : 0, dictHufPtr);
+    } catch (e) {
+      if (dictPtr) _free(dictPtr);
+      if (dictHufPtr) _free(dictHufPtr);
+      throw e;
+    }
     return {
       optsPtr,
       release() {
@@ -438,8 +470,8 @@ export default async function createZXC(moduleOverrides, factory) {
     let dstPtr = 0;
 
     try {
-      srcPtr = _malloc(data.length);
-      dstPtr = _malloc(bound);
+      srcPtr = _alloc(data.length);
+      dstPtr = _alloc(bound);
       Module.HEAPU8.set(data, srcPtr);
       const result = _compress(srcPtr, data.length, dstPtr, bound, optsPtr);
       if (result < 0) {
@@ -476,23 +508,24 @@ export default async function createZXC(moduleOverrides, factory) {
       _writeDecompressOpts(checksum, d, n, h),
     );
 
-    // Read decompressed size from footer
-    const srcPtr = _malloc(data.length);
-    Module.HEAPU8.set(data, srcPtr);
-
-    const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-    if (origSize > 0x7fffffff) {
-      // A wasm32 heap cannot address it; fail clearly instead of
-      // aborting inside malloc.
-      _free(srcPtr);
-      release();
-      throw new Error(
-        `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-      );
-    }
-    const dstPtr = _malloc(origSize || 1);
+    let srcPtr = 0;
+    let dstPtr = 0;
 
     try {
+      // Read decompressed size from footer
+      srcPtr = _alloc(data.length);
+      Module.HEAPU8.set(data, srcPtr);
+
+      const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
+      if (origSize > 0x7fffffff) {
+        // A wasm32 heap cannot address it; name the real cause rather
+        // than a generic allocation failure.
+        throw new Error(
+          `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
+        );
+      }
+      dstPtr = _alloc(origSize);
+
       const result = _decompress(
         srcPtr,
         data.length,
@@ -528,7 +561,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {number} Original uncompressed size, or 0 if invalid.
    */
   function getDecompressedSize(data) {
-    const ptr = _malloc(data.length);
+    const ptr = _alloc(data.length);
     try {
       Module.HEAPU8.set(data, ptr);
       return _u64(_get_decompressed_size(ptr, data.length));
@@ -580,9 +613,11 @@ export default async function createZXC(moduleOverrides, factory) {
       compress(data) {
         if (!cctx) throw new Error("ZXC: compression context already freed");
         const bound = _compress_bound(data.length);
-        const srcPtr = _malloc(data.length);
-        const dstPtr = _malloc(bound);
+        let srcPtr = 0;
+        let dstPtr = 0;
         try {
+          srcPtr = _alloc(data.length);
+          dstPtr = _alloc(bound);
           Module.HEAPU8.set(data, srcPtr);
           const result = _compress_cctx(
             cctx,
@@ -599,8 +634,8 @@ export default async function createZXC(moduleOverrides, factory) {
           }
           return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
         } finally {
-          _free(srcPtr);
-          _free(dstPtr);
+          if (srcPtr) _free(srcPtr);
+          if (dstPtr) _free(dstPtr);
         }
       },
       /** Free the context and release WASM memory. Idempotent. */
@@ -646,17 +681,18 @@ export default async function createZXC(moduleOverrides, factory) {
        */
       decompress(data) {
         if (!dctx) throw new Error("ZXC: decompression context already freed");
-        const srcPtr = _malloc(data.length);
-        Module.HEAPU8.set(data, srcPtr);
-        const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-        if (origSize > 0x7fffffff) {
-          _free(srcPtr);
-          throw new Error(
-            `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-          );
-        }
-        const dstPtr = _malloc(origSize || 1);
+        let srcPtr = 0;
+        let dstPtr = 0;
         try {
+          srcPtr = _alloc(data.length);
+          Module.HEAPU8.set(data, srcPtr);
+          const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
+          if (origSize > 0x7fffffff) {
+            throw new Error(
+              `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
+            );
+          }
+          dstPtr = _alloc(origSize);
           const result = _decompress_dctx(
             dctx,
             srcPtr,
@@ -672,8 +708,8 @@ export default async function createZXC(moduleOverrides, factory) {
           }
           return new Uint8Array(Module.HEAPU8.buffer, dstPtr, result).slice();
         } finally {
-          _free(srcPtr);
-          _free(dstPtr);
+          if (srcPtr) _free(srcPtr);
+          if (dstPtr) _free(dstPtr);
         }
       },
       /** Free the context and release WASM memory. Idempotent. */
@@ -739,10 +775,20 @@ export default async function createZXC(moduleOverrides, factory) {
     // Reusable scratch buffers in the WASM heap. The compress/end calls
     // never reallocate, so these pointers stay valid for the stream's
     // lifetime even if the heap grows (cwrap re-reads HEAPU8 internally).
-    const inDescPtr = _malloc(IO_BUF_SIZE);
-    const outDescPtr = _malloc(IO_BUF_SIZE);
+    let inDescPtr = 0;
+    let outDescPtr = 0;
+    let stagePtr = 0;
     const stageCap = Math.max(_cstream_out_size(cs), 64 * 1024);
-    const stagePtr = _malloc(stageCap);
+    try {
+      inDescPtr = _alloc(IO_BUF_SIZE);
+      outDescPtr = _alloc(IO_BUF_SIZE);
+      stagePtr = _alloc(stageCap);
+    } catch (e) {
+      _cstream_free(cs);
+      if (inDescPtr) _free(inDescPtr);
+      if (outDescPtr) _free(outDescPtr);
+      throw e;
+    }
 
     function drainCompress(srcPtr, srcLen) {
       const chunks = [];
@@ -793,7 +839,7 @@ export default async function createZXC(moduleOverrides, factory) {
       /** Push input and return any compressed bytes produced. */
       compress(data) {
         if (data.length === 0) return drainCompress(stagePtr, 0);
-        const srcPtr = _malloc(data.length);
+        const srcPtr = _alloc(data.length);
         try {
           Module.HEAPU8.set(data, srcPtr);
           return drainCompress(srcPtr, data.length);
@@ -836,15 +882,25 @@ export default async function createZXC(moduleOverrides, factory) {
     _free(optsPtr);
     if (ds === 0) throw new Error("ZXC: failed to create dstream");
 
-    const inDescPtr = _malloc(IO_BUF_SIZE);
-    const outDescPtr = _malloc(IO_BUF_SIZE);
+    let inDescPtr = 0;
+    let outDescPtr = 0;
+    let stagePtr = 0;
     const stageCap = Math.max(_dstream_out_size(ds), 4096);
-    const stagePtr = _malloc(stageCap);
+    try {
+      inDescPtr = _alloc(IO_BUF_SIZE);
+      outDescPtr = _alloc(IO_BUF_SIZE);
+      stagePtr = _alloc(stageCap);
+    } catch (e) {
+      _dstream_free(ds);
+      if (inDescPtr) _free(inDescPtr);
+      if (outDescPtr) _free(outDescPtr);
+      throw e;
+    }
 
     return {
       /** Push compressed bytes; return any decompressed bytes produced. */
       decompress(data) {
-        const srcPtr = data.length > 0 ? _malloc(data.length) : 0;
+        const srcPtr = data.length > 0 ? _alloc(data.length) : 0;
         try {
           if (srcPtr) Module.HEAPU8.set(data, srcPtr);
           _writeInbuf(inDescPtr, srcPtr, data.length);
@@ -937,8 +993,7 @@ export default async function createZXC(moduleOverrides, factory) {
     }
 
     const srcLen = data.length;
-    const srcPtr = _malloc(srcLen);
-    if (!srcPtr) throw new Error("ZXC: malloc failed for seekable buffer");
+    const srcPtr = _alloc(srcLen);
     Module.HEAPU8.set(data, srcPtr);
 
     let handle = _seekable_open(srcPtr, srcLen);
@@ -990,10 +1045,11 @@ export default async function createZXC(moduleOverrides, factory) {
         if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
           throw new Error("ZXC: dictHuf must be exactly 128 bytes");
         }
-        const dictPtr = _malloc(dict.length);
-        if (!dictPtr) throw new Error("ZXC: malloc failed for dictionary");
-        const hufPtr = dictHuf ? _malloc(ZXC_HUF_TABLE_SIZE) : 0;
+        let dictPtr = 0;
+        let hufPtr = 0;
         try {
+          dictPtr = _alloc(dict.length);
+          hufPtr = dictHuf ? _alloc(ZXC_HUF_TABLE_SIZE) : 0;
           Module.HEAPU8.set(dict, dictPtr);
           if (hufPtr) Module.HEAPU8.set(dictHuf, hufPtr);
           const r = _seekable_set_dict(handle, dictPtr, dict.length, hufPtr);
@@ -1003,7 +1059,7 @@ export default async function createZXC(moduleOverrides, factory) {
             );
           }
         } finally {
-          _free(dictPtr);
+          if (dictPtr) _free(dictPtr);
           if (hufPtr) _free(hufPtr);
         }
       },
@@ -1037,8 +1093,7 @@ export default async function createZXC(moduleOverrides, factory) {
           throw new Error("ZXC: offset must be an integer in [0, 2^32-1]");
         }
         if (length === 0) return new Uint8Array(0);
-        const dstPtr = _malloc(length);
-        if (!dstPtr) throw new Error("ZXC: malloc failed for output buffer");
+        const dstPtr = _alloc(length);
         try {
           const r = _seekable_decompress_range(
             handle,
@@ -1094,16 +1149,12 @@ export default async function createZXC(moduleOverrides, factory) {
     }
     const numBlocks = compSizes.length;
     const sz = _seek_table_size(numBlocks);
-    const dstPtr = _malloc(sz);
-    if (!dstPtr) throw new Error("ZXC: malloc failed for seek table");
-
-    const csPtr = _malloc(numBlocks * 4);
-    if (!csPtr) {
-      _free(dstPtr);
-      throw new Error("ZXC: malloc failed for compSizes scratch");
-    }
+    let dstPtr = 0;
+    let csPtr = 0;
 
     try {
+      dstPtr = _alloc(sz);
+      csPtr = _alloc(numBlocks * 4);
       for (let i = 0; i < numBlocks; i++) {
         Module.HEAPU32[(csPtr >> 2) + i] = compSizes[i] >>> 0;
       }
@@ -1113,8 +1164,8 @@ export default async function createZXC(moduleOverrides, factory) {
       }
       return new Uint8Array(Module.HEAPU8.buffer, dstPtr, r).slice();
     } finally {
-      _free(dstPtr);
-      _free(csPtr);
+      if (dstPtr) _free(dstPtr);
+      if (csPtr) _free(csPtr);
     }
   }
 
@@ -1137,15 +1188,18 @@ export default async function createZXC(moduleOverrides, factory) {
     const n = samples.length;
 
     // Heap arrays: pointers (4 bytes each) + sizes (size_t = 4 bytes on wasm32).
-    const ptrsPtr = _malloc(n * 4);
-    const sizesPtr = _malloc(n * 4);
+    let ptrsPtr = 0;
+    let sizesPtr = 0;
     const samplePtrs = [];
-    const dictPtr = _malloc(cap);
+    let dictPtr = 0;
 
     try {
+      ptrsPtr = _alloc(n * 4);
+      sizesPtr = _alloc(n * 4);
+      dictPtr = _alloc(cap);
       for (let i = 0; i < n; i++) {
         const s = samples[i];
-        const sp = s.length > 0 ? _malloc(s.length) : _malloc(1);
+        const sp = _alloc(s.length);
         if (s.length > 0) Module.HEAPU8.set(s, sp);
         samplePtrs.push(sp);
         Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
@@ -1158,16 +1212,16 @@ export default async function createZXC(moduleOverrides, factory) {
       return new Uint8Array(Module.HEAPU8.buffer, dictPtr, r).slice();
     } finally {
       for (const sp of samplePtrs) _free(sp);
-      _free(ptrsPtr);
-      _free(sizesPtr);
-      _free(dictPtr);
+      if (ptrsPtr) _free(ptrsPtr);
+      if (sizesPtr) _free(sizesPtr);
+      if (dictPtr) _free(dictPtr);
     }
   }
 
   /* Shared helper: copy a Uint8Array into the heap and call an id getter. */
   function _callIdOnBuffer(fn, data) {
     if (!data || data.length === 0) return 0;
-    const ptr = _malloc(data.length);
+    const ptr = _alloc(data.length);
     try {
       Module.HEAPU8.set(data, ptr);
       return fn(ptr, data.length) >>> 0;
@@ -1221,10 +1275,13 @@ export default async function createZXC(moduleOverrides, factory) {
       throw new Error("ZXC: dictSave requires a 128-byte hufLengths table");
     }
     const cap = _dict_save_bound(content.length);
-    const contentPtr = _malloc(content.length);
-    const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
-    const bufPtr = _malloc(cap);
+    let contentPtr = 0;
+    let hufPtr = 0;
+    let bufPtr = 0;
     try {
+      contentPtr = _alloc(content.length);
+      hufPtr = _alloc(ZXC_HUF_TABLE_SIZE);
+      bufPtr = _alloc(cap);
       Module.HEAPU8.set(content, contentPtr);
       Module.HEAPU8.set(hufLengths, hufPtr);
       const r = _dict_save(contentPtr, content.length, hufPtr, bufPtr, cap);
@@ -1233,9 +1290,9 @@ export default async function createZXC(moduleOverrides, factory) {
       }
       return new Uint8Array(Module.HEAPU8.buffer, bufPtr, r).slice();
     } finally {
-      _free(contentPtr);
-      _free(hufPtr);
-      _free(bufPtr);
+      if (contentPtr) _free(contentPtr);
+      if (hufPtr) _free(hufPtr);
+      if (bufPtr) _free(bufPtr);
     }
   }
 
@@ -1256,14 +1313,18 @@ export default async function createZXC(moduleOverrides, factory) {
       throw new Error("ZXC: trainDictHuf requires a non-empty dictionary");
     }
     const n = samples.length;
-    const ptrsPtr = _malloc(n * 4);
-    const sizesPtr = _malloc(n * 4);
+    let ptrsPtr = 0;
+    let sizesPtr = 0;
     const samplePtrs = [];
-    const dictPtr = _malloc(dict.length);
-    const hufPtr = _malloc(ZXC_HUF_TABLE_SIZE);
+    let dictPtr = 0;
+    let hufPtr = 0;
     try {
+      ptrsPtr = _alloc(n * 4);
+      sizesPtr = _alloc(n * 4);
+      dictPtr = _alloc(dict.length);
+      hufPtr = _alloc(ZXC_HUF_TABLE_SIZE);
       for (let i = 0; i < n; i++) {
-        const sp = _malloc(samples[i].length || 1);
+        const sp = _alloc(samples[i].length);
         samplePtrs.push(sp);
         if (samples[i].length > 0) Module.HEAPU8.set(samples[i], sp);
         Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
@@ -1288,10 +1349,10 @@ export default async function createZXC(moduleOverrides, factory) {
       ).slice();
     } finally {
       for (const sp of samplePtrs) _free(sp);
-      _free(ptrsPtr);
-      _free(sizesPtr);
-      _free(dictPtr);
-      _free(hufPtr);
+      if (ptrsPtr) _free(ptrsPtr);
+      if (sizesPtr) _free(sizesPtr);
+      if (dictPtr) _free(dictPtr);
+      if (hufPtr) _free(hufPtr);
     }
   }
 
@@ -1303,7 +1364,7 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function dictHuf(zxd) {
     if (!zxd || zxd.length === 0) return null;
-    const bufPtr = _malloc(zxd.length);
+    const bufPtr = _alloc(zxd.length);
     try {
       Module.HEAPU8.set(zxd, bufPtr);
       const p = _dict_huf(bufPtr, zxd.length);
@@ -1328,13 +1389,16 @@ export default async function createZXC(moduleOverrides, factory) {
     if (!zxd || zxd.length === 0) {
       throw new Error("ZXC: dictLoad requires a non-empty buffer");
     }
-    const bufPtr = _malloc(zxd.length);
-    // out params: content ptr (4), content size (4), huf ptr (4), dict id (4)
-    const contentOutPtr = _malloc(4);
-    const sizeOutPtr = _malloc(4);
-    const hufOutPtr = _malloc(4);
-    const idOutPtr = _malloc(4);
+    let bufPtr = 0;
+    // out params: content ptr, content size, huf ptr, dict id (4 bytes each)
+    let outPtr = 0;
     try {
+      bufPtr = _alloc(zxd.length);
+      outPtr = _alloc(16);
+      const contentOutPtr = outPtr;
+      const sizeOutPtr = outPtr + 4;
+      const hufOutPtr = outPtr + 8;
+      const idOutPtr = outPtr + 12;
       Module.HEAPU8.set(zxd, bufPtr);
       const r = _dict_load(
         bufPtr,
@@ -1364,11 +1428,8 @@ export default async function createZXC(moduleOverrides, factory) {
       ).slice();
       return { content, huf, id };
     } finally {
-      _free(bufPtr);
-      _free(contentOutPtr);
-      _free(sizeOutPtr);
-      _free(hufOutPtr);
-      _free(idOutPtr);
+      if (bufPtr) _free(bufPtr);
+      if (outPtr) _free(outPtr);
     }
   }
 
@@ -1385,15 +1446,18 @@ export default async function createZXC(moduleOverrides, factory) {
       throw new Error("ZXC: dictTrain requires at least one sample");
     }
     const n = samples.length;
-    const ptrsPtr = _malloc(n * 4);
-    const sizesPtr = _malloc(n * 4);
+    let ptrsPtr = 0;
+    let sizesPtr = 0;
     const samplePtrs = [];
     const cap = _dict_save_bound(ZXC_DICT_SIZE_MAX);
-    const zxdPtr = _malloc(cap);
+    let zxdPtr = 0;
     try {
+      ptrsPtr = _alloc(n * 4);
+      sizesPtr = _alloc(n * 4);
+      zxdPtr = _alloc(cap);
       for (let i = 0; i < n; i++) {
         const s = samples[i];
-        const sp = _malloc(s.length || 1);
+        const sp = _alloc(s.length);
         if (s.length > 0) Module.HEAPU8.set(s, sp);
         samplePtrs.push(sp);
         Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
@@ -1406,9 +1470,9 @@ export default async function createZXC(moduleOverrides, factory) {
       return new Uint8Array(Module.HEAPU8.buffer, zxdPtr, r).slice();
     } finally {
       for (const sp of samplePtrs) _free(sp);
-      _free(ptrsPtr);
-      _free(sizesPtr);
-      _free(zxdPtr);
+      if (ptrsPtr) _free(ptrsPtr);
+      if (sizesPtr) _free(sizesPtr);
+      if (zxdPtr) _free(zxdPtr);
     }
   }
 

@@ -960,6 +960,299 @@ async function main() {
     );
   }
 
+  // --- Allocation failure ---
+  // Built with ALLOW_MEMORY_GROWTH, malloc returns 0 when the heap is
+  // exhausted. Make the wrapper's Nth malloc fail, for every N an entry
+  // point reaches, and check that it throws without writing through the
+  // null pointer (bytes [0, 1024) sit below the static data) or leaking
+  // the heap blocks and native handles it already made.
+  {
+    console.log(
+      "\n-- Allocation failure: throws, no low-memory write, no leak --",
+    );
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const fault = {
+      failAt: 0,
+      calls: 0,
+      hit: false,
+      live: new Set(),
+      native: new Set(),
+      nativeSeen: new Set(),
+    };
+    // Handles the C library allocates with its own malloc, out of reach of
+    // the _malloc hook: track them through the wrapper's cwrap bindings.
+    const NATIVE_CREATE = {
+      zxc_create_cctx: "cctx",
+      zxc_create_dctx: "dctx",
+      zxc_cstream_create: "cstream",
+      zxc_dstream_create: "dstream",
+      zxc_seekable_open: "seekable",
+    };
+    const NATIVE_FREE = {
+      zxc_free_cctx: "cctx",
+      zxc_free_dctx: "dctx",
+      zxc_cstream_free: "cstream",
+      zxc_dstream_free: "dstream",
+      zxc_seekable_free: "seekable",
+    };
+    let M = null;
+    const faultyFactory = async (overrides) => {
+      M = await ZXCModule(overrides);
+      const realMalloc = M._malloc;
+      const realFree = M._free;
+      const realCwrap = M.cwrap;
+      M._malloc = (n) => {
+        if (fault.failAt && ++fault.calls === fault.failAt) {
+          fault.hit = true;
+          return 0;
+        }
+        const p = realMalloc(n);
+        if (p) fault.live.add(p);
+        return p;
+      };
+      M._free = (p) => {
+        fault.live.delete(p);
+        realFree(p);
+      };
+      M.cwrap = (name, ...rest) => {
+        const fn = realCwrap(name, ...rest);
+        if (name in NATIVE_CREATE) {
+          const kind = NATIVE_CREATE[name];
+          return (...args) => {
+            const h = fn(...args);
+            if (h) {
+              fault.native.add(`${kind}@${h}`);
+              fault.nativeSeen.add(kind);
+            }
+            return h;
+          };
+        }
+        if (name in NATIVE_FREE) {
+          const kind = NATIVE_FREE[name];
+          return (h, ...args) => {
+            fault.native.delete(`${kind}@${h}`);
+            return fn(h, ...args);
+          };
+        }
+        return fn;
+      };
+      return M;
+    };
+    const zxc = await createZXC({}, faultyFactory);
+
+    // Fill [0, LOW) with a canary for the duration of fn, so any write
+    // through a null pointer shows up, zeros included. The range is
+    // restored afterwards.
+    const LOW = 1024;
+    const CANARY = 0xa5;
+    const withCanary = (fn) => {
+      const saved = M.HEAPU8.slice(0, LOW);
+      M.HEAPU8.fill(CANARY, 0, LOW);
+      let err = null;
+      try {
+        fn();
+      } catch (e) {
+        err = e;
+      }
+      // Re-read HEAPU8: the heap may have grown during fn.
+      const touched = !M.HEAPU8.subarray(0, LOW).every((b) => b === CANARY);
+      M.HEAPU8.set(saved, 0);
+      return { err, touched };
+    };
+
+    // Non-zero bytes, so a copy to address 0 would show up.
+    const payload = new Uint8Array(8192);
+    for (let i = 0; i < payload.length; i++) payload[i] = (i % 251) + 1;
+    const samples = [];
+    for (let k = 0; k < 16; k++) {
+      samples.push(
+        new TextEncoder().encode(
+          `{"id":${k},"type":"event","payload":{"user":"alice","region":"eu-west"}}`,
+        ),
+      );
+    }
+    const dict = zxc.trainDict(samples);
+    const huf = zxc.trainDictHuf(samples, dict);
+    const zxd = zxc.dictSave(dict, huf);
+    const arc = zxc.compress(payload);
+    const arcDict = zxc.compress(payload, { dict, dictHuf: huf });
+    const arcSeek = zxc.compress(payload, { seekable: true });
+    const arcSeekDict = zxc.compress(payload, {
+      seekable: true,
+      dict,
+      dictHuf: huf,
+    });
+
+    const ops = {
+      compress: () => zxc.compress(payload),
+      "compress+dict": () => zxc.compress(payload, { dict, dictHuf: huf }),
+      decompress: () => zxc.decompress(arc),
+      "decompress+dict": () => zxc.decompress(arcDict, { dict, dictHuf: huf }),
+      getDecompressedSize: () => zxc.getDecompressedSize(arc),
+      "cctx.compress": () => {
+        const c = zxc.createCompressContext({ dict, dictHuf: huf });
+        try {
+          c.compress(payload);
+        } finally {
+          c.free();
+        }
+      },
+      "dctx.decompress": () => {
+        const d = zxc.createDecompressContext({ dict, dictHuf: huf });
+        try {
+          d.decompress(arcDict);
+        } finally {
+          d.free();
+        }
+      },
+      cstream: () => {
+        const s = zxc.createCStream();
+        try {
+          s.compress(payload);
+          s.end();
+        } finally {
+          s.free();
+        }
+      },
+      dstream: () => {
+        const s = zxc.createDStream();
+        try {
+          s.decompress(arc);
+        } finally {
+          s.free();
+        }
+      },
+      "seekable.decompressRange": () => {
+        const s = zxc.createSeekable(arcSeek);
+        try {
+          s.decompressRange(0, 512);
+        } finally {
+          s.free();
+        }
+      },
+      "seekable.setDict": () => {
+        const s = zxc.createSeekable(arcSeekDict);
+        try {
+          s.setDict(dict, huf);
+          s.decompressRange(0, 512);
+        } finally {
+          s.free();
+        }
+      },
+      writeSeekTable: () => zxc.writeSeekTable([100, 200, 300]),
+      trainDict: () => zxc.trainDict(samples),
+      trainDictHuf: () => zxc.trainDictHuf(samples, dict),
+      dictTrain: () => zxc.dictTrain(samples),
+      dictSave: () => zxc.dictSave(dict, huf),
+      dictLoad: () => zxc.dictLoad(zxd),
+      dictHuf: () => zxc.dictHuf(zxd),
+      dictId: () => zxc.dictId(dict),
+      getDictId: () => zxc.getDictId(arcDict),
+      dictGetId: () => zxc.dictGetId(zxd),
+    };
+
+    // The canary is only meaningful if the module never uses [0, LOW)
+    // itself: run every entry point unfaulted and check that it holds.
+    {
+      const failures = [];
+      for (const [name, op] of Object.entries(ops)) {
+        const { err, touched } = withCanary(op);
+        if (err) failures.push(`${name} threw: ${err.message}`);
+        if (touched) failures.push(`${name} wrote [0, ${LOW})`);
+      }
+      assert(
+        failures.length === 0,
+        `module leaves [0, ${LOW}) alone on unfaulted runs` +
+          (failures.length ? ` -- ${failures.join("; ")}` : ""),
+      );
+      const kinds = Object.values(NATIVE_CREATE);
+      const unseen = kinds.filter((k) => !fault.nativeSeen.has(k));
+      assert(
+        unseen.length === 0,
+        `native handle tracking sees every kind` +
+          (unseen.length ? ` -- never saw ${unseen.join(", ")}` : ""),
+      );
+    }
+
+    for (const [name, op] of Object.entries(ops)) {
+      const problems = [];
+      let exercised = 0;
+      for (let k = 1; ; k++) {
+        const liveBefore = new Set(fault.live);
+        const nativeBefore = new Set(fault.native);
+        fault.failAt = k;
+        fault.calls = 0;
+        fault.hit = false;
+        const { err, touched } = withCanary(op);
+        fault.failAt = 0;
+
+        if (!fault.hit) {
+          // k is past the last allocation: the call must now succeed.
+          if (err) problems.push(`unfaulted run threw: ${err.message}`);
+          break;
+        }
+        exercised++;
+        if (!err || !String(err.message).includes("out of WASM memory")) {
+          problems.push(
+            `malloc #${k}: ${err ? `wrong error "${err.message}"` : "no error"}`,
+          );
+        }
+        if (touched) {
+          problems.push(`malloc #${k}: wrote through the null pointer`);
+        }
+        const leaked = [...fault.live].filter((p) => !liveBefore.has(p));
+        if (leaked.length > 0) {
+          problems.push(`malloc #${k}: leaked ${leaked.length} allocation(s)`);
+        }
+        const leakedNative = [...fault.native]
+          .filter((h) => !nativeBefore.has(h))
+          .map((h) => h.split("@")[0]);
+        if (leakedNative.length > 0) {
+          problems.push(
+            `malloc #${k}: leaked native ${leakedNative.join(", ")}`,
+          );
+        }
+      }
+      assert(
+        exercised > 0 && problems.length === 0,
+        `${name}: ${exercised} failure point(s) handled` +
+          (problems.length ? ` -- ${problems.join("; ")}` : ""),
+      );
+    }
+
+    const back = zxc.decompress(zxc.compress(payload));
+    assert(
+      arraysEqual(back, payload),
+      "roundtrip still works after the faults",
+    );
+  }
+
+  // --- Oversized allocation ---
+  // malloc takes a uint32: a size past the wasm32 heap must be refused, not
+  // wrapped to a small request that the copy then overruns. 2 GiB is the
+  // first size past the limit; 4 GiB + 16 would wrap to 16, so it fails if
+  // the size is truncated before the check.
+  {
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const cases = [
+      [0x80000000, "2 GiB"],
+      [0x100000010, "4 GiB + 16 (wraps to 16)"],
+    ];
+    for (const [length, label] of cases) {
+      let msg = "";
+      try {
+        zxc.getDecompressedSize({ length });
+      } catch (e) {
+        msg = String(e.message);
+      }
+      assert(
+        msg.includes("exceeds wasm32 addressable memory"),
+        `oversized ${label} refused before malloc (got "${msg}")`,
+      );
+    }
+  }
+
   // --- Summary ---
   console.log(`\n${"=".repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);
