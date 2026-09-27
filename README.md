@@ -15,7 +15,7 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 
 ## TL;DR
 
-- **Faster decode than LZ4, at a smaller size.** 22–75% faster decode at the default level (best on ARM64), rising to up to 2.6× in the speed-optimized tier, always at an equal-or-better compression ratio. See the [benchmarks](#benchmarks).
+- **Faster decode than LZ4, at a smaller size.** 35% to 103% faster decode at the default level (best on ARM64), rising to up to 2.4× in the speed-optimized tier, always at an equal-or-better compression ratio. See the [benchmarks](#benchmarks).
 - **Independently verified.** Merged into [lzbench](https://github.com/inikep/lzbench) (@inikep) and [TurboBench](https://github.com/powturbo/TurboBench) (@powturbo); every benchmark below is reproducible against 70+ codecs.
 - **Vendored in ClickHouse.** Available there as a column codec — behind `SET enable_zxc_codec = 1`. See the [ClickHouse codec reference](https://clickhouse.com/docs/reference/statements/create/table/codec).
 - **Cross-platform.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386, with hand-tuned SIMD (SSE2/AVX2/AVX-512 on x86, NEON on ARMv8+).
@@ -33,13 +33,13 @@ single-threaded:
 
 | Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
 | :--- | ---: | ---: | ---: | ---: |
-| Apple M2 | **2.62x** | **1.75x** | **1.50x** | **2.60x** |
-| Axion (Neoverse-V2) | **1.92x** | **1.41x** | **1.25x** | **1.94x** |
-| EPYC 9B45 (Zen 5) | **2.20x** | **1.36x** | **1.19x** | **2.21x** |
-| EPYC 7B13 (Zen 3) | **1.81x** | **1.22x** | **1.10x** | **2.13x** |
+| Apple M2 | **2.41x** | **2.03x** | **1.52x** | **2.80x** |
+| Axion (Neoverse-V2) | **1.93x** | **1.54x** | **1.28x** | **2.17x** |
+| EPYC 9B45 (Zen 5) | **2.17x** | **1.64x** | **1.23x** | **2.49x** |
+| EPYC 7B13 (Zen 3) | **1.82x** | **1.35x** | **1.15x** | **2.38x** |
 
 The speed is not bought with ratio: ZXC is also *smaller* in all four pairings — 61.76 vs 62.15,
-46.09 vs 47.60, 36.28 vs 36.75 and 33.09 vs 34.53 %.
+46.65 vs 47.60, 36.28 vs 36.75 and 33.09 vs 34.53 %.
 
 *Decompression Speed vs Compressed Size — ARM64 Apple M2*
 
@@ -49,7 +49,7 @@ The speed is not bought with ratio: ZXC is also *smaller* in all four pairings �
 
 ![Decompression Speed: ZXC vs LZ4 family at equivalent ratio tiers](docs/images/bench-bars.svg)
 
-Measured with [lzbench](https://github.com/inikep/lzbench) 2.3.1 (from
+Measured with [lzbench](https://github.com/inikep/lzbench) 2.4.1 (from
 [@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
 machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
 / Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
@@ -180,7 +180,7 @@ and building from source, with the full option table and the PGO workflow:
 >
 > Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
 >
-> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.19x on Apple Silicon** and ranging **1.26x–1.83x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.05x–1.40x**), at a 33.09% ratio.
+> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.18x on Apple Silicon** and ranging **1.38x–1.78x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.18x–1.52x**), at a 33.09% ratio.
 
 ## Block Size Tuning
 

@@ -1,6 +1,7 @@
 # Changelog
 
 ## [0.15.0] - 2026-10-XX
+api: Add support for zero-allocation in-place decompression (#461)
 api: Introduces kernel zxc support (#454)
 api: Introduce format v9 and .zxd dictionary v2 (#452)
 api: Announce the seek table with a HAS_SEEK_TABLE header flag (#448)
@@ -13,6 +14,7 @@ perf: Split long GLO matches into inline sequences at L3-L5 (#441)
 fix: Enforce strict read/write separation in in-place decompression (#450)
 fix: Make the stream processor callback type-safe (#449)
 fix: Throw on failed WASM heap allocation (#459)
+build: Remove temporary Docker downgrade workaround (#462)
 build: Add Linux kernel module support and its CI workflow (#454)
 build: Flush stream output and report write errors (#453)
 build: Prevent auxv header inclusion when ZXC_ONLY_DEFAULT is defined (#447)
