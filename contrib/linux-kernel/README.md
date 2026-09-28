@@ -4,7 +4,8 @@ Everything an out-of-tree module needs: the dependency header, two header
 shims, a Kbuild and a self-test module, plus this guide. `make` here stages the
 library sources next to the Kbuild and builds `build/zxc_selftest.ko` against
 the running kernel's headers (`KDIR=` for another tree). Loading it round-trips
-a block and a frame at levels 3 and 7 and refuses to load on a mismatch.
+a block and a frame, also in place, at levels 3 and 7 and refuses to load on a
+mismatch.
 
 ```
 zxc_deps.h     the kernel replacement for src/lib/zxc_deps.h
@@ -81,7 +82,9 @@ scalar, with `ZXC_DISABLE_SIMD`.
 ## Frame or block
 
 A payload, an image or an initramfs is a `.zxc` frame: `zxc_decompress()`, or
-`zxc_decompress_dctx()` on a static context. A host that works page by page
+`zxc_decompress_dctx()` on a static context; already in RAM,
+`zxc_decompress_inplace_dctx()` decodes it inside its own buffer. A host that
+works page by page
 (a zram-like backend) uses `zxc_compress_block()` and
 `zxc_decompress_block_safe()` instead: the frame's header, footer and per-frame
 setup would be paid on every page for nothing.
