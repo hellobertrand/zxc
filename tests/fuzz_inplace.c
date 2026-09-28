@@ -7,8 +7,7 @@
 
 /**
  * @file fuzz_inplace.c
- * @brief Fuzzer for the single-buffer decompressors (zxc_decompress_inplace,
- *        zxc_decompress_inplace_dctx).
+ * @brief Fuzzer for the single-buffer decompressor (zxc_decompress_inplace).
  *
  * Input and output share one buffer: the write cursor must never catch up with
  * the read cursor. Each archive is decoded at its own bound, flush-right.
@@ -39,31 +38,16 @@
 
 static const size_t kBlockSizes[] = {4096, 8192, 16384, 65536};
 
-/* Decodes @p arc in place at its bound; the result, or SKIPPED.
- * zxc_decompress_inplace_dctx() must agree on the code and on every byte. */
+/* Decodes @p arc in place at its bound; the result, or SKIPPED. */
 static int64_t decode_inplace(const uint8_t* arc, const size_t len, uint8_t** out,
                               const int checksum) {
     const size_t cap = zxc_decompress_inplace_bound(arc, len);
     if (cap == 0 || cap > FUZZ_INPLACE_MAX_BUF) return SKIPPED;
     uint8_t* const buf = (uint8_t*)malloc(cap);
-    uint8_t* const buf2 = (uint8_t*)malloc(cap);
-    zxc_dctx* const dctx = zxc_create_dctx();
-    if (!buf || !buf2 || !dctx) {
-        free(buf);
-        free(buf2);
-        zxc_free_dctx(dctx);
-        return SKIPPED;
-    }
+    if (!buf) return SKIPPED;
     memcpy(buf + cap - len, arc, len);
-    memcpy(buf2 + cap - len, arc, len);
     const zxc_decompress_opts_t o = {.checksum_enabled = checksum};
     const int64_t r = zxc_decompress_inplace(buf, cap, len, &o);
-    const int64_t r2 = zxc_decompress_inplace_dctx(dctx, buf2, cap, len, &o);
-    assert(r2 == r);
-    assert(r <= 0 || memcmp(buf, buf2, (size_t)r) == 0);
-    (void)r2;
-    zxc_free_dctx(dctx);
-    free(buf2);
     if (out)
         *out = buf;
     else
