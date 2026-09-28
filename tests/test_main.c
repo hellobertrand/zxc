@@ -83,6 +83,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_static_ctx_null_inputs),
     TEST_CASE(test_static_ctx_roundtrip_all_levels),
     TEST_CASE(test_static_dctx_block_bounds),
+    TEST_CASE(test_static_dctx_inplace),
 
     /* --- Stream API --- */
     TEST_CASE(test_null_output_decompression),

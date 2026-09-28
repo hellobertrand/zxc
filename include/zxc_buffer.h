@@ -180,6 +180,9 @@ ZXC_EXPORT size_t zxc_decompress_inplace_bound(const void* src, const size_t src
  * two, which is what makes this worthwhile on memory-constrained targets
  * (embedded, FOTA, firmware).
  *
+ * @note The decode context is heap-allocated for the call; to supply your own,
+ *       see zxc_decompress_inplace_dctx().
+ *
  * @note @p buffer is both input and output: on success its first @c N bytes
  *       hold the decompressed data (@c N = the return value).
  *
@@ -540,6 +543,36 @@ ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
  */
 ZXC_EXPORT int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* src, size_t src_size, void* dst,
                                        size_t dst_capacity, const zxc_decompress_opts_t* opts);
+
+/**
+ * @brief In-place decompression with a caller-supplied context.
+ *
+ * Same contract and error codes as zxc_decompress_inplace(), with @p dctx as
+ * the decode context. With a static context (zxc_init_static_dctx()) the call
+ * allocates nothing.
+ *
+ * A static context rejects a foreign block size
+ * (@ref ZXC_ERROR_BAD_BLOCK_SIZE) and any dictionary
+ * (@ref ZXC_ERROR_DICT_UNSUPPORTED).
+ *
+ * @code
+ * static uint8_t ws[...] __attribute__((aligned(64)));  // zxc_static_dctx_workspace_size(bs)
+ * zxc_dctx* d = zxc_init_static_dctx(ws, sizeof(ws), bs);
+ * // buf: zxc_decompress_inplace_bound() bytes, archive flush-right
+ * int64_t n = zxc_decompress_inplace_dctx(d, buf, cap, archive_size, NULL);
+ * @endcode
+ *
+ * @param[in,out] dctx            Decompression context (static or heap).
+ * @param[in,out] buffer          Work buffer holding the flush-right archive.
+ * @param[in]     buffer_capacity Total size of @p buffer in bytes.
+ * @param[in]     comp_size       Size of the compressed archive in bytes.
+ * @param[in]     opts            Decompression options, or NULL for defaults.
+ * @return Decompressed size (> 0), 0 for an empty frame, or a negative
+ *         @ref zxc_error_t.
+ */
+ZXC_EXPORT int64_t zxc_decompress_inplace_dctx(zxc_dctx* dctx, void* buffer,
+                                               const size_t buffer_capacity, const size_t comp_size,
+                                               const zxc_decompress_opts_t* opts);
 
 /* ========================================================================= */
 /*  Static Context API (caller-allocated workspace)                          */

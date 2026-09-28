@@ -98,6 +98,7 @@ int test_static_dctx_probe_honours_guards(void);
 int test_static_ctx_level_raise_rejected(void);
 int test_static_ctx_null_inputs(void);
 int test_static_dctx_block_bounds(void);
+int test_static_dctx_inplace(void);
 
 /* Stream API */
 int test_null_output_decompression(void);

@@ -20,6 +20,7 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 - **Vendored in ClickHouse.** Available there as a column codec — behind `SET enable_zxc_codec = 1`. See the [ClickHouse codec reference](https://clickhouse.com/docs/reference/statements/create/table/codec).
 - **Cross-platform.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386, with hand-tuned SIMD (SSE2/AVX2/AVX-512 on x86, NEON on ARMv8+).
 - **Built for "Write Once, Read Many."** Compress once at build time, decompress millions of times at run time.
+- **Decompresses in place.** Decode inside the very buffer that holds the archive: one buffer instead of two, and with a caller-owned context, zero allocations. See [in-place decompression](#in-place-decompression).
 - **Production-grade.** Continuously fuzzed by Google [OSS-Fuzz](https://github.com/google/oss-fuzz), ASan/UBSan/Valgrind-clean, SLSA-signed releases, thread-safe API, BSD-3-Clause.
 - **Seekable.** Built-in seek table for O(1) random-access decompression.
 - **Dictionary mode for small data.** A corpus-trained dictionary (`zxc --train`) prefills the LZ77 window at every block start, recovering ratio on payloads too small to build their own history. See [dictionary compression](#dictionary-compression).
@@ -209,18 +210,50 @@ zxc_compress_opts_t opts = {
 
 ## In-Place Decompression
 
-When the whole archive already lives in RAM (a firmware image, a game asset, a FOTA payload), ZXC can decompress **inside a single buffer** — no separate output allocation. You place the compressed archive flush-right in a buffer, and ZXC decodes left-to-right into the same memory. Because a ZXC block never expands, the write cursor provably never overtakes the read cursor given a one-block safety margin, so peak memory drops from *compressed + decompressed* to roughly *decompressed* alone.
+A normal decode needs two buffers: the archive and the output, so peak memory is *compressed + decompressed*. ZXC can decode **inside a single buffer**: you place the archive at its end, and the decoder writes the output from its start.
+
+```
+buffer:  [ output → → →          | archive → → → ]
+           ^ write cursor           ^ read cursor
+```
+
+Both cursors move right, and a ZXC block never expands, so with a small safety margin the write cursor provably never catches the read cursor. Peak memory drops to roughly *decompressed* alone. This is the shape of firmware images, FOTA payloads, bootloaders, game assets: anything read-only that already sits in RAM.
+
+**One buffer:**
 
 ```c
-// One allocation instead of two.
-size_t need = zxc_decompress_inplace_bound(archive, archive_size);   // reads header+footer
+size_t need = zxc_decompress_inplace_bound(archive, archive_size);   // reads header + footer only
 uint8_t* buf = malloc(need);
-memcpy(buf + (need - archive_size), archive, archive_size);          // archive flush-right
-int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode into buf[0..]
+memcpy(buf + (need - archive_size), archive, archive_size);          // archive at the end
+int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode from buf[0]
 // buf[0 .. n) now holds the decompressed data
 ```
 
-The required margin is one block, the accumulated per-block framing overhead, the trailing framing the encoder writes after the last block (EOF block, seek table, footer), and the wild-copy tail (`block_size + nblocks x (12-16 B) + ~2 KB`) — about **1 %** overhead on a large archive; always size the buffer via `zxc_decompress_inplace_bound` rather than the formula. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, and an archive whose output would reach input not yet read (padding, forged block sizes) with `ZXC_ERROR_CORRUPT_DATA`: never silent corruption. This is a library/API capability: it targets embedded/firmware integrators.
+**One buffer, zero allocations.** `zxc_decompress_inplace` still allocates its decode context for the duration of the call. Where the library must not touch an allocator at all (kernel code, heapless targets, fixed memory budgets), hand it a context living in memory you own:
+
+```c
+// Once, up front: sized for the block size your archives use.
+size_t ws_size = zxc_static_dctx_workspace_size(64 * 1024);
+void* ws = aligned_alloc(64, ws_size);                                // or .bss, kmalloc, vmalloc
+zxc_dctx* dctx = zxc_init_static_dctx(ws, ws_size, 64 * 1024);
+
+// Per archive: no allocation inside the library.
+int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size, NULL);
+```
+
+A static context accepts only archives compressed with its block size (`-B`), and no dictionary; anything else is refused with an error before decoding.
+
+**What it costs.** The margin is one block, plus 8–16 bytes per block of framing, plus ~2 KB of tail; the static context is about three blocks. So the block size decides both, and small payloads want small blocks:
+
+| Block size (`-B`) | Margin, 8 MB payload | Static context |
+| ---: | ---: | ---: |
+| 4 KB | 22 KB (0.3 %) | 16 KB |
+| 64 KB | 69 KB (0.8 %) | 212 KB |
+| 512 KB (default) | 526 KB (6.3 %) | 1.7 MB |
+
+Smaller blocks cost some ratio and decode speed; measure on your data. Always size the buffer with `zxc_decompress_inplace_bound` rather than the formula.
+
+**What it guarantees.** An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`. An archive whose output would reach input not yet read (padding, forged block sizes) is rejected with `ZXC_ERROR_CORRUPT_DATA`. Never silent corruption: both entry points are covered by a dedicated fuzzer.
 
 ---
 

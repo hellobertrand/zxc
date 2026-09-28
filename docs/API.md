@@ -484,6 +484,46 @@ int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);
 // buf[0 .. n) now holds the decompressed data
 ```
 
+The decode context is allocated for the duration of the call (about three
+blocks, see `zxc_static_dctx_workspace_size`). To decode without any
+allocation, use `zxc_decompress_inplace_dctx` below with a static context.
+
+**Returns**: decompressed size (> 0), `0` for an empty frame, or negative
+`zxc_error_t`.
+
+### `zxc_decompress_inplace_dctx`
+
+```c
+ZXC_EXPORT int64_t zxc_decompress_inplace_dctx(
+    zxc_dctx*                    dctx,
+    void*                        buffer,
+    size_t                       buffer_capacity,
+    size_t                       comp_size,
+    const zxc_decompress_opts_t* opts     // NULL = defaults
+);
+```
+
+Same contract as `zxc_decompress_inplace` (flush-right archive, buffer of at
+least `zxc_decompress_inplace_bound`, same buffer checks and error codes), but
+the decode context comes from `dctx`. With a static context
+(`zxc_init_static_dctx`) the call touches no allocator at all: peak memory is
+the caller's buffer plus the caller's workspace, both sized up front. This is
+the entry point for kernel code and heapless targets.
+
+The rules of `dctx` apply: a static context rejects an archive whose block size
+differs from its own with `ZXC_ERROR_BAD_BLOCK_SIZE`, and any dictionary with
+`ZXC_ERROR_DICT_UNSUPPORTED`. A heap context (`zxc_create_dctx`) allocates on
+first use, then reuses its buffers across calls.
+
+```c
+size_t ws_size = zxc_static_dctx_workspace_size(64 * 1024);
+void* ws = aligned_alloc(64, ws_size);                  // or .bss, kmalloc, vmalloc
+zxc_dctx* dctx = zxc_init_static_dctx(ws, ws_size, 64 * 1024);
+
+memcpy(buf + (need - archive_size), archive, archive_size);   // flush-right
+int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size, NULL);
+```
+
 **Returns**: decompressed size (> 0), `0` for an empty frame, or negative
 `zxc_error_t`.
 
@@ -791,6 +831,9 @@ maximum block size up front.
   Use `posix_memalign(..., 64, ...)`, `aligned_alloc(64, ...)`, the slab
   allocator (kmalloc returns ≥ `ARCH_KMALLOC_MINALIGN`), or a
   `_Alignas(64)` static array.
+- **In place too.** A static decompression context also drives
+  `zxc_decompress_inplace_dctx`: a single-buffer decode with no allocation
+  at all.
 
 ### `zxc_static_cctx_workspace_size`
 
@@ -1661,7 +1704,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **68 symbols** (verified with `nm -gU`):
+The shared library exports **69 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1733,6 +1776,7 @@ The shared library exports **68 symbols** (verified with `nm -gU`):
 | 66 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
 | 67 | `zxc_compress_opts_size` | Info | `zxc_opts.h` |
 | 68 | `zxc_decompress_opts_size` | Info | `zxc_opts.h` |
+| 69 | `zxc_decompress_inplace_dctx` | Context | `zxc_buffer.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with
