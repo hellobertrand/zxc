@@ -14,11 +14,14 @@
  *
  *  Phase 0 -- Raw .zxd parser. Feed the untrusted bytes straight to
  *             zxc_dict_load() / zxc_dict_get_id(). Must never crash on garbage.
+ *             A dictionary that loads then round-trips a payload with its own
+ *             table, so the tree built from untrusted code lengths is decoded.
  *  Phase 1 -- Train. Split the input into samples and call zxc_train_dict().
  *  Phase 2 -- Serialize roundtrip. Save the trained dict to .zxd, load it back,
  *             and verify content / dict_id agree across save/load/get_id/id.
  *             Also drives the DST_TOO_SMALL path and single-byte corruption.
- *  Phase 3 -- Use the trained dict for a real compress -> decompress roundtrip.
+ *  Phase 3 -- Use the trained dict for a real compress -> decompress roundtrip,
+ *             with its shared literal table when the header asks (levels 6-7).
  *
  * The control header carries level, sample count, dict capacity, and the
  * corruption position/mask, so the same input deterministically reaches the
@@ -39,6 +42,27 @@
 #define FUZZ_DICT_MAX_INPUT (256 << 10) /* 256 KiB */
 #define FUZZ_DICT_CTRL 8                /* control-header bytes consumed below */
 #define FUZZ_DICT_MAX_SAMPLES 8
+#define FUZZ_DICT_HUF_PAYLOAD 4096 /* bytes round-tripped with a loaded table */
+
+/* Compresses up to FUZZ_DICT_HUF_PAYLOAD bytes of @p src at level 6 with a
+ * loaded dictionary and its table, then decodes: a table load accepted must
+ * compress, and what compresses must decode bit-exact. */
+static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const void* huf,
+                               const uint8_t* src, size_t n) {
+    static uint8_t comp[FUZZ_DICT_HUF_PAYLOAD * 2 + 1024];
+    static uint8_t out[FUZZ_DICT_HUF_PAYLOAD];
+    if (n > FUZZ_DICT_HUF_PAYLOAD) n = FUZZ_DICT_HUF_PAYLOAD;
+    if (n == 0 || zxc_compress_bound(n) > sizeof(comp)) return;
+    const zxc_compress_opts_t co = {
+        .level = 6, .dict = dict, .dict_size = dict_size, .dict_huf = huf};
+    const int64_t c = zxc_compress(src, n, comp, sizeof(comp), &co);
+    assert(c > 0);
+    const zxc_decompress_opts_t dop = {.dict = dict, .dict_size = dict_size, .dict_huf = huf};
+    const int64_t d = zxc_decompress(comp, (size_t)c, out, n, &dop);
+    assert(d == (int64_t)n && memcmp(out, src, n) == 0);
+    (void)c;
+    (void)d;
+}
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     static uint8_t* dict_buf = NULL; /* trained dict content (<= ZXC_DICT_SIZE_MAX) */
@@ -67,6 +91,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
              * stored id binds the (content, table) pair. */
             assert(zxc_dict_get_id(data, size) == id);
             assert(zxc_dict_id(content, content_size, huf) == id);
+            dict_huf_roundtrip(content, content_size, huf, data, size);
         }
         (void)zxc_dict_get_id(data, size);
     }
@@ -76,7 +101,9 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     if (size < FUZZ_DICT_CTRL) return 0;
 
-    const int level = (int)(data[0] % (unsigned)zxc_max_level()) + 1;
+    // With the shared table, levels 6-7: the only ones that use it.
+    const int use_huf = (data[7] >> 1) & 1;
+    const int level = use_huf ? 6 + (data[0] & 1) : (int)(data[0] % (unsigned)zxc_max_level()) + 1;
     const size_t n_samples = (size_t)(data[1] % FUZZ_DICT_MAX_SAMPLES) + 1;
     size_t dict_cap = (size_t)(data[2] | (data[3] << 8));
     const size_t corrupt_pos = (size_t)(data[4] | (data[5] << 8));
@@ -196,6 +223,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         .checksum_enabled = use_checksum,
         .dict = dict_buf,
         .dict_size = (size_t)dict_sz,
+        .dict_huf = use_huf ? huf : NULL,
     };
     const int64_t csize = zxc_compress(data, size, comp_buf, bound, &copts);
     if (csize < 0) return 0;
@@ -228,6 +256,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         .checksum_enabled = use_checksum,
         .dict = dict_buf,
         .dict_size = (size_t)dict_sz,
+        .dict_huf = use_huf ? huf : NULL,
     };
     const int64_t dsize = zxc_decompress(comp_buf, (size_t)csize, decomp_buf, size, &dopts);
 
