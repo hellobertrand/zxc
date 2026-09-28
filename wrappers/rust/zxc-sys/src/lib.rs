@@ -366,6 +366,19 @@ unsafe extern "C" {
         opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
+    /// In-place decompression with a caller-supplied context.
+    ///
+    /// Same contract as `zxc_decompress_inplace`, with `dctx` as the decode
+    /// context. With a static context (`zxc_init_static_dctx`) the call
+    /// allocates nothing; it rejects a foreign block size and any dictionary.
+    pub fn zxc_decompress_inplace_dctx(
+        dctx: *mut zxc_dctx,
+        buffer: *mut c_void,
+        buffer_capacity: usize,
+        comp_size: usize,
+        opts: *const zxc_decompress_opts_t,
+    ) -> i64;
+
     /// Returns a human-readable name for the given error code.
     ///
     /// # Arguments
