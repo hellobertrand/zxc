@@ -758,7 +758,7 @@ int test_static_dctx_block_bounds(void) {
     return ok;
 }
 
-/* Round trip, then refusals compared with zxc_decompress_inplace(). */
+/* Round trip, then the documented refusals. */
 static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig, size_t n,
                              int level, int checksum, size_t block_size) {
     const size_t cbound = (size_t)zxc_compress_bound(n);
@@ -785,12 +785,9 @@ static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig
     /* One byte short. */
     if (ok && need - 1 >= csz) {
         memcpy(buf + need - 1 - csz, comp, csz);
-        const int64_t r1 = zxc_decompress_inplace_dctx(d, buf, need - 1, csz, &dop);
-        memcpy(buf + need - 1 - csz, comp, csz);
-        const int64_t r2 = zxc_decompress_inplace(buf, need - 1, csz, &dop);
-        if (r1 != ZXC_ERROR_DST_TOO_SMALL || r2 != r1) {
-            printf("  [FAIL] %s: undersized -> dctx %lld, heap %lld\n", label, (long long)r1,
-                   (long long)r2);
+        const int64_t r = zxc_decompress_inplace_dctx(d, buf, need - 1, csz, &dop);
+        if (r != ZXC_ERROR_DST_TOO_SMALL) {
+            printf("  [FAIL] %s: undersized -> %lld\n", label, (long long)r);
             ok = 0;
         }
     }
@@ -809,12 +806,9 @@ static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig
         uint8_t* const b2 = bneed ? (uint8_t*)malloc(bneed) : NULL;
         if (b2) {
             memcpy(b2 + bneed - csz - pad, bad, csz + pad);
-            const int64_t r1 = zxc_decompress_inplace_dctx(d, b2, bneed, csz + pad, &dop);
-            memcpy(b2 + bneed - csz - pad, bad, csz + pad);
-            const int64_t r2 = zxc_decompress_inplace(b2, bneed, csz + pad, &dop);
-            if (r1 >= 0 || r1 != r2) {
-                printf("  [FAIL] %s: padded -> dctx %lld, heap %lld\n", label, (long long)r1,
-                       (long long)r2);
+            const int64_t r = zxc_decompress_inplace_dctx(d, b2, bneed, csz + pad, &dop);
+            if (r != ZXC_ERROR_CORRUPT_DATA) {
+                printf("  [FAIL] %s: padded -> %lld\n", label, (long long)r);
                 ok = 0;
             }
         }
@@ -825,6 +819,25 @@ static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig
     free(buf);
     free(comp);
     return ok;
+}
+
+/* Compresses @p n bytes at @p block_size and decodes them in place through @p d. */
+static int64_t inplace_refusal(zxc_dctx* d, const uint8_t* src, size_t n, size_t block_size,
+                               const zxc_decompress_opts_t* dop) {
+    const zxc_compress_opts_t co = {.level = 3, .block_size = block_size};
+    const size_t cb = (size_t)zxc_compress_bound(n);
+    uint8_t* const comp = (uint8_t*)malloc(cb);
+    const int64_t c = comp ? zxc_compress(src, n, comp, cb, &co) : -1;
+    const size_t need = c > 0 ? zxc_decompress_inplace_bound(comp, (size_t)c) : 0;
+    uint8_t* const buf = need ? (uint8_t*)malloc(need) : NULL;
+    int64_t r = INT64_MIN;
+    if (buf) {
+        memcpy(buf + need - (size_t)c, comp, (size_t)c);
+        r = zxc_decompress_inplace_dctx(d, buf, need, (size_t)c, dop);
+    }
+    free(buf);
+    free(comp);
+    return r;
 }
 
 /* In-place decode through a caller-owned context, static then heap. */
@@ -868,27 +881,15 @@ int test_static_dctx_inplace(void) {
         snprintf(label, sizeof(label), "static %zuK, pattern L7", bs >> 10);
         ok &= inplace_dctx_case(d, label, text, N, 7, 1, bs);
 
-        /* Foreign block size. */
-        const size_t other = bs * 2;
-        const zxc_compress_opts_t co = {.level = 3, .block_size = other};
-        const size_t cb = (size_t)zxc_compress_bound(N);
-        uint8_t* const comp = (uint8_t*)malloc(cb);
-        const int64_t c = comp ? zxc_compress(text, N, comp, cb, &co) : -1;
-        const size_t need = c > 0 ? zxc_decompress_inplace_bound(comp, (size_t)c) : 0;
-        uint8_t* const buf = need ? (uint8_t*)malloc(need) : NULL;
-        if (buf) {
-            memcpy(buf + need - (size_t)c, comp, (size_t)c);
-            const int64_t r = zxc_decompress_inplace_dctx(d, buf, need, (size_t)c, NULL);
-            if (r != ZXC_ERROR_BAD_BLOCK_SIZE) {
-                printf("  [FAIL] static %zuK: foreign block size -> %lld\n", bs >> 10,
-                       (long long)r);
-                ok = 0;
-            }
-        } else {
+        /* The static context's own refusals. */
+        const zxc_decompress_opts_t with_dict = {.dict = text, .dict_size = 1024};
+        const int64_t r_bs = inplace_refusal(d, text, 64 * 1024, bs * 2, NULL);
+        const int64_t r_dict = inplace_refusal(d, text, 64 * 1024, bs, &with_dict);
+        if (r_bs != ZXC_ERROR_BAD_BLOCK_SIZE || r_dict != ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] static %zuK: foreign block size -> %lld, dict -> %lld\n", bs >> 10,
+                   (long long)r_bs, (long long)r_dict);
             ok = 0;
         }
-        free(buf);
-        free(comp);
         zxc_free_dctx(d); /* no-op */
         test_aligned_free(ws);
     }

@@ -1894,8 +1894,11 @@ int test_dict_oversized_rejected_everywhere(void) {
     zxc_cctx* cctx = zxc_create_cctx(NULL);
     zxc_dctx* dctx = zxc_create_dctx();
     int ok = 0;
-    if (cs > 0 && cctx && dctx) {
+    const size_t need = cs > 0 ? zxc_decompress_inplace_bound(comp, (size_t)cs) : 0;
+    uint8_t* const inplace = need ? (uint8_t*)malloc(need) : NULL;
+    if (cs > 0 && cctx && dctx && inplace) {
         uint8_t out[512];
+        memcpy(inplace + need - (size_t)cs, comp, (size_t)cs);
         const int64_t e[] = {
             zxc_compress(src, sizeof(src), comp, sizeof(comp), &co),
             zxc_compress_cctx(cctx, src, sizeof(src), comp, sizeof(comp), &co),
@@ -1904,6 +1907,8 @@ int test_dict_oversized_rejected_everywhere(void) {
             zxc_decompress_dctx(dctx, comp, (size_t)cs, out, sizeof(out), &dop),
             zxc_decompress_block(dctx, comp + ZXC_FILE_HEADER_SIZE,
                                  (size_t)cs - ZXC_FILE_HEADER_SIZE, out, sizeof(out), &dop),
+            zxc_decompress_inplace(inplace, need, (size_t)cs, &dop),
+            zxc_decompress_inplace_dctx(dctx, inplace, need, (size_t)cs, &dop),
         };
         ok = 1;
         for (size_t i = 0; i < sizeof(e) / sizeof(e[0]); i++) {
@@ -1915,9 +1920,10 @@ int test_dict_oversized_rejected_everywhere(void) {
     } else {
         printf("  [FAIL] setup\n");
     }
+    free(inplace);
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
-    if (ok) printf("  [PASS] six entry points -> DICT_TOO_LARGE\nPASS\n\n");
+    if (ok) printf("  [PASS] eight entry points -> DICT_TOO_LARGE\nPASS\n\n");
     return ok;
 }
 

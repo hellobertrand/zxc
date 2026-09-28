@@ -20,7 +20,7 @@ ZXC is a lossless compression **C library** (with official Rust, Python, Node.js
 - **Vendored in ClickHouse.** Available there as a column codec — behind `SET enable_zxc_codec = 1`. See the [ClickHouse codec reference](https://clickhouse.com/docs/reference/statements/create/table/codec).
 - **Cross-platform.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER (ppc64el), s390x, i386, with hand-tuned SIMD (SSE2/AVX2/AVX-512 on x86, NEON on ARMv8+).
 - **Built for "Write Once, Read Many."** Compress once at build time, decompress millions of times at run time.
-- **Decompresses in place.** Decode inside the very buffer that holds the archive: one buffer instead of two, and with a caller-owned context, zero allocations. See [in-place decompression](#in-place-decompression).
+- **Decompresses in place.** Decode inside the very buffer that holds the archive: one buffer instead of two, and with a static context, zero allocations. See [in-place decompression](#in-place-decompression).
 - **Production-grade.** Continuously fuzzed by Google [OSS-Fuzz](https://github.com/google/oss-fuzz), ASan/UBSan/Valgrind-clean, SLSA-signed releases, thread-safe API, BSD-3-Clause.
 - **Seekable.** Built-in seek table for O(1) random-access decompression.
 - **Dictionary mode for small data.** A corpus-trained dictionary (`zxc --train`) prefills the LZ77 window at every block start, recovering ratio on payloads too small to build their own history. See [dictionary compression](#dictionary-compression).
@@ -243,15 +243,15 @@ int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size, NULL);
 
 A static context accepts only archives compressed with its block size (`-B`), and no dictionary; anything else is refused with an error before decoding.
 
-**What it costs.** The margin is one block, plus 8–16 bytes per block of framing, plus ~2 KB of tail; the static context is about three blocks. So the block size decides both, and small payloads want small blocks:
+**What it costs.** The margin is one block, plus 8–16 bytes per block of framing, plus ~2 KB of tail; the static context is three to four blocks. So the block size decides both, and small payloads want small blocks:
 
 | Block size (`-B`) | Margin, 8 MB payload | Static context |
 | ---: | ---: | ---: |
-| 4 KB | 22 KB (0.3 %) | 16 KB |
+| 4 KB | 22–31 KB (0.3–0.4 %) | 16 KB |
 | 64 KB | 69 KB (0.8 %) | 212 KB |
 | 512 KB (default) | 526 KB (6.3 %) | 1.7 MB |
 
-Smaller blocks cost some ratio and decode speed; measure on your data. Always size the buffer with `zxc_decompress_inplace_bound` rather than the formula.
+The higher margin is with block checksums, which the CLI writes by default. Smaller blocks cost some ratio and decode speed; measure on your data. Always size the buffer with `zxc_decompress_inplace_bound` rather than the formula.
 
 **What it guarantees.** An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`. An archive whose output would reach input not yet read (padding, forged block sizes) is rejected with `ZXC_ERROR_CORRUPT_DATA`. Never silent corruption: both entry points are covered by a dedicated fuzzer.
 

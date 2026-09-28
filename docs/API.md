@@ -484,9 +484,10 @@ int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);
 // buf[0 .. n) now holds the decompressed data
 ```
 
-The decode context is allocated for the duration of the call (about three
-blocks, see `zxc_static_dctx_workspace_size`). To decode without any
-allocation, use `zxc_decompress_inplace_dctx` below with a static context.
+The decode context is allocated for the duration of the call: about two
+blocks, up to roughly `zxc_static_dctx_workspace_size` once the archive holds
+entropy-coded blocks. To decode without any allocation, use
+`zxc_decompress_inplace_dctx` below with a static context.
 
 **Returns**: decompressed size (> 0), `0` for an empty frame, or negative
 `zxc_error_t`.

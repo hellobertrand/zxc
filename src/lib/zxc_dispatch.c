@@ -737,9 +737,14 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     return (int64_t)(op - op_start);
 }
 
-// Frame decode body shared by zxc_decompress and the no-destination probe.
+// One-shot decode for zxc_decompress and the no-destination probe.
 static int64_t zxc_decompress_frame(const uint8_t* src, size_t src_size, uint8_t* dst,
                                     size_t dst_capacity, const zxc_decompress_opts_t* opts);
+
+// The frame walk behind every buffer decode, in place when @p inplace is set.
+static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, size_t src_size,
+                                     uint8_t* dst, size_t dst_capacity,
+                                     const zxc_decompress_opts_t* opts, int inplace);
 
 /**
  * @brief Validates a frame envelope without decoding it: file header, then the
@@ -834,172 +839,6 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
     if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size, opts);
 
     return zxc_decompress_frame((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts);
-}
-
-static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, uint8_t* dst,
-                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
-    const int checksum_enabled = opts ? opts->checksum_enabled : 0;
-    const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
-    const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
-
-    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-
-    const uint8_t* ip = src;
-    const uint8_t* ip_end = ip + src_size;
-    uint8_t* op = dst;
-    const uint8_t* op_start = op;
-    const uint8_t* op_end = op + dst_capacity;
-    size_t runtime_chunk_size = 0;
-    zxc_cctx_t ctx;
-
-    int file_has_checksums = 0;
-    int file_has_seek = 0;
-    uint32_t header_dict_id = 0;
-    const int hrc = zxc_read_file_header(ip, src_size, &runtime_chunk_size, &file_has_checksums,
-                                         &header_dict_id, &file_has_seek);
-    if (UNLIKELY(hrc != ZXC_OK)) return hrc;
-
-    // Dictionary validation, before any allocation: a binding the caller cannot
-    // satisfy is settled from the header alone.
-    if (header_dict_id != 0) {
-        if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
-        if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id))
-            return ZXC_ERROR_DICT_MISMATCH;
-    }
-
-    ip += ZXC_FILE_HEADER_SIZE;
-
-    const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
-
-    // Carved on the first block that needs it: an archive storing nothing, and
-    // a no-destination probe of one, never reach that point, and half a
-    // megabyte is a lot to allocate for a 32-byte frame.
-    // Dict decode buffer: [dict_content | decode_space + PAD], carved into the
-    // cctx workspace (NULL when no dictionary is active).
-    int ctx_ready = 0;
-    uint8_t* dict_dec = NULL;
-
-    // Block decompression loop
-    uint64_t block_index = 0;
-    uint64_t digest = 0;
-
-    for (;;) {
-        if (UNLIKELY(ip >= ip_end)) {
-            if (ctx_ready) zxc_cctx_free(&ctx);
-            return ZXC_ERROR_CORRUPT_DATA;
-        }
-        const size_t rem_src = (size_t)(ip_end - ip);
-        zxc_block_header_t bh;
-        // Read the block header to determine the compressed size
-        if (UNLIKELY(zxc_read_block_header(ip, rem_src, &bh) != ZXC_OK)) {
-            if (ctx_ready) zxc_cctx_free(&ctx);
-            return ZXC_ERROR_BAD_HEADER;
-        }
-
-        // Handle EOF block separately (not a real chunk to decompress)
-        if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
-            // EOF carries no payload; a non-zero comp_size is a malformed header.
-            if (UNLIKELY(bh.comp_size != 0)) {
-                if (ctx_ready) zxc_cctx_free(&ctx);
-                return ZXC_ERROR_BAD_HEADER;
-            }
-            // The footer is the source size then, when the archive carries
-            // checksums, the digest. Its length follows file_has_checksums, and
-            // it must lie past this EOF header: read from the end regardless, a
-            // short archive would hand back header or block bytes as a size.
-            const size_t footer_len = zxc_footer_bytes(file_has_checksums);
-            const size_t consumed = (size_t)(ip - src) + ZXC_BLOCK_HEADER_SIZE;
-            if (UNLIKELY(src_size < footer_len || src_size - footer_len < consumed)) {
-                if (ctx_ready) zxc_cctx_free(&ctx);
-                return ZXC_ERROR_SRC_TOO_SMALL;
-            }
-            const uint8_t* const footer = src + src_size - footer_len;
-            if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start))) {
-                if (ctx_ready) zxc_cctx_free(&ctx);
-                return ZXC_ERROR_CORRUPT_DATA;
-            }
-            // Between the EOF block and the footer: the SEK block if announced, else nothing.
-            if (UNLIKELY(!zxc_tail_gap_ok(src + consumed, src_size - footer_len - consumed,
-                                          file_has_seek, (uint64_t)(op - op_start),
-                                          runtime_chunk_size))) {
-                if (ctx_ready) zxc_cctx_free(&ctx);
-                return ZXC_ERROR_CORRUPT_DATA;
-            }
-            if (checksum_enabled && file_has_checksums &&
-                UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != digest)) {
-                if (ctx_ready) zxc_cctx_free(&ctx);
-                return ZXC_ERROR_BAD_CHECKSUM;
-            }
-            break;  // EOF reached, exit the block loop
-        }
-
-        // The decoder only requires the payload, the step also covers the
-        // checksum.
-        const size_t advance = ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
-                               (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-        if (UNLIKELY(advance > rem_src)) {
-            if (ctx_ready) zxc_cctx_free(&ctx);
-            return ZXC_ERROR_SRC_TOO_SMALL;
-        }
-
-        if (!ctx_ready) {
-            if (UNLIKELY(zxc_cctx_init(&ctx, runtime_chunk_size, 0, 0,
-                                       file_has_checksums && checksum_enabled,
-                                       dict_size) != ZXC_OK))
-                return ZXC_ERROR_MEMORY;
-            ctx_ready = 1;
-            if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
-                // LCOV_EXCL_START
-                zxc_cctx_free(&ctx);
-                return ZXC_ERROR_CORRUPT_DATA;
-                // LCOV_EXCL_STOP
-            }
-            dict_dec = ctx.dict_buffer;
-            if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
-        }
-
-        // The fast decoder never writes past its capacity; a block that does not
-        // fit decodes aside and copies only its real output.
-        const size_t rem_cap = (size_t)(op_end - op);
-        int res;
-        const uint8_t* bounce = NULL;
-        if (dict_dec) {
-            // Decode behind the dict prefix so back-references into it resolve.
-            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, dict_dec + dict_size, work_sz,
-                                               block_index);
-            bounce = dict_dec + dict_size;
-        } else if (LIKELY(rem_cap >= work_sz)) {
-            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, op, work_sz, block_index);
-        } else {
-            res = zxc_decompress_chunk_wrapper(&ctx, ip, rem_src, ctx.work_buf, ctx.work_buf_cap,
-                                               block_index);
-            bounce = ctx.work_buf;
-        }
-        if (bounce && LIKELY(res > 0)) {
-            // A no-destination probe lands here too.
-            if (UNLIKELY((size_t)res > rem_cap)) {
-                if (ctx_ready) zxc_cctx_free(&ctx);
-                return ZXC_ERROR_DST_TOO_SMALL;
-            }
-            ZXC_MEMCPY(op, bounce, (size_t)res);
-        }
-        if (UNLIKELY(res < 0)) {
-            if (ctx_ready) zxc_cctx_free(&ctx);
-            return res;
-        }
-
-        if (checksum_enabled && file_has_checksums)
-            digest =
-                zxc_digest_combine(digest, zxc_le32(ip + ZXC_BLOCK_HEADER_SIZE + bh.comp_size));
-
-        ip += advance;
-        op += res;
-        block_index++;
-    }
-
-    if (ctx_ready) zxc_cctx_free(&ctx);
-    return (int64_t)(op - op_start);
 }
 
 /**
@@ -1118,17 +957,57 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
 }
 
 /**
+ * @brief Argument and buffer checks shared by the in-place entry points.
+ *
+ * Runs before any allocation, so both entry points refuse the same calls with
+ * the same codes. On success @p comp is the start of the flush-right archive.
+ *
+ * @param[in]  buffer          Caller buffer holding the flush-right archive.
+ * @param[in]  buffer_capacity Total size of @p buffer.
+ * @param[in]  comp_size       Size of the archive.
+ * @param[in]  opts            Decompression options, or NULL.
+ * @param[out] comp            Start of the archive inside @p buffer.
+ * @return ZXC_OK, or a negative @ref zxc_error_t.
+ */
+static int zxc_inplace_prepare(const void* buffer, const size_t buffer_capacity,
+                               const size_t comp_size, const zxc_decompress_opts_t* opts,
+                               const uint8_t** comp) {
+    if (UNLIKELY(!buffer || comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE ||
+                 comp_size > buffer_capacity))
+        return ZXC_ERROR_NULL_INPUT;
+    const uint8_t* const c = (const uint8_t*)buffer + (buffer_capacity - comp_size);
+    uint64_t dsize = 0;
+    uint64_t margin = 0;
+    uint64_t floor = 0;
+    const int rc = zxc_inplace_probe(c, comp_size, &dsize, &margin, &floor);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
+        return ZXC_ERROR_DST_TOO_SMALL;
+    /* The check above sizes the buffer against the payload, this one against the
+     * archive where it lies: block 0 starts a full block clear. */
+    if (UNLIKELY((uint64_t)(buffer_capacity - comp_size) < floor)) return ZXC_ERROR_DST_TOO_SMALL;
+    if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+    *comp = c;
+    return ZXC_OK;
+}
+
+/**
  * @brief Decompresses in place, inside a single caller-owned buffer.
  *
- * Public API; full contract in @c zxc_buffer.h. A wrapper over
- * @ref zxc_decompress_inplace_dctx with a context created for the call.
+ * Public API; full contract in @c zxc_buffer.h. Same walk as
+ * @ref zxc_decompress_inplace_dctx, on a context created for the call once the
+ * buffer checks have passed.
  */
 // cppcheck-suppress unusedFunction
 int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const size_t comp_size,
                                const zxc_decompress_opts_t* opts) {
+    const uint8_t* comp = NULL;
+    const int rc = zxc_inplace_prepare(buffer, buffer_capacity, comp_size, opts, &comp);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
     zxc_dctx* const dctx = zxc_create_dctx();
     if (UNLIKELY(!dctx)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
-    const int64_t res = zxc_decompress_inplace_dctx(dctx, buffer, buffer_capacity, comp_size, opts);
+    const int64_t res =
+        zxc_dctx_decode_frame(dctx, comp, comp_size, (uint8_t*)buffer, buffer_capacity, opts, 1);
     zxc_free_dctx(dctx);
     return res;
 }
@@ -1456,10 +1335,6 @@ static int64_t zxc_dctx_probe(const zxc_dctx* dctx, const uint8_t* RESTRICT src,
     return zxc_probe_without_dst(src, src_size, opts);
 }
 
-static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, size_t src_size,
-                                     uint8_t* dst, size_t dst_capacity,
-                                     const zxc_decompress_opts_t* opts, int inplace);
-
 /**
  * @brief Decompresses a framed archive into @p dst, reusing @p dctx.
  *
@@ -1490,27 +1365,48 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
 int64_t zxc_decompress_inplace_dctx(zxc_dctx* dctx, void* buffer, const size_t buffer_capacity,
                                     const size_t comp_size, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!dctx)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(!buffer || comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE ||
-                 comp_size > buffer_capacity))
-        return ZXC_ERROR_NULL_INPUT;
-    const uint8_t* const comp = (const uint8_t*)buffer + (buffer_capacity - comp_size);
-    uint64_t dsize = 0;
-    uint64_t margin = 0;
-    uint64_t floor = 0;
-    const int rc = zxc_inplace_probe(comp, comp_size, &dsize, &margin, &floor);
+    const uint8_t* comp = NULL;
+    const int rc = zxc_inplace_prepare(buffer, buffer_capacity, comp_size, opts, &comp);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
-    if (UNLIKELY(dsize > (uint64_t)buffer_capacity || (uint64_t)buffer_capacity - dsize < margin))
-        return ZXC_ERROR_DST_TOO_SMALL;
-    /* The check above sizes the buffer against the payload, this one against the
-     * archive where it lies: block 0 starts a full block clear. */
-    if (UNLIKELY((uint64_t)(buffer_capacity - comp_size) < floor)) return ZXC_ERROR_DST_TOO_SMALL;
     return zxc_dctx_decode_frame(dctx, comp, comp_size, (uint8_t*)buffer, buffer_capacity, opts, 1);
 }
 
 /**
- * @brief Frame walk shared by zxc_decompress_dctx() and
- *        zxc_decompress_inplace_dctx().
+ * @brief Readies @p dctx for a frame: re-carves the inner buffers when the block
+ *        or dictionary size changed (the block API shares this context), then
+ *        syncs the checksum flag and the shared literal table.
+ *
+ * @return ZXC_OK, or a negative @ref zxc_error_t.
+ */
+static int zxc_dctx_carve(zxc_dctx* dctx, const size_t chunk_size, const size_t dict_size,
+                          const int checksum, const uint8_t* dict_huf) {
+    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != chunk_size ||
+                 dctx->last_dict_size != dict_size)) {
+        if (dctx->initialized) {
+            zxc_cctx_free(&dctx->inner);
+            dctx->initialized = 0;
+        }
+        // LCOV_EXCL_START
+        if (UNLIKELY(zxc_cctx_init(&dctx->inner, chunk_size, 0, 0, checksum, dict_size) != ZXC_OK))
+            return ZXC_ERROR_MEMORY;
+        // LCOV_EXCL_STOP
+        dctx->last_block_size = chunk_size;
+        dctx->last_dict_size = dict_size;
+        dctx->initialized = 1;
+        dctx->huf_cached = 0;
+    } else {
+        dctx->inner.checksum_enabled = checksum;
+    }
+    if (UNLIKELY(zxc_ctx_sync_dict_huf(&dctx->inner, dctx->huf_cache, &dctx->huf_cached,
+                                       dict_huf) != ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;
+    return ZXC_OK;
+}
+
+/**
+ * @brief The frame walk behind every buffer decode: zxc_decompress(), its
+ *        no-destination probe, zxc_decompress_dctx() and both in-place entry
+ *        points.
  *
  * No RESTRICT between @p src and @p dst: in place (@p inplace set) they overlap,
  * and a block's room ends at the unread input, which keeps the per-block
@@ -1553,48 +1449,22 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             return ZXC_ERROR_DICT_MISMATCH;
     }
 
-    // Re-init when the block or dictionary size changed (the block API shares
-    // this context).
-    if (UNLIKELY(!dctx->initialized || dctx->last_block_size != runtime_chunk_size ||
-                 dctx->last_dict_size != dict_size)) {
-        if (dctx->initialized) {
-            zxc_cctx_free(&dctx->inner);
-            dctx->initialized = 0;
-        }
-        // LCOV_EXCL_START
-        if (UNLIKELY(zxc_cctx_init(&dctx->inner, runtime_chunk_size, 0, 0,
-                                   file_has_checksums && checksum_enabled, dict_size) != ZXC_OK))
-            return ZXC_ERROR_MEMORY;
-        // LCOV_EXCL_STOP
-        dctx->last_block_size = runtime_chunk_size;
-        dctx->last_dict_size = dict_size;
-        dctx->initialized = 1;
-        dctx->huf_cached = 0;
-    } else {
-        dctx->inner.checksum_enabled = file_has_checksums && checksum_enabled;
-    }
-
-    zxc_cctx_t* const ctx = &dctx->inner;
-
-    if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, dctx->huf_cache, &dctx->huf_cached, dict_huf) !=
-                 ZXC_OK))
-        return ZXC_ERROR_CORRUPT_DATA;
-
     ip += ZXC_FILE_HEADER_SIZE;
 
-    // work_buf was pre-sized to runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
-    // inside the matching zxc_cctx_init call above; the re-init guard ensures
-    // it stays in sync when chunk_size changes between calls.
+    // work_buf is sized to this by the carve below.
     const size_t work_sz = runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
+    zxc_cctx_t* const ctx = &dctx->inner;
 
+    // Carved on the first block that needs it: an archive storing nothing, and a
+    // no-destination probe of one, never allocate.
+    int ctx_ready = 0;
     // [dict | decode + PAD] scratch, NULL without a dictionary.
-    uint8_t* const dict_dec = ctx->dict_buffer;
-    if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
+    uint8_t* dict_dec = NULL;
 
     uint64_t block_index = 0;
     uint64_t digest = 0;
     for (;;) {
-        // See zxc_decompress_frame: only the EOF block may end the walk.
+        // Only the EOF block may end the walk.
         if (UNLIKELY(ip >= ip_end)) return ZXC_ERROR_CORRUPT_DATA;
         const size_t rem_src = (size_t)(ip_end - ip);
         zxc_block_header_t bh;
@@ -1602,9 +1472,13 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             return ZXC_ERROR_BAD_HEADER;
 
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
+            // EOF carries no payload; a non-zero comp_size is a malformed header.
             if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
 
-            // See zxc_decompress_frame: the footer must lie past this EOF header.
+            // The footer is the source size then, when the archive carries
+            // checksums, the digest. Its length follows file_has_checksums, and
+            // it must lie past this EOF header: read from the end regardless, a
+            // short archive would hand back header or block bytes as a size.
             const size_t footer_len = zxc_footer_bytes(file_has_checksums);
             const size_t consumed = (size_t)(ip - (const uint8_t*)src) + ZXC_BLOCK_HEADER_SIZE;
             if (UNLIKELY(src_size < footer_len || src_size - footer_len < consumed))
@@ -1623,12 +1497,25 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             break;  // EOF reached, stop decoding
         }
 
+        // The decoder only requires the payload, the step also covers the
+        // checksum.
         const size_t advance = ZXC_BLOCK_HEADER_SIZE + bh.comp_size +
                                (file_has_checksums ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
         if (UNLIKELY(advance > rem_src)) return ZXC_ERROR_SRC_TOO_SMALL;
 
+        if (UNLIKELY(!ctx_ready)) {
+            const int crc = zxc_dctx_carve(dctx, runtime_chunk_size, dict_size,
+                                           file_has_checksums && checksum_enabled, dict_huf);
+            if (UNLIKELY(crc != ZXC_OK)) return crc;
+            dict_dec = ctx->dict_buffer;
+            if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
+            ctx_ready = 1;
+        }
+
+        // The block's room: the rest of dst, in place cut at the unread input. The
+        // fast decoder never writes past its capacity; a block that does not fit
+        // decodes aside and copies only its real output.
         const size_t rem_cap = (size_t)(op_end - op);
-        // In place, the block's room ends at the unread input.
         size_t room = rem_cap;
         if (inplace) {
             const size_t ahead = ip > op ? (size_t)(ip - op) : 0;
@@ -1644,13 +1531,13 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
         } else if (LIKELY(room >= work_sz)) {
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, work_sz, block_index);
         } else {
-            // Safe path: decode into bounce buffer, then copy exact result.
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, ctx->work_buf_cap,
                                                block_index);
             bounce = ctx->work_buf;
         }
         if (bounce && LIKELY(res > 0)) {
-            // In place, output past the room means padding or forged sizes.
+            // A no-destination probe lands here too. In place, output past the
+            // room means padding or forged sizes.
             if (UNLIKELY((size_t)res > room))
                 return (size_t)res > rem_cap ? ZXC_ERROR_DST_TOO_SMALL : ZXC_ERROR_CORRUPT_DATA;
             ZXC_MEMCPY(op, bounce, (size_t)res);
@@ -1667,6 +1554,16 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
     }
 
     return (int64_t)(op - op_start);
+}
+
+// One-shot decode: the same walk, on a context that lives for the call.
+static int64_t zxc_decompress_frame(const uint8_t* src, const size_t src_size, uint8_t* dst,
+                                    const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
+    zxc_dctx dctx;
+    ZXC_MEMSET(&dctx, 0, sizeof(dctx));
+    const int64_t res = zxc_dctx_decode_frame(&dctx, src, src_size, dst, dst_capacity, opts, 0);
+    if (dctx.initialized) zxc_cctx_free(&dctx.inner);
+    return res;
 }
 
 // =========================================================================

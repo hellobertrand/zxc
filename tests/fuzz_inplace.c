@@ -7,10 +7,14 @@
 
 /**
  * @file fuzz_inplace.c
- * @brief Fuzzer for the single-buffer decompressor (zxc_decompress_inplace).
+ * @brief Fuzzer for the single-buffer decompressors (zxc_decompress_inplace,
+ *        zxc_decompress_inplace_dctx).
  *
  * Input and output share one buffer: the write cursor must never catch up with
- * the read cursor. Each archive is decoded at its own bound, flush-right.
+ * the read cursor. Each archive is decoded at its own bound, flush-right, then
+ * again through a heap context reused across the run's archives and through a
+ * static context per block size: same code and bytes, or BAD_BLOCK_SIZE from a
+ * static context sized for another block.
  *
  *  1. The raw input, as an archive.
  *  2. A payload compressed with header-chosen parameters, behind runs of zeros
@@ -29,6 +33,7 @@
 
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_constants.h"
+#include "../include/zxc_error.h"
 
 #define FUZZ_INPLACE_MAX_INPUT (64 << 10) /* 64 KiB of fuzzer bytes */
 #define FUZZ_INPLACE_UNIT 4096            /* zero and noise run granularity */
@@ -36,18 +41,68 @@
 
 #define SKIPPED INT64_MAX /* never a decoded size */
 
-static const size_t kBlockSizes[] = {4096, 8192, 16384, 65536};
+#define N_SIZES 4
+static const size_t kBlockSizes[N_SIZES] = {4096, 8192, 16384, 65536};
 
-/* Decodes @p arc in place at its bound; the result, or SKIPPED. */
+/* The run's contexts. Static workspaces are allocated once and re-initialised
+ * every run, so a crash reproduces from its input alone. */
+typedef struct {
+    zxc_dctx* heap;
+    zxc_dctx* fixed[N_SIZES];
+} run_ctx_t;
+
+static void run_ctx_init(run_ctx_t* c) {
+    static void* ws[N_SIZES];
+    static size_t ws_size[N_SIZES];
+    c->heap = zxc_create_dctx();
+    for (size_t k = 0; k < N_SIZES; k++) {
+        if (!ws[k]) {
+            ws_size[k] = (zxc_static_dctx_workspace_size(kBlockSizes[k]) + 63) & ~(size_t)63;
+            ws[k] = aligned_alloc(64, ws_size[k]);
+        }
+        c->fixed[k] = ws[k] ? zxc_init_static_dctx(ws[k], ws_size[k], kBlockSizes[k]) : NULL;
+    }
+}
+
+/* Decodes @p arc through @p d from a fresh copy in @p alt; checks it against @p r
+ * and @p ref. @p fixed is a static context's block size (0 for heap), @p bs the
+ * header's when known (else 0). */
+static void check_dctx(zxc_dctx* d, const size_t fixed, const size_t bs, const uint8_t* arc,
+                       const size_t len, uint8_t* alt, const size_t cap,
+                       const zxc_decompress_opts_t* o, const int64_t r, const uint8_t* ref) {
+    if (!d) return;
+    memcpy(alt + cap - len, arc, len);
+    const int64_t r2 = zxc_decompress_inplace_dctx(d, alt, cap, len, o);
+    // A static context refuses a foreign block size and a dictionary archive first.
+    if (fixed && ((fixed != bs && r2 == ZXC_ERROR_BAD_BLOCK_SIZE) ||
+                  (r == ZXC_ERROR_DICT_REQUIRED && r2 == ZXC_ERROR_DICT_UNSUPPORTED)))
+        return;
+    assert(r2 == r);
+    assert(r <= 0 || memcmp(ref, alt, (size_t)r) == 0);
+    (void)r2;
+    (void)ref;
+}
+
+/* Decodes @p arc in place at its bound; the result, or SKIPPED. @p bs is the
+ * header's block size when known, else 0. */
 static int64_t decode_inplace(const uint8_t* arc, const size_t len, uint8_t** out,
-                              const int checksum) {
+                              const int checksum, const run_ctx_t* c, const size_t bs) {
     const size_t cap = zxc_decompress_inplace_bound(arc, len);
     if (cap == 0 || cap > FUZZ_INPLACE_MAX_BUF) return SKIPPED;
     uint8_t* const buf = (uint8_t*)malloc(cap);
-    if (!buf) return SKIPPED;
+    uint8_t* const alt = (uint8_t*)malloc(cap);
+    if (!buf || !alt) {
+        free(buf);
+        free(alt);
+        return SKIPPED;
+    }
     memcpy(buf + cap - len, arc, len);
     const zxc_decompress_opts_t o = {.checksum_enabled = checksum};
     const int64_t r = zxc_decompress_inplace(buf, cap, len, &o);
+    check_dctx(c->heap, 0, bs, arc, len, alt, cap, &o, r, buf);
+    for (size_t k = 0; k < N_SIZES; k++)
+        check_dctx(c->fixed[k], kBlockSizes[k], bs, arc, len, alt, cap, &o, r, buf);
+    free(alt);
     if (out)
         *out = buf;
     else
@@ -55,9 +110,8 @@ static int64_t decode_inplace(const uint8_t* arc, const size_t len, uint8_t** ou
     return r;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    if (size < 5) return 0;
-    (void)decode_inplace(data, size, NULL, data[1] & 1);
+static void fuzz_one(const uint8_t* data, size_t size, const run_ctx_t* c) {
+    (void)decode_inplace(data, size, NULL, data[1] & 1, c, 0);
 
     const int level = (int)(data[0] % (unsigned)zxc_max_level()) + 1;
     const int checksum = data[1] & 1;
@@ -74,13 +128,13 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     data += 5;
     size -= 5;
-    if (size > FUZZ_INPLACE_MAX_INPUT) return 0;
+    if (size > FUZZ_INPLACE_MAX_INPUT) return;
     const size_t n = zero_len + noise_len + size;
-    if (n == 0) return 0;
+    if (n == 0) return;
 
     // [zeros][noise][fuzzer bytes]
     uint8_t* const src = (uint8_t*)malloc(n);
-    if (!src) return 0;
+    if (!src) return;
     memset(src, 0, zero_len);
     uint64_t st = 0x9E3779B97F4A7C15ULL ^ n;
     for (size_t i = zero_len; i < zero_len + noise_len; i++) {
@@ -124,12 +178,12 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (csize <= 0) {
         free(arc);
         free(src);
-        return 0;
+        return;
     }
     const size_t len = (size_t)csize;
 
     uint8_t* out = NULL;
-    const int64_t d = decode_inplace(arc, len, &out, checksum);
+    const int64_t d = decode_inplace(arc, len, &out, checksum, c, block_size);
     assert(d == SKIPPED || (d == (int64_t)n && memcmp(out, src, n) == 0));
     free(out);
 
@@ -137,12 +191,20 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const size_t footer = ZXC_FILE_FOOTER_SIZE + (checksum ? ZXC_FILE_DIGEST_SIZE : 0);
     memmove(arc + len - footer + pad, arc + len - footer, footer);
     memset(arc + len - footer, 0xA5, pad);
-    const int64_t p = decode_inplace(arc, len + pad, NULL, checksum);
+    const int64_t p = decode_inplace(arc, len + pad, NULL, checksum, c, block_size);
     assert(p == SKIPPED || p < 0);
     (void)d;
     (void)p;
 
     free(arc);
     free(src);
+}
+
+int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    if (size < 5) return 0;
+    run_ctx_t c;
+    run_ctx_init(&c);
+    fuzz_one(data, size, &c);
+    zxc_free_dctx(c.heap);
     return 0;
 }
