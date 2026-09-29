@@ -38,12 +38,6 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Select Latest Xcode
-        if: runner.os == 'macOS'
-        run: |
-          sudo xcode-select -s /Applications/Xcode_26.4.app
-          clang --version
-
       - name: Clone LZbench
         run: |
           git clone --depth 1 https://github.com/inikep/lzbench "${LZBENCH_DIR}"

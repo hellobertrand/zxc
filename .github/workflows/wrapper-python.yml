@@ -40,12 +40,6 @@ jobs:
           echo "CXX=g++-14" >> $GITHUB_ENV
           gcc-14 --version
 
-      - name: Select Latest Xcode (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          sudo xcode-select -s /Applications/Xcode_26.4.app
-          clang --version
-
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:

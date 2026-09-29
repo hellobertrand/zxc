@@ -39,12 +39,6 @@ jobs:
           echo "CXX=g++-14" >> $GITHUB_ENV
           gcc-14 --version
 
-      - name: Select Latest Xcode (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          sudo xcode-select -s /Applications/Xcode_26.4.app
-          clang --version
-
       - name: Install Rust Toolchain
         uses: actions-rust-lang/setup-rust-toolchain@166cdcfd11aee3cb47222f9ddb555ce30ddb9659 # v1.17.0
         with:
