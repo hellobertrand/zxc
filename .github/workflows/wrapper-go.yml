@@ -13,12 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-26.04
-          - os: ubuntu-26.04-arm
-          - os: macos-26
-          - os: windows-latest
-          - os: windows-11-arm
+        os: [ubuntu-26.04, ubuntu-26.04-arm, macos-26, macos-26-intel, windows-latest, windows-11-arm]
 
     steps:
       - name: Checkout Repository
