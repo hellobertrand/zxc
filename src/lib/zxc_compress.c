@@ -844,11 +844,6 @@ _finalize_match:
     return best;
 }
 
-// The covered rule relaxes only two cost steps, so a covered length must stay
-// below the third: longer matches trigger the skip before reaching it.
-typedef char zxc_opt_skip_below_varint2
-    [(ZXC_OPT_LONG_MATCH_SKIP < ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128 * 128) ? 1 : -1];
-
 /**
  * @brief Relaxes dp[p + L] with a match of length @p L costing @p nxt in total.
  *
@@ -1224,12 +1219,11 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                 const uint32_t nxt_cheap = dp[p] + ZXC_OPT_MATCH_COST_BASE;
                 const uint32_t nxt_v1 = nxt_cheap + CHAR_BIT;
 
-                // Covered: every processed position bounds dp[q+l] by
-                // dp[q] + cost(l) for its lengths, either by relaxing them or,
-                // covered itself, through its predecessor. Here that bound at
-                // p-1 gives dp[p+l] <= dp[p-1] + cost(l+1) <= dp[p] + cost(l+1).
-                // Costs ignore the offset, so length l can only win where
-                // cost(l) < cost(l+1): the last length of each class.
+                // Covered: each processed position q bounds dp[q+l] by
+                // dp[q] + cost(l), by relaxing or through its own predecessor.
+                // With dp[p] >= dp[p-1], length l only wins where cost(l) <
+                // cost(l+1): the last length of the two classes below
+                // ZXC_OPT_LONG_MATCH_SKIP. Costs ignore the offset.
                 const int covered = prev_len > L_max && prev_p + 1 == p && dp[p] >= dp[p - 1];
                 prev_p = p;
                 prev_len = L_max;
