@@ -24,6 +24,13 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Select Compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          echo "CC=gcc-14" >> $GITHUB_ENV
+          echo "CXX=g++-14" >> $GITHUB_ENV
+          gcc-14 --version
+
       - name: Install llvm-mingw (Windows ARM64)
         if: matrix.os == 'windows-11-arm'
         shell: pwsh

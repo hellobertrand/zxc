@@ -68,9 +68,9 @@ jobs:
           SKIP_CODECS+=" DONT_BUILD_ZLIB_NG=1 DONT_BUILD_ZLING=1 DONT_BUILD_ZPAQ=1"
           SKIP_CODECS+=" DONT_BUILD_MEMLZ=1 DONT_BUILD_ACEAPEX=1 DONT_BUILD_OPENZL=1"
 
-          # Use latest available compiler per platform
+          # GCC 14 on Linux: the compiler of the published benchmarks
           if [ "$RUNNER_OS" = "Linux" ]; then
-            export CC=gcc-15 CXX=g++-15
+            export CC=gcc-14 CXX=g++-14
           fi
 
           make -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="-march=native"

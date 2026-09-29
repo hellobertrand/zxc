@@ -30,12 +30,12 @@ jobs:
       matrix:
         include:
           - name: Linux x86_64
-            os: ubuntu-latest
+            os: ubuntu-26.04
             artifact_name: zxc
             platform: linux-x86_64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: Linux ARM64
-            os: ubuntu-24.04-arm
+            os: ubuntu-26.04-arm
             artifact_name: zxc
             platform: linux-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
@@ -60,7 +60,8 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Select Latest Compiler (Linux)
+      # GCC 14: the compiler of the published benchmarks
+      - name: Select Compiler (Linux)
         if: runner.os == 'Linux'
         run: |
           echo "CC=gcc-14" >> $GITHUB_ENV
@@ -164,7 +165,7 @@ jobs:
   source-tarball:
     name: Canonical source tarball
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-26.04
     permissions:
       contents: read
       id-token: write
@@ -183,6 +184,8 @@ jobs:
           sha256sum "zxc-${VERSION}.tar.gz"
 
       - name: Compress the same tar with zxc
+        env:
+          CC: gcc-14
         run: |
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DZXC_NATIVE_ARCH=OFF \
                 -DZXC_BUILD_TESTS=OFF
@@ -324,7 +327,7 @@ jobs:
     name: Attach SLSA provenance
     needs: provenance
     if: github.event_name == 'release'
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-slim
     permissions:
       contents: write
     steps:
