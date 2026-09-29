@@ -14,8 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-          - os: ubuntu-24.04-arm
+          - os: ubuntu-26.04
+          - os: ubuntu-26.04-arm
           - os: macos-26
           - os: windows-latest
           - os: windows-11-arm
@@ -23,13 +23,6 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Select Latest Compiler (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          echo "CC=gcc-14" >> $GITHUB_ENV
-          echo "CXX=g++-14" >> $GITHUB_ENV
-          gcc-14 --version
 
       - name: Install llvm-mingw (Windows ARM64)
         if: matrix.os == 'windows-11-arm'
