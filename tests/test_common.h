@@ -222,6 +222,9 @@ int test_seek_tail_rule(void);
 int test_chunk_size_code(void);
 int test_header_checksum_single_bit(void);
 
+/* Encoder output */
+int test_encoder_output_pinned(void);
+
 /* Misc */
 int test_error_name(void);
 int test_library_info_api(void);

@@ -139,6 +139,9 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_chunk_size_code),
     TEST_CASE(test_header_checksum_single_bit),
 
+    /* --- Encoder output --- */
+    TEST_CASE(test_encoder_output_pinned),
+
     /* --- Misc --- */
     TEST_CASE(test_error_name),
     TEST_CASE(test_library_info_api),

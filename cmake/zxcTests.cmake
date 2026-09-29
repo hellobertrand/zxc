@@ -22,6 +22,7 @@ if(ZXC_BUILD_TESTS)
         tests/test_seekable.c
         tests/test_seekable_mt.c
         tests/test_format.c
+        tests/test_encoder_pin.c
         tests/test_misc.c
         tests/test_dict.c
     )
