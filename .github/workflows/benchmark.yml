@@ -70,7 +70,7 @@ jobs:
 
           # Use latest available compiler per platform
           if [ "$RUNNER_OS" = "Linux" ]; then
-            export CC=gcc-14 CXX=g++-14
+            export CC=gcc-15 CXX=g++-15
           fi
 
           make -j $SKIP_CODECS CC="${CC:-cc}" MOREFLAGS="-march=native"
