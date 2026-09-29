@@ -466,7 +466,7 @@ typedef struct {
  * @param[in] cur  Position being matched.
  * @param[in] ref  Candidate, earlier in the same buffer.
  * @param[in] from Bytes already known to match.
- * @param[in] need Length to reach; @p cur + @p need must not pass @p iend.
+ * @param[in] need Length to reach; at most @p iend - @p cur.
  * @param[in] iend End of the input buffer.
  * @return 1 if cur[from, need) equals ref[from, need), else 0.
  */
@@ -474,7 +474,7 @@ static ZXC_ALWAYS_INLINE int zxc_match_reaches(const uint8_t* cur, const uint8_t
                                                uint32_t from, const uint32_t need,
                                                const uint8_t* iend) {
     while (from < need) {
-        if (UNLIKELY(cur + from + sizeof(uint64_t) > iend)) {
+        if (UNLIKELY((size_t)(iend - cur) - from < sizeof(uint64_t))) {
             while (from < need && cur[from] == ref[from]) from++;
             return from >= need;
         }
@@ -488,8 +488,8 @@ static ZXC_ALWAYS_INLINE int zxc_match_reaches(const uint8_t* cur, const uint8_t
 /**
  * @brief Lazy probe: tells whether @p lp holds a match of at least @p need bytes.
  *
- * Read-only walk of the chain at @p lp. Candidates are gated on the 4 bytes
- * ending at @p need, and the first one to reach it settles the answer.
+ * Read-only walk of the chain at @p lp. Candidates are gated on the last 4 of
+ * the @p need bytes, [need-4, need), and the first to reach @p need settles it.
  *
  * @param[in] src         Start of the source buffer.
  * @param[in] lp          Position probed; at least 8 bytes must be readable.
@@ -511,7 +511,7 @@ static ZXC_ALWAYS_INLINE int zxc_lazy_probe(const uint8_t* src, const uint8_t* l
                                             const uint16_t* RESTRICT chain_table,
                                             const uint32_t epoch_mark, const uint32_t offset_mask,
                                             const int use_hash5, const zxc_lz77_params_t p) {
-    if (lp + need > iend) return 0;  // too close to the end to win
+    if (need > (size_t)(iend - lp)) return 0;  // too close to the end to win
 
     const uint64_t val8 = zxc_le64(lp);
     const uint32_t val = (uint32_t)val8;
@@ -654,8 +654,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint32_t next_idx = match_idx - delta;
         ZXC_PREFETCH_READ(src + next_idx + best.len - 3);
 
-        // Gate first: most candidates share the head and fail on the 4 bytes
-        // ending at best.len.
+        // Gate first: most candidates share the head and fail on bytes
+        // [best.len-3, best.len], which a longer match must also cover.
         const int should_compare = (cur_pos - match_idx) >= p.min_offset &&
                                    zxc_le32(ref + best.len - 3) == zxc_le32(ip + best.len - 3) &&
                                    zxc_le32(ref) == cur_val;
@@ -843,6 +843,11 @@ _finalize_match:
 
     return best;
 }
+
+// The covered rule relaxes only two cost steps, so a covered length must stay
+// below the third: longer matches trigger the skip before reaching it.
+typedef char zxc_opt_skip_below_varint2
+    [(ZXC_OPT_LONG_MATCH_SKIP < ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128 * 128) ? 1 : -1];
 
 /**
  * @brief Relaxes dp[p + L] with a match of length @p L costing @p nxt in total.
@@ -1074,9 +1079,10 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
  * to be skipped at positions strictly inside a long match, without this
  * guard, highly repetitive data (e.g. Lorem-loop with multi-MB matches at
  * every offset) makes the parser quadratic and unit tests run for minutes.
- * The inner sub-length update loop visits every L from `MIN_MATCH` to
- * `max_L`; the skip threshold means each long-match region only pays its
- * O(L) cost once at the starting position, keeping total work O(N).
+ * The inner sub-length update visits every L from `MIN_MATCH` to `max_L`,
+ * except at a covered position (see the loop), which relaxes at most two
+ * cells; the skip threshold means each long-match region only pays its O(L)
+ * cost once at the starting position, keeping total work O(N).
  *
  * @param[in,out] ctx           Compression context. The lazy-allocated
  *                              `opt_scratch` field provides the DP arrays;
@@ -1215,15 +1221,16 @@ static int zxc_lz77_optimal_parse_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                 const size_t L_max_plus = L_max + 1;
                 const size_t L_cheap_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK;
                 const size_t L_v1_end = L_cheap_end + 128;
-                const size_t L_v2_end = L_cheap_end + 128 * 128;
                 const uint32_t nxt_cheap = dp[p] + ZXC_OPT_MATCH_COST_BASE;
                 const uint32_t nxt_v1 = nxt_cheap + CHAR_BIT;
 
-                // Covered: p-1 already relaxed dp[p+l] at the cost of length
-                // l+1. Costs ignore the offset, so with dp[p] >= dp[p-1] length
-                // l only wins where that cost steps up: the last of each class.
-                const int covered = prev_len > L_max && prev_p + 1 == p && prev_len < L_v2_end &&
-                                    dp[p] >= dp[p - 1];
+                // Covered: every processed position bounds dp[q+l] by
+                // dp[q] + cost(l) for its lengths, either by relaxing them or,
+                // covered itself, through its predecessor. Here that bound at
+                // p-1 gives dp[p+l] <= dp[p-1] + cost(l+1) <= dp[p] + cost(l+1).
+                // Costs ignore the offset, so length l can only win where
+                // cost(l) < cost(l+1): the last length of each class.
+                const int covered = prev_len > L_max && prev_p + 1 == p && dp[p] >= dp[p - 1];
                 prev_p = p;
                 prev_len = L_max;
 
