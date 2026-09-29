@@ -74,6 +74,24 @@ jobs:
       - name: Build 
         run: cmake --build build --config Release --parallel
 
+      # The released zxc must start on glibc 2.34 (RHEL 9, Debian 12, Ubuntu 22.04).
+      - name: Check glibc floor (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          needs=$(objdump -p build/zxc | sed -n '/Version References/,$p' | grep -o 'GLIBC_[A-Z0-9_.]*' | sort -u)
+          echo "$needs"
+          # GLIBC_ABI_* markers (e.g. DT_RELR) and any version above 2.34 break the floor.
+          too_new=$(for v in $needs; do
+            case "$v" in
+              GLIBC_ABI_*) echo "$v" ;;
+              *) [ "$(printf '%s\n' 2.34 "${v#GLIBC_}" | sort -V | tail -1)" = 2.34 ] || echo "$v" ;;
+            esac
+          done)
+          if [ -n "$too_new" ]; then
+            echo "::error::zxc requires more than glibc 2.34:" $too_new
+            exit 1
+          fi
+
       - name: Test (native)
         working-directory: build
         run: ctest -C Release --output-on-failure
