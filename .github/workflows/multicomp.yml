@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   # ===========================================================================
-  # Clang 12–20 on Ubuntu
+  # Clang 12–22 on Ubuntu
   # ===========================================================================
   clang:
     name: "Clang ${{ matrix.version }} (${{ matrix.os }})"
@@ -32,11 +32,14 @@ jobs:
           - { os: ubuntu-22.04, version: 14, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-22.04, version: 15, needs_llvm_apt: false, llvm_distro: "" }
           # Ubuntu 24.04 ships Clang 16, 17, 18 - 19/20 need LLVM APT
-          - { os: ubuntu-latest, version: 16, needs_llvm_apt: false, llvm_distro: "" }
-          - { os: ubuntu-latest, version: 17, needs_llvm_apt: false, llvm_distro: "" }
-          - { os: ubuntu-latest, version: 18, needs_llvm_apt: false, llvm_distro: "" }
-          - { os: ubuntu-latest, version: 19, needs_llvm_apt: true,  llvm_distro: noble }
-          - { os: ubuntu-latest, version: 20, needs_llvm_apt: true,  llvm_distro: noble }
+          - { os: ubuntu-24.04, version: 16, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-24.04, version: 17, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-24.04, version: 18, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-24.04, version: 19, needs_llvm_apt: true,  llvm_distro: noble }
+          - { os: ubuntu-24.04, version: 20, needs_llvm_apt: true,  llvm_distro: noble }
+          # Ubuntu 26.04 ships Clang 20, 21, 22
+          - { os: ubuntu-26.04, version: 21, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-26.04, version: 22, needs_llvm_apt: false, llvm_distro: "" }
 
     steps:
       - name: Checkout Repository
@@ -139,20 +142,15 @@ jobs:
           - { os: ubuntu-22.04, version: 11 }
           - { os: ubuntu-22.04, version: 12 }
           # Ubuntu 24.04 preinstalls GCC 12, 13, 14.
-          - { os: ubuntu-latest, version: 13 }
-          - { os: ubuntu-latest, version: 14 }
-          # GCC 15, 16 from the toolchain test PPA.
-          - { os: ubuntu-latest, version: 15, needs_install: true, needs_ppa: true }
-          - { os: ubuntu-latest, version: 16, needs_install: true, needs_ppa: true }
+          - { os: ubuntu-24.04, version: 13 }
+          - { os: ubuntu-24.04, version: 14 }
+          # Ubuntu 26.04 preinstalls GCC 13, 14, 15; GCC 16 lives in universe.
+          - { os: ubuntu-26.04, version: 15 }
+          - { os: ubuntu-26.04, version: 16, needs_install: true }
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      - name: Add Toolchain Test PPA (newer GCC)
-        if: matrix.needs_ppa
-        run: |
-          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
 
       - name: Install GCC ${{ matrix.version }}
         if: matrix.needs_install
