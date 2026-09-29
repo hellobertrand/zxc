@@ -14,9 +14,9 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-26.04
+          - os: ubuntu-latest
             arch: x86_64
-          - os: ubuntu-26.04-arm
+          - os: ubuntu-24.04-arm
             arch: aarch64
           - os: macos-26
             arch: arm64
@@ -70,7 +70,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-26.04, ubuntu-26.04-arm, macos-26, macos-26-intel, windows-latest, windows-11-arm]
+        os: [ubuntu-latest, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-latest, windows-11-arm]
         node: ["22", "24", "26"]
     defaults:
       run:

@@ -28,7 +28,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-26.04, macos-26-xlarge]
+        os: [ubuntu-latest, macos-26-xlarge]
 
     env:
         LZBENCH_DIR: lzbench

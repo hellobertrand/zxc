@@ -30,12 +30,12 @@ jobs:
       matrix:
         include:
           - name: Linux x86_64
-            os: ubuntu-26.04
+            os: ubuntu-latest
             artifact_name: zxc
             platform: linux-x86_64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: Linux ARM64
-            os: ubuntu-26.04-arm
+            os: ubuntu-24.04-arm
             artifact_name: zxc
             platform: linux-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
@@ -183,7 +183,7 @@ jobs:
   source-tarball:
     name: Canonical source tarball
     if: github.event_name == 'release'
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-latest
     permissions:
       contents: read
       id-token: write
