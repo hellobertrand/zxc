@@ -576,6 +576,21 @@ static void zxc_progress_clear(size_t len) {
 }
 
 /**
+ * @brief Benchmark progress line, throttled like the file progress bar:
+ *        rewritten in place every 100 ms on a tty, else one line per second
+ *        (only reached with --progress always).
+ *
+ * @p last holds the elapsed time of the last line, negative before the first.
+ */
+static void zxc_bench_progress(const char* op, int iters, double elapsed, int to_tty,
+                               double* last) {
+    if (*last >= 0.0 && elapsed - *last < (to_tty ? 0.1 : 1.0)) return;
+    *last = elapsed;
+    fprintf(stderr, to_tty ? "\r%s... %d iters (%.1fs)" : "%s... %d iters (%.1fs)\n", op, iters,
+            elapsed);
+}
+
+/**
  * @brief Progress callback for CLI progress bar.
  *
  * The library fires this once per block -- at multi-GB/s rates that is far
@@ -1767,6 +1782,13 @@ int main(int argc, char** argv) {
             return 1;
         }
 
+        // Same policy as the file progress bar: auto shows it on a terminal only.
+        const int stderr_tty = isatty(fileno(stderr)) != 0;
+        const int show_progress = !json_output && !g_quiet &&
+                                  g_progress_mode != ZXC_PROGRESS_NEVER &&
+                                  (g_progress_mode == ZXC_PROGRESS_ALWAYS || stderr_tty);
+        double last_line = -1.0;
+
         const zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
                                                  .level = level,
                                                  .block_size = block_size,
@@ -1824,11 +1846,11 @@ int main(int argc, char** argv) {
             const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
             compress_iters++;
-            if (!json_output && !g_quiet)
-                fprintf(stderr, "\rCompressing... %d iters (%.1fs)", compress_iters,
-                        zxc_now() - compress_start);
+            if (show_progress)
+                zxc_bench_progress("Compressing", compress_iters, zxc_now() - compress_start,
+                                   stderr_tty, &last_line);
         }
-        if (!json_output && !g_quiet) zxc_progress_clear(64);
+        if (show_progress && stderr_tty) zxc_progress_clear(64);
         fclose(fm);
         fm = NULL;
 
@@ -1895,6 +1917,7 @@ int main(int argc, char** argv) {
         int decompress_iters = 0;
         const double decompress_deadline = zxc_now() + (double)bench_seconds;
         const double decompress_start = zxc_now();
+        last_line = -1.0;
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             const double t0 = zxc_now();
@@ -1902,11 +1925,11 @@ int main(int argc, char** argv) {
             const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;
             decompress_iters++;
-            if (!json_output && !g_quiet)
-                fprintf(stderr, "\rDecompressing... %d iters (%.1fs)", decompress_iters,
-                        zxc_now() - decompress_start);
+            if (show_progress)
+                zxc_bench_progress("Decompressing", decompress_iters, zxc_now() - decompress_start,
+                                   stderr_tty, &last_line);
         }
-        if (!json_output && !g_quiet) zxc_progress_clear(64);
+        if (show_progress && stderr_tty) zxc_progress_clear(64);
         fclose(fc);
 
         const double compress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_compress;
