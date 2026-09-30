@@ -7,7 +7,7 @@
  * Expects the built zxc.js + zxc.wasm to be in the build directory.
  * The BUILD_DIR environment variable can override the default path.
  *
- * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
+ * Copyright (c) Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  */
 

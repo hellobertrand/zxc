@@ -45,7 +45,7 @@ To maintain legal clarity and recognize all contributors, every new source file 
 /*
  * ZXC - High-performance lossless compression
  *
- * Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
+ * Copyright (c) Bertrand Lebonnois and contributors.
  * SPDX-License-Identifier: BSD-3-Clause
  */
 ```
