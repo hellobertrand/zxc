@@ -1,4 +1,4 @@
-# ZXC - Lossless Compression Built for Ultra-Fast Decode
+# ZXC - Lossless Compression with Ultra-Fast Decompression
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
 [![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
@@ -407,7 +407,7 @@ The distinction: conformance freezes decoder *behaviour* (`decode(x) == expected
 
 ## Safety & Quality
 * **Unit Tests**: Comprehensive test suite with CTest integration.
-* **Continuous Fuzzing**: Enrolled in Google [OSS-Fuzz](https://github.com/google/oss-fuzz), which fuzzes five harnesses (roundtrip, decompress, streaming, seekable, dictionary) around the clock. The same harnesses run under ClusterFuzzLite (ASan + UBSan) on every pull request touching the library.
+* **Continuous Fuzzing**: Enrolled in Google [OSS-Fuzz](https://github.com/google/oss-fuzz), which fuzzes eight harnesses (roundtrip, decompress, block, in-place, push streaming, multi-threaded FILE* streaming, seekable, dictionary) around the clock, covering over 80 % of the library's lines ([coverage history](https://introspector.oss-fuzz.com/project-profile?project=zxc)). The same harnesses run under ClusterFuzzLite (ASan + UBSan) on every pull request touching the library.
 * **Static Analysis**: Checked with Cppcheck & Clang Static Analyzer.
 * **CodeQL Analysis**: GitHub Advanced Security scanning for vulnerabilities.
 * **Snyk**: Continuous security and code analysis for dependencies and source.
