@@ -1,7 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # ZXC - High-performance lossless compression
 #
-# Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
-# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) Bertrand Lebonnois and contributors.
 
 # The Makefile stages zxc/ and shim/ next to this file.
 ccflags-y += -DZXC_STATIC_DEFINE -DZXC_DISABLE_SIMD

@@ -1,7 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # ZXC - High-performance lossless compression
 #
-# Copyright (c) 2025-2026 Bertrand Lebonnois and contributors.
-# SPDX-License-Identifier: BSD-3-Clause
+# Copyright (c) Bertrand Lebonnois and contributors.
 
 # Builds zxc_selftest.ko against a kernel tree: `make`, or `make KDIR=<tree>`
 # (BUILD=<dir> stages elsewhere). Kbuild compiles what sits under one directory,
