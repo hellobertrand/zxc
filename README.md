@@ -34,8 +34,8 @@ single-threaded:
 | Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
 | :--- | ---: | ---: | ---: | ---: |
 | Apple M2 | **2.41x** | **2.03x** | **1.52x** | **2.80x** |
-| Axion (Neoverse-V2) | **1.93x** | **1.54x** | **1.28x** | **2.17x** |
-| EPYC 9B45 (Zen 5) | **2.17x** | **1.64x** | **1.23x** | **2.49x** |
+| Axion (Neoverse-V2) | **1.93x** | **1.54x** | **1.29x** | **2.17x** |
+| EPYC 9B45 (Zen 5) | **2.19x** | **1.65x** | **1.24x** | **2.49x** |
 | EPYC 7B13 (Zen 3) | **1.82x** | **1.35x** | **1.15x** | **2.38x** |
 
 The speed is not bought with ratio: ZXC is also *smaller* in all four pairings — 61.76 vs 62.15,
@@ -180,7 +180,7 @@ and building from source, with the full option table and the PGO workflow:
 >
 > Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
 >
-> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.18x on Apple Silicon** and ranging **1.38x–1.78x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.18x–1.52x**), at a 33.09% ratio.
+> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.18x on Apple Silicon** and ranging **1.38x–1.81x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.18x–1.52x**), at a 33.09% ratio.
 
 ## Block Size Tuning
 
