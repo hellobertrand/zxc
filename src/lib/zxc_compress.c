@@ -486,23 +486,11 @@ static ZXC_ALWAYS_INLINE int zxc_match_reaches(const uint8_t* cur, const uint8_t
 }
 
 /**
- * @brief Lazy probe: tells whether @p lp holds a match of at least @p need bytes.
+ * @brief Tells whether @p lp holds a match of at least @p need bytes, within
+ *        the lazy search budget. Read-only; 8 bytes at @p lp must be readable.
  *
- * Read-only walk of the chain at @p lp. Candidates are gated on the last 4 of
- * the @p need bytes, [need-4, need), and the first to reach @p need settles it.
- *
- * @param[in] src         Start of the source buffer.
- * @param[in] lp          Position probed; at least 8 bytes must be readable.
- * @param[in] iend        End of the input buffer.
- * @param[in] need        Length a candidate must reach.
- * @param[in] hash_table  Position table.
- * @param[in] hash_tags   Tag table.
- * @param[in] chain_table Chain table.
- * @param[in] epoch_mark  Current epoch marker.
- * @param[in] offset_mask Mask isolating the position bits.
- * @param[in] use_hash5   Non-zero for the 5-byte hash.
- * @param[in] p           LZ77 parameters (lazy_attempts, min_offset).
- * @return 1 if such a match exists within the search budget, else 0.
+ * Candidates are gated on the last 4 of the @p need bytes, [need-4, need), and
+ * the first to reach @p need settles it.
  */
 static ZXC_ALWAYS_INLINE int zxc_lazy_probe(const uint8_t* src, const uint8_t* lp,
                                             const uint8_t* iend, const uint32_t need,
@@ -649,7 +637,8 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         const uint8_t* ref = src + match_idx;
 
         // Load the next chain link early (before the compare) so its address
-        // resolves while we prefetch.
+        // resolves while we prefetch. The prefetch aims at the next gate for
+        // the current best.len; a longer match found here moves that gate.
         const uint16_t delta = chain_table[match_idx & ZXC_LZ_WINDOW_MASK];
         const uint32_t next_idx = match_idx - delta;
         ZXC_PREFETCH_READ(src + next_idx + best.len - 3);
@@ -830,7 +819,8 @@ _finalize_match:
         best.ref = b_ref;
     }
 
-    // Lazy: a longer match one byte ahead (two from level 4) cancels this one.
+    // Lazy: a match two bytes longer at ip+1, or from level 4 three bytes longer
+    // at ip+2, cancels this one.
     if (p.use_lazy && best.ref && best.len < (uint32_t)p.lazy_len_threshold &&
         ip + 1 < search_limit) {
         if (zxc_lazy_probe(src, ip + 1, iend, best.len + 2, hash_table, hash_tags, chain_table,
