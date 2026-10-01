@@ -39,7 +39,7 @@ jobs:
           fi
 
       - name: Generate CHANGELOG
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4.8.0
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
         with:
           config: cliff.toml
           args: --verbose ${{ steps.ver.outputs.tag_arg }}
