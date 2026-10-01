@@ -92,3 +92,7 @@ wrappers/wasm/zxc.wasm
 builddir*/
 subprojects/
 wrappers/nodejs/zxc-core/
+
+# site
+site/dist/
+site/node_modules/

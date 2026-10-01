@@ -1,0 +1,111 @@
+{
+  "_comment": "Source: README.md benchmark tables (lzbench 2.3, silesia.tar, single thread). Update this file when new numbers are published; the landing page is regenerated from it at build time.",
+  "zxcVersion": "0.13.0",
+  "corpus": "silesia.tar",
+  "corpusBytes": 211947520,
+  "tool": "lzbench 2.3",
+  "tiers": [
+    { "id": "fast",    "name": "Fast",    "zxc": "zxc -1", "rival": "lz4 --fast -17" },
+    { "id": "default", "name": "Default", "zxc": "zxc -3", "rival": "lz4" },
+    { "id": "high",    "name": "High",    "zxc": "zxc -6", "rival": "lz4hc -9" },
+    { "id": "ultra",   "name": "Ultra",   "zxc": "zxc -7", "rival": "zstd -1" }
+  ],
+  "cpus": [
+    {
+      "id": "m2",
+      "label": "Apple M2",
+      "arch": "ARM64",
+      "detail": "Apple M2, macOS 26, Clang 21, -march=native",
+      "rows": [
+        ["zxc -1", 888, 12880, 61.50],
+        ["zxc -2", 594, 10683, 53.61],
+        ["zxc -3", 251, 7063, 45.79],
+        ["zxc -4", 173, 6696, 42.65],
+        ["zxc -5", 103, 6295, 40.27],
+        ["zxc -6", 12.4, 5980, 36.27],
+        ["zxc -7", 8.74, 3790, 33.00],
+        ["lz4", 814, 4784, 47.60],
+        ["lz4 --fast -17", 1354, 5624, 62.15],
+        ["lz4hc -9", 48.0, 4528, 36.75],
+        ["lzav -1", 674, 3901, 39.94],
+        ["snappy", 883, 3265, 47.85],
+        ["zstd --fast --1", 725, 2539, 41.01],
+        ["zstd -1", 646, 1809, 34.53],
+        ["zstd -3", 394, 1704, 31.20],
+        ["zlib -1", 150, 412, 36.45]
+      ]
+    },
+    {
+      "id": "axion",
+      "label": "Google Axion",
+      "arch": "ARM64",
+      "detail": "Google Axion (Neoverse V2), GCP C4A, GCC 14.3, -march=native",
+      "rows": [
+        ["zxc -1", 868, 9383, 61.50],
+        ["zxc -2", 588, 7816, 53.61],
+        ["zxc -3", 241, 5377, 45.79],
+        ["zxc -4", 167, 5115, 42.65],
+        ["zxc -5", 98.5, 4794, 40.27],
+        ["zxc -6", 11.7, 4450, 36.27],
+        ["zxc -7", 7.72, 2843, 33.00],
+        ["lz4", 729, 4263, 47.60],
+        ["lz4 --fast -17", 1276, 4947, 62.15],
+        ["lz4hc -9", 24.1, 3855, 36.75],
+        ["lzav -1", 633, 2799, 39.94],
+        ["snappy", 755, 2296, 47.85],
+        ["zstd --fast --1", 605, 2278, 41.01],
+        ["zstd -1", 522, 1644, 34.53],
+        ["zstd -3", 330, 1526, 31.20],
+        ["zlib -1", 115, 389, 36.45]
+      ]
+    },
+    {
+      "id": "zen5",
+      "label": "AMD EPYC 9B45",
+      "arch": "x86_64",
+      "detail": "AMD EPYC 9B45 (Zen 5), GCP C4D, GCC 14.3, -march=native",
+      "rows": [
+        ["zxc -1", 879, 11032, 61.50],
+        ["zxc -2", 597, 9829, 53.61],
+        ["zxc -3", 239, 6096, 45.79],
+        ["zxc -4", 165, 5786, 42.65],
+        ["zxc -5", 98.9, 5468, 40.27],
+        ["zxc -6", 12.3, 5389, 36.27],
+        ["zxc -7", 8.52, 3742, 33.00],
+        ["lz4", 772, 5029, 47.60],
+        ["lz4 --fast -17", 1287, 5293, 62.15],
+        ["lz4hc -9", 45.3, 4844, 36.75],
+        ["lzav -1", 652, 3495, 39.94],
+        ["snappy", 773, 2078, 47.89],
+        ["zstd --fast --1", 663, 2437, 41.01],
+        ["zstd -1", 600, 1888, 34.53],
+        ["zstd -3", 363, 1722, 31.20],
+        ["zlib -1", 136, 402, 36.45]
+      ]
+    },
+    {
+      "id": "zen3",
+      "label": "AMD EPYC 7B13",
+      "arch": "x86_64",
+      "detail": "AMD EPYC 7B13 (Zen 3), GCP C2D, GCC 14.3, -march=native",
+      "rows": [
+        ["zxc -1", 717, 7726, 61.50],
+        ["zxc -2", 483, 6461, 53.61],
+        ["zxc -3", 202, 4250, 45.79],
+        ["zxc -4", 141, 4082, 42.65],
+        ["zxc -5", 84.0, 3938, 40.27],
+        ["zxc -6", 10.6, 3695, 36.27],
+        ["zxc -7", 6.68, 2474, 33.00],
+        ["lz4", 641, 3891, 47.60],
+        ["lz4 --fast -17", 1112, 4494, 62.15],
+        ["lz4hc -9", 37.3, 3727, 36.75],
+        ["lzav -1", 481, 2939, 39.94],
+        ["snappy", 665, 1741, 47.89],
+        ["zstd --fast --1", 488, 1785, 41.01],
+        ["zstd -1", 445, 1339, 34.53],
+        ["zstd -3", 233, 1208, 31.20],
+        ["zlib -1", 107, 359, 36.45]
+      ]
+    }
+  ]
+}
