@@ -39,7 +39,15 @@ A DCO check runs on every pull request and must pass before it can be merged.
 If you forgot a sign-off, the check output explains how to fix it.
 
 ## License Headers
-To maintain legal clarity and recognize all contributors, every new source file (.c, .h, .rs, .py, etc.) must include the following header at the very top:
+To maintain legal clarity and recognize all contributors, every new source file must start with an SPDX line followed by the copyright notice. The SPDX line is the first line, or the second after a shebang, and uses the file's own comment syntax:
+
+| Files | SPDX line |
+|---|---|
+| `.c`, `.cc`, `.rs`, `.go`, `.js`, `.mjs`, `.ts` | `// SPDX-License-Identifier: BSD-3-Clause` |
+| `.h` | `/* SPDX-License-Identifier: BSD-3-Clause */` |
+| `.py`, `.pyi`, `.sh`, `.cmake`, `.cmake.in`, `CMakeLists.txt`, `Makefile`, `Kbuild`, `meson.build`, `meson_options.txt`, `Dockerfile` | `# SPDX-License-Identifier: BSD-3-Clause` |
+
+For example, in a `.c` file:
 
 ```C
 // SPDX-License-Identifier: BSD-3-Clause
@@ -50,7 +58,18 @@ To maintain legal clarity and recognize all contributors, every new source file 
  */
 ```
 
-The SPDX line comes first (second after a shebang), in the file's own comment syntax: `//` in .c, .rs, .go, .js and .ts files, `/* */` in .h files, `#` in Python, shell, CMake, Makefile, Kbuild and meson files.
+and in a `.h` file:
+
+```C
+/* SPDX-License-Identifier: BSD-3-Clause */
+/*
+ * ZXC - High-performance lossless compression
+ *
+ * Copyright (c) Bertrand Lebonnois and contributors.
+ */
+```
+
+The `SPDX Header Check` step of the quality workflow enforces the SPDX line. The vendored `src/lib/vendors/rapidhash.h` carries `MIT` instead, added by the vendors workflow on each update.
 
 ## Quick Start
 
