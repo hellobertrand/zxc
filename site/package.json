@@ -1,0 +1,17 @@
+{
+  "name": "zxc-site",
+  "private": true,
+  "description": "Source of libzxc.org, generated from the docs of this repository.",
+  "license": "BSD-3-Clause",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "dev": "node build.mjs --serve"
+  },
+  "dependencies": {
+    "marked": "18.0.14"
+  }
+}

@@ -1,0 +1,178 @@
+<div class="inner">
+
+<h1>ZXC: lossless compression built for fast decode</h1>
+
+<p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. At every compression level ZXC decodes faster than LZ4, and produces output of equal or smaller size.</p>
+
+<p>ZXC is free software, released under the <a href="https://opensource.org/license/bsd-3-clause">BSD 3-Clause License</a>. It has no dependencies, and official bindings exist for Rust, Python, Node.js and Go.</p>
+
+<div class="release">
+  <p><strong>The current release is ZXC {{VERSION}}</strong>{{RELEASE_DATE}}.
+  See the <a href="/docs/changelog/">changelog</a> for what changed, and <a href="#download">Downloading ZXC</a> below.</p>
+</div>
+
+{{BENCH_FIGURE}}
+
+<h2 id="specifications">Specifications</h2>
+
+<div class="table-scroll">
+<table class="spec">
+  <thead><tr><th scope="col">Parameter</th><th scope="col">Value</th><th scope="col">Notes</th></tr></thead>
+  <tbody>
+    <tr><td>Compression levels</td><td>1 to 7</td><td>Default 3</td></tr>
+    <tr><td>Block size</td><td>4&nbsp;KB to 2&nbsp;MB, powers of two</td><td>Default 512&nbsp;KB; 256&nbsp;KB for streaming</td></tr>
+    <tr><td>Decompression context</td><td>&asymp;&nbsp;512&nbsp;KB</td><td>At the default block size</td></tr>
+    <tr><td>Compression context</td><td>&asymp;&nbsp;1.78&nbsp;MB</td><td>&asymp;&nbsp;1.03&nbsp;MB with 256&nbsp;KB blocks</td></tr>
+    <tr><td>In-place decompression margin</td><td>&asymp;&nbsp;1&nbsp;% of the archive</td><td>Use <code>zxc_decompress_inplace_bound()</code></td></tr>
+    <tr><td>Random access</td><td>O(1) per block</td><td>Requires a seek table (<code>-S</code>)</td></tr>
+    <tr><td>Integrity</td><td>Optional per-block checksum</td><td>rapidhash</td></tr>
+    <tr><td>Dictionaries</td><td>External <code>.zxd</code> file</td><td>Referenced by a 32-bit ID</td></tr>
+    <tr><td>Threading</td><td>Multi-threaded streaming</td><td>Thread count detected automatically</td></tr>
+    <tr><td>Architectures</td><td>x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER, s390x, i386</td><td>Tested in CI</td></tr>
+    <tr><td>Wire format</td><td>Version {{FORMAT_VERSION}}</td><td><a href="/docs/format/">Specification</a></td></tr>
+    <tr><td>Library name</td><td>libzxc</td><td>pkg-config <code>libzxc</code>; CMake <code>zxc::zxc_lib</code>; Debian <code>libzxc-dev</code></td></tr>
+    <tr><td>Language, dependencies</td><td>C17, none</td><td>Bindings for Rust, Python, Node.js, Go</td></tr>
+    <tr><td>License</td><td>BSD 3-Clause</td><td></td></tr>
+  </tbody>
+</table>
+</div>
+
+<h2 id="why">Why ZXC?</h2>
+
+<p>LZ4 is symmetric: it compresses about as fast as it decompresses. That suits logs and swap, but not data that is shipped. A firmware image is compressed once on a build server and decompressed on every device that installs it, so time saved during compression helps nobody.</p>
+
+<p>ZXC moves the work to the encoder. Match selection, optimal parsing and statistics tuning are done once, and the bitstream is laid out for the pipelines and branch predictors of modern processors. The decoder stays short, has few branches, and uses SIMD where it is available.</p>
+
+<p>Typical uses:</p>
+<ul>
+  <li>Firmware and over-the-air updates. In-place decompression keeps peak memory close to the decompressed size.</li>
+  <li>Game assets and application start-up, where load time and battery use matter.</li>
+  <li>Packaged artefacts and content delivery, where more original data is delivered per byte read from disk or network.</li>
+  <li>Read-heavy storage. Seekable archives can decode any block without reading the blocks before it.</li>
+</ul>
+
+<h2 id="features">Features</h2>
+
+<ul>
+  <li><strong>Seekable archives.</strong> An optional seek table gives O(1) random access to any block.</li>
+  <li><strong>In-place decompression.</strong> Decode inside a single buffer with about 1&nbsp;% overhead instead of a second allocation.</li>
+  <li><strong>Trained dictionaries.</strong> <code>zxc --train</code> builds a dictionary for small, similar payloads such as JSON documents, log lines or RPC messages.</li>
+  <li><strong>Multi-threaded streaming.</strong> The file and stream interfaces split work across processor cores.</li>
+  <li><strong>Hand-written SIMD.</strong> SSE2, AVX2 and AVX-512 with run-time selection on x86; NEON on ARMv8 and later.</li>
+  <li><strong>Portable.</strong> Tested on x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER, s390x and i386.</li>
+  <li><strong>Careful interface.</strong> Every call takes an explicit output capacity. The library is thread-safe, with reusable contexts for tight loops and static contexts for targets without a heap.</li>
+  <li><strong>Optional checksums.</strong> Per-block integrity checks based on rapidhash.</li>
+  <li><strong>Documented format.</strong> The <a href="/docs/format/">wire format</a> (version {{FORMAT_VERSION}}) is specified in full, and public conformance vectors let others write independent decoders.</li>
+</ul>
+
+<h2 id="levels">Compression levels</h2>
+
+<p>Seven levels trade compression time for size. Decompression stays in the multi-GB/s range at every level. Level 3 is the default.</p>
+
+{{LEVELS_TABLE}}
+
+<p class="note">Size is the compressed size as a percentage of <code>silesia.tar</code>. Speeds are single-threaded on Apple M2 with {{BENCH_TOOL}}. Blocks are 512&nbsp;KB by default; use <code>-B 256K</code> for streaming or memory-constrained targets.</p>
+
+<h2 id="benchmarks">Benchmarks</h2>
+
+<p>ZXC is included in the two main open-source compression benchmark suites, <a href="https://github.com/inikep/lzbench">lzbench</a> and <a href="https://github.com/powturbo/TurboBench">TurboBench</a>, so the figures below can be reproduced with either tool alongside more than 70 other codecs. Benchmarks also run on every commit on x86_64 and ARM64 machines; see the <a href="https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml">latest results</a>.</p>
+
+{{BENCH_TABLES}}
+
+<h2 id="download">Downloading ZXC</h2>
+
+<p>Source and binary archives for Linux, macOS and Windows are published on the <a href="https://github.com/hellobertrand/zxc/releases">releases page</a>. Each archive carries SLSA build provenance, which you can check with:</p>
+<pre class="code" data-lang="sh"><code>gh attestation verify zxc-{{VERSION}}-linux-x86_64.tar.gz --repo hellobertrand/zxc</code></pre>
+
+<p>ZXC is also packaged by distributions and package managers:</p>
+
+<dl>
+  <dt>Debian and Ubuntu</dt>
+  <dd><pre class="code" data-lang="sh"><code>sudo apt install zxc libzxc-dev</code></pre></dd>
+  <dt>Homebrew</dt>
+  <dd><pre class="code" data-lang="sh"><code>brew install zxc</code></pre></dd>
+  <dt>vcpkg</dt>
+  <dd><pre class="code" data-lang="sh"><code>vcpkg install zxc</code></pre></dd>
+  <dt>Conan</dt>
+  <dd><pre class="code" data-lang="sh"><code>conan install -r conancenter --requires="zxc/[*]" --build=missing</code></pre></dd>
+  <dt>Winget</dt>
+  <dd><pre class="code" data-lang="sh"><code>winget install hellobertrand.zxc</code></pre></dd>
+</dl>
+
+<p>To build from source you need CMake 3.14 or later and a C17 compiler (GCC, Clang or MSVC):</p>
+<pre class="code" data-lang="sh"><code>git clone https://github.com/hellobertrand/zxc.git
+cd zxc
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+sudo cmake --install build</code></pre>
+<p>The installation provides CMake (<code>find_package(zxc)</code>, target <code>zxc::zxc_lib</code>) and pkg-config (<code>libzxc</code>) files. Meson users can include ZXC as a subproject; see the <a href="/docs/install/">integration guide</a>.</p>
+
+<h2 id="start">Quick start</h2>
+
+<p>The <code>zxc</code> command reads and writes files or pipes, and can be used as a compressor by <code>tar</code>:</p>
+<pre class="code" data-lang="sh"><code># Compress (level 3 by default), then decompress
+zxc -5 assets.tar assets.tar.zxc
+zxc -d assets.tar.zxc assets.tar
+
+# Seekable archive, for random access
+zxc -S big.bin big.bin.zxc
+
+# As a compressor for tar
+tar -I 'zxc -5' -cf data.tar.zxc data/
+
+# Measure speed on your own machine
+zxc -b input_file</code></pre>
+
+<p>From C, the buffer interface compresses and decompresses in one call each:</p>
+<pre class="code" data-lang="c"><code>#include "zxc.h"
+
+uint64_t bound = zxc_compress_bound(src_size);
+zxc_compress_opts_t c = {
+    .level            = ZXC_LEVEL_DEFAULT,
+    .checksum_enabled = 1,
+};
+int64_t csize = zxc_compress(src, src_size, dst, bound, &amp;c);
+
+zxc_decompress_opts_t d = { .checksum_enabled = 1 };
+int64_t n = zxc_decompress(dst, csize, out, out_cap, &amp;d);
+if (n &lt; 0)
+    fprintf(stderr, "zxc: %s\n", zxc_error_name((int)n));</code></pre>
+
+<p>See the <a href="/docs/examples/">examples</a> for the streaming, context, seekable and dictionary interfaces, the <a href="/docs/api/">API reference</a> for every function, and the <a href="/docs/cli/">manual page</a> for all command options.</p>
+
+<h2 id="bindings">Language bindings</h2>
+
+<p>The official bindings are maintained in the main repository and released with the library. They are published as <code>zxc-compress</code>, because the name <code>zxc</code> is taken on some registries.</p>
+
+<div class="table-scroll">
+<table>
+  <thead><tr><th scope="col">Language</th><th scope="col">Installation</th><th scope="col">Package</th></tr></thead>
+  <tbody>
+    <tr><td>Rust</td><td><code>cargo add zxc-compress</code></td><td><a href="https://crates.io/crates/zxc-compress">crates.io</a></td></tr>
+    <tr><td>Python</td><td><code>pip install zxc-compress</code></td><td><a href="https://pypi.org/project/zxc-compress">PyPI</a></td></tr>
+    <tr><td>Node.js</td><td><code>npm install zxc-compress</code></td><td><a href="https://www.npmjs.com/package/zxc-compress">npm</a></td></tr>
+    <tr><td>Go</td><td><code>go get github.com/hellobertrand/zxc/wrappers/go</code></td><td><a href="https://github.com/hellobertrand/zxc/tree/main/wrappers/go">source</a></td></tr>
+    <tr><td>WebAssembly</td><td>build with Emscripten</td><td><a href="https://github.com/hellobertrand/zxc/tree/main/wrappers/wasm">source</a></td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Bindings maintained by others: <a href="https://github.com/meysam81/go-zxc">go-zxc</a> (Go), <a href="https://github.com/openpeeps/zxc-nim">zxc-nim</a> (Nim), and a <a href="https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor">Free Pascal port</a>.</p>
+
+<h2 id="quality">Testing</h2>
+
+<ul>
+  <li>Continuous fuzzing with ClusterFuzzLite over the compression, decompression, streaming and seekable code, with more than 5 billion iterations so far.</li>
+  <li>AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind in continuous integration; Cppcheck, the Clang Static Analyzer and CodeQL on every change.</li>
+  <li>Decoder conformance vectors and byte-exact tests of the encoder output, so that the wire format cannot change by accident.</li>
+  <li>Builds and tests across several operating systems, compilers and eight processor architectures.</li>
+  <li>Pinned CI dependencies, tracked by the <a href="https://scorecard.dev/viewer/?uri=github.com/hellobertrand/zxc">OpenSSF Scorecard</a>.</li>
+</ul>
+
+<h2 id="help">Getting help and contributing</h2>
+
+<p>Questions and ideas are welcome in <a href="https://github.com/hellobertrand/zxc/discussions">GitHub Discussions</a>. Please report bugs on the <a href="https://github.com/hellobertrand/zxc/issues">issue tracker</a>, and security problems privately as described in the <a href="https://github.com/hellobertrand/zxc/security/policy">security policy</a>.</p>
+
+<p>Contributions are welcome; read the <a href="https://github.com/hellobertrand/zxc/blob/main/.github/CONTRIBUTING.md">contribution guidelines</a> first. You can also support the project through <a href="https://github.com/sponsors/hellobertrand">GitHub Sponsors</a>.</p>
+
+</div>
