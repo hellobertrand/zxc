@@ -220,3 +220,23 @@ jobs:
           else
             echo "No non-ASCII characters found."
           fi
+
+      - name: SPDX Header Check
+        shell: bash
+        run: |
+          echo "Checking SPDX-License-Identifier in the first 2 lines of source files..."
+          missing=0
+          while IFS= read -r f; do
+            [ -f "$f" ] && [ ! -L "$f" ] || continue
+            if ! head -n 2 "$f" | grep -qE 'SPDX-License-Identifier: [A-Za-z0-9.+ -]+'; then
+              echo "::error file=$f,line=1::Missing SPDX-License-Identifier in the first 2 lines"
+              missing=$((missing + 1))
+            fi
+          done < <(git ls-files -- \
+            '*.c' '*.h' '*.rs' '*.go' '*.py' '*.js' '*.mjs' '*.ts' '*.sh' '*.cmake' \
+            '*CMakeLists.txt' '*Makefile' '*Kbuild' '*meson.build' '*Dockerfile')
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::$missing file(s) without an SPDX header."
+            exit 1
+          fi
+          echo "All source files carry an SPDX header."
