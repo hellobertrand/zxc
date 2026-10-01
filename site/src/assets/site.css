@@ -1,0 +1,215 @@
+/* libzxc.org stylesheet.
+   Deliberately plain, in the tradition of GNU project pages and Texinfo
+   manuals: system fonts, white pages, classic link colours, one column,
+   bordered tables. No web fonts, no framework. */
+
+:root {
+  --bg: #ffffff;
+  --fg: #1a1a1a;
+  --muted: #555555;
+  --link: #0645ad;
+  --link-visited: #5a3696;
+  --rule: #cccccc;
+  --bar: #eeeeee;
+  --th: #f2f2f2;
+  --pre-bg: #f7f7f7;
+  --pre-border: #dddddd;
+  --note-bg: #fffbe6;
+  --note-border: #e6d98c;
+  --zxc: #1f4e9c;
+  --rival: #9a9a9a;
+  --hl: #eef3fb;
+  --tok-com: #6a6a6a;
+  --tok-str: #0b6b0b;
+  --tok-pp: #8a4b00;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c1c1c;
+    --fg: #dddddd;
+    --muted: #a8a8a8;
+    --link: #8ab4f8;
+    --link-visited: #c3a6f5;
+    --rule: #444444;
+    --bar: #2a2a2a;
+    --th: #262626;
+    --pre-bg: #242424;
+    --pre-border: #3a3a3a;
+    --note-bg: #2b2816;
+    --note-border: #5c5324;
+    --zxc: #7ea6e8;
+    --rival: #6e6e6e;
+    --hl: #1f2733;
+    --tok-com: #9a9a9a;
+    --tok-str: #9ccc8c;
+    --tok-pp: #e0a66a;
+  }
+}
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Verdana, Arial, sans-serif;
+  font-size: 1rem;
+  line-height: 1.5;
+}
+code, kbd, pre, samp, tt {
+  font-family: "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", Menlo, Consolas, monospace;
+  font-size: 0.92em;
+}
+a { color: var(--link); }
+a:visited { color: var(--link-visited); }
+a:hover { text-decoration: none; }
+:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+img { max-width: 100%; height: auto; }
+hr { border: 0; border-top: 1px solid var(--rule); margin: 1.5em 0; }
+
+.inner { max-width: 52em; margin: 0 auto; padding: 0 1em; }
+.skip { position: absolute; left: -999px; }
+.skip:focus { left: 1em; top: 0.5em; background: var(--bg); padding: 0.3em 0.6em; z-index: 2; }
+
+/* ---------- Masthead ---------- */
+.masthead { padding: 1.2em 0 0; }
+.masthead .inner { display: flex; align-items: center; gap: 0.9em; }
+.masthead .logo { display: block; flex: none; line-height: 0; }
+.site-name { margin: 0; font-size: 1.9em; font-weight: bold; line-height: 1.1; }
+.site-name a, .site-name a:visited { color: var(--fg); text-decoration: none; }
+.site-tag { margin: 0.15em 0 0; color: var(--muted); }
+
+.navbar {
+  margin-top: 1em;
+  background: var(--bar);
+  border-top: 1px solid var(--rule);
+  border-bottom: 1px solid var(--rule);
+}
+.navbar ul { list-style: none; margin: 0 auto; padding: 0.4em 1em; max-width: 52em; display: flex; flex-wrap: wrap; gap: 0.2em 0; }
+.navbar li + li::before { content: "|"; color: var(--muted); padding: 0 0.6em; }
+.navbar a, .navbar a:visited { color: var(--link); }
+.navbar a[aria-current] { color: var(--fg); font-weight: bold; text-decoration: none; }
+
+main { display: block; padding: 1.2em 0 2em; }
+
+/* ---------- Headings and text ---------- */
+h1, h2, h3, h4 { line-height: 1.25; font-weight: bold; }
+h1 { font-size: 1.75em; margin: 0.6em 0 0.5em; }
+h2 { font-size: 1.35em; margin: 1.8em 0 0.6em; padding-bottom: 0.2em; border-bottom: 1px solid var(--rule); }
+h3 { font-size: 1.12em; margin: 1.5em 0 0.5em; }
+h4 { font-size: 1em; margin: 1.3em 0 0.4em; }
+p, ul, ol, dl, table, pre { margin: 0 0 1em; }
+ul, ol { padding-left: 1.6em; }
+li { margin: 0.2em 0; }
+dt { font-weight: bold; margin-top: 0.6em; }
+dd { margin: 0.1em 0 0.4em 1.6em; }
+.small, .note { font-size: 0.9em; color: var(--muted); }
+:not(pre) > code { overflow-wrap: anywhere; }
+
+/* ---------- Notices ---------- */
+.release {
+  background: var(--note-bg);
+  border: 1px solid var(--note-border);
+  padding: 0.6em 0.9em;
+  margin: 1em 0 1.5em;
+}
+.release p { margin: 0.2em 0; }
+
+/* ---------- Tables ---------- */
+.table-scroll { overflow-x: auto; margin: 0 0 1em; }
+.table-scroll > table { margin: 0; }
+table { border-collapse: collapse; }
+th, td { border: 1px solid var(--rule); padding: 0.3em 0.6em; text-align: left; vertical-align: top; }
+thead th { background: var(--th); }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+tr.is-zxc td, tr.is-zxc th { background: var(--hl); }
+table.spec { width: 100%; }
+table.spec td:first-child { font-weight: bold; white-space: nowrap; }
+table.spec td:last-child { color: var(--muted); font-size: 0.92em; }
+table.spec code { white-space: nowrap; }
+th.codec, td.codec { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 0.9em; font-weight: normal; white-space: nowrap; }
+
+details { margin: 0 0 0.8em; }
+details > summary { cursor: pointer; padding: 0.2em 0; }
+details[open] > summary { margin-bottom: 0.5em; }
+
+/* ---------- Code ---------- */
+pre.code {
+  position: relative;
+  background: var(--pre-bg);
+  border: 1px solid var(--pre-border);
+  padding: 0.6em 0.8em;
+  overflow-x: auto;
+  line-height: 1.45;
+  tab-size: 4;
+}
+pre.code code { font-size: 1em; }
+.tok-kw { font-weight: bold; }
+.tok-com { color: var(--tok-com); font-style: italic; }
+.tok-str { color: var(--tok-str); }
+.tok-pp { color: var(--tok-pp); }
+.copy {
+  position: absolute; top: 0.3em; right: 0.3em;
+  font: inherit; font-size: 0.8em;
+  background: var(--bg); color: var(--muted);
+  border: 1px solid var(--pre-border); padding: 0 0.4em; cursor: pointer;
+}
+.copy:hover { color: var(--fg); }
+
+/* ---------- Figure 1 ---------- */
+figure.bench { margin: 1.5em 0; padding: 0.8em 1em 0.6em; border: 1px solid var(--rule); }
+figure.bench fieldset { border: 0; padding: 0; margin: 0 0 0.8em; }
+figure.bench legend { font-weight: bold; padding: 0; margin-bottom: 0.3em; }
+figure.bench fieldset label { margin-right: 1.1em; white-space: nowrap; }
+.tier { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 0 1em; padding: 0.55em 0; border-top: 1px dotted var(--rule); }
+.tier-name { font-weight: bold; }
+.tier-name small { display: block; font-weight: normal; color: var(--muted); }
+.bar-label { display: flex; justify-content: space-between; gap: 1em; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+.track { height: 0.7em; margin: 0.1em 0 0.35em; }
+.fill { height: 100%; width: calc(var(--w) * 100%); background: var(--rival); transition: width 0.3s; }
+.bar.zxc .fill { background: var(--zxc); }
+.gain { font-size: 0.88em; color: var(--muted); }
+.gain b { color: var(--fg); }
+figure.bench figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0.6em; }
+@media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
+
+/* ---------- Docs (Texinfo-like) ---------- */
+.nodenav { font-size: 0.92em; margin: 0 0 0.5em; }
+.nodenav + hr { margin-top: 0.3em; }
+.doc-meta { color: var(--muted); font-size: 0.9em; margin-top: -0.3em; }
+.contents { margin: 1em 0 1.5em; }
+.contents h2 { border: 0; font-size: 1.1em; margin: 0 0 0.3em; }
+.contents ul { margin: 0; }
+.contents ul ul { margin: 0.1em 0 0.3em; }
+.prose h2 .anchor, .prose h3 .anchor, .prose h4 .anchor { margin-left: 0.3em; font-weight: normal; text-decoration: none; color: var(--muted); visibility: hidden; }
+.prose :is(h2, h3, h4):hover .anchor { visibility: visible; }
+.prose blockquote { margin: 1em 0; padding: 0.1em 1em; border-left: 3px solid var(--rule); color: var(--muted); }
+.prose img { background: #fff; }
+.prose hr:has(+ h2) { display: none; }
+.doclist dt { font-size: 1.05em; }
+
+/* ---------- Footer ---------- */
+.footer { border-top: 1px solid var(--rule); background: var(--bar); font-size: 0.88em; color: var(--muted); padding: 1em 0 1.2em; }
+.footer p { margin: 0.35em 0; }
+
+@media (max-width: 36em) {
+  .site-name { font-size: 1.55em; }
+  .navbar ul { gap: 0.25em 1.1em; }
+  .navbar li + li::before { content: none; }
+  .tier { grid-template-columns: 1fr; }
+  .tier-name small { display: inline; margin-left: 0.5em; }
+  /* Specifications: one stacked block per parameter instead of a wide table */
+  table.spec, table.spec tbody, table.spec tr, table.spec td { display: block; width: auto; }
+  table.spec thead { display: none; }
+  table.spec tr { border-top: 1px solid var(--rule); padding: 0.45em 0; }
+  table.spec tr:last-child { border-bottom: 1px solid var(--rule); }
+  table.spec td { border: 0; padding: 0; }
+  table.spec td:first-child { white-space: normal; }
+  table.spec td:last-child:empty { display: none; }
+}
+
+@media print {
+  .navbar, .copy, .skip, figure.bench fieldset { display: none; }
+  a { color: inherit; }
+}
