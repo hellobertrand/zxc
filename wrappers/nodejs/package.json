@@ -42,7 +42,7 @@
     "cmake-js": "^8.0.0"
   },
   "devDependencies": {
-    "vitest": "^4.0.0"
+    "vitest": "^5.0.2"
   },
   "binary": {
     "napi_versions": [
