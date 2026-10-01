@@ -20,6 +20,10 @@ cibuildwheel==4.2.1 \
     --hash=sha256:22af6eb3a601bc9efdd42ab5522839ed99c8d61cad6dbd0cec5278bfef74ae4f \
     --hash=sha256:6d67f04c0d1277a3b5301ed2ef82b115efd2ac1fe58b998bbc6ba1d59c918983
     # via -r requirements/build.in
+colorama==0.4.6 ; os_name == 'nt' \
+    --hash=sha256:08695f5cb7ed6e0531a20572697297273c47b8cae5a63ffc6d6ed5c201be6e44 \
+    --hash=sha256:4f1d9991f5acc0ca119f9d443620b77f9d6b33703e51011c16baf57afb285fc6
+    # via build
 dependency-groups==1.3.1 \
     --hash=sha256:51aeaa0dfad72430fcfb7bcdbefbd75f3792e5919563077f30bc0d73f4493030 \
     --hash=sha256:78078301090517fd938c19f64a53ce98c32834dfe0dee6b88004a569a6adfefd
@@ -49,11 +53,17 @@ pyproject-hooks==1.2.0 \
     --hash=sha256:1e859bd5c40fae9448642dd871adf459e5e2084186e8d2c2a79a824c970da1f8 \
     --hash=sha256:9e5c6bfa8dcc30091c74b0cf803c81fdd29d94f01992a7707bc97babb1141913
     # via build
-setuptools-scm==10.2.1 \
-    --hash=sha256:4fa7dd82cf8c800df59c9a288c90299b1657ff1ecfc3f5cc00287c5dbf5e27a9 \
-    --hash=sha256:b7c82f4102d389ee57dc66ccdb4f9b4bca3c40ba83b43f1f63d68ccd72db2580
+setuptools==84.0.0 \
+    --hash=sha256:51a52592b3b99e102b609654876bd65f19f999935166d1352678931132b0c670 \
+    --hash=sha256:f4695c21257f0d9b537ec2692c941d02ee143b7cc1276941349a546573b2ef73
+    # via
+    #   -r requirements/build.in
+    #   setuptools-scm
+setuptools-scm==10.3.4 \
+    --hash=sha256:82f34c3e3084fc2b57d397200637cc13f2338004052d2fee47baa5f0e902464e \
+    --hash=sha256:a69f28bfc245608781205e912faae437c2b2165773afa4e7b979d77447a69dd2
     # via -r requirements/build.in
-vcs-versioning==2.2.2 \
-    --hash=sha256:4ac4ded78720cdb4d0291ae58ace87e1e9201912e1023f3029c6cce5c9152cfb \
-    --hash=sha256:fe7fb216f8780a5516e7864a9333aacb1b70015b087a9be3918da76ef2760808
+vcs-versioning==2.5.0 \
+    --hash=sha256:956a796e31f80fe714d219d6d1df15a6bf247d10f6d851bf4b98279d0a42da55 \
+    --hash=sha256:dbf44f6303dc817e5792cb7d0e9cc90e3046ee1e32eaa357b20ad368811313d0
     # via setuptools-scm
