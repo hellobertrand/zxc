@@ -1,4 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause
+/*
+ * ZXC - High-performance lossless compression
+ *
+ * Copyright (c) Bertrand Lebonnois and contributors.
+ */
 
 // Copies the ZXC C core into the package so the published tarball builds on
 // its own. In the repo the addon compiles against the checkout two levels up;

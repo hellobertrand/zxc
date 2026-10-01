@@ -1,3 +1,8 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# ZXC - High-performance lossless compression
+#
+# Copyright (c) Bertrand Lebonnois and contributors.
+
 option('build_cli', type : 'boolean', value : false,
        description : 'Build the command-line interface')
 option('use_system_rapidhash', type : 'boolean', value : false,

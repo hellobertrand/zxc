@@ -1,6 +1,11 @@
 # SPDX-License-Identifier: BSD-3-Clause
+"""
+ZXC - High-performance lossless compression
 
-"""Reusable compression and decompression contexts."""
+Copyright (c) Bertrand Lebonnois and contributors.
+
+Reusable compression and decompression contexts.
+"""
 
 import pytest
 
