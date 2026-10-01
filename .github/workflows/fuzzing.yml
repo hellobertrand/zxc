@@ -68,7 +68,7 @@ jobs:
     - name: Upload SARIF to GitHub Security
       # Fork PRs never get security-events: write, so the upload would fail
       if: (success() || failure()) && github.event.pull_request.head.repo.fork != true
-      uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4.37.4
+      uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
       with:
         sarif_file: .
         category: clusterfuzzlite-${{ matrix.sanitizer }}
