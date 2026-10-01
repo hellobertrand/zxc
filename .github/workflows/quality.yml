@@ -234,8 +234,7 @@ jobs:
             fi
           done < <(git ls-files -- \
             '*.c' '*.cc' '*.h' '*.rs' '*.go' '*.py' '*.pyi' '*.js' '*.mjs' '*.ts' '*.sh' '*.cmake' \
-            '*CMakeLists.txt' '*Makefile' '*Kbuild' '*meson.build' '*Dockerfile' \
-            ':!src/lib/vendors/')
+            '*CMakeLists.txt' '*Makefile' '*Kbuild' '*meson.build' '*Dockerfile')
           if [ "$missing" -ne 0 ]; then
             echo "::error::$missing file(s) without an SPDX header."
             exit 1
