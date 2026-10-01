@@ -1,8 +1,8 @@
 #!/bin/bash
+# SPDX-License-Identifier: BSD-3-Clause
 # ZXC - High-performance lossless compression
 #
 # Copyright (c) Bertrand Lebonnois and contributors.
-# SPDX-License-Identifier: BSD-3-Clause
 #
 # Test script for ZXC CLI
 # Usage: ./tests/test_cli.sh [path_to_zxc_binary]

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 /**
  * ZXC WASM Roundtrip Test
  *
@@ -8,7 +9,6 @@
  * The BUILD_DIR environment variable can override the default path.
  *
  * Copyright (c) Bertrand Lebonnois and contributors.
- * SPDX-License-Identifier: BSD-3-Clause
  */
 
 import { join, dirname, resolve } from "path";

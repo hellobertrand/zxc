@@ -42,13 +42,15 @@ If you forgot a sign-off, the check output explains how to fix it.
 To maintain legal clarity and recognize all contributors, every new source file (.c, .h, .rs, .py, etc.) must include the following header at the very top:
 
 ```C
+// SPDX-License-Identifier: BSD-3-Clause
 /*
  * ZXC - High-performance lossless compression
  *
  * Copyright (c) Bertrand Lebonnois and contributors.
- * SPDX-License-Identifier: BSD-3-Clause
  */
 ```
+
+The SPDX line comes first (second after a shebang), in the file's own comment syntax: `//` in .c, .rs, .go, .js and .ts files, `/* */` in .h files, `#` in Python, shell, CMake, Makefile, Kbuild and meson files.
 
 ## Quick Start
 

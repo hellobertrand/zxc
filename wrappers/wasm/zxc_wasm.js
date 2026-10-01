@@ -1,10 +1,10 @@
+// SPDX-License-Identifier: BSD-3-Clause
 /**
  * ZXC WebAssembly Wrapper
  *
  * High-level JavaScript API for ZXC compression/decompression via WASM.
  *
  * Copyright (c) Bertrand Lebonnois and contributors.
- * SPDX-License-Identifier: BSD-3-Clause
  */
 
 /**

@@ -1,7 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # ZXC - High-performance lossless compression
 #
 # Copyright (c) Bertrand Lebonnois and contributors.
-# SPDX-License-Identifier: BSD-3-Clause
 #
 # Standalone downstream project used by .github/workflows/packaging.yml, never
 # built as part of ZXC: it is configured against an install prefix.

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: BSD-3-Clause
+
 """Reusable compression and decompression contexts."""
 
 import pytest

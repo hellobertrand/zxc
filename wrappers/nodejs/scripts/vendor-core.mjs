@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: BSD-3-Clause
+
 // Copies the ZXC C core into the package so the published tarball builds on
 // its own. In the repo the addon compiles against the checkout two levels up;
 // a consumer installing from npm only ever sees this copy.

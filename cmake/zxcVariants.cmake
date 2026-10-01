@@ -1,7 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
 # ZXC - High-performance lossless compression
 #
 # Copyright (c) Bertrand Lebonnois and contributors.
-# SPDX-License-Identifier: BSD-3-Clause
 #
 # Function Multi-Versioning: per-ISA variant objects for the runtime dispatcher.
 # Populates ZXC_VARIANT_OBJECTS, consumed by the zxc_lib target.

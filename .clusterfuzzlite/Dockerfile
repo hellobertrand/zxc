@@ -1,3 +1,4 @@
+# SPDX-License-Identifier: BSD-3-Clause
 #  Copyright (c) Bertrand Lebonnois and contributors.
 #
 #  This source code is licensed under the BSD-style license found in the
