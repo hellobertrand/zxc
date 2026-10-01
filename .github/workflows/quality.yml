@@ -224,19 +224,26 @@ jobs:
       - name: SPDX Header Check
         shell: bash
         run: |
-          echo "Checking SPDX-License-Identifier in the first 2 lines of source files..."
+          # bash -e: a failing git ls-files fails the step.
+          files=$(git ls-files -- \
+            '*.c' '*.cc' '*.h' '*.rs' '*.go' '*.py' '*.pyi' '*.js' '*.mjs' '*.ts' '*.sh' '*.cmake' \
+            '*.cmake.in' '*CMakeLists.txt' '*Makefile' '*Kbuild' '*meson.build' '*meson_options.txt' '*Dockerfile')
+          [ -n "$files" ] || { echo "::error::No source file to check."; exit 1; }
+          # A comment marker, the tag, an SPDX expression, and the */ closing a block comment.
+          id='[A-Za-z0-9.+()-]+'
+          re="^(//|/\*|#) SPDX-License-Identifier: ${id}( (AND|OR|WITH) ${id})*( \*/)?$"
           missing=0
           while IFS= read -r f; do
-            [ -f "$f" ] && [ ! -L "$f" ] || continue
-            if ! head -n 2 "$f" | grep -qE 'SPDX-License-Identifier: [A-Za-z0-9.+ -]+'; then
-              echo "::error file=$f,line=1::Missing SPDX-License-Identifier in the first 2 lines"
+            # The tag sits on line 1, or line 2 after a shebang.
+            line=
+            { IFS= read -r line; [[ $line == '#!'* ]] && IFS= read -r line; } < "$f" || true
+            if ! [[ ${line%$'\r'} =~ $re ]]; then
+              echo "::error file=$f::Missing or malformed SPDX-License-Identifier"
               missing=$((missing + 1))
             fi
-          done < <(git ls-files -- \
-            '*.c' '*.cc' '*.h' '*.rs' '*.go' '*.py' '*.pyi' '*.js' '*.mjs' '*.ts' '*.sh' '*.cmake' \
-            '*CMakeLists.txt' '*Makefile' '*Kbuild' '*meson.build' '*Dockerfile')
+          done <<< "$files"
           if [ "$missing" -ne 0 ]; then
-            echo "::error::$missing file(s) without an SPDX header."
+            echo "::error::$missing file(s) without a valid SPDX header."
             exit 1
           fi
-          echo "All source files carry an SPDX header."
+          echo "All $(grep -c "" <<< "$files") source files carry an SPDX header."
