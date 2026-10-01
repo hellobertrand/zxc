@@ -44,11 +44,11 @@ jobs:
 
       - name: Copy Lib ZXC
         run: |
-          mkdir -p ${LZBENCH_DIR}/lz/zxc/include/
-          mkdir -p ${LZBENCH_DIR}/lz/zxc/src/lib/
+          mkdir -p ${LZBENCH_DIR}/lz+entropy/zxc/include/
+          mkdir -p ${LZBENCH_DIR}/lz+entropy/zxc/src/lib/
 
-          cp -r include ${LZBENCH_DIR}/lz/zxc/
-          cp -r src/lib ${LZBENCH_DIR}/lz/zxc/src/
+          cp -r include ${LZBENCH_DIR}/lz+entropy/zxc/
+          cp -r src/lib ${LZBENCH_DIR}/lz+entropy/zxc/src/
 
       - name: Build Lzbench
         working-directory: ${{ env.LZBENCH_DIR }}
