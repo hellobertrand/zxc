@@ -238,10 +238,35 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Compute apt cache key
+        id: apt-key
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore apt cache
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /var/cache/apt/archives/*.deb
+            /var/lib/apt/lists
+          key: apt-trixie-${{ matrix.cross_pkg }}-${{ steps.apt-key.outputs.week }}
+
       - name: Install cross-compiler
         run: |
-          apt-get update
+          rm -f /etc/apt/apt.conf.d/docker-clean # it deletes the .deb files
+          if [ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]; then
+              apt-get update
+          fi
           apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Save apt cache
+        if: github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /var/cache/apt/archives/*.deb
+            /var/lib/apt/lists
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
@@ -412,10 +437,36 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # apt cache: see Tier 2.
+      - name: Compute apt cache key
+        id: apt-key
+        run: echo "week=$(date -u +%G-%V)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore apt cache
+        id: apt-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /var/cache/apt/archives/*.deb
+            /var/lib/apt/lists
+          key: apt-trixie-${{ matrix.cross_pkg }}-${{ steps.apt-key.outputs.week }}
+
       - name: Install cross-compiler
         run: |
-          apt-get update
+          rm -f /etc/apt/apt.conf.d/docker-clean # it deletes the .deb files
+          if [ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]; then
+              apt-get update
+          fi
           apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
+
+      - name: Save apt cache
+        if: github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            /var/cache/apt/archives/*.deb
+            /var/lib/apt/lists
+          key: ${{ steps.apt-cache.outputs.cache-primary-key }}
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
