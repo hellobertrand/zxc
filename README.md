@@ -418,7 +418,7 @@ The distinction: conformance freezes decoder *behaviour* (`decode(x) == expected
 
 ## License & Credits
 
-**ZXC** Copyright © 2025-2026, Bertrand Lebonnois and contributors.
+**ZXC** Copyright © Bertrand Lebonnois and contributors.
 Licensed under the **BSD 3-Clause License**. See LICENSE for details.
 
 **Third-Party Components:**
