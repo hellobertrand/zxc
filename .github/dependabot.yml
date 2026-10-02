@@ -29,3 +29,7 @@ updates:
     directory: /.clusterfuzzlite
     schedule:
       interval: monthly
+  - package-ecosystem: npm
+    directory: /site
+    schedule:
+      interval: monthly
