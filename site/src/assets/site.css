@@ -1,7 +1,7 @@
 /* libzxc.org stylesheet.
    Deliberately plain, in the tradition of GNU project pages and Texinfo
-   manuals: system fonts, white pages, classic link colours, one column,
-   bordered tables. No web fonts, no framework. */
+   manuals: white pages, classic link colours, one column, bordered tables.
+   Noto Sans and Noto Sans Mono from Google Fonts; no framework. */
 
 :root {
   --bg: #ffffff;
@@ -53,12 +53,12 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font-family: "Noto Sans", "DejaVu Sans", "Liberation Sans", Verdana, Arial, sans-serif;
+  font-family: "Noto Sans", Arial, sans-serif;
   font-size: 1rem;
   line-height: 1.5;
 }
 code, kbd, pre, samp, tt {
-  font-family: "DejaVu Sans Mono", "Liberation Mono", "Noto Sans Mono", Menlo, Consolas, monospace;
+  font-family: "Noto Sans Mono", Menlo, Consolas, monospace;
   font-size: 0.92em;
 }
 a { color: var(--link); }
@@ -127,7 +127,7 @@ table.spec { width: 100%; }
 table.spec td:first-child { font-weight: bold; white-space: nowrap; }
 table.spec td:last-child { color: var(--muted); font-size: 0.92em; }
 table.spec code { white-space: nowrap; }
-th.codec, td.codec { font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 0.9em; font-weight: normal; white-space: nowrap; }
+th.codec, td.codec { font-family: "Noto Sans Mono", Menlo, Consolas, monospace; font-size: 0.9em; font-weight: normal; white-space: nowrap; }
 
 details { margin: 0 0 0.8em; }
 details > summary { cursor: pointer; padding: 0.2em 0; }
@@ -164,7 +164,7 @@ figure.bench fieldset label { margin-right: 1.1em; white-space: nowrap; }
 .tier { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 0 1em; padding: 0.55em 0; border-top: 1px dotted var(--rule); }
 .tier-name { font-weight: bold; }
 .tier-name small { display: block; font-weight: normal; color: var(--muted); }
-.bar-label { display: flex; justify-content: space-between; gap: 1em; font-family: "DejaVu Sans Mono", "Liberation Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
+.bar-label { display: flex; justify-content: space-between; gap: 1em; font-family: "Noto Sans Mono", Menlo, Consolas, monospace; font-size: 0.85em; }
 .track { height: 0.7em; margin: 0.1em 0 0.35em; }
 .fill { height: 100%; width: calc(var(--w) * 100%); background: var(--rival); transition: width 0.3s; }
 .bar.zxc .fill { background: var(--zxc); }
