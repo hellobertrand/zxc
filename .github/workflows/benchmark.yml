@@ -28,7 +28,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-26-xlarge]
+        # PRs: free standard M1 runner; xlarge (billed) for the full run only
+        os:
+          - ubuntu-latest
+          - ${{ github.event_name == 'pull_request' && 'macos-26' || 'macos-26-xlarge' }}
 
     env:
         LZBENCH_DIR: lzbench
