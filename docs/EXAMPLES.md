@@ -673,7 +673,7 @@ dictionary format and §3.1 for the header fields.
 
 Consuming zxc as a Meson subproject or through WrapDB — the `.wrap` file, the
 `meson.build` dependency and the build commands — is documented in
-[INSTALL.md](INSTALL.md#meson-subproject-or-wrapdb).
+[INSTALL.md](https://github.com/hellobertrand/zxc/blob/main/docs/INSTALL.md#meson-subproject-or-wrapdb).
 
 ---
 

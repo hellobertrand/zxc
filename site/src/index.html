@@ -1,6 +1,6 @@
 <div class="inner">
 
-<h1>ZXC: lossless compression built for fast decode</h1>
+<h1>ZXC: lossless compression built for fast decoding</h1>
 
 <p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. At every compression level ZXC decodes faster than LZ4, and produces output of equal or smaller size.</p>
 
@@ -76,6 +76,11 @@
 <h2 id="benchmarks">Benchmarks</h2>
 
 <p>ZXC is included in the two main open-source compression benchmark suites, <a href="https://github.com/inikep/lzbench">lzbench</a> and <a href="https://github.com/powturbo/TurboBench">TurboBench</a>, so the figures below can be reproduced with either tool alongside more than 70 other codecs. Benchmarks also run on every commit on x86_64 and ARM64 machines; see the <a href="https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml">latest results</a>.</p>
+
+<figure class="pareto">
+  <a href="/docs/images/bench-pareto-ratio.svg"><img src="/docs/images/bench-pareto-ratio.svg" width="1119" height="803" alt="Compressed size against decompression speed for ZXC, LZ4 and Zstandard levels, one panel per processor: Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
+  <figcaption>Figure 2. Compressed size of <code>silesia.tar</code> against single-threaded decompression speed, on two ARM64 and two x86_64 processors; lower and to the right is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
+</figure>
 
 {{BENCH_TABLES}}
 
