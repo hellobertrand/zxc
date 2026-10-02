@@ -172,6 +172,9 @@ figure.bench fieldset label { margin-right: 1.1em; white-space: nowrap; }
 .gain { font-size: 0.88em; color: var(--muted); }
 .gain b { color: var(--fg); }
 figure.bench figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0.6em; }
+figure.pareto { margin: 1.5em 0; }
+figure.pareto img { display: block; background: #fff; }
+figure.pareto figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0.6em; }
 @media (prefers-reduced-motion: reduce) { .fill { transition: none; } }
 
 /* ---------- Docs (Texinfo-like) ---------- */
