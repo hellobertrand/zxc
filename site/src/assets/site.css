@@ -75,7 +75,6 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: 1.5em 0; }
 /* ---------- Masthead ---------- */
 .masthead { padding: 1.2em 0 0; }
 .masthead .inner { display: flex; align-items: center; gap: 0.9em; }
-.masthead .logo { display: block; flex: none; line-height: 0; }
 .site-name { margin: 0; font-size: 1.9em; font-weight: bold; line-height: 1.1; }
 .site-name a, .site-name a:visited { color: var(--fg); text-decoration: none; }
 .site-tag { margin: 0.15em 0 0; color: var(--muted); }

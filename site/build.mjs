@@ -292,7 +292,6 @@ function header(active) {
   return `<a class="skip" href="#main">Skip to content</a>
 <header class="masthead">
   <div class="inner">
-    <a class="logo" href="/" aria-hidden="true" tabindex="-1"><img src="/assets/favicon.svg" width="48" height="48" alt=""></a>
     <div>
       <p class="site-name"><a href="/">ZXC</a></p>
       <p class="site-tag">Asymmetric lossless compression, built for fast decoding</p>
@@ -353,8 +352,7 @@ function layout({ title, description, urlPath, body, active, jsonLd }) {
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="/assets/favicon.svg" type="image/svg+xml">
-<link rel="apple-touch-icon" href="/assets/apple-touch-icon.png">
+<link rel="icon" href="data:,">
 <link rel="stylesheet" href="/assets/site.css?v=${ASSET_V.css}">
 <script src="/assets/site.js?v=${ASSET_V.js}" defer></script>
 ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ""}
@@ -590,6 +588,7 @@ async function build() {
       "@context": "https://schema.org",
       "@type": "SoftwareSourceCode",
       name: "ZXC",
+      alternateName: "libzxc",
       description: "Asymmetric lossless compression library built for ultra-fast decode.",
       codeRepository: GH,
       programmingLanguage: "C",
