@@ -78,8 +78,22 @@
 <p>ZXC is included in the two main open-source compression benchmark suites, <a href="https://github.com/inikep/lzbench">lzbench</a> and <a href="https://github.com/powturbo/TurboBench">TurboBench</a>, so the figures below can be reproduced with either tool alongside more than 70 other codecs. Benchmarks also run on every commit on x86_64 and ARM64 machines; see the <a href="https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml">latest results</a>.</p>
 
 <figure class="pareto">
-  <a href="/docs/images/bench-pareto-ratio.svg"><img src="/docs/images/bench-pareto-ratio.svg" width="1119" height="803" alt="Compressed size against decompression speed for ZXC, LZ4 and Zstandard levels, one panel per processor: Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
+  <a href="/docs/images/bench-pareto-decomp.svg"><img src="/docs/images/bench-pareto-decomp.svg" width="1119" height="803" alt="Compressed size against decompression speed for ZXC, LZ4 and Zstandard levels, one panel per processor: Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
   <figcaption>Figure 2. Compressed size of <code>silesia.tar</code> against single-threaded decompression speed, on two ARM64 and two x86_64 processors; lower and to the right is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
+</figure>
+
+<p>The decoder's speed is paid for at compression time, and on this axis LZ4 and Zstandard are ahead. Levels 1 and 2 still compress at several hundred MB/s; levels 6 and 7 run at about 10&nbsp;MB/s, slower than <code>lz4hc -9</code>, and are meant for data that is compressed once and read many times.</p>
+
+<figure class="pareto">
+  <a href="/docs/images/bench-ratio-comp.svg"><img src="/docs/images/bench-ratio-comp.svg" width="1115" height="803" alt="Compressed size against compression speed, on a logarithmic scale, for ZXC, LZ4 and Zstandard levels, one panel per processor: Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
+  <figcaption>Figure 3. Compressed size of <code>silesia.tar</code> against single-threaded compression speed (logarithmic scale), on the same four processors; lower and to the right is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
+</figure>
+
+<p>Raw decode speed leaves out half of the picture. When the decoder is fed from a disk, a network or another core, the compressed bytes are what is scarce, and what matters is how much original data each compressed megabyte yields. Effective throughput combines both: decode speed &times; 100 / ratio&nbsp;(%). On this measure every ZXC level is ahead of LZ4, on all four processors.</p>
+
+<figure class="pareto">
+  <a href="/docs/images/bench-effective.svg"><img src="/docs/images/bench-effective.svg" width="1328" height="752" alt="Effective throughput relative to LZ4 for every ZXC level and for LZ4, LZ4HC, LZAV, Zstandard and Snappy, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. All ZXC levels are above the LZ4 baseline of 1.00." loading="lazy"></a>
+  <figcaption>Figure 4. Effective throughput (decode speed &times; 100 / ratio&nbsp;%) relative to LZ4, on the same four processors; higher is better, and LZ4 is 1.00. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
 {{BENCH_TABLES}}
@@ -103,6 +117,9 @@
   <dt>Winget</dt>
   <dd><pre class="code" data-lang="sh"><code>winget install hellobertrand.zxc</code></pre></dd>
 </dl>
+
+<p>Which version each distribution currently ships is tracked by <a href="https://repology.org/project/zxc/versions">Repology</a>:</p>
+<p class="repology"><a href="https://repology.org/project/zxc/versions"><img src="https://repology.org/badge/vertical-allrepos/zxc.svg" referrerpolicy="no-referrer" alt="Packaging status of ZXC across distributions and package managers, from Repology." loading="lazy"></a></p>
 
 <p>To build from source you need CMake 3.14 or later and a C17 compiler (GCC, Clang or MSVC):</p>
 <pre class="code" data-lang="sh"><code>git clone https://github.com/hellobertrand/zxc.git
@@ -167,8 +184,9 @@ if (n &lt; 0)
 <h2 id="quality">Testing</h2>
 
 <ul>
-  <li>Continuous fuzzing with ClusterFuzzLite over the compression, decompression, streaming and seekable code, with more than 5 billion iterations so far.</li>
-  <li>AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind in continuous integration; Cppcheck, the Clang Static Analyzer and CodeQL on every change.</li>
+  <li>Fuzzed around the clock by Google <a href="https://github.com/google/oss-fuzz">OSS-Fuzz</a>, with eight harnesses covering compression, decompression, the block API, in-place decoding, streaming, seekable archives and dictionaries; they reach over 80&nbsp;% of the library's lines (<a href="https://introspector.oss-fuzz.com/project-profile?project=zxc">coverage history</a>).</li>
+  <li>The same harnesses run under ClusterFuzzLite on every pull request.</li>
+  <li>AddressSanitizer, UndefinedBehaviorSanitizer and Valgrind in continuous integration; Cppcheck, the Clang Static Analyzer and CodeQL on every change; continuous security analysis of the code and its dependencies by Snyk.</li>
   <li>Decoder conformance vectors and byte-exact tests of the encoder output, so that the wire format cannot change by accident.</li>
   <li>Builds and tests across several operating systems, compilers and eight processor architectures.</li>
   <li>Pinned CI dependencies, tracked by the <a href="https://scorecard.dev/viewer/?uri=github.com/hellobertrand/zxc">OpenSSF Scorecard</a>.</li>

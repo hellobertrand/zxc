@@ -158,8 +158,9 @@ pre.code code { font-size: 1em; }
 
 /* ---------- Figure 1 ---------- */
 figure.bench { margin: 1.5em 0; padding: 0.8em 1em 0.6em; border: 1px solid var(--rule); }
+figure.bench .bench-title { font-weight: bold; margin: 0 0 0.5em; }
 figure.bench fieldset { border: 0; padding: 0; margin: 0 0 0.8em; }
-figure.bench legend { font-weight: bold; padding: 0; margin-bottom: 0.3em; }
+figure.bench legend { float: left; padding: 0; margin-right: 0.6em; }
 figure.bench fieldset label { margin-right: 1.1em; white-space: nowrap; }
 .tier { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 0 1em; padding: 0.55em 0; border-top: 1px dotted var(--rule); }
 .tier-name { font-weight: bold; }
