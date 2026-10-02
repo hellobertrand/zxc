@@ -10,6 +10,8 @@
 //   docs/*.md, docs/man/*.md  documentation pages
 //   docs/images/*             figures referenced by the docs
 //   CHANGELOG.md              changelog page
+//   docs/Doxyfile.in, include/, src/lib/
+//                             Doxygen reference in /docs/doxygen/ (needs doxygen)
 //   site/src/**               landing page, styles, scripts, fonts, benchmark data
 //
 // Only dependency: `marked` (Markdown -> HTML). Highlighting, slugs, link
@@ -18,6 +20,7 @@
 import { readFile, writeFile, mkdir, rm, cp, stat } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -55,6 +58,11 @@ const DOCS = [
     blurb: "What changed in each release." },
 ];
 const DOC_BY_FILE = new Map(DOCS.map((d) => [d.file, d]));
+
+// The Doxygen reference: generated HTML, listed on /docs/ but outside the page chain.
+// It has no link back to the site, so it opens in a new tab.
+const DOXYGEN = { group: "Reference", href: "/docs/doxygen/", title: "Doxygen reference", newTab: true,
+  blurb: "Generated from the headers and sources: every symbol with its documentation and source, searchable." };
 
 // ---------------------------------------------------------------------------
 // Small helpers
@@ -499,6 +507,31 @@ function contentsBlock(toc) {
 }
 
 // ---------------------------------------------------------------------------
+// Doxygen reference
+// ---------------------------------------------------------------------------
+/** Runs Doxygen on docs/Doxyfile.in into OUT/docs/doxygen. Returns false if skipped. */
+async function buildDoxygen(version) {
+  const tpl = path.join(REPO, "docs/Doxyfile.in");
+  if (!existsSync(tpl)) { console.warn("skip: docs/Doxyfile.in not found"); return false; }
+  // The @VAR@ CMake would substitute, then the overrides for the site (last assignment wins).
+  const conf = (await readFile(tpl, "utf8"))
+    .replaceAll("@PROJECT_NAME@", "ZXC")
+    .replaceAll("@PROJECT_VERSION@", version)
+    .replaceAll("@PROJECT_DESCRIPTION@", "High-performance asymmetric lossless compression library") +
+    `\nOUTPUT_DIRECTORY = "${path.join(OUT, "docs")}"\nHTML_OUTPUT = doxygen\nQUIET = YES\nWARNINGS = NO\nWARN_IF_INCOMPLETE_DOC = NO\nWARN_NO_PARAMDOC = NO\n`;
+  const bin = process.env.DOXYGEN || "doxygen";
+  const r = spawnSync(bin, ["-"], { cwd: REPO, input: conf, stdio: ["pipe", "inherit", "inherit"] });
+  if (r.error) {
+    // CI must publish the reference; a local preview can do without it.
+    if (process.env.CI) throw new Error(`${bin} not found: ${r.error.message}`);
+    console.warn(`skip: ${bin} not found, no Doxygen reference`);
+    return false;
+  }
+  if (r.status !== 0) throw new Error(`${bin} exited with status ${r.status}`);
+  return true;
+}
+
+// ---------------------------------------------------------------------------
 // Build
 // ---------------------------------------------------------------------------
 async function build() {
@@ -582,11 +615,18 @@ async function build() {
     }));
   }
 
+  // Doxygen reference
+  const entries = DOCS.map((d) => ({ ...d, href: `/docs/${d.slug}/` }));
+  if (await buildDoxygen(version)) {
+    entries.push(DOXYGEN);
+    pages.push(DOXYGEN.href);
+  }
+
   // Docs index, grouped like a GNU manual directory
-  const groups = [...new Set(DOCS.map((d) => d.group))];
+  const groups = [...new Set(entries.map((d) => d.group))];
   const lists = groups.map((g) => `<h2>${esc(g)}</h2>
 <dl class="doclist">
-${DOCS.filter((d) => d.group === g).map((d) => `  <dt><a href="/docs/${d.slug}/">${esc(d.title)}</a></dt>\n  <dd>${esc(d.blurb)}</dd>`).join("\n")}
+${entries.filter((d) => d.group === g).map((d) => `  <dt><a href="${d.href}"${d.newTab ? ' target="_blank" rel="noopener"' : ""}>${esc(d.title)}</a></dt>\n  <dd>${esc(d.blurb)}</dd>`).join("\n")}
 </dl>`).join("\n");
   await write("/docs/", layout({
     title: "Documentation",
