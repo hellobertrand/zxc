@@ -422,7 +422,7 @@ function renderFigure(bench) {
     }));
     const r = perCpu[first.id].L.get(t.zxc).ratio;
     return `<div class="tier">
-      <div class="tier-name">${esc(t.name)}<small>&asymp;${Math.round(r)}&#8239;% size</small></div>
+      <div class="tier-name">${esc(t.name)}<small>${r.toFixed(2)}&#8239;% of original</small></div>
       <div class="bars">
         ${bar(t, "zxc")}
         ${bar(t, "rival")}
@@ -435,12 +435,13 @@ function renderFigure(bench) {
   const details = Object.fromEntries(cpus.map((c) => [c.id, c.detail]));
 
   return `<figure class="bench" data-bench-figure>
+    <p class="bench-title">Decompression speed against codecs of similar size</p>
     <fieldset>
-      <legend>Decompression speed at equal output size, by processor:</legend>
+      <legend>Processor:</legend>
         ${radios}
     </fieldset>
     ${tiers}
-    <figcaption>Figure 1. Single-threaded decompression of <code>${esc(bench.corpus)}</code> (${(bench.corpusBytes / 1e6).toFixed(1)}&nbsp;MB), measured with ${esc(bench.tool)} and zxc ${esc(bench.zxcVersion)}. Each ZXC level is compared with the codec that produces output of similar size. <span data-cpu-detail='${JSON.stringify(details).replace(/'/g, "&#39;")}'>${esc(first.detail)}</span>. Full results are in the <a href="#benchmarks">benchmark tables</a>.</figcaption>
+    <figcaption>Figure 1. Single-threaded decompression of <code>${esc(bench.corpus)}</code> (${(bench.corpusBytes / 1e6).toFixed(1)}&nbsp;MB), measured with ${esc(bench.tool)} and zxc ${esc(bench.zxcVersion)}. ZXC levels 1, 3, 6 and 7 are each compared with the codec that produces output of similar size. <span data-cpu-detail='${JSON.stringify(details).replace(/'/g, "&#39;")}'>${esc(first.detail)}</span>. Full results are in the <a href="#benchmarks">benchmark tables</a>.</figcaption>
   </figure>`;
 }
 
@@ -475,7 +476,7 @@ function renderLevels(bench) {
   const L = benchLookup(bench.cpus[0]);
   const rows = LEVEL_INFO.map(([n, name, use]) => {
     const r = L.get(`zxc -${n}`);
-    return `<tr${n === 3 ? ' class="is-zxc"' : ""}><td class="num">${n}</td><td>${name}</td><td>${use}</td><td class="num">${r ? r.ratio.toFixed(1) : ""}</td><td class="num">${r ? fmt(r.dec) : ""}</td><td class="num">${r ? fmt(r.comp) : ""}</td></tr>`;
+    return `<tr${n === 3 ? ' class="is-zxc"' : ""}><td class="num">${n}</td><td>${name}</td><td>${use}</td><td class="num">${r ? r.ratio.toFixed(2) : ""}</td><td class="num">${r ? fmt(r.dec) : ""}</td><td class="num">${r ? fmt(r.comp) : ""}</td></tr>`;
   }).join("\n");
   return `<div class="table-scroll"><table>
     <thead><tr><th scope="col">Level</th><th scope="col">Name</th><th scope="col">Suited for</th><th scope="col" class="num">Size %</th><th scope="col" class="num">Decode MB/s</th><th scope="col" class="num">Encode MB/s</th></tr></thead>

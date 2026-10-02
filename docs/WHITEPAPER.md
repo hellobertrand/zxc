@@ -880,11 +880,11 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 ### 7.5 Benchmarks Results
 
-**Figure B**: Decompression Efficiency : Cycles Per Byte Comparaison
+**Figure C**: Decompression Efficiency : Cycles Per Byte Comparaison
 
 ![Benchmark Cycles Per Byte](./images/bench-cycles.svg)
 
-**Figure C**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
+**Figure D**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
 
 ![Effective Throughput vs LZ4](./images/bench-effective.svg)
 
