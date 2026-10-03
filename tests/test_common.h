@@ -172,6 +172,8 @@ int test_stream_footer_looks_like_sek(void);
 int test_stream_get_decompressed_size_errors(void);
 int test_stream_engine_errors(void);
 int test_stream_trailing_bytes(void);
+int test_stream_input_kinds(void);
+int test_stream_input_shrinks(void);
 
 /* --- Containers (test_container.c) --- */
 int test_container_concat(void);

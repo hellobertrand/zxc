@@ -53,7 +53,18 @@
 // Map POSIX file positioning functions to Windows equivalents
 #define fseeko _fseeki64
 #define ftello _ftelli64
+#else
+#include <sys/stat.h>
+// A regular-file input is decoded through positioned reads (pread): each worker
+// reads the block it decodes, so the archive is no longer copied by the reader
+// thread alone.
+#define ZXC_STREAM_PREAD 1
 #endif
+
+// Smallest block size read that way. Below it the per-block system calls cost more
+// than the serial copy they replace: measured, 4 KiB blocks lose a third, 16 KiB
+// blocks lose at 4 threads, 64 KiB blocks gain at every thread count.
+#define ZXC_STREAM_PREAD_MIN_BLOCK ((size_t)64 * 1024)
 
 // ============================================================================
 // STREAMING ENGINE (Producer / Worker / Consumer)
@@ -86,7 +97,8 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  * lines to prevent false sharing in a multi-threaded environment.
  *
  * @var zxc_stream_job_t::in_buf
- *      Pointer to the buffer containing raw input data.
+ *      Pointer to the buffer containing raw input data. Unused with positioned
+ *      reads: the worker reads the block into its own buffer.
  * @var zxc_stream_job_t::in_cap
  *      The total allocated capacity of the input buffer.
  * @var zxc_stream_job_t::in_sz
@@ -100,6 +112,8 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  *      The actual size of the valid data produced in the output buffer.
  * @var zxc_stream_job_t::block_index
  *      Frame position of the block: seeds its checksum.
+ * @var zxc_stream_job_t::in_off
+ *      Positioned reads: file offset of the block (its header first).
  * @var zxc_stream_job_t::job_id
  *      A unique identifier for the job, often used for ordering or debugging.
  * @var zxc_stream_job_t::status
@@ -117,6 +131,7 @@ typedef struct {
     size_t out_cap;
     size_t result_sz;
     uint64_t block_index;
+    uint64_t in_off;
     int job_id;
     ZXC_ATOMIC job_status_t status;  // Atomic for lock-free status updates
     char pad[ZXC_CACHE_LINE_SIZE];   // Prevent False Sharing
@@ -194,6 +209,13 @@ typedef struct {
  * @var zxc_stream_ctx_t::dict_huf
  *     Shared dictionary literal Huffman table (128-byte packed code-lengths
  *     header), NULL when absent.
+ * @var zxc_stream_ctx_t::in_fd
+ *     Descriptor the blocks are read from with positioned reads (decompression
+ *     of a regular file), -1 when the input goes through stdio.
+ * @var zxc_stream_ctx_t::in_pos
+ *     Positioned reads: the reader's file offset, the stream position's stand-in.
+ * @var zxc_stream_ctx_t::in_alloc
+ *     Positioned reads: size of each worker's input buffer.
  */
 typedef struct {
     zxc_stream_job_t* jobs;
@@ -224,6 +246,9 @@ typedef struct {
     size_t dict_size;
     const uint8_t* dict_huf; /**< Shared dictionary literal table (128-byte packed
                                   code-lengths header), NULL when absent. */
+    int in_fd;
+    uint64_t in_pos;
+    size_t in_alloc;
 } zxc_stream_ctx_t;
 
 /** @brief The ring slot after @p idx. */
@@ -273,6 +298,46 @@ typedef struct {
 } writer_args_t;
 
 /**
+ * @brief Switches a regular-file input to positioned reads, from its current position.
+ *
+ * @c ctx->in_fd stays -1, and the input goes through stdio, for anything else: a
+ * pipe, a memory stream, a host without pread.
+ */
+static void zxc_stream_open_positioned(zxc_stream_ctx_t* ctx, FILE* f_in) {
+#if defined(ZXC_STREAM_PREAD)
+    struct stat st;
+    const int fd = fileno(f_in);
+    const long long pos = ftello(f_in);
+    if (fd < 0 || pos < 0 || fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) return;
+    ctx->in_fd = fd;
+    ctx->in_pos = (uint64_t)pos;
+#else
+    (void)ctx;
+    (void)f_in;
+#endif
+}
+
+/**
+ * @brief fread's positioned counterpart: reads up to @p len bytes at @p offset.
+ *
+ * Safe from any thread: the descriptor's own position is neither used nor moved.
+ * @return Bytes read, short at the end of the file; 0 on error.
+ */
+static size_t zxc_stream_read_at(const zxc_stream_ctx_t* ctx, uint8_t* dst, const size_t len,
+                                 const uint64_t offset) {
+#if defined(ZXC_STREAM_PREAD)
+    const ssize_t r = pread(ctx->in_fd, dst, len, (off_t)offset);
+    return r > 0 ? (size_t)r : 0;
+#else
+    (void)ctx;
+    (void)dst;
+    (void)len;
+    (void)offset;
+    return 0;
+#endif
+}
+
+/**
  * @brief Runs one chunk through the codec the stream's mode selects.
  *
  * Both codecs are called by name: the compressor takes a mutable context, the
@@ -292,7 +357,8 @@ static ZXC_ALWAYS_INLINE int zxc_stream_process(const zxc_stream_ctx_t* ctx, zxc
  * Sleeps on @c cond_worker until @c worker_queue has a job, then runs
  * @ref zxc_stream_process over it and marks it @c JOB_STATUS_PROCESSED. Each worker
  * owns a thread-local @c zxc_cctx_t so the parallel part never touches a shared
- * context.
+ * context. With positioned reads it also owns an input buffer, and reads each
+ * block itself before decoding it.
  *
  * The writer is signalled only when the finished job is the one it is waiting
  * for (@c jid == @c ctx->write_idx). Jobs completing out of order stay silent,
@@ -312,10 +378,15 @@ static void* zxc_stream_worker(void* arg) {
     const size_t eff_chunk = (ctx->dict_size > 0 && ctx->compression_mode == 1)
                                  ? zxc_block_size_ceil(ctx->dict_size + ctx->chunk_size)
                                  : ctx->chunk_size;
+    // Positioned reads: one input buffer per worker, reused for every block, so it
+    // stays in this core's cache.
+    uint8_t* const in_work = ctx->in_fd >= 0 ? (uint8_t*)ZXC_MALLOC(ctx->in_alloc) : NULL;
     if (UNLIKELY(zxc_cctx_init(&cctx, eff_chunk, ctx->compression_mode, ctx->compression_level,
                                unified_chk, ctx->dict_size) != ZXC_OK ||
-                 zxc_cctx_attach_dict_huf(&cctx, ctx->dict_huf) != ZXC_OK)) {
+                 zxc_cctx_attach_dict_huf(&cctx, ctx->dict_huf) != ZXC_OK ||
+                 (ctx->in_fd >= 0 && !in_work))) {
         // LCOV_EXCL_START
+        ZXC_FREE(in_work);
         zxc_cctx_free(&cctx);
         pthread_mutex_lock(&ctx->lock);
         ctx->io_error = 1;
@@ -349,18 +420,24 @@ static void* zxc_stream_worker(void* arg) {
         job = &ctx->jobs[jid];
         pthread_mutex_unlock(&ctx->lock);
 
+        // A block cut short (the file shrank under us) is an I/O error, like a
+        // short fread in the reader.
+        const uint8_t* const in = in_work ? in_work : job->in_buf;
         int res;
-        if (dict_work && ctx->compression_mode == 1) {
-            ZXC_MEMCPY(dict_work + dsz, job->in_buf, job->in_sz);
+        if (in_work &&
+            UNLIKELY(zxc_stream_read_at(ctx, in_work, job->in_sz, job->in_off) != job->in_sz)) {
+            res = ZXC_ERROR_IO;
+        } else if (dict_work && ctx->compression_mode == 1) {
+            ZXC_MEMCPY(dict_work + dsz, in, job->in_sz);
             res = zxc_stream_process(ctx, &cctx, dict_work, dsz + job->in_sz, job->out_buf,
                                      job->out_cap, job->block_index);
         } else if (dict_work && ctx->compression_mode == 0) {
-            res = zxc_stream_process(ctx, &cctx, job->in_buf, job->in_sz, dict_work + dsz,
+            res = zxc_stream_process(ctx, &cctx, in, job->in_sz, dict_work + dsz,
                                      ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD, job->block_index);
             if (LIKELY(res > 0)) ZXC_MEMCPY(job->out_buf, dict_work + dsz, (size_t)res);
         } else {
-            res = zxc_stream_process(ctx, &cctx, job->in_buf, job->in_sz, job->out_buf,
-                                     job->out_cap, job->block_index);
+            res = zxc_stream_process(ctx, &cctx, in, job->in_sz, job->out_buf, job->out_cap,
+                                     job->block_index);
         }
 
         pthread_mutex_lock(&ctx->lock);
@@ -377,6 +454,7 @@ static void* zxc_stream_worker(void* arg) {
         }
         pthread_mutex_unlock(&ctx->lock);
     }
+    ZXC_FREE(in_work);
     zxc_cctx_free(&cctx);
     return NULL;
 }
@@ -517,6 +595,10 @@ static int64_t zxc_stream_engine_fail(zxc_stream_ctx_t* ctx, pthread_t* workers,
 /**
  * @brief Reads the input and feeds the ring until the stream ends.
  *
+ * With positioned reads, decompression only reads each block's header and stored
+ * checksum here and leaves the body to the worker; both ways go through the same
+ * header checks.
+ *
  * Returns the ring index the terminator job goes to.
  */
 static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mode,
@@ -541,8 +623,13 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
             *total_src_bytes += read_sz;
             if (UNLIKELY(read_sz == 0)) read_eof = 1;
         } else {
+            const int positioned = ctx->in_fd >= 0;
             uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
-            size_t h_read = fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
+            const size_t h_read =
+                positioned ? zxc_stream_read_at(ctx, bh_buf, ZXC_BLOCK_HEADER_SIZE, ctx->in_pos)
+                           : fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
+            const uint64_t block_off = ctx->in_pos;
+            if (positioned) ctx->in_pos += h_read;
             if (UNLIKELY(h_read < ZXC_BLOCK_HEADER_SIZE)) {
                 read_eof = 1;
             } else {
@@ -587,23 +674,36 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                     break;
                 }
                 const size_t body_total = (size_t)bh.comp_size + checksum_sz;
+                // Folded only when finish_decompress will compare it: like the
+                // block checksums, the file flag and the caller's switch both.
+                const int fold = has_checksum && ctx->checksum_enabled;
+                uint8_t chk_buf[ZXC_BLOCK_CHECKSUM_SIZE];
+                const uint8_t* stored = job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
+                int got;
 
-                ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
+                if (positioned) {
+                    // The worker reads the block; the digest only needs its
+                    // stored checksum.
+                    job->in_off = block_off;
+                    ctx->in_pos += body_total;
+                    stored = chk_buf;
+                    got = !fold ||
+                          zxc_stream_read_at(ctx, chk_buf, sizeof(chk_buf),
+                                             ctx->in_pos - sizeof(chk_buf)) == sizeof(chk_buf);
+                } else {
+                    ZXC_MEMCPY(job->in_buf, bh_buf, ZXC_BLOCK_HEADER_SIZE);
 
-                // Single fread for body + checksum (reduces syscalls)
-                const size_t body_read =
-                    fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in);
+                    // Single fread for body + checksum (reduces syscalls)
+                    got = fread(job->in_buf + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in) ==
+                          body_total;
+                }
 
-                if (UNLIKELY(body_read != body_total)) {
+                if (UNLIKELY(!got)) {
                     ctx->io_error = 1;
                     break;
                 }
-                // Folded only when finish_decompress will compare it: like the
-                // block checksums, the file flag and the caller's switch both.
-                if (has_checksum && ctx->checksum_enabled)
-                    *d_digest = zxc_digest_combine(
-                        *d_digest, zxc_le32(job->in_buf + ZXC_BLOCK_HEADER_SIZE + bh.comp_size));
-                read_sz = ZXC_BLOCK_HEADER_SIZE + body_read;
+                if (fold) *d_digest = zxc_digest_combine(*d_digest, zxc_le32(stored));
+                read_sz = ZXC_BLOCK_HEADER_SIZE + body_total;
                 ctx->frame_in += read_sz;
             }
         }
@@ -684,6 +784,14 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
                                          const uint64_t d_digest) {
     // After the EOF block: the SEK block when the header announced one, then the
     // footer, whose length follows from the bytes read and the bytes produced.
+
+    // Positioned reads never moved the stream: the tail is read through it, from
+    // where the blocks ended.
+    if (ctx->in_fd >= 0 && UNLIKELY(fseeko(f_in, (long long)ctx->in_pos, SEEK_SET) != 0)) {
+        ctx->io_error = 1;  // LCOV_EXCL_LINE
+        return;             // LCOV_EXCL_LINE
+    }
+
     if (ctx->file_has_seek) {
         uint8_t sek[ZXC_BLOCK_HEADER_SIZE];
         uint64_t remaining = 0;
@@ -749,6 +857,13 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
  * directly into `in_buf`, and the writer writes directly from `out_buf`,
  * minimizing memory copies.
  *
+ * **Positioned Reads (decompression):**
+ * With two threads or more, a regular file holding blocks of at least
+ * @ref ZXC_STREAM_PREAD_MIN_BLOCK is not copied by the reader: it only walks the
+ * block headers, each worker reads the block it decodes
+ * (@ref zxc_stream_read_at), and all `n_threads` decode. One thread, smaller
+ * blocks, pipes and memory streams keep the `fread` path.
+ *
  * @param[in]  f_in             Input file stream (source).
  * @param[out] f_out            Output file stream (destination).
  * @param[in]  n_threads        Worker thread count; 0 or less auto-detects the
@@ -778,6 +893,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     zxc_stream_ctx_t ctx;
     ZXC_MEMSET(&ctx, 0, sizeof(ctx));
+    ctx.in_fd = -1;
 
     size_t runtime_chunk_sz = (block_size > 0) ? block_size : ZXC_BLOCK_SIZE_DEFAULT;
     int file_has_chk = 0;
@@ -819,8 +935,12 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
 
     int num_threads = (n_threads > 0) ? n_threads : zxc_num_procs();
     if (num_threads > ZXC_MAX_THREADS) num_threads = ZXC_MAX_THREADS;
-    // Reserve 1 thread for Writer/Reader overhead if possible
-    const int num_workers = (num_threads > 1) ? num_threads - 1 : 1;
+    // A lone worker decodes faster when the reader copies the archive for it.
+    if (mode == 0 && num_threads > 1 && runtime_chunk_sz >= ZXC_STREAM_PREAD_MIN_BLOCK)
+        zxc_stream_open_positioned(&ctx, f_in);
+    // Reserve 1 thread for Writer/Reader overhead if possible. Positioned reads
+    // leave the reader no archive to copy, so every thread decodes.
+    const int num_workers = ctx.in_fd >= 0 ? num_threads : (num_threads > 1) ? num_threads - 1 : 1;
 
     ctx.compression_mode = mode;
     ctx.io_error = 0;
@@ -842,6 +962,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
     const uint64_t max_out = zxc_compress_bound(runtime_chunk_sz);
     const size_t raw_alloc_in = (size_t)((mode ? runtime_chunk_sz : max_out) + ZXC_PAD_SIZE);
     const size_t alloc_in = (raw_alloc_in + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
+    ctx.in_alloc = alloc_in;
 
     const size_t raw_alloc_out =
         (size_t)((mode ? max_out : runtime_chunk_sz + ZXC_DECOMPRESS_TAIL_PAD) + ZXC_PAD_SIZE);

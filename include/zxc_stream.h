@@ -88,6 +88,13 @@ ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compre
  *         (e.g. @ref ZXC_ERROR_BAD_HEADER).
  *
  * @note @p f_out is flushed before returning; see @ref zxc_stream_compress.
+ *
+ * @note With two threads or more, a regular-file @p f_in holding blocks of 64 KiB
+ *       or more is read by the worker threads, with positioned reads (POSIX
+ *       @c pread), rather than through stdio by the reader alone; all
+ *       @c n_threads then decode. A file that shrinks during the call is
+ *       @ref ZXC_ERROR_IO. Pipes, sockets and memory streams are read with
+ *       @c fread as before.
  */
 ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out,
                                          const zxc_decompress_opts_t* opts);

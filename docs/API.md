@@ -1123,6 +1123,12 @@ ZXC_EXPORT int64_t zxc_stream_decompress(
 Decompresses `f_in` -> `f_out` using a parallel pipeline. Bytes after the footer
 are `ZXC_ERROR_CORRUPT_DATA`.
 
+With two threads or more, a regular-file `f_in` holding blocks of 64 KiB or more
+is read by the worker threads with positioned reads (POSIX `pread`) rather than
+through stdio by the reader alone, and all `n_threads` decode. A file that
+shrinks during the call is `ZXC_ERROR_IO`. Pipes, sockets and memory streams are
+read with `fread`.
+
 **Returns**: total decompressed bytes written, or negative `zxc_error_t`.
 
 ### `zxc_stream_get_decompressed_size`

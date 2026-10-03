@@ -567,7 +567,7 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 4.  **Reordering & Write (Writer Thread)**: The writer thread ensures chunks are written to disk in the correct original order, regardless of which worker finished first.
 
 ### 6.2 Asynchronous Decompression Pipeline
-1.  **Header Parsing (Main Thread)**: The main thread scans block headers to identify boundaries and payload sizes.
+1.  **Header Parsing (Main Thread)**: The main thread scans block headers to identify boundaries and payload sizes. For a regular file (POSIX, blocks of 64 KiB or more), each worker then reads its own payload with a positioned read, so the archive is not copied by a single thread; pipes are read through stdio.
 2.  **Dispatch**: Compressed payloads are fed into the worker job queue.
 3.  **Parallel Decoding (Worker Threads)**:
     *   Workers decode chunks into pre-allocated output buffers.
