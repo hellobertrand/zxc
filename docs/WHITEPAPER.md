@@ -573,9 +573,13 @@ Benchmarks were conducted using `lzbench` (by inikep) with default block size of
 * **Target 3 (Build):** AMD EPYC 9B45 — Google Cloud C4D / Linux (GCC 14)
 * **Target 4 (Production):** AMD EPYC 7B13 — Google Cloud C2D / Linux (GCC 14)
 
-**Figure A**: Pareto Frontier — Decompression Speed vs. Compressed Size (across 4 CPUs)
+**Figure A**: Pareto Frontier — Compression Ratio vs. Decompression Speed (across 4 CPUs)
 
-![Pareto Frontier — Decompression Speed vs Compressed Size](./images/bench-pareto-ratio.svg)
+![Pareto Frontier — Compression Ratio vs Decompression Speed](./images/bench-pareto-decompression.svg)
+
+**Figure A'**: Compression Ratio vs. Compression Speed (across 4 CPUs)
+
+![Compression Ratio vs Compression Speed](./images/bench-pareto-compression.svg)
 
 
 ### 7.1 Client ARM64 Summary (Apple Silicon M2)

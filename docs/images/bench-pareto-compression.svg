@@ -1,0 +1,248 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 846" width="960" height="846" role="img" aria-label="Compression speed versus compression ratio for ZXC, LZ4, zstd, lzav, snappy and zlib on four CPUs, with the Pareto frontier">
+<style>text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;font-size:11px}.t{font-size:24px;font-weight:700}.st{font-size:14px}.pt{font-size:15px;font-weight:600}.pa{font-size:13px;font-weight:400}.ax{font-size:12px}.b{font-weight:600}.bd{font-size:13px;font-weight:700}.lg{font-size:13px}.num{font-variant-numeric:tabular-nums}.grid,.axis{stroke-width:1}.ring{stroke-width:1.5}.halo{paint-order:stroke;stroke-width:4;stroke-linejoin:round}.zl{fill:none;stroke-width:2.5;stroke-linejoin:round}.gl{fill:none;stroke-width:1.5;stroke-dasharray:5 4}.ol{fill:none;stroke-width:1.5;stroke-dasharray:5 4}.cn{stroke-width:1;stroke-dasharray:2 3;opacity:.7}.fr{fill:none;stroke-width:14;stroke-linejoin:round;stroke-linecap:round}.bg{fill:#ffffff}text{fill:#1f2328}.mu{fill:#656d76}.fg{fill:#1f2328}.grid{stroke:#e6e8eb}.axis{stroke:#afb8c1}.zl{stroke:#0969da}.zp{fill:#0969da}.cn{stroke:#0969da}.gl{stroke:#8c959f}.gp{fill:#8c959f}.ol{stroke:#bc4c00}.op{fill:#bc4c00}.rp{fill:#1f2328}.ring{stroke:#ffffff}.wash{fill:#ddf4ff}.fr{stroke:#d0d7de}.halo{stroke:#ffffff}@media (prefers-color-scheme:dark){.bg{fill:#0d1117}text{fill:#e6edf3}.mu{fill:#8d96a0}.fg{fill:#e6edf3}.grid{stroke:#21262d}.axis{stroke:#3d444d}.zl{stroke:#4493f8}.zp{fill:#4493f8}.cn{stroke:#4493f8}.gl{stroke:#6e7681}.gp{fill:#6e7681}.ol{stroke:#db6d28}.op{fill:#db6d28}.rp{fill:#e6edf3}.ring{stroke:#0d1117}.wash{fill:#0c2d6b}.fr{stroke:#30363d}.halo{stroke:#0d1117}}</style>
+<rect class="bg" width="960" height="846" rx="8"/>
+<text x="40.0" y="48.0" class="t" text-anchor="start">Compression speed is what ZXC trades away</text>
+<text x="40.0" y="74.0" class="st mu" text-anchor="start">Compression ratio vs compression speed · Silesia · single thread · lzbench 2.3.1</text>
+<text x="920.0" y="74.0" class="st mu" text-anchor="end">↗ up and right is better</text>
+<path class="zl" d="M40 104h28"/>
+<circle class="zp ring" cx="54.0" cy="104.0" r="5"/>
+<text x="76.0" y="108.0" class="lg" text-anchor="start">ZXC 0.14.1</text>
+<path class="gl" d="M176.0 104h28"/>
+<rect class="gp ring" x="185.0" y="99.0" width="10" height="10"/>
+<text x="212.0" y="108.0" class="lg" text-anchor="start">LZ4 1.10.0</text>
+<path class="ol" d="M312.0 104h28"/>
+<path class="op ring" d="M326.0 98.0l6 11h-12z"/>
+<text x="348.0" y="108.0" class="lg" text-anchor="start">zstd 1.5.7</text>
+<path class="gp ring" d="M462.0 98.0l6 6l-6 6l-6-6z"/>
+<text x="484.0" y="108.0" class="lg" text-anchor="start">lzav, snappy, zlib</text>
+<path class="fr" d="M648.6 104h14"/>
+<text x="677.6" y="108.0" class="lg" text-anchor="start">Pareto frontier</text>
+<path class="grid" d="M115.5 160v270"/>
+<text x="115.5" y="446.0" class="mu num" text-anchor="middle">10</text>
+<path class="grid" d="M187.6 160v270"/>
+<text x="187.6" y="446.0" class="mu num" text-anchor="middle">30</text>
+<path class="grid" d="M266.7 160v270"/>
+<text x="266.7" y="446.0" class="mu num" text-anchor="middle">100</text>
+<path class="grid" d="M338.8 160v270"/>
+<text x="338.8" y="446.0" class="mu num" text-anchor="middle">300</text>
+<path class="grid" d="M417.9 160v270"/>
+<text x="417.9" y="446.0" class="mu num" text-anchor="middle">1 000</text>
+<path class="grid" d="M70 174.2h420"/>
+<text x="62.0" y="178.2" class="mu num" text-anchor="end">30%</text>
+<path class="grid" d="M70 245.3h420"/>
+<text x="62.0" y="249.3" class="mu num" text-anchor="end">40%</text>
+<path class="grid" d="M70 316.3h420"/>
+<text x="62.0" y="320.3" class="mu num" text-anchor="end">50%</text>
+<path class="grid" d="M70 387.4h420"/>
+<text x="62.0" y="391.4" class="mu num" text-anchor="end">60%</text>
+<path class="axis" d="M70 430h420"/>
+<text class="ax mu" transform="translate(28 295.0) rotate(-90)" text-anchor="middle">Compression ratio, % (lower is better ↑)</text>
+<text x="70" y="146" class="pt">Apple M2 <tspan class="pa mu">ARM64</tspan></text>
+<polyline class="fr" points="437.4,402.6 409.3,301.0 402.9,299.3 393.5,252.4 392.6,244.6 381.2,206.4 356.4,182.7"/>
+<polyline class="gl" points="437.4,402.6 402.9,299.3 210.0,222.2"/>
+<rect class="gp ring" x="432.4" y="397.6" width="10" height="10"/>
+<text x="437.4" y="422.6" class="mu" text-anchor="middle">lz4 --fast</text>
+<rect class="gp ring" x="397.9" y="294.3" width="10" height="10"/>
+<text x="393.9" y="315.3" class="mu" text-anchor="end">lz4</text>
+<rect class="gp ring" x="205.0" y="217.2" width="10" height="10"/>
+<text x="210.0" y="211.2" class="mu" text-anchor="middle">lz4hc -9</text>
+<polyline class="ol" points="393.5,252.4 381.2,206.4 356.4,182.7"/>
+<path class="op ring" d="M393.5 246.4l6 11h-12z"/>
+<text x="403.5" y="265.4" class="mu" text-anchor="start">zstd --fast</text>
+<path class="op ring" d="M381.2 200.4l6 11h-12z"/>
+<text x="390.2" y="210.4" class="mu" text-anchor="start">zstd -1</text>
+<path class="op ring" d="M356.4 176.7l6 11h-12z"/>
+<text x="365.4" y="186.7" class="mu" text-anchor="start">zstd -3</text>
+<path class="gp ring" d="M392.6 238.6l6 6l-6 6l-6-6z"/>
+<text x="402.6" y="243.6" class="mu" text-anchor="start">lzav</text>
+<path class="gp ring" d="M409.3 295.0l6 6l-6 6l-6-6z"/>
+<text x="418.3" y="305.0" class="mu" text-anchor="start">snappy</text>
+<path class="gp ring" d="M292.4 214.0l6 6l-6 6l-6-6z"/>
+<text x="301.4" y="224.0" class="mu" text-anchor="start">zlib</text>
+<polyline class="zl" points="409.1,399.9 382.2,343.7 325.3,288.5 295.9,266.5 261.2,248.3 130.7,218.8 103.7,196.2"/>
+<circle class="zp ring" cx="409.1" cy="399.9" r="5"/>
+<text x="416.1" y="391.9" class="b" text-anchor="start">-1</text>
+<circle class="zp ring" cx="382.2" cy="343.7" r="5"/>
+<text x="389.2" y="335.7" class="b" text-anchor="start">-2</text>
+<circle class="zp ring" cx="325.3" cy="288.5" r="5"/>
+<text x="332.3" y="280.5" class="b" text-anchor="start">-3</text>
+<circle class="zp ring" cx="295.9" cy="266.5" r="5"/>
+<text x="302.9" y="258.5" class="b" text-anchor="start">-4</text>
+<circle class="zp ring" cx="261.2" cy="248.3" r="5"/>
+<text x="268.2" y="240.3" class="b" text-anchor="start">-5</text>
+<circle class="zp ring" cx="130.7" cy="218.8" r="5"/>
+<text x="137.7" y="210.8" class="b" text-anchor="start">-6</text>
+<circle class="zp ring" cx="103.7" cy="196.2" r="5"/>
+<text x="110.7" y="188.2" class="b" text-anchor="start">-7</text>
+<path class="grid" d="M565.5 160v270"/>
+<text x="565.5" y="446.0" class="mu num" text-anchor="middle">10</text>
+<path class="grid" d="M637.6 160v270"/>
+<text x="637.6" y="446.0" class="mu num" text-anchor="middle">30</text>
+<path class="grid" d="M716.7 160v270"/>
+<text x="716.7" y="446.0" class="mu num" text-anchor="middle">100</text>
+<path class="grid" d="M788.8 160v270"/>
+<text x="788.8" y="446.0" class="mu num" text-anchor="middle">300</text>
+<path class="grid" d="M867.9 160v270"/>
+<text x="867.9" y="446.0" class="mu num" text-anchor="middle">1 000</text>
+<path class="grid" d="M520 174.2h420"/>
+<text x="512.0" y="178.2" class="mu num" text-anchor="end">30%</text>
+<path class="grid" d="M520 245.3h420"/>
+<text x="512.0" y="249.3" class="mu num" text-anchor="end">40%</text>
+<path class="grid" d="M520 316.3h420"/>
+<text x="512.0" y="320.3" class="mu num" text-anchor="end">50%</text>
+<path class="grid" d="M520 387.4h420"/>
+<text x="512.0" y="391.4" class="mu num" text-anchor="end">60%</text>
+<path class="axis" d="M520 430h420"/>
+<text x="520" y="146" class="pt">Google Axion <tspan class="pa mu">ARM64</tspan></text>
+<polyline class="fr" points="883.7,402.6 859.3,399.9 849.4,301.0 847.0,299.3 839.5,244.6 825.2,206.4 793.9,182.7"/>
+<polyline class="gl" points="883.7,402.6 847.0,299.3 663.1,222.2"/>
+<rect class="gp ring" x="878.7" y="397.6" width="10" height="10"/>
+<text x="883.7" y="422.6" class="mu" text-anchor="middle">lz4 --fast</text>
+<rect class="gp ring" x="842.0" y="294.3" width="10" height="10"/>
+<text x="838.0" y="315.3" class="mu" text-anchor="end">lz4</text>
+<rect class="gp ring" x="658.1" y="217.2" width="10" height="10"/>
+<text x="663.1" y="211.2" class="mu" text-anchor="middle">lz4hc -9</text>
+<polyline class="ol" points="834.9,252.4 825.2,206.4 793.9,182.7"/>
+<path class="op ring" d="M834.9 246.4l6 11h-12z"/>
+<text x="844.9" y="265.4" class="mu" text-anchor="start">zstd --fast</text>
+<path class="op ring" d="M825.2 200.4l6 11h-12z"/>
+<text x="834.2" y="210.4" class="mu" text-anchor="start">zstd -1</text>
+<path class="op ring" d="M793.9 176.7l6 11h-12z"/>
+<text x="802.9" y="186.7" class="mu" text-anchor="start">zstd -3</text>
+<path class="gp ring" d="M839.5 238.6l6 6l-6 6l-6-6z"/>
+<text x="849.5" y="243.6" class="mu" text-anchor="start">lzav</text>
+<path class="gp ring" d="M849.4 295.0l6 6l-6 6l-6-6z"/>
+<text x="858.4" y="305.0" class="mu" text-anchor="start">snappy</text>
+<path class="gp ring" d="M725.9 214.0l6 6l-6 6l-6-6z"/>
+<text x="734.9" y="224.0" class="mu" text-anchor="start">zlib</text>
+<polyline class="zl" points="859.3,399.9 833.1,343.7 773.3,288.5 748.8,266.5 713.8,248.3 574.7,218.8 549.3,196.2"/>
+<circle class="zp ring" cx="859.3" cy="399.9" r="5"/>
+<text x="866.3" y="391.9" class="b" text-anchor="start">-1</text>
+<circle class="zp ring" cx="833.1" cy="343.7" r="5"/>
+<text x="840.1" y="335.7" class="b" text-anchor="start">-2</text>
+<circle class="zp ring" cx="773.3" cy="288.5" r="5"/>
+<text x="780.3" y="280.5" class="b" text-anchor="start">-3</text>
+<circle class="zp ring" cx="748.8" cy="266.5" r="5"/>
+<text x="755.8" y="258.5" class="b" text-anchor="start">-4</text>
+<circle class="zp ring" cx="713.8" cy="248.3" r="5"/>
+<text x="720.8" y="240.3" class="b" text-anchor="start">-5</text>
+<circle class="zp ring" cx="574.7" cy="218.8" r="5"/>
+<text x="581.7" y="210.8" class="b" text-anchor="start">-6</text>
+<circle class="zp ring" cx="549.3" cy="196.2" r="5"/>
+<text x="556.3" y="188.2" class="b" text-anchor="start">-7</text>
+<path class="grid" d="M115.5 510v270"/>
+<text x="115.5" y="796.0" class="mu num" text-anchor="middle">10</text>
+<path class="grid" d="M187.6 510v270"/>
+<text x="187.6" y="796.0" class="mu num" text-anchor="middle">30</text>
+<path class="grid" d="M266.7 510v270"/>
+<text x="266.7" y="796.0" class="mu num" text-anchor="middle">100</text>
+<path class="grid" d="M338.8 510v270"/>
+<text x="338.8" y="796.0" class="mu num" text-anchor="middle">300</text>
+<path class="grid" d="M417.9 510v270"/>
+<text x="417.9" y="796.0" class="mu num" text-anchor="middle">1 000</text>
+<path class="grid" d="M70 524.2h420"/>
+<text x="62.0" y="528.2" class="mu num" text-anchor="end">30%</text>
+<path class="grid" d="M70 595.3h420"/>
+<text x="62.0" y="599.3" class="mu num" text-anchor="end">40%</text>
+<path class="grid" d="M70 666.3h420"/>
+<text x="62.0" y="670.3" class="mu num" text-anchor="end">50%</text>
+<path class="grid" d="M70 737.4h420"/>
+<text x="62.0" y="741.4" class="mu num" text-anchor="end">60%</text>
+<path class="axis" d="M70 780h420"/>
+<text class="ax mu" transform="translate(28 645.0) rotate(-90)" text-anchor="middle">Compression ratio, % (lower is better ↑)</text>
+<text x="490.0" y="816.0" class="ax mu" text-anchor="end">Compression speed, MB/s (log scale) → faster</text>
+<text x="70" y="496" class="pt">AMD EPYC Zen 5 <tspan class="pa mu">x86_64</tspan></text>
+<polyline class="fr" points="434.3,752.6 407.0,749.9 400.5,649.3 392.8,594.6 384.2,556.4 351.3,532.7"/>
+<polyline class="gl" points="434.3,752.6 400.5,649.3 214.3,572.2"/>
+<rect class="gp ring" x="429.3" y="747.6" width="10" height="10"/>
+<text x="434.3" y="772.6" class="mu" text-anchor="middle">lz4 --fast</text>
+<rect class="gp ring" x="395.5" y="644.3" width="10" height="10"/>
+<text x="391.5" y="665.3" class="mu" text-anchor="end">lz4</text>
+<rect class="gp ring" x="209.3" y="567.2" width="10" height="10"/>
+<text x="214.3" y="561.2" class="mu" text-anchor="middle">lz4hc -9</text>
+<polyline class="ol" points="390.3,602.4 384.2,556.4 351.3,532.7"/>
+<path class="op ring" d="M390.3 596.4l6 11h-12z"/>
+<text x="400.3" y="615.4" class="mu" text-anchor="start">zstd --fast</text>
+<path class="op ring" d="M384.2 550.4l6 11h-12z"/>
+<text x="393.2" y="560.4" class="mu" text-anchor="start">zstd -1</text>
+<path class="op ring" d="M351.3 526.7l6 11h-12z"/>
+<text x="360.3" y="536.7" class="mu" text-anchor="start">zstd -3</text>
+<path class="gp ring" d="M392.8 588.6l6 6l-6 6l-6-6z"/>
+<text x="402.8" y="593.6" class="mu" text-anchor="start">lzav</text>
+<path class="gp ring" d="M398.2 645.3l6 6l-6 6l-6-6z"/>
+<text x="407.2" y="655.3" class="mu" text-anchor="start">snappy</text>
+<path class="gp ring" d="M286.4 564.0l6 6l-6 6l-6-6z"/>
+<text x="295.4" y="574.0" class="mu" text-anchor="start">zlib</text>
+<polyline class="zl" points="407.0,749.9 381.0,693.7 324.2,638.5 299.2,616.5 265.2,598.3 129.6,568.8 95.0,546.2"/>
+<circle class="zp ring" cx="407.0" cy="749.9" r="5"/>
+<text x="414.0" y="741.9" class="b" text-anchor="start">-1</text>
+<circle class="zp ring" cx="381.0" cy="693.7" r="5"/>
+<text x="388.0" y="685.7" class="b" text-anchor="start">-2</text>
+<circle class="zp ring" cx="324.2" cy="638.5" r="5"/>
+<text x="331.2" y="630.5" class="b" text-anchor="start">-3</text>
+<circle class="zp ring" cx="299.2" cy="616.5" r="5"/>
+<text x="306.2" y="608.5" class="b" text-anchor="start">-4</text>
+<circle class="zp ring" cx="265.2" cy="598.3" r="5"/>
+<text x="272.2" y="590.3" class="b" text-anchor="start">-5</text>
+<circle class="zp ring" cx="129.6" cy="568.8" r="5"/>
+<text x="136.6" y="560.8" class="b" text-anchor="start">-6</text>
+<circle class="zp ring" cx="95.0" cy="546.2" r="5"/>
+<text x="102.0" y="538.2" class="b" text-anchor="start">-7</text>
+<path class="grid" d="M565.5 510v270"/>
+<text x="565.5" y="796.0" class="mu num" text-anchor="middle">10</text>
+<path class="grid" d="M637.6 510v270"/>
+<text x="637.6" y="796.0" class="mu num" text-anchor="middle">30</text>
+<path class="grid" d="M716.7 510v270"/>
+<text x="716.7" y="796.0" class="mu num" text-anchor="middle">100</text>
+<path class="grid" d="M788.8 510v270"/>
+<text x="788.8" y="796.0" class="mu num" text-anchor="middle">300</text>
+<path class="grid" d="M867.9 510v270"/>
+<text x="867.9" y="796.0" class="mu num" text-anchor="middle">1 000</text>
+<path class="grid" d="M520 524.2h420"/>
+<text x="512.0" y="528.2" class="mu num" text-anchor="end">30%</text>
+<path class="grid" d="M520 595.3h420"/>
+<text x="512.0" y="599.3" class="mu num" text-anchor="end">40%</text>
+<path class="grid" d="M520 666.3h420"/>
+<text x="512.0" y="670.3" class="mu num" text-anchor="end">50%</text>
+<path class="grid" d="M520 737.4h420"/>
+<text x="512.0" y="741.4" class="mu num" text-anchor="end">60%</text>
+<path class="axis" d="M520 780h420"/>
+<text x="940.0" y="816.0" class="ax mu" text-anchor="end">Compression speed, MB/s (log scale) → faster</text>
+<text x="520" y="496" class="pt">AMD EPYC Zen 3 <tspan class="pa mu">x86_64</tspan></text>
+<polyline class="fr" points="874.9,752.6 845.6,749.9 840.9,651.3 838.6,649.3 821.2,594.6 813.8,556.4 771.7,532.7"/>
+<polyline class="gl" points="874.9,752.6 838.6,649.3 651.4,572.2"/>
+<rect class="gp ring" x="869.9" y="747.6" width="10" height="10"/>
+<text x="874.9" y="772.6" class="mu" text-anchor="middle">lz4 --fast</text>
+<rect class="gp ring" x="833.6" y="644.3" width="10" height="10"/>
+<text x="829.6" y="665.3" class="mu" text-anchor="end">lz4</text>
+<rect class="gp ring" x="646.4" y="567.2" width="10" height="10"/>
+<text x="651.4" y="561.2" class="mu" text-anchor="middle">lz4hc -9</text>
+<polyline class="ol" points="820.0,602.4 813.8,556.4 771.7,532.7"/>
+<path class="op ring" d="M820.0 596.4l6 11h-12z"/>
+<text x="830.0" y="615.4" class="mu" text-anchor="start">zstd --fast</text>
+<path class="op ring" d="M813.8 550.4l6 11h-12z"/>
+<text x="822.8" y="560.4" class="mu" text-anchor="start">zstd -1</text>
+<path class="op ring" d="M771.7 526.7l6 11h-12z"/>
+<text x="780.7" y="536.7" class="mu" text-anchor="start">zstd -3</text>
+<path class="gp ring" d="M821.2 588.6l6 6l-6 6l-6-6z"/>
+<text x="831.2" y="593.6" class="mu" text-anchor="start">lzav</text>
+<path class="gp ring" d="M840.9 645.3l6 6l-6 6l-6-6z"/>
+<text x="849.9" y="655.3" class="mu" text-anchor="start">snappy</text>
+<path class="gp ring" d="M720.5 564.0l6 6l-6 6l-6-6z"/>
+<text x="729.5" y="574.0" class="mu" text-anchor="start">zlib</text>
+<polyline class="zl" points="845.6,749.9 818.3,693.7 761.5,638.5 738.3,616.5 704.7,598.3 566.8,568.8 541.1,546.2"/>
+<circle class="zp ring" cx="845.6" cy="749.9" r="5"/>
+<text x="852.6" y="741.9" class="b" text-anchor="start">-1</text>
+<circle class="zp ring" cx="818.3" cy="693.7" r="5"/>
+<text x="825.3" y="685.7" class="b" text-anchor="start">-2</text>
+<circle class="zp ring" cx="761.5" cy="638.5" r="5"/>
+<text x="768.5" y="630.5" class="b" text-anchor="start">-3</text>
+<circle class="zp ring" cx="738.3" cy="616.5" r="5"/>
+<text x="745.3" y="608.5" class="b" text-anchor="start">-4</text>
+<circle class="zp ring" cx="704.7" cy="598.3" r="5"/>
+<text x="711.7" y="590.3" class="b" text-anchor="start">-5</text>
+<circle class="zp ring" cx="566.8" cy="568.8" r="5"/>
+<text x="573.8" y="560.8" class="b" text-anchor="start">-6</text>
+<circle class="zp ring" cx="541.1" cy="546.2" r="5"/>
+<text x="548.1" y="538.2" class="b" text-anchor="start">-7</text>
+</svg>
