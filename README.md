@@ -1,7 +1,4 @@
-# ZXC
-
-**Lossless compression built for ultra-fast decode.**
-Faster than LZ4, at a smaller size. Seekable. C library with Rust, Python, Node.js, Go and WASM bindings.
+# ZXC - Lossless Compression Built for Ultra-Fast Decode
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
 [![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
@@ -11,7 +8,8 @@ Faster than LZ4, at a smaller size. Seekable. C library with Rust, Python, Node.
 [![Code Coverage](https://codecov.io/github/hellobertrand/zxc/branch/main/graph/badge.svg?token=LHA03HOA1X)](https://codecov.io/github/hellobertrand/zxc)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/hellobertrand/zxc/badge)](https://scorecard.dev/viewer/?uri=github.com/hellobertrand/zxc)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
-<!-- [![Packaging status](https://repology.org/badge/tiny-repos/zxc.svg)](https://repology.org/project/zxc/versions) -->
+
+ZXC is a lossless compression C library, with official Rust, Python, Node.js, Go and WASM bindings. It spends more time compressing so that decompression runs faster: the right trade-off for data **compressed once and read many times**, such as game assets, firmware updates, app bundles or content delivery. It decodes faster than LZ4 at a smaller size, on every major CPU architecture.
 
 **Decompression speedup against the closest competitor at each ratio tier** â€” Silesia corpus (202 MB), single thread, reproducible with [lzbench](https://github.com/inikep/lzbench) and [TurboBench](https://github.com/powturbo/TurboBench):
 
@@ -27,7 +25,7 @@ The speed is not bought with ratio: ZXC is also *smaller* in all four pairings â
 
 <p align="center">
   <a href="docs/images/bench-scatter.svg">
-    <img src="docs/images/bench-scatter.svg" alt="Decompression speed vs compressed size: ZXC is faster than the LZ4 family at an equal or smaller size on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3" width="100%">
+    <img src="docs/images/bench-scatter.svg" alt="Decompression speed vs compressed size: ZXC is faster than the LZ4 family and zstd -1 at an equal or smaller size on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3" width="100%">
   </a>
 </p>
 
@@ -70,7 +68,7 @@ The speedups at the top compare ZXC with its closest competitor at each ratio. T
 the view to the rest of the field, and to compression speed: ZXC spends encoder time to buy decode
 speed, so its higher levels compress slowly by design.
 
-### Against the field (Apple M2)
+### All codecs (Apple M2)
 
 ![Decompression speed vs compressed size, ZXC against LZ4, LZ4HC, lzav, Snappy, zstd and zlib on Apple M2](docs/images/bench-arm64.svg)
 
@@ -93,8 +91,77 @@ speed, so its higher levels compress slowly by design.
 | zstd 1.5.7 -3 | 392 MB/s | 1695 MB/s | 31.20 % |
 | zlib 1.3.2 -1 | 148 MB/s | 410 MB/s | 36.45 % |
 
-The same table for Axion, Zen 5 and Zen 3 is in the
-[whitepaper](docs/WHITEPAPER.md#75-benchmarks-results).
+<details>
+<summary>Google Axion (Neoverse-V2, ARM64)</summary>
+
+| Codec | Compression | Decompression | Ratio |
+| :--- | ---: | ---: | ---: |
+| **zxc 0.14.1 -1** | 878 MB/s | **9487 MB/s** | **61.76 %** |
+| **zxc 0.14.1 -2** | 589 MB/s | **7834 MB/s** | **53.86 %** |
+| **zxc 0.14.1 -3** | 237 MB/s | **5980 MB/s** | **46.09 %** |
+| **zxc 0.14.1 -4** | 163 MB/s | **5675 MB/s** | **42.99 %** |
+| **zxc 0.14.1 -5** | 95.7 MB/s | **5310 MB/s** | **40.43 %** |
+| **zxc 0.14.1 -6** | 11.5 MB/s | **4787 MB/s** | **36.28 %** |
+| **zxc 0.14.1 -7** | 7.81 MB/s | **3186 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1272 MB/s | 4940 MB/s | 62.15 % |
+| lz4 1.10.0 | 728 MB/s | 4256 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 44.2 MB/s | 3843 MB/s | 36.75 % |
+| lzav 5.16 -1 | 649 MB/s | 2916 MB/s | 39.91 % |
+| snappy 1.2.2 | 755 MB/s | 2289 MB/s | 47.85 % |
+| zstd 1.5.7 --fast --1 | 605 MB/s | 2291 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 522 MB/s | 1643 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 324 MB/s | 1518 MB/s | 31.20 % |
+| zlib 1.3.2 -1 | 115 MB/s | 389 MB/s | 36.45 % |
+
+</details>
+
+<details>
+<summary>AMD EPYC 9B45 (Zen 5, x86_64)</summary>
+
+| Codec | Compression | Decompression | Ratio |
+| :--- | ---: | ---: | ---: |
+| **zxc 0.14.1 -1** | 848 MB/s | **11377 MB/s** | **61.76 %** |
+| **zxc 0.14.1 -2** | 570 MB/s | **10243 MB/s** | **53.86 %** |
+| **zxc 0.14.1 -3** | 240 MB/s | **6730 MB/s** | **46.09 %** |
+| **zxc 0.14.1 -4** | 164 MB/s | **6357 MB/s** | **42.99 %** |
+| **zxc 0.14.1 -5** | 97.7 MB/s | **5970 MB/s** | **40.43 %** |
+| **zxc 0.14.1 -6** | 12.4 MB/s | **5675 MB/s** | **36.28 %** |
+| **zxc 0.14.1 -7** | 7.32 MB/s | **4149 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1284 MB/s | 5179 MB/s | 62.15 % |
+| lz4 1.10.0 | 767 MB/s | 4938 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 45.0 MB/s | 4766 MB/s | 36.75 % |
+| lzav 5.16 -1 | 683 MB/s | 3483 MB/s | 39.91 % |
+| snappy 1.2.2 | 741 MB/s | 2073 MB/s | 47.89 % |
+| zstd 1.5.7 --fast --1 | 657 MB/s | 2423 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 599 MB/s | 1877 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 363 MB/s | 1709 MB/s | 31.20 % |
+| zlib 1.3.2 -1 | 135 MB/s | 392 MB/s | 36.45 % |
+
+</details>
+
+<details>
+<summary>AMD EPYC 7B13 (Zen 3, x86_64)</summary>
+
+| Codec | Compression | Decompression | Ratio |
+| :--- | ---: | ---: | ---: |
+| **zxc 0.14.1 -1** | 712 MB/s | **8106 MB/s** | **61.76 %** |
+| **zxc 0.14.1 -2** | 470 MB/s | **6746 MB/s** | **53.86 %** |
+| **zxc 0.14.1 -3** | 198 MB/s | **4752 MB/s** | **46.09 %** |
+| **zxc 0.14.1 -4** | 139 MB/s | **4562 MB/s** | **42.99 %** |
+| **zxc 0.14.1 -5** | 83.3 MB/s | **4403 MB/s** | **40.43 %** |
+| **zxc 0.14.1 -6** | 10.2 MB/s | **4101 MB/s** | **36.28 %** |
+| **zxc 0.14.1 -7** | 6.89 MB/s | **2840 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1113 MB/s | 4486 MB/s | 62.15 % |
+| lz4 1.10.0 | 640 MB/s | 3882 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 37.0 MB/s | 3725 MB/s | 36.75 % |
+| lzav 5.16 -1 | 491 MB/s | 2958 MB/s | 39.91 % |
+| snappy 1.2.2 | 663 MB/s | 1737 MB/s | 47.89 % |
+| zstd 1.5.7 --fast --1 | 482 MB/s | 1766 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 439 MB/s | 1332 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 231 MB/s | 1194 MB/s | 31.20 % |
+| zlib 1.3.2 -1 | 106 MB/s | 356 MB/s | 36.45 % |
+
+</details>
 
 ### Effective throughput
 

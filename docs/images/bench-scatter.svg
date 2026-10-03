@@ -1,7 +1,7 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 730" width="960" height="730" role="img" aria-label="Decompression speed versus compressed size: ZXC is faster than the LZ4 family at an equal or smaller size on four CPUs">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 810" width="960" height="810" role="img" aria-label="Decompression speed versus compressed size: ZXC is faster than the LZ4 family and zstd -1 at an equal or smaller size on four CPUs">
 <style>
-svg{--bg:#ffffff;--fg:#1f2328;--mute:#656d76;--grid:#e6e8eb;--axis:#afb8c1;--zxc:#0969da;--lz4:#8c959f;--badge:#ddf4ff}
-@media (prefers-color-scheme:dark){svg{--bg:#0d1117;--fg:#e6edf3;--mute:#8d96a0;--grid:#21262d;--axis:#3d444d;--zxc:#4493f8;--lz4:#6e7681;--badge:#0c2d6b}}
+svg{--bg:#ffffff;--fg:#1f2328;--mute:#656d76;--grid:#e6e8eb;--axis:#afb8c1;--zxc:#0969da;--lz4:#8c959f;--zstd:#bc4c00;--badge:#ddf4ff}
+@media (prefers-color-scheme:dark){svg{--bg:#0d1117;--fg:#e6edf3;--mute:#8d96a0;--grid:#21262d;--axis:#3d444d;--zxc:#4493f8;--lz4:#6e7681;--zstd:#db6d28;--badge:#0c2d6b}}
 text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helvetica,Arial,sans-serif;fill:var(--fg)}
 .bg{fill:var(--bg)}
 .t{font-size:24px;font-weight:700}
@@ -21,275 +21,286 @@ text{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans",Helveti
 .zp{fill:var(--zxc);stroke:var(--bg);stroke-width:1.5}
 .ll{fill:none;stroke:var(--lz4);stroke-width:2;stroke-dasharray:5 4}
 .lp{fill:var(--lz4);stroke:var(--bg);stroke-width:1.5}
+.zs{fill:var(--zstd);stroke:var(--bg);stroke-width:1.5}
 .cn{stroke:var(--zxc);stroke-width:1;stroke-dasharray:2 3;opacity:.7}
 .bdr{fill:var(--badge)}
 </style>
-<rect class="bg" width="960" height="730" rx="8"/>
+<rect class="bg" width="960" height="810" rx="8"/>
 <text x="40.0" y="48.0" class="t" text-anchor="start">Faster than LZ4, at a smaller size, on every CPU</text>
-<text x="40.0" y="74.0" class="st" text-anchor="start">Decompression speed vs compressed size · Silesia corpus · single thread · lzbench 2.3.1, -march=native</text>
+<text x="40.0" y="74.0" class="st" text-anchor="start">Decompression speed vs compressed size · Silesia · single thread · lzbench 2.3.1</text>
 <path class="zl" d="M40 104h28"/><circle class="zp" cx="54" cy="104" r="5"/>
 <text x="76.0" y="108.0" class="lg" text-anchor="start">ZXC 0.14.1, levels -1 to -7</text>
 <path class="ll" d="M330 104h28"/><rect class="lp" x="339" y="99" width="10" height="10"/>
 <text x="366.0" y="108.0" class="lg" text-anchor="start">LZ4 1.10.0: --fast -17, default, HC -9</text>
-<text x="920.0" y="108.0" class="st" text-anchor="end">↖ up and left is better</text>
-<path class="grid" d="M70 382.0h420"/>
-<text x="62.0" y="386.0" class="tk" text-anchor="end">0</text>
-<path class="grid" d="M70 352.4h420"/>
-<text x="62.0" y="356.4" class="tk" text-anchor="end">2</text>
-<path class="grid" d="M70 322.8h420"/>
-<text x="62.0" y="326.8" class="tk" text-anchor="end">4</text>
-<path class="grid" d="M70 293.2h420"/>
-<text x="62.0" y="297.2" class="tk" text-anchor="end">6</text>
-<path class="grid" d="M70 263.6h420"/>
-<text x="62.0" y="267.6" class="tk" text-anchor="end">8</text>
-<path class="grid" d="M70 234.0h420"/>
-<text x="62.0" y="238.0" class="tk" text-anchor="end">10</text>
-<path class="grid" d="M70 204.4h420"/>
-<text x="62.0" y="208.4" class="tk" text-anchor="end">12</text>
-<path class="grid" d="M70 174.8h420"/>
-<text x="62.0" y="178.8" class="tk" text-anchor="end">14</text>
-<path class="grid" d="M70.0 160v222"/>
-<text x="70.0" y="398.0" class="tk" text-anchor="middle">30%</text>
-<path class="grid" d="M128.3 160v222"/>
-<text x="128.3" y="398.0" class="tk" text-anchor="middle">35%</text>
-<path class="grid" d="M186.7 160v222"/>
-<text x="186.7" y="398.0" class="tk" text-anchor="middle">40%</text>
-<path class="grid" d="M245.0 160v222"/>
-<text x="245.0" y="398.0" class="tk" text-anchor="middle">45%</text>
-<path class="grid" d="M303.3 160v222"/>
-<text x="303.3" y="398.0" class="tk" text-anchor="middle">50%</text>
-<path class="grid" d="M361.7 160v222"/>
-<text x="361.7" y="398.0" class="tk" text-anchor="middle">55%</text>
-<path class="grid" d="M420.0 160v222"/>
-<text x="420.0" y="398.0" class="tk" text-anchor="middle">60%</text>
-<path class="grid" d="M478.3 160v222"/>
-<text x="478.3" y="398.0" class="tk" text-anchor="middle">65%</text>
-<path class="axis" d="M70 382h420"/>
-<text class="ax" transform="translate(32 271.0) rotate(-90)" text-anchor="middle">Decompression (GB/s)</text>
+<path class="zs" d="M690 98l6 11h-12z"/>
+<text x="704.0" y="108.0" class="lg" text-anchor="start">zstd 1.5.7 -1</text>
+<text x="920.0" y="74.0" class="st" text-anchor="end">↖ up and left is better</text>
+<path class="grid" d="M70 422.0h420"/>
+<text x="62.0" y="426.0" class="tk" text-anchor="end">0</text>
+<path class="grid" d="M70 389.2h420"/>
+<text x="62.0" y="393.2" class="tk" text-anchor="end">2</text>
+<path class="grid" d="M70 356.5h420"/>
+<text x="62.0" y="360.5" class="tk" text-anchor="end">4</text>
+<path class="grid" d="M70 323.8h420"/>
+<text x="62.0" y="327.8" class="tk" text-anchor="end">6</text>
+<path class="grid" d="M70 291.0h420"/>
+<text x="62.0" y="295.0" class="tk" text-anchor="end">8</text>
+<path class="grid" d="M70 258.2h420"/>
+<text x="62.0" y="262.2" class="tk" text-anchor="end">10</text>
+<path class="grid" d="M70 225.5h420"/>
+<text x="62.0" y="229.5" class="tk" text-anchor="end">12</text>
+<path class="grid" d="M70 192.8h420"/>
+<text x="62.0" y="196.8" class="tk" text-anchor="end">14</text>
+<path class="grid" d="M70 160.0h420"/>
+<text x="62.0" y="164.0" class="tk" text-anchor="end">16</text>
+<path class="grid" d="M70.0 160v262"/>
+<text x="70.0" y="438.0" class="tk" text-anchor="middle">30%</text>
+<path class="grid" d="M128.3 160v262"/>
+<text x="128.3" y="438.0" class="tk" text-anchor="middle">35%</text>
+<path class="grid" d="M186.7 160v262"/>
+<text x="186.7" y="438.0" class="tk" text-anchor="middle">40%</text>
+<path class="grid" d="M245.0 160v262"/>
+<text x="245.0" y="438.0" class="tk" text-anchor="middle">45%</text>
+<path class="grid" d="M303.3 160v262"/>
+<text x="303.3" y="438.0" class="tk" text-anchor="middle">50%</text>
+<path class="grid" d="M361.7 160v262"/>
+<text x="361.7" y="438.0" class="tk" text-anchor="middle">55%</text>
+<path class="grid" d="M420.0 160v262"/>
+<text x="420.0" y="438.0" class="tk" text-anchor="middle">60%</text>
+<path class="grid" d="M478.3 160v262"/>
+<text x="478.3" y="438.0" class="tk" text-anchor="middle">65%</text>
+<path class="axis" d="M70 422h420"/>
+<text class="ax" transform="translate(32 291.0) rotate(-90)" text-anchor="middle">Decompression (GB/s)</text>
 <text x="70" y="146" class="pt">Apple M2 <tspan class="pa">ARM64</tspan></text>
 <rect class="bdr" x="356.2" y="128" width="133.8" height="24" rx="12"/>
 <text x="423.1" y="145.0" class="bd" text-anchor="middle">up to 2.6× faster</text>
-<path class="cn" d="M445.1 305.5L440.5 181.8"/>
-<text x="445.1" y="338.5" class="gain" text-anchor="middle">ZXC ×2.62</text>
-<path class="cn" d="M275.3 311.4L257.7 258.3"/>
-<text x="275.3" y="344.4" class="gain" text-anchor="middle">ZXC ×1.75</text>
-<path class="cn" d="M148.8 315.4L143.3 282.2"/>
-<text x="148.8" y="348.4" class="gain" text-anchor="middle">ZXC ×1.50</text>
-<polyline class="ll" points="445.1,305.5 275.3,311.4 148.8,315.4"/>
-<rect class="lp" x="440.1" y="300.5" width="10" height="10"/>
-<text x="445.1" y="324.5" class="ln" text-anchor="middle">lz4 --fast</text>
-<rect class="lp" x="270.3" y="306.4" width="10" height="10"/>
-<text x="275.3" y="330.4" class="ln" text-anchor="middle">lz4</text>
-<rect class="lp" x="143.8" y="310.4" width="10" height="10"/>
-<text x="148.8" y="334.4" class="ln" text-anchor="middle">lz4hc -9</text>
-<polyline class="zl" points="440.5,181.8 348.4,214.2 257.7,258.3 221.6,265.0 191.7,272.6 143.3,282.2 106.1,313.5"/>
-<circle class="zp" cx="440.5" cy="181.8" r="5"/>
-<text x="440.5" y="171.8" class="lv" text-anchor="middle">-1</text>
-<circle class="zp" cx="348.4" cy="214.2" r="5"/>
-<text x="348.4" y="204.2" class="lv" text-anchor="middle">-2</text>
-<circle class="zp" cx="257.7" cy="258.3" r="5"/>
-<text x="257.7" y="248.3" class="lv" text-anchor="middle">-3</text>
-<circle class="zp" cx="221.6" cy="265.0" r="5"/>
-<text x="221.6" y="255.0" class="lv" text-anchor="middle">-4</text>
-<circle class="zp" cx="191.7" cy="272.6" r="5"/>
-<text x="191.7" y="262.6" class="lv" text-anchor="middle">-5</text>
-<circle class="zp" cx="143.3" cy="282.2" r="5"/>
-<text x="143.3" y="272.2" class="lv" text-anchor="middle">-6</text>
-<circle class="zp" cx="106.1" cy="313.5" r="5"/>
-<text x="106.1" y="303.5" class="lv" text-anchor="middle">-7</text>
-<path class="grid" d="M520 382.0h420"/>
-<text x="512.0" y="386.0" class="tk" text-anchor="end">0</text>
-<path class="grid" d="M520 352.4h420"/>
-<text x="512.0" y="356.4" class="tk" text-anchor="end">2</text>
-<path class="grid" d="M520 322.8h420"/>
-<text x="512.0" y="326.8" class="tk" text-anchor="end">4</text>
-<path class="grid" d="M520 293.2h420"/>
-<text x="512.0" y="297.2" class="tk" text-anchor="end">6</text>
-<path class="grid" d="M520 263.6h420"/>
-<text x="512.0" y="267.6" class="tk" text-anchor="end">8</text>
-<path class="grid" d="M520 234.0h420"/>
-<text x="512.0" y="238.0" class="tk" text-anchor="end">10</text>
-<path class="grid" d="M520 204.4h420"/>
-<text x="512.0" y="208.4" class="tk" text-anchor="end">12</text>
-<path class="grid" d="M520 174.8h420"/>
-<text x="512.0" y="178.8" class="tk" text-anchor="end">14</text>
-<path class="grid" d="M520.0 160v222"/>
-<text x="520.0" y="398.0" class="tk" text-anchor="middle">30%</text>
-<path class="grid" d="M578.3 160v222"/>
-<text x="578.3" y="398.0" class="tk" text-anchor="middle">35%</text>
-<path class="grid" d="M636.7 160v222"/>
-<text x="636.7" y="398.0" class="tk" text-anchor="middle">40%</text>
-<path class="grid" d="M695.0 160v222"/>
-<text x="695.0" y="398.0" class="tk" text-anchor="middle">45%</text>
-<path class="grid" d="M753.3 160v222"/>
-<text x="753.3" y="398.0" class="tk" text-anchor="middle">50%</text>
-<path class="grid" d="M811.7 160v222"/>
-<text x="811.7" y="398.0" class="tk" text-anchor="middle">55%</text>
-<path class="grid" d="M870.0 160v222"/>
-<text x="870.0" y="398.0" class="tk" text-anchor="middle">60%</text>
-<path class="grid" d="M928.3 160v222"/>
-<text x="928.3" y="398.0" class="tk" text-anchor="middle">65%</text>
-<path class="axis" d="M520 382h420"/>
+<path class="cn" d="M445.1 337.4L440.5 200.5"/>
+<text x="445.1" y="370.4" class="gain" text-anchor="middle">ZXC ×2.62</text>
+<path class="cn" d="M275.3 343.9L257.7 285.2"/>
+<text x="275.3" y="376.9" class="gain" text-anchor="middle">ZXC ×1.75</text>
+<path class="cn" d="M148.8 348.3L143.3 311.6"/>
+<text x="148.8" y="381.3" class="gain" text-anchor="middle">ZXC ×1.50</text>
+<path class="cn" d="M122.9 392.9L106.1 346.2"/>
+<path class="zs" d="M122.9 386.9l6 11h-12z"/>
+<text x="132.9" y="396.9" class="ln" text-anchor="start">zstd -1 <tspan class="gain">ZXC ×2.60</tspan></text>
+<polyline class="ll" points="445.1,337.4 275.3,343.9 148.8,348.3"/>
+<rect class="lp" x="440.1" y="332.4" width="10" height="10"/>
+<text x="445.1" y="356.4" class="ln" text-anchor="middle">lz4 --fast</text>
+<rect class="lp" x="270.3" y="338.9" width="10" height="10"/>
+<text x="275.3" y="362.9" class="ln" text-anchor="middle">lz4</text>
+<rect class="lp" x="143.8" y="343.3" width="10" height="10"/>
+<text x="148.8" y="367.3" class="ln" text-anchor="middle">lz4hc -9</text>
+<polyline class="zl" points="440.5,200.5 348.4,236.3 257.7,285.2 221.6,292.5 191.7,300.9 143.3,311.6 106.1,346.2"/>
+<circle class="zp" cx="440.5" cy="200.5" r="5"/>
+<text x="440.5" y="190.5" class="lv" text-anchor="middle">-1</text>
+<circle class="zp" cx="348.4" cy="236.3" r="5"/>
+<text x="348.4" y="226.3" class="lv" text-anchor="middle">-2</text>
+<circle class="zp" cx="257.7" cy="285.2" r="5"/>
+<text x="257.7" y="275.2" class="lv" text-anchor="middle">-3</text>
+<circle class="zp" cx="221.6" cy="292.5" r="5"/>
+<text x="221.6" y="282.5" class="lv" text-anchor="middle">-4</text>
+<circle class="zp" cx="191.7" cy="300.9" r="5"/>
+<text x="191.7" y="290.9" class="lv" text-anchor="middle">-5</text>
+<circle class="zp" cx="143.3" cy="311.6" r="5"/>
+<text x="143.3" y="301.6" class="lv" text-anchor="middle">-6</text>
+<circle class="zp" cx="106.1" cy="346.2" r="5"/>
+<text x="106.1" y="336.2" class="lv" text-anchor="middle">-7</text>
+<path class="grid" d="M520 422.0h420"/>
+<text x="512.0" y="426.0" class="tk" text-anchor="end">0</text>
+<path class="grid" d="M520 378.3h420"/>
+<text x="512.0" y="382.3" class="tk" text-anchor="end">2</text>
+<path class="grid" d="M520 334.7h420"/>
+<text x="512.0" y="338.7" class="tk" text-anchor="end">4</text>
+<path class="grid" d="M520 291.0h420"/>
+<text x="512.0" y="295.0" class="tk" text-anchor="end">6</text>
+<path class="grid" d="M520 247.3h420"/>
+<text x="512.0" y="251.3" class="tk" text-anchor="end">8</text>
+<path class="grid" d="M520 203.7h420"/>
+<text x="512.0" y="207.7" class="tk" text-anchor="end">10</text>
+<path class="grid" d="M520 160.0h420"/>
+<text x="512.0" y="164.0" class="tk" text-anchor="end">12</text>
+<path class="grid" d="M520.0 160v262"/>
+<text x="520.0" y="438.0" class="tk" text-anchor="middle">30%</text>
+<path class="grid" d="M578.3 160v262"/>
+<text x="578.3" y="438.0" class="tk" text-anchor="middle">35%</text>
+<path class="grid" d="M636.7 160v262"/>
+<text x="636.7" y="438.0" class="tk" text-anchor="middle">40%</text>
+<path class="grid" d="M695.0 160v262"/>
+<text x="695.0" y="438.0" class="tk" text-anchor="middle">45%</text>
+<path class="grid" d="M753.3 160v262"/>
+<text x="753.3" y="438.0" class="tk" text-anchor="middle">50%</text>
+<path class="grid" d="M811.7 160v262"/>
+<text x="811.7" y="438.0" class="tk" text-anchor="middle">55%</text>
+<path class="grid" d="M870.0 160v262"/>
+<text x="870.0" y="438.0" class="tk" text-anchor="middle">60%</text>
+<path class="grid" d="M928.3 160v262"/>
+<text x="928.3" y="438.0" class="tk" text-anchor="middle">65%</text>
+<path class="axis" d="M520 422h420"/>
 <text x="520" y="146" class="pt">Google Axion <tspan class="pa">ARM64</tspan></text>
 <rect class="bdr" x="806.2" y="128" width="133.8" height="24" rx="12"/>
 <text x="873.1" y="145.0" class="bd" text-anchor="middle">up to 1.9× faster</text>
-<path class="cn" d="M895.1 308.9L890.5 241.6"/>
-<text x="895.1" y="341.9" class="gain" text-anchor="middle">ZXC ×1.92</text>
-<path class="cn" d="M725.3 319.0L707.7 293.5"/>
-<text x="725.3" y="352.0" class="gain" text-anchor="middle">ZXC ×1.41</text>
-<path class="cn" d="M598.8 325.1L593.3 311.2"/>
-<text x="598.8" y="358.1" class="gain" text-anchor="middle">ZXC ×1.25</text>
-<polyline class="ll" points="895.1,308.9 725.3,319.0 598.8,325.1"/>
-<rect class="lp" x="890.1" y="303.9" width="10" height="10"/>
-<text x="895.1" y="327.9" class="ln" text-anchor="middle">lz4 --fast</text>
-<rect class="lp" x="720.3" y="314.0" width="10" height="10"/>
-<text x="725.3" y="338.0" class="ln" text-anchor="middle">lz4</text>
-<rect class="lp" x="593.8" y="320.1" width="10" height="10"/>
-<text x="598.8" y="344.1" class="ln" text-anchor="middle">lz4hc -9</text>
-<polyline class="zl" points="890.5,241.6 798.4,266.1 707.7,293.5 671.6,298.0 641.7,303.4 593.3,311.2 556.1,334.8"/>
-<circle class="zp" cx="890.5" cy="241.6" r="5"/>
-<text x="890.5" y="231.6" class="lv" text-anchor="middle">-1</text>
-<circle class="zp" cx="798.4" cy="266.1" r="5"/>
-<text x="798.4" y="256.1" class="lv" text-anchor="middle">-2</text>
-<circle class="zp" cx="707.7" cy="293.5" r="5"/>
-<text x="707.7" y="283.5" class="lv" text-anchor="middle">-3</text>
-<circle class="zp" cx="671.6" cy="298.0" r="5"/>
-<text x="671.6" y="288.0" class="lv" text-anchor="middle">-4</text>
-<circle class="zp" cx="641.7" cy="303.4" r="5"/>
-<text x="641.7" y="293.4" class="lv" text-anchor="middle">-5</text>
-<circle class="zp" cx="593.3" cy="311.2" r="5"/>
-<text x="593.3" y="301.2" class="lv" text-anchor="middle">-6</text>
-<circle class="zp" cx="556.1" cy="334.8" r="5"/>
-<text x="556.1" y="324.8" class="lv" text-anchor="middle">-7</text>
-<path class="grid" d="M70 692.0h420"/>
-<text x="62.0" y="696.0" class="tk" text-anchor="end">0</text>
-<path class="grid" d="M70 662.4h420"/>
-<text x="62.0" y="666.4" class="tk" text-anchor="end">2</text>
-<path class="grid" d="M70 632.8h420"/>
-<text x="62.0" y="636.8" class="tk" text-anchor="end">4</text>
-<path class="grid" d="M70 603.2h420"/>
-<text x="62.0" y="607.2" class="tk" text-anchor="end">6</text>
-<path class="grid" d="M70 573.6h420"/>
-<text x="62.0" y="577.6" class="tk" text-anchor="end">8</text>
-<path class="grid" d="M70 544.0h420"/>
-<text x="62.0" y="548.0" class="tk" text-anchor="end">10</text>
-<path class="grid" d="M70 514.4h420"/>
-<text x="62.0" y="518.4" class="tk" text-anchor="end">12</text>
-<path class="grid" d="M70 484.8h420"/>
-<text x="62.0" y="488.8" class="tk" text-anchor="end">14</text>
-<path class="grid" d="M70.0 470v222"/>
-<text x="70.0" y="708.0" class="tk" text-anchor="middle">30%</text>
-<path class="grid" d="M128.3 470v222"/>
-<text x="128.3" y="708.0" class="tk" text-anchor="middle">35%</text>
-<path class="grid" d="M186.7 470v222"/>
-<text x="186.7" y="708.0" class="tk" text-anchor="middle">40%</text>
-<path class="grid" d="M245.0 470v222"/>
-<text x="245.0" y="708.0" class="tk" text-anchor="middle">45%</text>
-<path class="grid" d="M303.3 470v222"/>
-<text x="303.3" y="708.0" class="tk" text-anchor="middle">50%</text>
-<path class="grid" d="M361.7 470v222"/>
-<text x="361.7" y="708.0" class="tk" text-anchor="middle">55%</text>
-<path class="grid" d="M420.0 470v222"/>
-<text x="420.0" y="708.0" class="tk" text-anchor="middle">60%</text>
-<path class="grid" d="M478.3 470v222"/>
-<text x="478.3" y="708.0" class="tk" text-anchor="middle">65%</text>
-<path class="axis" d="M70 692h420"/>
-<text class="ax" transform="translate(32 581.0) rotate(-90)" text-anchor="middle">Decompression (GB/s)</text>
-<text x="490.0" y="728.0" class="ax" text-anchor="end">Compressed size (% of original, smaller ←)</text>
-<text x="70" y="456" class="pt">AMD EPYC Zen 5 <tspan class="pa">x86_64</tspan></text>
-<rect class="bdr" x="356.2" y="438" width="133.8" height="24" rx="12"/>
-<text x="423.1" y="455.0" class="bd" text-anchor="middle">up to 2.2× faster</text>
-<path class="cn" d="M445.1 615.4L440.5 523.6"/>
-<text x="445.1" y="648.4" class="gain" text-anchor="middle">ZXC ×2.20</text>
-<path class="cn" d="M275.3 618.9L257.7 592.4"/>
-<text x="275.3" y="651.9" class="gain" text-anchor="middle">ZXC ×1.36</text>
-<path class="cn" d="M148.8 621.5L143.3 608.0"/>
-<text x="148.8" y="654.5" class="gain" text-anchor="middle">ZXC ×1.19</text>
-<polyline class="ll" points="445.1,615.4 275.3,618.9 148.8,621.5"/>
-<rect class="lp" x="440.1" y="610.4" width="10" height="10"/>
-<text x="445.1" y="634.4" class="ln" text-anchor="middle">lz4 --fast</text>
-<rect class="lp" x="270.3" y="613.9" width="10" height="10"/>
-<text x="275.3" y="637.9" class="ln" text-anchor="middle">lz4</text>
-<rect class="lp" x="143.8" y="616.5" width="10" height="10"/>
-<text x="148.8" y="640.5" class="ln" text-anchor="middle">lz4hc -9</text>
-<polyline class="zl" points="440.5,523.6 348.4,540.4 257.7,592.4 221.6,597.9 191.7,603.6 143.3,608.0 106.1,630.6"/>
-<circle class="zp" cx="440.5" cy="523.6" r="5"/>
-<text x="440.5" y="513.6" class="lv" text-anchor="middle">-1</text>
-<circle class="zp" cx="348.4" cy="540.4" r="5"/>
-<text x="348.4" y="530.4" class="lv" text-anchor="middle">-2</text>
-<circle class="zp" cx="257.7" cy="592.4" r="5"/>
-<text x="257.7" y="582.4" class="lv" text-anchor="middle">-3</text>
-<circle class="zp" cx="221.6" cy="597.9" r="5"/>
-<text x="221.6" y="587.9" class="lv" text-anchor="middle">-4</text>
-<circle class="zp" cx="191.7" cy="603.6" r="5"/>
-<text x="191.7" y="593.6" class="lv" text-anchor="middle">-5</text>
-<circle class="zp" cx="143.3" cy="608.0" r="5"/>
-<text x="143.3" y="598.0" class="lv" text-anchor="middle">-6</text>
-<circle class="zp" cx="106.1" cy="630.6" r="5"/>
-<text x="106.1" y="620.6" class="lv" text-anchor="middle">-7</text>
-<path class="grid" d="M520 692.0h420"/>
-<text x="512.0" y="696.0" class="tk" text-anchor="end">0</text>
-<path class="grid" d="M520 662.4h420"/>
-<text x="512.0" y="666.4" class="tk" text-anchor="end">2</text>
-<path class="grid" d="M520 632.8h420"/>
-<text x="512.0" y="636.8" class="tk" text-anchor="end">4</text>
-<path class="grid" d="M520 603.2h420"/>
-<text x="512.0" y="607.2" class="tk" text-anchor="end">6</text>
-<path class="grid" d="M520 573.6h420"/>
-<text x="512.0" y="577.6" class="tk" text-anchor="end">8</text>
-<path class="grid" d="M520 544.0h420"/>
-<text x="512.0" y="548.0" class="tk" text-anchor="end">10</text>
-<path class="grid" d="M520 514.4h420"/>
-<text x="512.0" y="518.4" class="tk" text-anchor="end">12</text>
-<path class="grid" d="M520 484.8h420"/>
-<text x="512.0" y="488.8" class="tk" text-anchor="end">14</text>
-<path class="grid" d="M520.0 470v222"/>
-<text x="520.0" y="708.0" class="tk" text-anchor="middle">30%</text>
-<path class="grid" d="M578.3 470v222"/>
-<text x="578.3" y="708.0" class="tk" text-anchor="middle">35%</text>
-<path class="grid" d="M636.7 470v222"/>
-<text x="636.7" y="708.0" class="tk" text-anchor="middle">40%</text>
-<path class="grid" d="M695.0 470v222"/>
-<text x="695.0" y="708.0" class="tk" text-anchor="middle">45%</text>
-<path class="grid" d="M753.3 470v222"/>
-<text x="753.3" y="708.0" class="tk" text-anchor="middle">50%</text>
-<path class="grid" d="M811.7 470v222"/>
-<text x="811.7" y="708.0" class="tk" text-anchor="middle">55%</text>
-<path class="grid" d="M870.0 470v222"/>
-<text x="870.0" y="708.0" class="tk" text-anchor="middle">60%</text>
-<path class="grid" d="M928.3 470v222"/>
-<text x="928.3" y="708.0" class="tk" text-anchor="middle">65%</text>
-<path class="axis" d="M520 692h420"/>
-<text x="940.0" y="728.0" class="ax" text-anchor="end">Compressed size (% of original, smaller ←)</text>
-<text x="520" y="456" class="pt">AMD EPYC Zen 3 <tspan class="pa">x86_64</tspan></text>
-<rect class="bdr" x="806.2" y="438" width="133.8" height="24" rx="12"/>
-<text x="873.1" y="455.0" class="bd" text-anchor="middle">up to 1.8× faster</text>
-<path class="cn" d="M895.1 625.6L890.5 572.0"/>
-<text x="895.1" y="658.6" class="gain" text-anchor="middle">ZXC ×1.81</text>
-<path class="cn" d="M725.3 634.5L707.7 621.7"/>
-<text x="725.3" y="667.5" class="gain" text-anchor="middle">ZXC ×1.22</text>
-<path class="cn" d="M598.8 636.9L593.3 631.3"/>
-<text x="598.8" y="669.9" class="gain" text-anchor="middle">ZXC ×1.10</text>
-<polyline class="ll" points="895.1,625.6 725.3,634.5 598.8,636.9"/>
-<rect class="lp" x="890.1" y="620.6" width="10" height="10"/>
-<text x="895.1" y="644.6" class="ln" text-anchor="middle">lz4 --fast</text>
-<rect class="lp" x="720.3" y="629.5" width="10" height="10"/>
-<text x="725.3" y="653.5" class="ln" text-anchor="middle">lz4</text>
-<rect class="lp" x="593.8" y="631.9" width="10" height="10"/>
-<text x="598.8" y="655.9" class="ln" text-anchor="middle">lz4hc -9</text>
-<polyline class="zl" points="890.5,572.0 798.4,592.2 707.7,621.7 671.6,624.5 641.7,626.8 593.3,631.3 556.1,650.0"/>
-<circle class="zp" cx="890.5" cy="572.0" r="5"/>
-<text x="890.5" y="562.0" class="lv" text-anchor="middle">-1</text>
-<circle class="zp" cx="798.4" cy="592.2" r="5"/>
-<text x="798.4" y="582.2" class="lv" text-anchor="middle">-2</text>
-<circle class="zp" cx="707.7" cy="621.7" r="5"/>
-<text x="707.7" y="611.7" class="lv" text-anchor="middle">-3</text>
-<circle class="zp" cx="671.6" cy="624.5" r="5"/>
-<text x="671.6" y="614.5" class="lv" text-anchor="middle">-4</text>
-<circle class="zp" cx="641.7" cy="626.8" r="5"/>
-<text x="641.7" y="616.8" class="lv" text-anchor="middle">-5</text>
-<circle class="zp" cx="593.3" cy="631.3" r="5"/>
-<text x="593.3" y="621.3" class="lv" text-anchor="middle">-6</text>
-<circle class="zp" cx="556.1" cy="650.0" r="5"/>
-<text x="556.1" y="640.0" class="lv" text-anchor="middle">-7</text>
+<path class="cn" d="M895.1 314.1L890.5 214.9"/>
+<text x="895.1" y="347.1" class="gain" text-anchor="middle">ZXC ×1.92</text>
+<path class="cn" d="M725.3 329.1L707.7 291.4"/>
+<text x="725.3" y="362.1" class="gain" text-anchor="middle">ZXC ×1.41</text>
+<path class="cn" d="M598.8 338.1L593.3 317.5"/>
+<text x="598.8" y="371.1" class="gain" text-anchor="middle">ZXC ×1.25</text>
+<path class="cn" d="M572.9 386.1L556.1 352.4"/>
+<path class="zs" d="M572.9 380.1l6 11h-12z"/>
+<text x="582.9" y="390.1" class="ln" text-anchor="start">zstd -1 <tspan class="gain">ZXC ×1.94</tspan></text>
+<polyline class="ll" points="895.1,314.1 725.3,329.1 598.8,338.1"/>
+<rect class="lp" x="890.1" y="309.1" width="10" height="10"/>
+<text x="895.1" y="333.1" class="ln" text-anchor="middle">lz4 --fast</text>
+<rect class="lp" x="720.3" y="324.1" width="10" height="10"/>
+<text x="725.3" y="348.1" class="ln" text-anchor="middle">lz4</text>
+<rect class="lp" x="593.8" y="333.1" width="10" height="10"/>
+<text x="598.8" y="357.1" class="ln" text-anchor="middle">lz4hc -9</text>
+<polyline class="zl" points="890.5,214.9 798.4,251.0 707.7,291.4 671.6,298.1 641.7,306.1 593.3,317.5 556.1,352.4"/>
+<circle class="zp" cx="890.5" cy="214.9" r="5"/>
+<text x="890.5" y="204.9" class="lv" text-anchor="middle">-1</text>
+<circle class="zp" cx="798.4" cy="251.0" r="5"/>
+<text x="798.4" y="241.0" class="lv" text-anchor="middle">-2</text>
+<circle class="zp" cx="707.7" cy="291.4" r="5"/>
+<text x="707.7" y="281.4" class="lv" text-anchor="middle">-3</text>
+<circle class="zp" cx="671.6" cy="298.1" r="5"/>
+<text x="671.6" y="288.1" class="lv" text-anchor="middle">-4</text>
+<circle class="zp" cx="641.7" cy="306.1" r="5"/>
+<text x="641.7" y="296.1" class="lv" text-anchor="middle">-5</text>
+<circle class="zp" cx="593.3" cy="317.5" r="5"/>
+<text x="593.3" y="307.5" class="lv" text-anchor="middle">-6</text>
+<circle class="zp" cx="556.1" cy="352.4" r="5"/>
+<text x="556.1" y="342.4" class="lv" text-anchor="middle">-7</text>
+<path class="grid" d="M70 772.0h420"/>
+<text x="62.0" y="776.0" class="tk" text-anchor="end">0</text>
+<path class="grid" d="M70 734.6h420"/>
+<text x="62.0" y="738.6" class="tk" text-anchor="end">2</text>
+<path class="grid" d="M70 697.1h420"/>
+<text x="62.0" y="701.1" class="tk" text-anchor="end">4</text>
+<path class="grid" d="M70 659.7h420"/>
+<text x="62.0" y="663.7" class="tk" text-anchor="end">6</text>
+<path class="grid" d="M70 622.3h420"/>
+<text x="62.0" y="626.3" class="tk" text-anchor="end">8</text>
+<path class="grid" d="M70 584.9h420"/>
+<text x="62.0" y="588.9" class="tk" text-anchor="end">10</text>
+<path class="grid" d="M70 547.4h420"/>
+<text x="62.0" y="551.4" class="tk" text-anchor="end">12</text>
+<path class="grid" d="M70 510.0h420"/>
+<text x="62.0" y="514.0" class="tk" text-anchor="end">14</text>
+<path class="grid" d="M70.0 510v262"/>
+<text x="70.0" y="788.0" class="tk" text-anchor="middle">30%</text>
+<path class="grid" d="M128.3 510v262"/>
+<text x="128.3" y="788.0" class="tk" text-anchor="middle">35%</text>
+<path class="grid" d="M186.7 510v262"/>
+<text x="186.7" y="788.0" class="tk" text-anchor="middle">40%</text>
+<path class="grid" d="M245.0 510v262"/>
+<text x="245.0" y="788.0" class="tk" text-anchor="middle">45%</text>
+<path class="grid" d="M303.3 510v262"/>
+<text x="303.3" y="788.0" class="tk" text-anchor="middle">50%</text>
+<path class="grid" d="M361.7 510v262"/>
+<text x="361.7" y="788.0" class="tk" text-anchor="middle">55%</text>
+<path class="grid" d="M420.0 510v262"/>
+<text x="420.0" y="788.0" class="tk" text-anchor="middle">60%</text>
+<path class="grid" d="M478.3 510v262"/>
+<text x="478.3" y="788.0" class="tk" text-anchor="middle">65%</text>
+<path class="axis" d="M70 772h420"/>
+<text class="ax" transform="translate(32 641.0) rotate(-90)" text-anchor="middle">Decompression (GB/s)</text>
+<text x="490.0" y="808.0" class="ax" text-anchor="end">Compressed size (% of original, smaller ←)</text>
+<text x="70" y="496" class="pt">AMD EPYC Zen 5 <tspan class="pa">x86_64</tspan></text>
+<rect class="bdr" x="356.2" y="478" width="133.8" height="24" rx="12"/>
+<text x="423.1" y="495.0" class="bd" text-anchor="middle">up to 2.2× faster</text>
+<path class="cn" d="M445.1 675.1L440.5 559.1"/>
+<text x="445.1" y="708.1" class="gain" text-anchor="middle">ZXC ×2.20</text>
+<path class="cn" d="M275.3 679.6L257.7 646.1"/>
+<text x="275.3" y="712.6" class="gain" text-anchor="middle">ZXC ×1.36</text>
+<path class="cn" d="M148.8 682.8L143.3 665.8"/>
+<text x="148.8" y="715.8" class="gain" text-anchor="middle">ZXC ×1.19</text>
+<path class="cn" d="M122.9 736.9L106.1 694.4"/>
+<path class="zs" d="M122.9 730.9l6 11h-12z"/>
+<text x="132.9" y="740.9" class="ln" text-anchor="start">zstd -1 <tspan class="gain">ZXC ×2.21</tspan></text>
+<polyline class="ll" points="445.1,675.1 275.3,679.6 148.8,682.8"/>
+<rect class="lp" x="440.1" y="670.1" width="10" height="10"/>
+<text x="445.1" y="694.1" class="ln" text-anchor="middle">lz4 --fast</text>
+<rect class="lp" x="270.3" y="674.6" width="10" height="10"/>
+<text x="275.3" y="698.6" class="ln" text-anchor="middle">lz4</text>
+<rect class="lp" x="143.8" y="677.8" width="10" height="10"/>
+<text x="148.8" y="701.8" class="ln" text-anchor="middle">lz4hc -9</text>
+<polyline class="zl" points="440.5,559.1 348.4,580.3 257.7,646.1 221.6,653.0 191.7,660.3 143.3,665.8 106.1,694.4"/>
+<circle class="zp" cx="440.5" cy="559.1" r="5"/>
+<text x="440.5" y="549.1" class="lv" text-anchor="middle">-1</text>
+<circle class="zp" cx="348.4" cy="580.3" r="5"/>
+<text x="348.4" y="570.3" class="lv" text-anchor="middle">-2</text>
+<circle class="zp" cx="257.7" cy="646.1" r="5"/>
+<text x="257.7" y="636.1" class="lv" text-anchor="middle">-3</text>
+<circle class="zp" cx="221.6" cy="653.0" r="5"/>
+<text x="221.6" y="643.0" class="lv" text-anchor="middle">-4</text>
+<circle class="zp" cx="191.7" cy="660.3" r="5"/>
+<text x="191.7" y="650.3" class="lv" text-anchor="middle">-5</text>
+<circle class="zp" cx="143.3" cy="665.8" r="5"/>
+<text x="143.3" y="655.8" class="lv" text-anchor="middle">-6</text>
+<circle class="zp" cx="106.1" cy="694.4" r="5"/>
+<text x="106.1" y="684.4" class="lv" text-anchor="middle">-7</text>
+<path class="grid" d="M520 772.0h420"/>
+<text x="512.0" y="776.0" class="tk" text-anchor="end">0</text>
+<path class="grid" d="M520 719.6h420"/>
+<text x="512.0" y="723.6" class="tk" text-anchor="end">2</text>
+<path class="grid" d="M520 667.2h420"/>
+<text x="512.0" y="671.2" class="tk" text-anchor="end">4</text>
+<path class="grid" d="M520 614.8h420"/>
+<text x="512.0" y="618.8" class="tk" text-anchor="end">6</text>
+<path class="grid" d="M520 562.4h420"/>
+<text x="512.0" y="566.4" class="tk" text-anchor="end">8</text>
+<path class="grid" d="M520 510.0h420"/>
+<text x="512.0" y="514.0" class="tk" text-anchor="end">10</text>
+<path class="grid" d="M520.0 510v262"/>
+<text x="520.0" y="788.0" class="tk" text-anchor="middle">30%</text>
+<path class="grid" d="M578.3 510v262"/>
+<text x="578.3" y="788.0" class="tk" text-anchor="middle">35%</text>
+<path class="grid" d="M636.7 510v262"/>
+<text x="636.7" y="788.0" class="tk" text-anchor="middle">40%</text>
+<path class="grid" d="M695.0 510v262"/>
+<text x="695.0" y="788.0" class="tk" text-anchor="middle">45%</text>
+<path class="grid" d="M753.3 510v262"/>
+<text x="753.3" y="788.0" class="tk" text-anchor="middle">50%</text>
+<path class="grid" d="M811.7 510v262"/>
+<text x="811.7" y="788.0" class="tk" text-anchor="middle">55%</text>
+<path class="grid" d="M870.0 510v262"/>
+<text x="870.0" y="788.0" class="tk" text-anchor="middle">60%</text>
+<path class="grid" d="M928.3 510v262"/>
+<text x="928.3" y="788.0" class="tk" text-anchor="middle">65%</text>
+<path class="axis" d="M520 772h420"/>
+<text x="940.0" y="808.0" class="ax" text-anchor="end">Compressed size (% of original, smaller ←)</text>
+<text x="520" y="496" class="pt">AMD EPYC Zen 3 <tspan class="pa">x86_64</tspan></text>
+<rect class="bdr" x="806.2" y="478" width="133.8" height="24" rx="12"/>
+<text x="873.1" y="495.0" class="bd" text-anchor="middle">up to 2.1× faster</text>
+<path class="cn" d="M895.1 654.5L890.5 559.6"/>
+<text x="895.1" y="687.5" class="gain" text-anchor="middle">ZXC ×1.81</text>
+<path class="cn" d="M725.3 670.3L707.7 647.5"/>
+<text x="725.3" y="703.3" class="gain" text-anchor="middle">ZXC ×1.22</text>
+<path class="cn" d="M598.8 674.4L593.3 664.6"/>
+<text x="598.8" y="707.4" class="gain" text-anchor="middle">ZXC ×1.10</text>
+<path class="cn" d="M572.9 737.1L556.1 697.6"/>
+<path class="zs" d="M572.9 731.1l6 11h-12z"/>
+<text x="582.9" y="741.1" class="ln" text-anchor="start">zstd -1 <tspan class="gain">ZXC ×2.13</tspan></text>
+<polyline class="ll" points="895.1,654.5 725.3,670.3 598.8,674.4"/>
+<rect class="lp" x="890.1" y="649.5" width="10" height="10"/>
+<text x="895.1" y="673.5" class="ln" text-anchor="middle">lz4 --fast</text>
+<rect class="lp" x="720.3" y="665.3" width="10" height="10"/>
+<text x="725.3" y="689.3" class="ln" text-anchor="middle">lz4</text>
+<rect class="lp" x="593.8" y="669.4" width="10" height="10"/>
+<text x="598.8" y="693.4" class="ln" text-anchor="middle">lz4hc -9</text>
+<polyline class="zl" points="890.5,559.6 798.4,595.3 707.7,647.5 671.6,652.5 641.7,656.6 593.3,664.6 556.1,697.6"/>
+<circle class="zp" cx="890.5" cy="559.6" r="5"/>
+<text x="890.5" y="549.6" class="lv" text-anchor="middle">-1</text>
+<circle class="zp" cx="798.4" cy="595.3" r="5"/>
+<text x="798.4" y="585.3" class="lv" text-anchor="middle">-2</text>
+<circle class="zp" cx="707.7" cy="647.5" r="5"/>
+<text x="707.7" y="637.5" class="lv" text-anchor="middle">-3</text>
+<circle class="zp" cx="671.6" cy="652.5" r="5"/>
+<text x="671.6" y="642.5" class="lv" text-anchor="middle">-4</text>
+<circle class="zp" cx="641.7" cy="656.6" r="5"/>
+<text x="641.7" y="646.6" class="lv" text-anchor="middle">-5</text>
+<circle class="zp" cx="593.3" cy="664.6" r="5"/>
+<text x="593.3" y="654.6" class="lv" text-anchor="middle">-6</text>
+<circle class="zp" cx="556.1" cy="697.6" r="5"/>
+<text x="556.1" y="687.6" class="lv" text-anchor="middle">-7</text>
 </svg>
