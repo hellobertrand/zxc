@@ -8,7 +8,7 @@
 
 <!-- [![Latest release](https://img.shields.io/github/v/release/hellobertrand/zxc)](https://github.com/hellobertrand/zxc/releases/latest) -->
 
-ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core, 1.1x to 2.6x faster than LZ4 at an equal or better compression ratio.
+ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.6x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio.
 
 Seven compression levels trade compression speed for ratio, and the decoder stays fast at every one of them: the densest level compresses better than `zstd -1` while decoding about twice as fast. ZXC also provides seekable archives for O(1) random access, in-place decompression, and dictionary compression for small data.
 
@@ -150,7 +150,7 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 
 ## Features
 
-- **1.1–2.6× faster decode than LZ4**, at an equal or better ratio in every tier ([benchmarks](#benchmarks)).
+- **1.1–2.6× faster decode than LZ4** at levels -1 to -6, at an equal or better ratio. Level -7 trades that lead for density: it decodes 1.9–2.6× faster than `zstd -1`, at a better ratio ([benchmarks](#benchmarks)).
 - **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern ARM cores (Apple Silicon, Graviton, Axion).
 - **O(1) random access.** A built-in seek table decompresses any block without reading the rest.
 - **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
