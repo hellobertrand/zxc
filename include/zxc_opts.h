@@ -32,8 +32,7 @@ extern "C" {
 /**
  * @brief Progress callback function type.
  *
- * Called from the writer thread after each block is processed; after each batch
- * of blocks when a regular file of small blocks is decompressed.
+ * Called from the writer thread after each block, or batch of blocks, is processed.
  *
  * @param[in] bytes_processed Input bytes processed so far.
  * @param[in] bytes_total     Total input bytes to process (0 if unknown, e.g. stdin).
