@@ -1,10 +1,53 @@
 # Building and Integrating ZXC
 
-Prebuilt binaries, package managers and the release archives are covered in the
-[README](../README.md#installation). This document is for the two cases that
-need more room: **vendoring** zxc into another build, and **building it from
-source**. Vendoring into a libc-less target (a kernel module, a firmware) has
-its own tree: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
+Package managers are covered in the [README](../README.md#installation). This
+document is for the cases that need more room: verifying a **release archive**,
+**vendoring** zxc into another build, and **building it from source**.
+Vendoring into a libc-less target (a kernel module, a firmware) has its own tree: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
+
+## Release archives
+
+Pick the archive for your platform on the [Releases page](https://github.com/hellobertrand/zxc/releases)
+— `zxc-<version>-linux-{x86_64,arm64}.tar.gz`, `zxc-<version>-macos-arm64.tar.gz`, or `zxc-<version>-windows-{x86_64,arm64}.zip`.
+x86_64 builds dispatch AVX2/AVX-512 at runtime; ARM64 builds carry NEON. `zxc-<version>.tar.gz` is
+the canonical source, reproducible with
+`git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`; `zxc-<version>.tar.zxc`
+is that same tar compressed with `zxc -7`, readable only by a `zxc` whose format version matches, so
+keep the `.tar.gz` for archival.
+
+Verify before extracting — the manifest is signed, so check it first:
+
+```bash
+minisign -Vm checksums.sha256 -P 'RWQV0cpiyJYPkxF5iIysJzKNtzcGphqeyyFkiFErLMo5UZkWisGBxkNB'
+sha256sum -c checksums.sha256 --ignore-missing
+# macOS, replacing ARCHIVE with the downloaded archive's file name:
+#   grep -F 'ARCHIVE' checksums.sha256 | shasum -a 256 -c
+gh attestation verify zxc-<version>-linux-x86_64.tar.gz --repo hellobertrand/zxc
+
+tar -xzf zxc-<version>-linux-x86_64.tar.gz
+sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
+```
+
+Linux and macOS archives hold `bin/zxc`, `include/`, `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and
+`lib/cmake/zxc/zxcConfig.cmake`. Windows ZIP archives hold `bin/zxc.exe`, `include/`,
+`lib/zxc.lib`, `lib/pkgconfig/libzxc.pc` and `lib/cmake/zxc/zxcConfig.cmake`.
+
+Release tags are PGP-signed. Check the key's fingerprint against the one published in
+[SECURITY.md](../.github/SECURITY.md) *before* importing it — otherwise the import is circular, and
+`git verify-tag` would validate a signature made by whatever key the download happened to supply
+(it also exits 0 for a key you have never certified):
+
+```bash
+curl -sS https://github.com/hellobertrand.gpg -o zxc-maintainer.gpg
+gpg --show-keys --with-fingerprint zxc-maintainer.gpg   # compare with .github/SECURITY.md
+gpg --import zxc-maintainer.gpg                         # only once it matches
+
+git clone https://github.com/hellobertrand/zxc.git      # the archives carry no tags
+cd zxc
+git verify-tag v<version>
+```
+
+Key fingerprint and vulnerability reporting: [SECURITY.md](../.github/SECURITY.md).
 
 ## Building from source (CMake)
 
