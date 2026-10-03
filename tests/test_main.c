@@ -108,6 +108,8 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_stream_trailing_bytes),
     TEST_CASE(test_stream_input_kinds),
     TEST_CASE(test_stream_input_shrinks),
+    TEST_CASE(test_stream_input_rewritten),
+    TEST_CASE(test_stream_block_batches),
 
     /* --- Containers: concatenated frames --- */
     TEST_CASE(test_container_concat),

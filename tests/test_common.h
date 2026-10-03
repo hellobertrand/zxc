@@ -174,6 +174,8 @@ int test_stream_engine_errors(void);
 int test_stream_trailing_bytes(void);
 int test_stream_input_kinds(void);
 int test_stream_input_shrinks(void);
+int test_stream_input_rewritten(void);
+int test_stream_block_batches(void);
 
 /* --- Containers (test_container.c) --- */
 int test_container_concat(void);

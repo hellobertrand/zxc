@@ -302,7 +302,8 @@ typedef void (*zxc_progress_callback_t)(
 );
 ```
 
-Called from the writer thread after each block is processed.
+Called from the writer thread after each block is processed; after each batch of
+blocks when a regular file of small blocks is decompressed.
 Must be fast and non-blocking.
 
 ### 6.3 Opaque Context Types
@@ -1128,6 +1129,10 @@ is read by the worker threads with positioned reads (POSIX `pread`) rather than
 through stdio by the reader alone, and all `n_threads` decode. A file that
 shrinks during the call is `ZXC_ERROR_IO`. Pipes, sockets and memory streams are
 read with `fread`.
+
+A regular file's small blocks are read, decoded and written in batches of up to
+256 KiB of output (POSIX). Pipes, sockets and memory streams are still decoded
+block by block, so the output of a live stream is never held back.
 
 **Returns**: total decompressed bytes written, or negative `zxc_error_t`.
 

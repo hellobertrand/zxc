@@ -95,6 +95,11 @@ ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compre
  *       @c n_threads then decode. A file that shrinks during the call is
  *       @ref ZXC_ERROR_IO. Pipes, sockets and memory streams are read with
  *       @c fread as before.
+ *
+ * @note A regular file's small blocks are read, decoded and written in batches of
+ *       up to 256 KiB of output (POSIX). Pipes, sockets and memory streams are
+ *       still decoded block by block, so the output of a live stream is never
+ *       held back.
  */
 ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out,
                                          const zxc_decompress_opts_t* opts);

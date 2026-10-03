@@ -568,7 +568,7 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 
 ### 6.2 Asynchronous Decompression Pipeline
 1.  **Header Parsing (Main Thread)**: The main thread scans block headers to identify boundaries and payload sizes. For a regular file (POSIX, blocks of 64 KiB or more), each worker then reads its own payload with a positioned read, so the archive is not copied by a single thread; pipes are read through stdio.
-2.  **Dispatch**: Compressed payloads are fed into the worker job queue.
+2.  **Dispatch**: Compressed payloads are fed into the worker job queue. The small blocks of a regular file travel in batches of up to 256 KiB of output, so the per-job handoff does not dominate their decoding; a pipe keeps one block per job.
 3.  **Parallel Decoding (Worker Threads)**:
     *   Workers decode chunks into pre-allocated output buffers.
     *   **Fast Path**: If the output buffer has sufficient margin, the decoder uses "wild copies" (16-byte SIMD stores) to bypass bounds checking for maximal speed.
