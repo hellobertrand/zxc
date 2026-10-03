@@ -9,7 +9,13 @@
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/hellobertrand/zxc/badge)](https://scorecard.dev/viewer/?uri=github.com/hellobertrand/zxc)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
 
-ZXC is a lossless compression C library, with official Rust, Python, Node.js, Go and WASM bindings. It spends more time compressing so that decompression runs faster: the right trade-off for data **compressed once and read many times**, such as game assets, firmware updates, app bundles or content delivery. It decodes faster than LZ4 at a smaller size, on every major CPU architecture.
+ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core, 1.1x to 2.6x faster than LZ4 at an equal or better compression ratio.
+
+Seven compression levels trade compression speed for ratio, and the decoder stays fast at every one of them: the densest level compresses better than `zstd -1` while decoding about twice as fast. ZXC also provides seekable archives for O(1) random access, in-place decompression, and dictionary compression for small data.
+
+The ZXC format is fully specified in [FORMAT.md](docs/FORMAT.md) and guarded by public conformance vectors. This repository is the reference implementation, provided as an open-source BSD 3-Clause licensed C library and a command line utility producing and decoding `.zxc` files, with official bindings for Rust, Python, Node.js, Go and WASM. The design is described in the [whitepaper](docs/WHITEPAPER.md).
+
+## Benchmarks
 
 **Decompression speedup against the closest competitor at each ratio tier** — Silesia corpus (202 MB), single thread, reproducible with [lzbench](https://github.com/inikep/lzbench) and [TurboBench](https://github.com/powturbo/TurboBench):
 
@@ -20,8 +26,8 @@ ZXC is a lossless compression C library, with official Rust, Python, Node.js, Go
 | EPYC 9B45 (Zen 5) | **2.20x** | **1.36x** | **1.19x** | **2.21x** |
 | EPYC 7B13 (Zen 3) | **1.81x** | **1.22x** | **1.10x** | **2.13x** |
 
-The speed is not bought with ratio: ZXC is also *smaller* in all four pairings — 61.76 vs 62.15,
-46.09 vs 47.60, 36.28 vs 36.75 and 33.09 vs 34.53 %.
+ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.09 % vs 47.60 %, 36.28 % vs
+36.75 % and 33.09 % vs 34.53 % of the original size.
 
 <p align="center">
   <a href="docs/images/bench-scatter.svg">
@@ -29,44 +35,14 @@ The speed is not bought with ratio: ZXC is also *smaller* in all four pairings �
   </a>
 </p>
 
-**Used in** [ClickHouse](https://clickhouse.com/docs/reference/statements/create/table/codec) (experimental column codec) · **Packaged in** Debian 14, Ubuntu 26.10, Homebrew, vcpkg, Conan, Winget · **Benchmarked in** lzbench & TurboBench
-
-## Why ZXC
-
-- **1.1–2.6× faster decode than LZ4**, at an equal or better ratio in every tier ([benchmarks](#benchmarks)).
-- **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern ARM cores (Apple Silicon, Graviton, Axion).
-- **O(1) random access.** A built-in seek table decompresses any block without reading the rest.
-- **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
-- **Small payloads too.** A trained dictionary recovers ratio on 4–128 KB blocks ([details](#dictionary-compression)).
-- **Runs everywhere.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER, s390x, i386, with hand-tuned SIMD (AVX2/AVX-512/NEON).
-- **Production-grade.** Continuously fuzzed by OSS-Fuzz, ASan/UBSan/Valgrind-clean, a [specified wire format](docs/FORMAT.md) with conformance vectors, signed releases, BSD-3-Clause.
-
-## Quick start
-
-```bash
-brew install zxc                  # or: vcpkg install zxc / winget install hellobertrand.zxc
-
-zxc -5 assets.tar                 # → assets.tar.zxc
-zxc -d assets.tar.zxc             # decompress
-zxc -b your_file                  # benchmark on your own data
-```
-
-From your language of choice:
-
-```bash
-pip install zxc-compress
-npm install zxc-compress          # or zxc-wasm for the browser
-cargo add zxc-compress
-go get github.com/hellobertrand/zxc/wrappers/go
-```
-
-→ [Benchmarks](#benchmarks) · [Installation](#installation) · [API & examples](docs/EXAMPLES.md) · [Whitepaper](docs/WHITEPAPER.md)
-
-## Benchmarks
-
-The speedups at the top compare ZXC with its closest competitor at each ratio. This section widens
-the view to the rest of the field, and to compression speed: ZXC spends encoder time to buy decode
-speed, so its higher levels compress slowly by design.
+Measured with [lzbench](https://github.com/inikep/lzbench) 2.3.1 (from
+[@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
+machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
+/ Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
+commit ([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)); every
+number is reproducible with lzbench or [TurboBench](https://github.com/powturbo/TurboBench), where
+ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures live in the
+**[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**.
 
 ### All codecs (Apple M2)
 
@@ -173,16 +149,25 @@ speed, so its higher levels compress slowly by design.
 >
 > Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.19x on Apple Silicon** and ranging **1.26x–1.83x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.05x–1.40x**), at a 33.09% ratio.
 
-### Methodology
+## Features
 
-Measured with [lzbench](https://github.com/inikep/lzbench) 2.3.1 (from
-[@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
-machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
-/ Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
-commit ([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)); every
-number is reproducible with lzbench or [TurboBench](https://github.com/powturbo/TurboBench), where
-ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures live in the
-**[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**.
+- **1.1–2.6× faster decode than LZ4**, at an equal or better ratio in every tier ([benchmarks](#benchmarks)).
+- **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern ARM cores (Apple Silicon, Graviton, Axion).
+- **O(1) random access.** A built-in seek table decompresses any block without reading the rest.
+- **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
+- **Small payloads too.** A trained dictionary recovers ratio on 4–128 KB blocks ([details](#dictionary-compression)).
+- **Runs everywhere.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER, s390x, i386, with hand-tuned SIMD (AVX2/AVX-512/NEON).
+- **Production-grade.** Continuously fuzzed by OSS-Fuzz, ASan/UBSan/Valgrind-clean, a [specified wire format](docs/FORMAT.md) with conformance vectors, signed releases, BSD-3-Clause.
+
+**Used in** [ClickHouse](https://clickhouse.com/docs/reference/statements/create/table/codec) (experimental column codec) · **Packaged in** Debian 14, Ubuntu 26.10, Homebrew, vcpkg, Conan, Winget · **Benchmarked in** lzbench & TurboBench
+
+## Compression Levels
+
+*   **Level 1, 2 (Fast):** Optimized for real-time assets (Gaming, UI).
+*   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
+*   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstd.
+*   **Level 6 (Density):** Beats LZ4HC on both axes — better ratio *and* faster decode on every measured platform — while staying in the multi-GB/s decode class. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
+*   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding several times faster than it. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
 
 ## Usage
 
@@ -258,30 +243,6 @@ O(1) random-access decompression.
 **[👉 See complete examples and advanced usage](docs/EXAMPLES.md)** — stream API, reusable contexts,
 seekable readers, dictionaries and numeric pre-filters, as full compilable programs.
 
-## Language Bindings
-
-[![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
-[![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
-[![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
-
-Official wrappers maintained in this repository:
-
-| Language | Package Manager | Install Command | Documentation | Author |
-|----------|-----------------|-----------------|---------------|--------|
-| **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](wrappers/rust/zxc/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
-| **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](wrappers/python/README.md) | [@nuberchardzer1](https://github.com/nuberchardzer1) |
-| **Node.js**| [`npm`](https://www.npmjs.com/package/zxc-compress) | `npm install zxc-compress` | [README](wrappers/nodejs/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
-| **Go** | `go get` | `go get github.com/hellobertrand/zxc/wrappers/go` | [README](wrappers/go/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
-| **WASM** | [`npm`](https://www.npmjs.com/package/zxc-wasm) | `npm install zxc-wasm` | [README](wrappers/wasm/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
-
-Community-maintained bindings:
-
-| Language | Package Manager | Install Command | Repository | Author |
-| -------- | --------------- | --------------- | ---------- | ------ |
-| **Go** | pkg.go.dev | `go get github.com/meysam81/go-zxc` | <https://github.com/meysam81/go-zxc> | [@meysam81](https://github.com/meysam81) |
-| **Nim** | nimble | `nimble install zxc` | <https://github.com/openpeeps/zxc-nim> | [@georgelemon](https://github.com/georgelemon) |
-| **Free Pascal** | Build from source | Clone the repository | <https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor> | [@Xelitan](https://github.com/Xelitan) |
-
 ## Installation
 
 ZXC is packaged across major ecosystems and kept current by their maintainers:
@@ -328,24 +289,29 @@ and building from source, with the full option table and the PGO workflow:
 
 [![Packaging status](https://repology.org/badge/vertical-allrepos/zxc.svg)](https://repology.org/project/zxc/versions)
 
-## Design Philosophy: Asymmetric Efficiency
+## Language Bindings
 
-Traditional codecs force a trade-off between **symmetric speed** (LZ4) and **archival density** (Zstd). **ZXC takes a third path: asymmetric efficiency.**
+[![Crates.io](https://img.shields.io/crates/v/zxc-compress)](https://crates.io/crates/zxc-compress)
+[![PyPi](https://img.shields.io/pypi/v/zxc-compress)](https://pypi.org/project/zxc-compress)
+[![npm](https://img.shields.io/npm/v/zxc-compress)](https://www.npmjs.com/package/zxc-compress)
 
-The encoder does the heavy lifting upfront — match selection, optimal parsing, statistics tuning — to emit a bitstream structured for the instruction pipelining and branch prediction of modern CPUs (particularly ARMv8). Complexity is **offloaded from the decoder to the encoder**, which is exactly the trade-off WORM workloads want.
+Official wrappers maintained in this repository:
 
-*   **Build time:** you compress only once (on CI/CD).
-*   **Run time:** you decompress millions of times (on every user's device). **ZXC respects this asymmetry.**
+| Language | Package Manager | Install Command | Documentation | Author |
+|----------|-----------------|-----------------|---------------|--------|
+| **Rust** | [`crates.io`](https://crates.io/crates/zxc-compress) | `cargo add zxc-compress` | [README](wrappers/rust/zxc/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
+| **Python**| [`PyPI`](https://pypi.org/project/zxc-compress) | `pip install zxc-compress` | [README](wrappers/python/README.md) | [@nuberchardzer1](https://github.com/nuberchardzer1) |
+| **Node.js**| [`npm`](https://www.npmjs.com/package/zxc-compress) | `npm install zxc-compress` | [README](wrappers/nodejs/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
+| **Go** | `go get` | `go get github.com/hellobertrand/zxc/wrappers/go` | [README](wrappers/go/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
+| **WASM** | [`npm`](https://www.npmjs.com/package/zxc-wasm) | `npm install zxc-wasm` | [README](wrappers/wasm/README.md) | [@hellobertrand](https://github.com/hellobertrand) |
 
-[👉 **Read the Technical Whitepaper**](docs/WHITEPAPER.md)
+Community-maintained bindings:
 
-## Compression Levels
-
-*   **Level 1, 2 (Fast):** Optimized for real-time assets (Gaming, UI).
-*   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
-*   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstd.
-*   **Level 6 (Density):** Beats LZ4HC on both axes — better ratio *and* faster decode on every measured platform — while staying in the multi-GB/s decode class. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
-*   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding several times faster than it. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
+| Language | Package Manager | Install Command | Repository | Author |
+| -------- | --------------- | --------------- | ---------- | ------ |
+| **Go** | pkg.go.dev | `go get github.com/meysam81/go-zxc` | <https://github.com/meysam81/go-zxc> | [@meysam81](https://github.com/meysam81) |
+| **Nim** | nimble | `nimble install zxc` | <https://github.com/openpeeps/zxc-nim> | [@georgelemon](https://github.com/georgelemon) |
+| **Free Pascal** | Build from source | Clone the repository | <https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor> | [@Xelitan](https://github.com/Xelitan) |
 
 ## In-Place Decompression
 
