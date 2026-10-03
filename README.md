@@ -1,13 +1,12 @@
 # ZXC - Lossless Compression Built for Ultra-Fast Decode
 
 [![Build & Release](https://github.com/hellobertrand/zxc/actions/workflows/build.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/build.yml)
-[![Code Quality](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/quality.yml)
-[![Code Security](https://github.com/hellobertrand/zxc/actions/workflows/security.yml/badge.svg)](https://github.com/hellobertrand/zxc/actions/workflows/security.yml)
 [![Fuzzing Status](https://oss-fuzz-build-logs.storage.googleapis.com/badges/zxc.svg)](https://oss-fuzz-build-logs.storage.googleapis.com/index.html#zxc)
-[![Snyk Security](https://snyk.io/test/github/hellobertrand/zxc/badge.svg)](https://snyk.io/test/github/hellobertrand/zxc/badge.svg)
 [![Code Coverage](https://codecov.io/github/hellobertrand/zxc/branch/main/graph/badge.svg?token=LHA03HOA1X)](https://codecov.io/github/hellobertrand/zxc)
 [![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/hellobertrand/zxc/badge)](https://scorecard.dev/viewer/?uri=github.com/hellobertrand/zxc)
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE)
+
+<!-- [![Latest release](https://img.shields.io/github/v/release/hellobertrand/zxc)](https://github.com/hellobertrand/zxc/releases/latest) -->
 
 ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core, 1.1x to 2.6x faster than LZ4 at an equal or better compression ratio.
 
@@ -44,9 +43,9 @@ number is reproducible with lzbench or [TurboBench](https://github.com/powturbo/
 ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures live in the
 **[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**.
 
-### All codecs (Apple M2)
+### All codecs
 
-![Decompression speed vs compressed size, ZXC against LZ4, LZ4HC, lzav, Snappy, zstd and zlib on Apple M2](docs/images/bench-arm64.svg)
+![Decompression speed and compressed size of each codec relative to LZ4, on Apple M2](docs/images/bench-arm64.svg)
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
@@ -141,7 +140,7 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 
 ### Effective throughput
 
-![Effective Throughput](docs/images/bench-effective.svg)
+![Effective throughput of each codec relative to LZ4, on four CPUs](docs/images/bench-effective.svg)
 
 > **What is Effective Throughput?**
 >
