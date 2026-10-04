@@ -29,8 +29,8 @@ ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.09 % vs 47.6
 36.75 % and 33.09 % vs 34.53 % of the original size.
 
 <p align="center">
-  <a href="docs/images/bench-scatter.svg">
-    <img src="docs/images/bench-scatter.svg" alt="Decompression speed vs compressed size: ZXC is faster than the LZ4 family and zstd -1 at an equal or smaller size on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3" width="100%">
+  <a href="docs/images/bench-bars.svg">
+    <img src="docs/images/bench-bars.svg" alt="Decompression speed of ZXC levels -1, -3, -6 and -7 next to lz4 --fast, lz4, lz4hc -9 and zstd -1 on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3: ZXC is faster at a smaller size in every pair" width="100%">
   </a>
 </p>
 
@@ -43,9 +43,11 @@ number is reproducible with lzbench or [TurboBench](https://github.com/powturbo/
 ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures live in the
 **[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**.
 
-### All codecs
+### Every level, on every CPU
 
-![Decompression speed and compressed size of each codec relative to LZ4, on Apple M2](docs/images/bench-arm64.svg)
+![Decompression speed vs compressed size: ZXC is faster than the LZ4 family and zstd -1 at an equal or smaller size on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3](docs/images/bench-scatter.svg)
+
+### All codecs
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
