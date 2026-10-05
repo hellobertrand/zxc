@@ -599,11 +599,11 @@ static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_cap
  *
  * @return Bytes written, or a negative @ref zxc_error_t.
  */
-static int64_t zxc_write_seek_table_from_frame(uint8_t* RESTRICT dst, const size_t dst_capacity,
-                                               const uint8_t* RESTRICT blocks,
-                                               const uint8_t* const blocks_end,
-                                               const uint64_t num_blocks,
-                                               const int checksum_enabled) {
+static int64_t zxc_write_seek_table_from_blocks(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                                                const uint8_t* RESTRICT blocks,
+                                                const uint8_t* const blocks_end,
+                                                const uint64_t num_blocks,
+                                                const int checksum_enabled) {
     const size_t total = zxc_seek_table_size(num_blocks);
     if (UNLIKELY(total == 0)) return ZXC_ERROR_OVERFLOW;  // LCOV_EXCL_LINE
     if (UNLIKELY(dst_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
@@ -1312,7 +1312,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
 
     // Seek table between the EOF block and the footer.
     if (seekable) {
-        const int64_t st_val = zxc_write_seek_table_from_frame(
+        const int64_t st_val = zxc_write_seek_table_from_blocks(
             op, (size_t)(op_end - op), op_start + h_val, eof_at, bi, checksum_enabled);
         if (UNLIKELY(st_val < 0)) return st_val;
         op += st_val;
