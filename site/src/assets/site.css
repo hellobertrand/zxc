@@ -16,8 +16,10 @@
   --pre-border: #dddddd;
   --note-bg: #fffbe6;
   --note-border: #e6d98c;
-  --zxc: #1f4e9c;
+  --zxc: #0969da;
   --rival: #9a9a9a;
+  --lz4: #a475f9;
+  --zstd: #bc4c00;
   --hl: #eef3fb;
   --tok-com: #6a6a6a;
   --tok-str: #0b6b0b;
@@ -39,8 +41,10 @@
     --pre-border: #3a3a3a;
     --note-bg: #2b2816;
     --note-border: #5c5324;
-    --zxc: #7ea6e8;
+    --zxc: #4493f8;
     --rival: #6e6e6e;
+    --lz4: #bc8cff;
+    --zstd: #db6d28;
     --hl: #1f2733;
     --tok-com: #9a9a9a;
     --tok-str: #9ccc8c;
@@ -75,9 +79,16 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: 1.5em 0; }
 /* ---------- Masthead ---------- */
 .masthead { padding: 1.2em 0 0; }
 .masthead .inner { display: flex; align-items: center; gap: 0.9em; }
+.masthead .inner > div { flex: 1; min-width: 0; }
 .site-name { margin: 0; font-size: 1.9em; font-weight: bold; line-height: 1.1; }
 .site-name a, .site-name a:visited { color: var(--fg); text-decoration: none; }
 .site-tag { margin: 0.15em 0 0; color: var(--muted); }
+.gh-button { margin-left: auto; display: inline-flex; align-items: center; gap: 0.35em; padding: 0.15em 0.5em;
+  border: 1px solid var(--rule); border-radius: 5px; color: var(--fg); text-decoration: none; font-size: 0.8em; white-space: nowrap; }
+.gh-button:visited { color: var(--fg); }
+.gh-button:hover { background: var(--bar); }
+.gh-count { font-weight: bold; font-variant-numeric: tabular-nums; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .navbar {
   margin-top: 1em;
@@ -169,6 +180,8 @@ figure.bench fieldset label { margin-right: 1.1em; white-space: nowrap; }
 .track { height: 0.7em; margin: 0.1em 0 0.35em; }
 .fill { height: 100%; width: calc(var(--w) * 100%); background: var(--rival); transition: width 0.3s; }
 .bar.zxc .fill { background: var(--zxc); }
+.bar.lz4 .fill { background: var(--lz4); }
+.bar.zstd .fill { background: var(--zstd); }
 .gain { font-size: 0.88em; color: var(--muted); }
 .gain b { color: var(--fg); }
 figure.bench figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0.6em; }
@@ -213,6 +226,6 @@ figure.pareto figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0
 }
 
 @media print {
-  .navbar, .copy, .skip, figure.bench fieldset { display: none; }
+  .navbar, .copy, .skip, .gh-button, figure.bench fieldset { display: none; }
   a { color: inherit; }
 }

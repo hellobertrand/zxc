@@ -1,10 +1,12 @@
 <div class="inner">
 
-<h1>ZXC: lossless compression built for fast decoding</h1>
+<h1>ZXC: Lossless compression built for ultra-fast decode</h1>
 
 <p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. At every compression level ZXC decodes faster than LZ4, and produces output of equal or smaller size.</p>
 
 <p>ZXC is free software, released under the <a href="https://opensource.org/license/bsd-3-clause">BSD 3-Clause License</a>. It has no dependencies, and official bindings exist for Rust, Python, Node.js and Go.</p>
+
+<p>Development happens on <a href="https://github.com/hellobertrand/zxc">GitHub</a>.</p>
 
 <div class="release">
   <p><strong>The current release is ZXC {{VERSION}}</strong>{{RELEASE_DATE}}.
@@ -94,6 +96,13 @@
 <figure class="pareto">
   <a href="/docs/images/bench-effective.svg"><img src="/docs/images/bench-effective.svg" width="960" height="584" alt="Effective throughput relative to LZ4 for every ZXC level and for LZ4, LZ4HC, LZAV, Zstandard and Snappy, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. All ZXC levels are above the LZ4 baseline of 1.00." loading="lazy"></a>
   <figcaption>Figure 4. Effective throughput (decode speed &times; 100 / ratio&nbsp;%) relative to LZ4, on the same four processors; higher is better, and LZ4 is 1.00. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
+</figure>
+
+<p>Dividing the clock frequency by the decompression speed gives the cost of each decompressed byte in processor cycles, which compares processors running at different frequencies. ZXC spends less than one cycle per byte at every level.</p>
+
+<figure class="pareto">
+  <a href="/docs/images/bench-cycles.svg"><img src="/docs/images/bench-cycles.svg" width="960" height="608" alt="Processor cycles per decompressed byte for every ZXC level and for memcpy, LZ4, LZ4HC, LZAV, Snappy and Zstandard, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
+  <figcaption>Figure 5. Processor cycles per decompressed byte (clock frequency / decompression speed), on the same four processors; lower is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
 {{BENCH_TABLES}}
