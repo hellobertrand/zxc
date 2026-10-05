@@ -347,6 +347,19 @@ done:
     return ok;
 }
 
+/* 1 if every data block of @p arc is RAW, 0 otherwise or on a malformed walk. */
+static int all_blocks_raw(const uint8_t* arc, const size_t n, const int checksum) {
+    size_t off = ZXC_FILE_HEADER_SIZE, blocks = 0;
+    zxc_block_header_t bh;
+    while (zxc_read_block_header(arc + off, n - off, &bh) == ZXC_OK) {
+        if (bh.block_type == ZXC_BLOCK_EOF) return blocks > 0;
+        if (bh.block_type != ZXC_BLOCK_RAW) return 0;
+        off += ZXC_BLOCK_HEADER_SIZE + bh.comp_size + (checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+        blocks++;
+    }
+    return 0;
+}
+
 /* The context API used to drop .seekable; it now writes the table without
  * allocating, static contexts included. */
 int test_context_api_seekable_compress(void) {
@@ -385,6 +398,29 @@ int test_context_api_seekable_compress(void) {
     fails += !cctx_seekable_matches("dictionary", cctx, src, n, &with_dict, &with_dict);
     fails += !cctx_seekable_matches("one block", cctx, src, 1000, &plain, &plain);
     fails += !cctx_seekable_matches("empty input", cctx, src, 0, &cs, &cs);
+
+    /* Incompressible input: every data block is RAW, whose comp_size the table
+     * reads back like any other. */
+    {
+        const size_t rn = 5 * 4096 + 77;
+        const size_t rcap = (size_t)zxc_compress_bound(rn);
+        uint8_t* const noise = malloc(rn);
+        uint8_t* const rarc = malloc(rcap);
+        if (noise && rarc) {
+            zxc_test_srand(0x5EEDU);
+            for (size_t i = 0; i < rn; i++) noise[i] = (uint8_t)zxc_test_rand();
+            const int64_t rl = zxc_compress(noise, rn, rarc, rcap, &cs);
+            if (rl <= 0 || !all_blocks_raw(rarc, (size_t)rl, 1)) {
+                printf("  [FAIL] incompressible fixture is not all RAW (%lld)\n", (long long)rl);
+                fails++;
+            }
+            fails += !cctx_seekable_matches("all RAW, checksums", cctx, noise, rn, &cs, &cs);
+        } else {
+            fails++;
+        }
+        free(noise);
+        free(rarc);
+    }
     zxc_free_cctx(cctx);
 
     /* Created seekable, then used with NULL opts. */
