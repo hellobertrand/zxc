@@ -302,23 +302,21 @@ function header(active) {
   <div class="inner">
     <div>
       <p class="site-name"><a href="/">ZXC</a></p>
-      <p class="site-tag">Asymmetric lossless compression, built for fast decoding</p>
+      <p class="site-tag">Asymmetric lossless compression, built for ultra-fast decode</p>
     </div>
-    <a class="gh-button" href="${GH}" title="ZXC on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span class="visually-hidden">GitHub</span><span class="gh-count" data-gh-stars data-gh-compact${META.stars === null ? " hidden" : ""}><span class="visually-hidden">, stars: </span><span data-gh-stars-n>${META.stars === null ? "" : compact(META.stars)}</span></span></a>
   </div>
   <nav class="navbar" aria-label="Main"><ul>${links}</ul></nav>
 </header>`;
 }
 
 function footer() {
-  const year = new Date().getUTCFullYear();
   const today = new Date().toISOString().slice(0, 10);
   return `<footer class="footer">
   <div class="inner">
     <p><a href="#main">Back to top</a></p>
-    <p>Copyright &copy; 2025&ndash;${year} Bertrand Lebonnois and contributors.</p>
+    <p>Copyright &copy; 2025 Bertrand Lebonnois and contributors.</p>
     <p>ZXC is free software, released under the BSD 3-Clause License. This site is generated from the <a href="${GH}">zxc repository</a>; please report problems with it on the <a href="${GH}/issues">issue tracker</a>.</p>
-    <p>Updated: ${today} (ZXC ${esc(META.version)}).</p>
+    <p>Updated: ${today} (ZXC ${esc(META.version)})<span data-gh-stars${META.stars === null ? " hidden" : ""}> | <a class="gh-stars" href="${GH}" aria-label="GitHub stars"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg> <span data-gh-stars-n>${META.stars === null ? "" : META.stars.toLocaleString("en-US")}</span></a></span></p>
   </div>
 </footer>`;
 }
@@ -547,10 +545,7 @@ async function buildDoxygen(version) {
 // ---------------------------------------------------------------------------
 // Build
 // ---------------------------------------------------------------------------
-// 467 -> "467", 1234 -> "1.2k": the header button's compact form.
-const compact = (n) => (n < 1000 ? String(n) : `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`);
-
-// Star count at build time, so the header button reads right without JavaScript;
+// Star count at build time, so the footer reads right without JavaScript;
 // site.js refreshes it in the browser. Optional: an offline or rate-limited build omits it.
 async function githubStars() {
   try {
@@ -615,7 +610,7 @@ async function build() {
     .replace("{{BENCH_TABLES}}", () => renderBenchTables(bench))
     .replace("{{LEVELS_TABLE}}", () => renderLevels(bench));
   await write("/", layout({
-    title: "ZXC - Lossless Compression with Ultra-Fast Decompression",
+    title: "ZXC: Lossless compression built for ultra-fast decode",
     description: "ZXC is a lossless compression C library for write-once, read-many data. It decodes faster than LZ4 at a smaller size, with seekable archives, dictionaries and SIMD on ARM and x86.",
     urlPath: "/",
     body: highlightHtml(landing),

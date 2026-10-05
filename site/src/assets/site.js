@@ -20,16 +20,14 @@
     });
   }
 
-  // GitHub star count in the header button: refresh the build-time figure,
+  // GitHub star count in the footer: refresh the build-time figure,
   // at most once an hour per browser.
   var stars = document.querySelectorAll("[data-gh-stars]");
   if (stars.length && window.fetch) {
     var KEY = "zxc-gh-stars", HOUR = 3600 * 1000;
     var show = function (n) {
       stars.forEach(function (el) {
-        el.querySelector("[data-gh-stars-n]").textContent = el.hasAttribute("data-gh-compact")
-          ? (n < 1000 ? String(n) : (n / 1000).toFixed(1).replace(/\.0$/, "") + "k")
-          : n.toLocaleString("en-US");
+        el.querySelector("[data-gh-stars-n]").textContent = n.toLocaleString("en-US");
         el.hidden = false;
       });
     };
