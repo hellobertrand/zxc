@@ -79,16 +79,9 @@ hr { border: 0; border-top: 1px solid var(--rule); margin: 1.5em 0; }
 /* ---------- Masthead ---------- */
 .masthead { padding: 1.2em 0 0; }
 .masthead .inner { display: flex; align-items: center; gap: 0.9em; }
-.masthead .inner > div { flex: 1; min-width: 0; }
 .site-name { margin: 0; font-size: 1.9em; font-weight: bold; line-height: 1.1; }
 .site-name a, .site-name a:visited { color: var(--fg); text-decoration: none; }
 .site-tag { margin: 0.15em 0 0; color: var(--muted); }
-.gh-button { margin-left: auto; display: inline-flex; align-items: center; gap: 0.35em; padding: 0.15em 0.5em;
-  border: 1px solid var(--rule); border-radius: 5px; color: var(--fg); text-decoration: none; font-size: 0.8em; white-space: nowrap; }
-.gh-button:visited { color: var(--fg); }
-.gh-button:hover { background: var(--bar); }
-.gh-count { font-weight: bold; font-variant-numeric: tabular-nums; }
-.visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .navbar {
   margin-top: 1em;
@@ -208,6 +201,7 @@ figure.pareto figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0
 /* ---------- Footer ---------- */
 .footer { border-top: 1px solid var(--rule); background: var(--bar); font-size: 0.88em; color: var(--muted); padding: 1em 0 1.2em; }
 .footer p { margin: 0.35em 0; }
+.gh-stars svg { vertical-align: -2px; }
 
 @media (max-width: 36em) {
   .site-name { font-size: 1.55em; }
@@ -226,6 +220,6 @@ figure.pareto figcaption { font-size: 0.88em; color: var(--muted); margin-top: 0
 }
 
 @media print {
-  .navbar, .copy, .skip, .gh-button, figure.bench fieldset { display: none; }
+  .navbar, .copy, .skip, figure.bench fieldset { display: none; }
   a { color: inherit; }
 }
