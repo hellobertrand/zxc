@@ -299,6 +299,108 @@ int test_context_api_seekable_frame(void) {
     return 1;
 }
 
+/* Compresses @p src through @p cctx with @p ctx_opts (NULL = sticky) and
+ * through zxc_compress() with @p ref: the archives must match byte for byte,
+ * and the context's must open as seekable and serve a range spanning blocks. */
+static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t* src,
+                                 const size_t n, const zxc_compress_opts_t* ctx_opts,
+                                 const zxc_compress_opts_t* ref) {
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const a = malloc(cap);
+    uint8_t* const b = malloc(cap);
+    uint8_t* const out = malloc(n + 1);
+    int ok = 0;
+    if (!a || !b || !out) {
+        printf("  [FAIL] %s: malloc\n", what);
+        goto done;
+    }
+    const int64_t na = zxc_compress(src, n, a, cap, ref);
+    const int64_t nb = zxc_compress_cctx(cctx, src, n, b, cap, ctx_opts);
+    if (na <= 0 || nb != na || memcmp(a, b, (size_t)na) != 0) {
+        printf("  [FAIL] %s: one-shot %lld, context %lld\n", what, (long long)na, (long long)nb);
+        goto done;
+    }
+    zxc_seekable* const s = zxc_seekable_open(b, (size_t)nb);
+    if (s && ref->dict) zxc_seekable_set_dict(s, ref->dict, ref->dict_size, ref->dict_huf);
+    if (!s) {
+        printf("  [FAIL] %s: zxc_seekable_open refused the context's archive\n", what);
+        goto done;
+    }
+    const size_t off = n / 3, len = n / 3;
+    const int64_t r = len ? zxc_seekable_decompress_range(s, out, n, off, len) : 0;
+    zxc_seekable_free(s);
+    if (r != (int64_t)len || memcmp(out, src + off, len) != 0) {
+        printf("  [FAIL] %s: range [%zu, +%zu) returned %lld\n", what, off, len, (long long)r);
+        goto done;
+    }
+    ok = 1;
+done:
+    free(a);
+    free(b);
+    free(out);
+    return ok;
+}
+
+/* The context API used to drop .seekable silently, so the archive it wrote
+ * had no seek table. It now rereads the block headers it has just written:
+ * no per-call allocation, static contexts included. */
+int test_context_api_seekable_compress(void) {
+    printf("=== TEST: Context API - seekable compression matches the one-shot ===\n");
+    /* 74 blocks of 4 KB: two seek-table groups, the second one partial. */
+    const size_t n = 74 * 4096 - 123;
+    uint8_t* const src = malloc(n);
+    static uint8_t dict[2048];
+    if (!src) {
+        printf("  [FAIL] malloc\n");
+        return 0;
+    }
+    uint32_t x = 12345;
+    for (size_t i = 0; i < n; i++) {
+        x = x * 1103515245u + 12345u;
+        src[i] = (uint8_t)((i % 97 < 60) ? 'a' + (i % 13) : (x >> 24));
+    }
+    for (size_t i = 0; i < sizeof(dict); i++) dict[i] = (uint8_t)('a' + (i % 13));
+
+    int fails = 0;
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    if (!cctx) {
+        printf("  [FAIL] zxc_create_cctx\n");
+        free(src);
+        return 0;
+    }
+    const zxc_compress_opts_t plain = {.level = 3, .block_size = 4096, .seekable = 1};
+    const zxc_compress_opts_t cs = {
+        .level = 5, .block_size = 4096, .checksum_enabled = 1, .seekable = 1};
+    zxc_compress_opts_t with_dict = cs;
+    with_dict.dict = dict;
+    with_dict.dict_size = sizeof(dict);
+    fails += !cctx_seekable_matches("level 3", cctx, src, n, &plain, &plain);
+    fails += !cctx_seekable_matches("checksums", cctx, src, n, &cs, &cs);
+    fails += !cctx_seekable_matches("sticky (NULL opts)", cctx, src, n, NULL, &cs);
+    fails += !cctx_seekable_matches("dictionary", cctx, src, n, &with_dict, &with_dict);
+    fails += !cctx_seekable_matches("one block", cctx, src, 1000, &plain, &plain);
+    fails += !cctx_seekable_matches("empty input", cctx, src, 0, &cs, &cs);
+    zxc_free_cctx(cctx);
+
+    /* Created seekable, then used with NULL opts. */
+    cctx = zxc_create_cctx(&plain);
+    fails += !cctx || !cctx_seekable_matches("seekable from create", cctx, src, n, NULL, &plain);
+    zxc_free_cctx(cctx);
+
+    /* A static context cannot allocate: the table must still be written. */
+    const size_t ws_size = zxc_static_cctx_workspace_size(4096, 3);
+    void* const ws = malloc(ws_size);
+    cctx = ws ? zxc_init_static_cctx(ws, ws_size, &plain) : NULL;
+    fails += !cctx || !cctx_seekable_matches("static context", cctx, src, n, NULL, &plain);
+    free(ws);
+    free(src);
+
+    if (fails) return 0;
+    printf("  [PASS] heap, sticky, dictionary, empty and static contexts\n");
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* Pins both halves of the no-destination contract, through both entry points:
  * what the probe answers, and what a real decode of the same bytes answers.
  * They agree on every archive that reports an empty payload. On one that stores

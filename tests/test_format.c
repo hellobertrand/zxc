@@ -1183,15 +1183,17 @@ int test_seek_flag_contract(void) {
                 (long long)el, want, (long long)fl, same, opens);
     }
 
-    // The context API ignores seekable, so its header must not promise a table.
+    // The context API writes the table too: its header must promise it.
     if (ok) {
         const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
         zxc_cctx* const c = zxc_create_cctx(&so);
         const int64_t cl = c ? zxc_compress_cctx(c, src, n, lie, cap, &so) : -1;
         zxc_free_cctx(c);
-        ok = cl > 0 && !(lie[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) &&
+        zxc_seekable* const sc = cl > 0 ? zxc_seekable_open(lie, (size_t)cl) : NULL;
+        ok = cl > 0 && (lie[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) && sc &&
              seek_flag_verdict(lie, (size_t)cl, n, out, "cctx") == 1;
-        if (!ok) printf("  [FAIL] cctx: header promises a table it does not write\n");
+        zxc_seekable_free(sc);
+        if (!ok) printf("  [FAIL] cctx: seekable archive without a matching flag and table\n");
     }
 
     free(src);

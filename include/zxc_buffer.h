@@ -472,8 +472,9 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * Dictionary options are the exception: honoured as in zxc_compress() but
  * never remembered, so pass them on every call; the shared table is rebuilt
  * only when it changes. A static context returns
- * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary. @c seekable is ignored
- * here: use zxc_compress() when the archive needs a seek table.
+ * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary. @c seekable appends the
+ * seek table as zxc_compress() does, read back from the block headers just
+ * written: no allocation, so a static context supports it too.
  *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data; may be NULL when @p src_size is 0.

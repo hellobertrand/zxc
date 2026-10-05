@@ -560,8 +560,7 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
  *        block, the empty seek table when @p seekable, then the footer.
  *
  * Both entry points return through here: same options, same empty archive, by
- * construction. The context API ignores seekable and passes 0. Neither carves a
- * workspace: there is no block to encode.
+ * construction. Neither carves a workspace: there is no block to encode.
  *
  * @return Bytes written, or a negative @ref zxc_error_t.
  */
@@ -589,6 +588,42 @@ static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_cap
     const int f = zxc_write_file_footer(dst + off, dst_capacity - off, 0, 0, checksum_enabled);
     if (UNLIKELY(f < 0)) return f;
     return (int64_t)(off + (size_t)f);
+}
+
+/**
+ * @brief Writes the seek table of the @p num_blocks data blocks starting at
+ *        @p blocks, reading each block's on-disk size back from its header.
+ *
+ * The context API cannot hold one size per block without allocating per call,
+ * so it rereads the blocks it has just written instead: one header per block,
+ * negligible next to encoding it. The headers are our own output, trusted as is.
+ *
+ * @return Bytes written, or a negative @ref zxc_error_t.
+ */
+static int64_t zxc_write_seek_table_from_frame(uint8_t* RESTRICT dst, const size_t dst_capacity,
+                                               const uint8_t* RESTRICT blocks,
+                                               const uint64_t num_blocks,
+                                               const int checksum_enabled) {
+    const size_t total = zxc_seek_table_size(num_blocks);
+    if (UNLIKELY(total == 0)) return ZXC_ERROR_OVERFLOW;  // LCOV_EXCL_LINE
+    if (UNLIKELY(dst_capacity < total)) return ZXC_ERROR_DST_TOO_SMALL;
+
+    const int h = zxc_seek_table_header(dst, dst_capacity, num_blocks);
+    if (UNLIKELY(h < 0)) return h;  // LCOV_EXCL_LINE
+    uint8_t* p = dst + h;
+
+    const size_t trailer = ZXC_BLOCK_HEADER_SIZE + (checksum_enabled ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    uint32_t sizes[ZXC_SEEK_GROUP];
+    uint64_t anchor = ZXC_FILE_HEADER_SIZE;
+    for (uint64_t g = 0; g < zxc_seek_group_count(num_blocks); g++) {
+        const uint32_t cnt = zxc_seek_group_len(num_blocks, g);
+        for (uint32_t k = 0; k < cnt; k++) {
+            sizes[k] = (uint32_t)(zxc_le32(blocks + 3) + trailer);  // comp_size at offset 3
+            blocks += sizes[k];
+        }
+        p += zxc_seek_write_group(p, &anchor, sizes, cnt);
+    }
+    return (int64_t)(p - dst);
 }
 
 /**
@@ -1070,6 +1105,7 @@ struct zxc_cctx_s {
     // Sticky options (remembered from create or last compress call).
     int stored_level;
     int stored_checksum;
+    int stored_seekable;
     size_t stored_block_size;
     int huf_cached;                        /* inner carries the table below */
     uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
@@ -1107,6 +1143,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     cctx->stored_level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
     cctx->stored_block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     cctx->stored_checksum = opts ? opts->checksum_enabled : 0;
+    cctx->stored_seekable = opts ? opts->seekable : 0;
 
     if (opts) {
         // LCOV_EXCL_START
@@ -1155,6 +1192,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(!dst || dst_capacity == 0 || (src_size > 0 && !src))) return ZXC_ERROR_NULL_INPUT;
 
     const int checksum_enabled = opts ? opts->checksum_enabled : cctx->stored_checksum;
+    const int seekable = opts ? opts->seekable : cctx->stored_seekable;
     const int level = ZXC_OPTS_LEVEL(opts, cctx->stored_level);
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, cctx->stored_block_size);
     // Dictionary options are never sticky: a remembered pointer would dangle.
@@ -1177,6 +1215,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_seekable = seekable;
 
     // The encoder sees [dict | block], so the carved chunk covers both.
     const size_t eff_chunk =
@@ -1187,7 +1226,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     // same writer as the one-shot, and the workspace is left alone.
     if (UNLIKELY(src_size == 0))
         return zxc_write_empty_frame((uint8_t*)dst, dst_capacity, block_size, checksum_enabled, did,
-                                     0);
+                                     seekable);
 
     // Re-init when the chunk changed, a level raise needs the optimal-parser
     // scratch, or a dictionary arrives on a context carved without its prefix.
@@ -1227,14 +1266,15 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     const uint8_t* const op_end = op + dst_capacity;
     const uint8_t* const ip = (const uint8_t*)src;
 
-    const int h_val =
-        zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled, did, 0);
+    const int h_val = zxc_write_file_header(op, (size_t)(op_end - op), block_size, checksum_enabled,
+                                            did, seekable);
     if (UNLIKELY(h_val < 0)) return h_val;  // LCOV_EXCL_LINE
     op += h_val;
 
     uint64_t digest = 0;
     size_t pos = 0;
-    for (uint64_t bi = 0; pos < src_size; bi++) {
+    uint64_t bi = 0;
+    for (; pos < src_size; bi++) {
         const size_t chunk_len = (src_size - pos > block_size) ? block_size : (src_size - pos);
         const size_t rem_cap = (size_t)(op_end - op);
 
@@ -1262,7 +1302,15 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(eof_val < 0)) return eof_val;  // LCOV_EXCL_LINE
     op += eof_val;
 
-    if (UNLIKELY(rem_cap < (size_t)eof_val + zxc_footer_bytes(checksum_enabled)))
+    // Seekable: the table goes between the EOF block and the footer.
+    if (seekable) {
+        const int64_t st_val = zxc_write_seek_table_from_frame(
+            op, (size_t)(op_end - op), op_start + h_val, bi, checksum_enabled);
+        if (UNLIKELY(st_val < 0)) return st_val;  // LCOV_EXCL_LINE
+        op += st_val;
+    }
+
+    if (UNLIKELY((size_t)(op_end - op) < zxc_footer_bytes(checksum_enabled)))
         return ZXC_ERROR_DST_TOO_SMALL;  // LCOV_EXCL_LINE
 
     const int footer_val =
@@ -1924,6 +1972,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     cctx->stored_level = level;
     cctx->stored_block_size = block_size;
     cctx->stored_checksum = checksum_enabled;
+    cctx->stored_seekable = opts->seekable;
     return cctx;
 }
 

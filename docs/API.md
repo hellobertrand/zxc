@@ -751,8 +751,9 @@ Automatically re-initializes when `block_size` or `level` changes. A zero
 `src_size` writes the empty archive, as `zxc_compress()` does, without carving
 the workspace. Dictionary options are honoured as in `zxc_compress()` but are
 not sticky; the shared literal table is rebuilt only when it changes. A static
-context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary. `seekable` is
-ignored here: use `zxc_compress()` when the archive needs a seek table.
+context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary. `seekable`
+appends the seek table as `zxc_compress()` does, read back from the block headers
+just written: no allocation, so a static context supports it too.
 
 ### `zxc_create_dctx`
 
