@@ -11,9 +11,13 @@ body { width: 1200px; height: 630px; box-sizing: border-box; background: #fff; c
 .tag { font-size: 28px; color: #555; margin-top: 8px; }
 hr { border: 0; border-top: 2px solid #ccc; margin: 44px 0 36px; }
 .rows { display: grid; gap: 18px; font-family: "Noto Sans Mono", monospace; font-size: 26px; }
-.row { display: grid; grid-template-columns: 170px 1fr 220px; align-items: center; gap: 20px; }
+.row { display: grid; grid-template-columns: 170px 1fr 220px 130px; align-items: center; gap: 20px; }
+.hdr { font-family: "Noto Sans", Arial, sans-serif; font-size: 20px; color: #555; }
+.pair { margin-top: 10px; }
 .bar { height: 26px; background: #9a9a9a; }
-.z .bar { background: #1f4e9c; }
+.z .bar { background: #0969da; }
+.l .bar { background: #a475f9; }
+.s .bar { background: #bc4c00; }
 .v { text-align: right; }
 .cap { margin-top: 26px; font-size: 22px; color: #555; }
 </style></head>
@@ -21,10 +25,11 @@ hr { border: 0; border-top: 2px solid #ccc; margin: 44px 0 36px; }
   <div class="head"><div class="name">ZXC</div><div class="tag">Lossless compression that decodes faster than LZ4, at a smaller size</div></div>
   <hr>
   <div class="rows">
-    <div class="row z"><span>zxc -3</span><div class="bar" style="width:100%"></div><span class="v">9,705 MB/s</span></div>
-    <div class="row"><span>lz4</span><div class="bar" style="width:49.2%"></div><span class="v">4,774 MB/s</span></div>
-    <div class="row z"><span>zxc -7</span><div class="bar" style="width:52.1%"></div><span class="v">5,053 MB/s</span></div>
-    <div class="row"><span>zstd -1</span><div class="bar" style="width:18.6%"></div><span class="v">1,803 MB/s</span></div>
+    <div class="row hdr"><span></span><span>Decompression speed</span><span></span><span class="v" style="white-space:nowrap; justify-self:end">Size (% of original)</span></div>
+    <div class="row z"><span>zxc -3</span><div class="bar" style="width:100%"></div><span class="v">9,705 MB/s</span><span class="v">46.65 %</span></div>
+    <div class="row l"><span>lz4</span><div class="bar" style="width:49.2%"></div><span class="v">4,774 MB/s</span><span class="v">47.60 %</span></div>
+    <div class="row z pair"><span>zxc -7</span><div class="bar" style="width:52.1%"></div><span class="v">5,053 MB/s</span><span class="v">33.09 %</span></div>
+    <div class="row s"><span>zstd -1</span><div class="bar" style="width:18.6%"></div><span class="v">1,803 MB/s</span><span class="v">34.53 %</span></div>
   </div>
-  <div class="cap">Decompression of silesia.tar on Apple M2 &nbsp; libzxc.org</div>
+  <div class="cap">silesia.tar on Apple M2, single thread &nbsp; libzxc.org</div>
 </body></html>

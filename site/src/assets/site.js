@@ -20,6 +20,35 @@
     });
   }
 
+  // GitHub star count in the header button: refresh the build-time figure,
+  // at most once an hour per browser.
+  var stars = document.querySelectorAll("[data-gh-stars]");
+  if (stars.length && window.fetch) {
+    var KEY = "zxc-gh-stars", HOUR = 3600 * 1000;
+    var show = function (n) {
+      stars.forEach(function (el) {
+        el.querySelector("[data-gh-stars-n]").textContent = el.hasAttribute("data-gh-compact")
+          ? (n < 1000 ? String(n) : (n / 1000).toFixed(1).replace(/\.0$/, "") + "k")
+          : n.toLocaleString("en-US");
+        el.hidden = false;
+      });
+    };
+    var cached = null;
+    try { cached = JSON.parse(localStorage.getItem(KEY)); } catch (e) { cached = null; }
+    if (cached && typeof cached.n === "number" && Date.now() - cached.t < HOUR) {
+      show(cached.n);
+    } else {
+      fetch("https://api.github.com/repos/hellobertrand/zxc")
+        .then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d || typeof d.stargazers_count !== "number") return;
+          show(d.stargazers_count);
+          try { localStorage.setItem(KEY, JSON.stringify({ n: d.stargazers_count, t: Date.now() })); } catch (e) {}
+        })
+        .catch(function () {});
+    }
+  }
+
   // Figure 1: switch processor without reloading.
   var fig = document.querySelector("[data-bench-figure]");
   if (fig) {

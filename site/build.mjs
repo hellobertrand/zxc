@@ -9,7 +9,7 @@
 //   include/zxc_constants.h   library version
 //   docs/*.md, docs/man/*.md  documentation pages
 //   docs/images/*             figures referenced by the docs
-//   CHANGELOG.md              changelog page
+//   CHANGELOG (or CHANGELOG.md in releases before the rename)  changelog page
 //   docs/Doxyfile.in, include/, src/lib/
 //                             Doxygen reference in /docs/doxygen/ (needs doxygen)
 //   site/src/**               landing page, styles, scripts, fonts, benchmark data
@@ -39,6 +39,9 @@ const BRANCH = process.env.SOURCE_BRANCH || "main";
 // ---------------------------------------------------------------------------
 // Documentation pages. Order here is the order in the sidebar and on /docs/.
 // ---------------------------------------------------------------------------
+// CHANGELOG since 0.15.0; older release tags, which CI may build from, have CHANGELOG.md.
+const CHANGELOG = existsSync(path.join(REPO, "CHANGELOG")) ? "CHANGELOG" : "CHANGELOG.md";
+
 const DOCS = [
   { group: "Guides", slug: "whitepaper", file: "docs/WHITEPAPER.md", title: "Whitepaper",
     blurb: "Why an asymmetric codec, how the bitstream is laid out, and where the speed comes from." },
@@ -54,10 +57,12 @@ const DOCS = [
     blurb: "The zxc(1) manual page: modes, options, exit codes." },
   { group: "Reference", slug: "format", file: "docs/FORMAT.md", title: "Format specification",
     blurb: "The on-disk wire format, precise enough to write an independent decoder." },
-  { group: "Project", slug: "changelog", file: "CHANGELOG.md", title: "Changelog",
+  { group: "Project", slug: "changelog", file: CHANGELOG, title: "Changelog",
     blurb: "What changed in each release." },
 ];
 const DOC_BY_FILE = new Map(DOCS.map((d) => [d.file, d]));
+// Links to either name reach the changelog page.
+for (const f of ["CHANGELOG", "CHANGELOG.md"]) DOC_BY_FILE.set(f, DOC_BY_FILE.get(CHANGELOG));
 
 // The Doxygen reference: generated HTML, listed on /docs/ but outside the page chain.
 // It has no link back to the site, so it opens in a new tab.
@@ -259,6 +264,9 @@ function makeMarkdown(doc) {
       // The sidebar already lists every section: drop hand-written TOCs.
       let src = md.replace(/^#{2,3}\s+(?:Table of Contents|Contents)\s*\n[\s\S]*?(?=^#{1,6}\s|^---\s*$)/im, "");
       if (doc.slug === "changelog") {
+        // The plain-text CHANGELOG has no Markdown headings: make each
+        // "[v0.15.0] - date" or "Unreleased" line a section.
+        src = src.replace(/^(\[v\d+\.\d+\.\d+\] - .*|Unreleased)$/gm, "## $1");
         // Link PR / issue references to GitHub.
         src = src.replace(/\(#(\d+)\)/g, `([#$1](${GH}/pull/$1))`);
       }
@@ -271,7 +279,7 @@ function makeMarkdown(doc) {
 // Content hashes for cache busting, so CSS/JS can be cached as immutable.
 const ASSET_V = { css: "", js: "" };
 // Filled in by build(): shown in the footer.
-const META = { version: "", releaseDate: "" };
+const META = { version: "", releaseDate: "", stars: null };
 
 // ---------------------------------------------------------------------------
 // Page chrome (GNU-style masthead, navigation bar and footer)
@@ -296,6 +304,7 @@ function header(active) {
       <p class="site-name"><a href="/">ZXC</a></p>
       <p class="site-tag">Asymmetric lossless compression, built for fast decoding</p>
     </div>
+    <a class="gh-button" href="${GH}" title="ZXC on GitHub"><svg viewBox="0 0 16 16" width="15" height="15" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg><span class="visually-hidden">GitHub</span><span class="gh-count" data-gh-stars data-gh-compact${META.stars === null ? " hidden" : ""}><span class="visually-hidden">, stars: </span><span data-gh-stars-n>${META.stars === null ? "" : compact(META.stars)}</span></span></a>
   </div>
   <nav class="navbar" aria-label="Main"><ul>${links}</ul></nav>
 </header>`;
@@ -409,7 +418,9 @@ function renderFigure(bench) {
       byCpuVal[c.id] = { html: `${fmt(row.dec)} MB/s` };
     }
     const f = byCpu[first.id], v = byCpuVal[first.id];
-    return `<div class="bar ${which === "zxc" ? "zxc" : "rival"}">
+    // Rivals take their family's colour, as in the SVG charts.
+    const family = name.startsWith("zstd") ? " zstd" : name.startsWith("lz4") ? " lz4" : "";
+    return `<div class="bar ${which === "zxc" ? "zxc" : "rival" + family}">
           <div class="bar-label"><span class="codec">${esc(name)}</span><span class="val" data-by-cpu='${JSON.stringify(byCpuVal)}'>${v.html}</span></div>
           <div class="track"><div class="fill" style="--w:${f.w}" data-by-cpu='${JSON.stringify(byCpu)}'></div></div>
         </div>`;
@@ -536,6 +547,24 @@ async function buildDoxygen(version) {
 // ---------------------------------------------------------------------------
 // Build
 // ---------------------------------------------------------------------------
+// 467 -> "467", 1234 -> "1.2k": the header button's compact form.
+const compact = (n) => (n < 1000 ? String(n) : `${(n / 1000).toFixed(1).replace(/\.0$/, "")}k`);
+
+// Star count at build time, so the header button reads right without JavaScript;
+// site.js refreshes it in the browser. Optional: an offline or rate-limited build omits it.
+async function githubStars() {
+  try {
+    const headers = { Accept: "application/vnd.github+json", "User-Agent": "libzxc.org-build" };
+    if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
+    const res = await fetch("https://api.github.com/repos/hellobertrand/zxc", { headers, signal: AbortSignal.timeout(5000) });
+    if (!res.ok) return null;
+    const n = (await res.json()).stargazers_count;
+    return Number.isInteger(n) ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 async function build() {
   const t0 = Date.now();
   if (!existsSync(path.join(REPO, "include/zxc_constants.h"))) {
@@ -550,8 +579,11 @@ async function build() {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error("Could not read version from include/zxc_constants.h");
   const formatVersion = ((await readRepo("docs/FORMAT.md")).match(/\*\*Format Version\*\*:\s*(\d+)/) || [])[1] || "";
   const bench = JSON.parse(await readFile(path.join(SRC, "data/benchmarks.json"), "utf8"));
-  const changelog = existsSync(path.join(REPO, "CHANGELOG.md")) ? await readRepo("CHANGELOG.md") : "";
-  const releaseDate = (changelog.match(new RegExp(`^## \\[${version.replace(/\./g, "\\.")}\\] - (\\d{4}-\\d{2}-\\d{2})`, "m")) || [])[1] || "";
+  const stars = await githubStars();
+  META.stars = stars;
+  const changelog = existsSync(path.join(REPO, CHANGELOG)) ? await readRepo(CHANGELOG) : "";
+  // "[v0.15.0] - date" (CHANGELOG) or "## [0.14.1] - date" (CHANGELOG.md).
+  const releaseDate = (changelog.match(new RegExp(`^(?:## )?\\[v?${version.replace(/\./g, "\\.")}\\] - (\\d{4}-\\d{2}-\\d{2})`, "m")) || [])[1] || "";
   META.version = version;
   META.releaseDate = releaseDate;
 
@@ -583,7 +615,7 @@ async function build() {
     .replace("{{BENCH_TABLES}}", () => renderBenchTables(bench))
     .replace("{{LEVELS_TABLE}}", () => renderLevels(bench));
   await write("/", layout({
-    title: "ZXC: lossless compression built for fast decode",
+    title: "ZXC - Lossless Compression with Ultra-Fast Decompression",
     description: "ZXC is a lossless compression C library for write-once, read-many data. It decodes faster than LZ4 at a smaller size, with seekable archives, dictionaries and SIMD on ARM and x86.",
     urlPath: "/",
     body: highlightHtml(landing),
