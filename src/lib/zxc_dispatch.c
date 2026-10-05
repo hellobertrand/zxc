@@ -591,17 +591,17 @@ static int64_t zxc_write_empty_frame(uint8_t* RESTRICT dst, const size_t dst_cap
 }
 
 /**
- * @brief Writes the seek table of the @p num_blocks data blocks starting at
- *        @p blocks, reading each block's on-disk size back from its header.
+ * @brief Writes the seek table of the @p num_blocks blocks in
+ *        [@p blocks, @p blocks_end), sizes read back from their headers.
  *
- * The context API cannot hold one size per block without allocating per call,
- * so it rereads the blocks it has just written instead: one header per block,
- * negligible next to encoding it. The headers are our own output, trusted as is.
+ * Rereading spares the context API a per-call allocation. The walk must land
+ * exactly on the EOF block, or @c dst changed under us.
  *
  * @return Bytes written, or a negative @ref zxc_error_t.
  */
 static int64_t zxc_write_seek_table_from_frame(uint8_t* RESTRICT dst, const size_t dst_capacity,
                                                const uint8_t* RESTRICT blocks,
+                                               const uint8_t* const blocks_end,
                                                const uint64_t num_blocks,
                                                const int checksum_enabled) {
     const size_t total = zxc_seek_table_size(num_blocks);
@@ -613,16 +613,23 @@ static int64_t zxc_write_seek_table_from_frame(uint8_t* RESTRICT dst, const size
     uint8_t* p = dst + h;
 
     const size_t trailer = ZXC_BLOCK_HEADER_SIZE + (checksum_enabled ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
-    uint32_t sizes[ZXC_SEEK_GROUP];
     uint64_t anchor = ZXC_FILE_HEADER_SIZE;
-    for (uint64_t g = 0; g < zxc_seek_group_count(num_blocks); g++) {
-        const uint32_t cnt = zxc_seek_group_len(num_blocks, g);
-        for (uint32_t k = 0; k < cnt; k++) {
-            sizes[k] = (uint32_t)(zxc_le32(blocks + 3) + trailer);  // comp_size at offset 3
-            blocks += sizes[k];
+    for (uint64_t i = 0; i < num_blocks; i++) {
+        if (i % ZXC_SEEK_GROUP == 0) {
+            zxc_store_le64(p, anchor);
+            p += ZXC_SEEK_ANCHOR_SIZE;
         }
-        p += zxc_seek_write_group(p, &anchor, sizes, cnt);
+        const size_t left = (size_t)(blocks_end - blocks);
+        if (UNLIKELY(left < ZXC_BLOCK_HEADER_SIZE))
+            return ZXC_ERROR_CORRUPT_DATA;                           // LCOV_EXCL_LINE
+        const size_t size = (size_t)zxc_le32(blocks + 3) + trailer;  // comp_size at offset 3
+        if (UNLIKELY(size > left)) return ZXC_ERROR_CORRUPT_DATA;    // LCOV_EXCL_LINE
+        zxc_store_le32(p, (uint32_t)size);
+        p += ZXC_SEEK_SIZE_ENTRY;
+        anchor += size;
+        blocks += size;
     }
+    if (UNLIKELY(blocks != blocks_end)) return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
     return (int64_t)(p - dst);
 }
 
@@ -1295,6 +1302,7 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
         pos += chunk_len;
     }
     // EOF block
+    uint8_t* const eof_at = op;
     const size_t rem_cap = (size_t)(op_end - op);
     const zxc_block_header_t eof_bh = {
         .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
@@ -1302,16 +1310,16 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
     if (UNLIKELY(eof_val < 0)) return eof_val;  // LCOV_EXCL_LINE
     op += eof_val;
 
-    // Seekable: the table goes between the EOF block and the footer.
+    // Seek table between the EOF block and the footer.
     if (seekable) {
         const int64_t st_val = zxc_write_seek_table_from_frame(
-            op, (size_t)(op_end - op), op_start + h_val, bi, checksum_enabled);
-        if (UNLIKELY(st_val < 0)) return st_val;  // LCOV_EXCL_LINE
+            op, (size_t)(op_end - op), op_start + h_val, eof_at, bi, checksum_enabled);
+        if (UNLIKELY(st_val < 0)) return st_val;
         op += st_val;
     }
 
     if (UNLIKELY((size_t)(op_end - op) < zxc_footer_bytes(checksum_enabled)))
-        return ZXC_ERROR_DST_TOO_SMALL;  // LCOV_EXCL_LINE
+        return ZXC_ERROR_DST_TOO_SMALL;
 
     const int footer_val =
         zxc_write_file_footer(op, (size_t)(op_end - op), src_size, digest, checksum_enabled);

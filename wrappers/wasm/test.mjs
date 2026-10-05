@@ -810,13 +810,28 @@ async function main() {
       }
       assert(tamperedRejected, "an over-long Dictionary.huf is refused");
 
-      let seekableRejected = false;
+      // A seekable context matches the one-shot and opens as seekable.
+      const seekOpts = { seekable: true, checksum: true };
+      const ccSeek = zxc.createCompressContext(seekOpts);
+      const cSeek = ccSeek.compress(payload);
+      ccSeek.free();
+      assert(
+        arraysEqual(cSeek, zxc.compress(payload, seekOpts)),
+        "seekable context matches the one-shot",
+      );
+      const sCtx = zxc.createSeekable(cSeek);
       try {
-        zxc.createCompressContext({ seekable: true });
-      } catch (e) {
-        seekableRejected = true;
+        const off = payload.length >> 2;
+        assert(
+          arraysEqual(
+            sCtx.decompressRange(off, off),
+            payload.subarray(off, 2 * off),
+          ),
+          "seekable context archive serves a range",
+        );
+      } finally {
+        sCtx.free();
       }
-      assert(seekableRejected, "compression context refuses seekable");
 
       const ccFreed = zxc.createCompressContext({ dict });
       ccFreed.free();

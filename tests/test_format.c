@@ -1090,8 +1090,8 @@ static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t 
 /* HAS_SEEK_TABLE announces the SEK block (Sec 3.1, 5.5), and every reader holds
  * the tail to it: a flag set over no table, or clear over one, is refused by the
  * four sequential readers and zxc_seekable_open alike. Writers set it for what
- * they write, not for what was asked: the context API ignores seekable. An empty
- * seekable archive carries an empty table and opens with 0 blocks. */
+ * they write, the context API included. An empty seekable archive carries an
+ * empty table and opens with 0 blocks. */
 int test_seek_flag_contract(void) {
     printf("=== TEST: Format - HAS_SEEK_TABLE matches the tail on every reader ===\n");
     const size_t n = 3 * 4096 + 7;
@@ -1183,7 +1183,7 @@ int test_seek_flag_contract(void) {
                 (long long)el, want, (long long)fl, same, opens);
     }
 
-    // The context API writes the table too: its header must promise it.
+    // The context API sets the flag and writes the table.
     if (ok) {
         const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
         zxc_cctx* const c = zxc_create_cctx(&so);

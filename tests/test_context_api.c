@@ -299,9 +299,8 @@ int test_context_api_seekable_frame(void) {
     return 1;
 }
 
-/* Compresses @p src through @p cctx with @p ctx_opts (NULL = sticky) and
- * through zxc_compress() with @p ref: the archives must match byte for byte,
- * and the context's must open as seekable and serve a range spanning blocks. */
+/* cctx with ctx_opts (NULL = sticky) and zxc_compress() with ref must write the
+ * same bytes, which must open as seekable and serve a range across blocks. */
 static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t* src,
                                  const size_t n, const zxc_compress_opts_t* ctx_opts,
                                  const zxc_compress_opts_t* ref) {
@@ -321,10 +320,17 @@ static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t
         goto done;
     }
     zxc_seekable* const s = zxc_seekable_open(b, (size_t)nb);
-    if (s && ref->dict) zxc_seekable_set_dict(s, ref->dict, ref->dict_size, ref->dict_huf);
     if (!s) {
         printf("  [FAIL] %s: zxc_seekable_open refused the context's archive\n", what);
         goto done;
+    }
+    if (ref->dict) {
+        const int rc = zxc_seekable_set_dict(s, ref->dict, ref->dict_size, ref->dict_huf);
+        if (rc != ZXC_OK) {
+            printf("  [FAIL] %s: zxc_seekable_set_dict returned %d\n", what, rc);
+            zxc_seekable_free(s);
+            goto done;
+        }
     }
     const size_t off = n / 3, len = n / 3;
     const int64_t r = len ? zxc_seekable_decompress_range(s, out, n, off, len) : 0;
@@ -341,9 +347,8 @@ done:
     return ok;
 }
 
-/* The context API used to drop .seekable silently, so the archive it wrote
- * had no seek table. It now rereads the block headers it has just written:
- * no per-call allocation, static contexts included. */
+/* The context API used to drop .seekable; it now writes the table without
+ * allocating, static contexts included. */
 int test_context_api_seekable_compress(void) {
     printf("=== TEST: Context API - seekable compression matches the one-shot ===\n");
     /* 74 blocks of 4 KB: two seek-table groups, the second one partial. */
@@ -389,10 +394,32 @@ int test_context_api_seekable_compress(void) {
 
     /* A static context cannot allocate: the table must still be written. */
     const size_t ws_size = zxc_static_cctx_workspace_size(4096, 3);
-    void* const ws = malloc(ws_size);
+    void* const ws = test_aligned_alloc(64, ws_size);
     cctx = ws ? zxc_init_static_cctx(ws, ws_size, &plain) : NULL;
     fails += !cctx || !cctx_seekable_matches("static context", cctx, src, n, NULL, &plain);
-    free(ws);
+
+    /* A cut through the seek table or the footer: both entry points refuse it. */
+    if (cctx) {
+        const size_t cap = (size_t)zxc_compress_bound(n);
+        uint8_t* const arc = malloc(cap);
+        const int64_t full = arc ? zxc_compress(src, n, arc, cap, &plain) : -1;
+        const size_t table = zxc_seek_table_size(74);
+        const size_t cuts[] = {1, ZXC_FILE_FOOTER_SIZE, ZXC_FILE_FOOTER_SIZE + 1,
+                               ZXC_FILE_FOOTER_SIZE + table - 1, ZXC_FILE_FOOTER_SIZE + table};
+        for (size_t i = 0; full > 0 && i < sizeof(cuts) / sizeof(cuts[0]); i++) {
+            const size_t c = (size_t)full - cuts[i];
+            const int64_t r1 = zxc_compress(src, n, arc, c, &plain);
+            const int64_t r2 = zxc_compress_cctx(cctx, src, n, arc, c, NULL);
+            if (r1 != ZXC_ERROR_DST_TOO_SMALL || r2 != r1) {
+                printf("  [FAIL] capacity %zu (archive %lld): one-shot %lld, context %lld\n", c,
+                       (long long)full, (long long)r1, (long long)r2);
+                fails++;
+            }
+        }
+        if (full <= 0) fails++;
+        free(arc);
+    }
+    test_aligned_free(ws);
     free(src);
 
     if (fails) return 0;

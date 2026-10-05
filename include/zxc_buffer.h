@@ -308,7 +308,8 @@ ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
  * @param[in]     opts         Compression options, or NULL for defaults.
  *                             @c level, @c block_size, @c checksum_enabled and
  *                             the dictionary fields are used; the shared table
- *                             is rebuilt only when it changes.
+ *                             is rebuilt only when it changes. @c seekable is
+ *                             ignored and not remembered.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
@@ -466,15 +467,16 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * raise returns @ref ZXC_ERROR_BAD_LEVEL instead, since the workspace cannot
  * grow.
  *
- * Options are **sticky**: values passed in @p opts are remembered and reused
- * on later calls that pass NULL, starting from those given to
- * zxc_create_cctx(). Levels above @ref ZXC_LEVEL_ULTRA are silently clamped.
+ * Options are **sticky**: each entry point remembers the options it uses for
+ * later calls that pass NULL, starting from zxc_create_cctx(): level,
+ * block_size, checksum_enabled and seekable here, the first three for
+ * zxc_compress_block(). Levels above @ref ZXC_LEVEL_ULTRA are silently clamped.
  * Dictionary options are the exception: honoured as in zxc_compress() but
  * never remembered, so pass them on every call; the shared table is rebuilt
  * only when it changes. A static context returns
  * @ref ZXC_ERROR_DICT_UNSUPPORTED for any dictionary. @c seekable appends the
- * seek table as zxc_compress() does, read back from the block headers just
- * written: no allocation, so a static context supports it too.
+ * seek table as zxc_compress() does, without allocating, static contexts
+ * included.
  *
  * @param[in,out] cctx         Reusable compression context.
  * @param[in]     src          Source data; may be NULL when @p src_size is 0.

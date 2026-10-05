@@ -34,6 +34,24 @@
  * Returns a FILE* opened for writing, or NULL on failure. */
 FILE* create_restricted_file(const char* path);
 
+/* --- Aligned allocation ------------------------------------------------- */
+
+/* Static-context workspaces must be cache-line (64-byte) aligned. */
+#if defined(_WIN32)
+#include <malloc.h>
+static inline void* test_aligned_alloc(size_t alignment, size_t size) {
+    return _aligned_malloc(size, alignment);
+}
+static inline void test_aligned_free(void* p) { _aligned_free(p); }
+#else
+static inline void* test_aligned_alloc(size_t alignment, size_t size) {
+    void* p = NULL;
+    if (posix_memalign(&p, alignment, size) != 0) return NULL;
+    return p;
+}
+static inline void test_aligned_free(void* p) { free(p); }
+#endif
+
 /* --- Deterministic PRNG ------------------------------------------------- */
 
 /* Test-only pseudorandom generator (splitmix64). Used purely to synthesize

@@ -577,24 +577,20 @@ export default async function createZXC(moduleOverrides, factory) {
    * @param {object} [opts] - Default options.
    * @param {number} [opts.level=3] - Default compression level.
    * @param {boolean} [opts.checksum=false] - Default checksum setting.
+   * @param {boolean} [opts.seekable=false] - Append a seek table to every archive.
    * @param {Dictionary|Uint8Array} [opts.dict] - Dictionary used by every
    *   compress() call; the decoder must be given the same one.
    * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table.
-   * @throws If `opts.seekable` is set: this API writes no seek table.
    * @returns {{ compress: Function, free: Function }}
    */
   function createCompressContext(opts) {
     const level = (opts && opts.level) || _default_level();
     const checksum = (opts && opts.checksum) || false;
-    // zxc_compress_cctx writes no seek table: refuse rather than drop it.
-    if (opts && opts.seekable)
-      throw new Error(
-        "ZXC: seekable is not supported on a compression context",
-      );
+    const seekable = (opts && opts.seekable) || false;
 
     // The options struct and the dictionary copies live as long as the context.
     let { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
-      _writeCompressOpts(level, checksum, false, d, n, h),
+      _writeCompressOpts(level, checksum, seekable, d, n, h),
     );
     let cctx = _create_cctx(optsPtr);
 

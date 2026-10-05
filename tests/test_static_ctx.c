@@ -7,21 +7,6 @@
 
 #include "test_common.h"
 
-#if defined(_WIN32)
-#include <malloc.h>
-static void* test_aligned_alloc(size_t alignment, size_t size) {
-    return _aligned_malloc(size, alignment);
-}
-static void test_aligned_free(void* p) { _aligned_free(p); }
-#else
-static void* test_aligned_alloc(size_t alignment, size_t size) {
-    void* p = NULL;
-    if (posix_memalign(&p, alignment, size) != 0) return NULL;
-    return p;
-}
-static void test_aligned_free(void* p) { free(p); }
-#endif
-
 /* Helper: produce a deterministic compressible payload. */
 static void fill_payload(uint8_t* dst, size_t n) {
     for (size_t i = 0; i < n; ++i) dst[i] = (uint8_t)((i * 31U) ^ (i >> 8));
