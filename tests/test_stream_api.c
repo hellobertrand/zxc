@@ -431,6 +431,21 @@ cleanup:
     return result;
 }
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+// Reads endless zeros and seeks anywhere, but once at the end no longer tells where.
+static int read_zeros(void* cookie, char* buf, const int len) {
+    (void)cookie;
+    memset(buf, 0, (size_t)len);
+    return len;
+}
+static fpos_t tell_fails_after_end(void* cookie, const fpos_t off, const int whence) {
+    int* const at_end = (int*)cookie;
+    if (whence == SEEK_END) *at_end = 1;
+    if (whence == SEEK_CUR && *at_end) return -1;
+    return whence == SEEK_END ? 100 + off : off;
+}
+#endif
+
 int test_stream_get_decompressed_size_errors() {
     printf("=== TEST: Unit - zxc_stream_get_decompressed_size Error Codes ===\n");
 
@@ -461,6 +476,24 @@ int test_stream_get_decompressed_size_errors() {
         fclose(f);
     }
     printf("  [PASS] file too small -> ZXC_ERROR_SRC_TOO_SMALL\n");
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+    // 2b. A stream that seeks to its end but cannot tell where that is: an I/O
+    //     error, never a read sized by the failed tell.
+    {
+        static int tell_after_end = 0;
+        tell_after_end = 0;
+        FILE* f = funopen(&tell_after_end, read_zeros, NULL, tell_fails_after_end, NULL);
+        zxc_frame_info_t fi;
+        const int rc = f ? zxc_stream_get_frame_info(f, &fi, sizeof(fi)) : ZXC_ERROR_IO;
+        if (f) fclose(f);
+        if (!f || rc != ZXC_ERROR_IO) {
+            printf("  [FAIL] failed tell: expected %d, got %d\n", ZXC_ERROR_IO, rc);
+            return 0;
+        }
+    }
+    printf("  [PASS] failed tell -> ZXC_ERROR_IO\n");
+#endif
 
     // 3. Bad magic word
     {

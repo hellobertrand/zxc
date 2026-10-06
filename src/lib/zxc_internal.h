@@ -2253,7 +2253,18 @@ int zxc_parse_file_footer(const uint8_t* end, size_t avail, uint64_t* src_size,
                           uint64_t* compressed_size, size_t* sizes_len);
 
 /** @brief Most bytes a footer spans: the digest and the two longest sizes. */
-#define ZXC_FOOTER_TAIL_MAX (ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE)
+#define ZXC_FOOTER_MAX_SIZE_WITH_DIGEST (ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE)
+
+/** @brief Smallest frame: header, the EOF block and the shortest footer. */
+#define ZXC_FRAME_MIN_SIZE (ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE)
+
+/** @brief Bytes zxc_read_frame_info() takes from the end of @p total bytes, at
+ *  least @ref ZXC_FRAME_MIN_SIZE: all of them past the header and EOF block, up
+ *  to @ref ZXC_FOOTER_MAX_SIZE_WITH_DIGEST. */
+static inline size_t zxc_frame_tail_len(const uint64_t total) {
+    const uint64_t body = total - (ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE);
+    return body < ZXC_FOOTER_MAX_SIZE_WITH_DIGEST ? (size_t)body : ZXC_FOOTER_MAX_SIZE_WITH_DIGEST;
+}
 
 /**
  * @brief Validates a frame from its header and the end of its bytes: the one
@@ -2261,7 +2272,7 @@ int zxc_parse_file_footer(const uint8_t* end, size_t avail, uint64_t* src_size,
  *
  * @param[in]  header     The first @ref ZXC_FILE_HEADER_SIZE bytes.
  * @param[in]  tail       The last @p tail_len bytes, @p tail_len being
- *                        min(@p total - header - EOF block, @ref ZXC_FOOTER_TAIL_MAX).
+ *                        @ref zxc_frame_tail_len of @p total.
  * @param[in]  total      Bytes of the whole input.
  * @param[out] info       Filled on success.
  * @param[out] footer_len Footer bytes, digest included; may be NULL.
@@ -2328,11 +2339,21 @@ static ZXC_ALWAYS_INLINE int zxc_seek_header_ok(const uint8_t* hdr, const uint64
  * @brief Checks the SEK block header on the @p avail bytes present, like
  *        @ref zxc_check_file_footer: type and size field first, all of it at 8.
  *
+ * The @p prefix bytes before it and @p has_checksum give the footer the frame
+ * would end with if it had no table: when that footer is shorter than a block
+ * header and stands where the header should, the flag lies. A SEK header written
+ * with its reserved bytes at zero never starts with such a footer.
+ *
  * @return @ref ZXC_OK, @ref ZXC_ERROR_CORRUPT_DATA or @ref ZXC_ERROR_SRC_TOO_SMALL.
  */
 static ZXC_ALWAYS_INLINE int zxc_check_seek_header(const uint8_t* hdr, const size_t avail,
-                                                   const uint64_t total_out,
-                                                   const size_t block_size, uint64_t* sek_bytes) {
+                                                   const uint64_t prefix, const uint64_t total_out,
+                                                   const size_t block_size, const int has_checksum,
+                                                   uint64_t* sek_bytes) {
+    const zxc_footer_layout_t l = zxc_footer_layout(prefix, total_out, has_checksum);
+    if (l.len < ZXC_BLOCK_HEADER_SIZE && avail >= l.len &&
+        zxc_check_file_footer(hdr, l.len, &l, total_out, NULL) == ZXC_OK)
+        return ZXC_ERROR_CORRUPT_DATA;
     if (avail >= ZXC_BLOCK_HEADER_SIZE)
         return zxc_seek_header_ok(hdr, total_out, block_size, sek_bytes) ? ZXC_OK
                                                                          : ZXC_ERROR_CORRUPT_DATA;

@@ -276,7 +276,7 @@ int test_buffer_error_codes() {
             free(src);
             free(full_dst);
         } else {
-            // EOF header(8) + footer(8) = 16 bytes at the end.
+            // The tail: EOF block (8), then a footer of 3 to 17 bytes.
             // Try with a buffer that's just a few bytes too small.
             const size_t tight = (size_t)full_sz - 5;
             uint8_t* tight_dst = malloc(tight);
@@ -1372,6 +1372,21 @@ done:
 
 /* zxc_get_frame_info and its FILE* twin: every field against what the archive
  * was built with, the same answer from both, and nothing written on failure. */
+/* Every byte of @p x is a field or zero: no stack bytes leak through the padding. */
+static int frame_info_padding_zero(const zxc_frame_info_t* x) {
+    zxc_frame_info_t e;
+    memset(&e, 0, sizeof(e));
+    e.decompressed_size = x->decompressed_size;
+    e.compressed_size = x->compressed_size;
+    e.digest = x->digest;
+    e.block_size = x->block_size;
+    e.dict_id = x->dict_id;
+    e.format_version = x->format_version;
+    e.has_checksum = x->has_checksum;
+    e.has_seek_table = x->has_seek_table;
+    return memcmp(&e, x, sizeof(e)) == 0;
+}
+
 static int frame_info_same(const zxc_frame_info_t* a, const zxc_frame_info_t* b) {
     return a->decompressed_size == b->decompressed_size &&
            a->compressed_size == b->compressed_size && a->digest == b->digest &&
@@ -1400,8 +1415,8 @@ int test_frame_info(void) {
         }
         const int64_t n = zxc_compress(src, N, arc, cap, &co);
         zxc_frame_info_t a, b;
-        memset(&a, 0, sizeof(a));
-        memset(&b, 0, sizeof(b));
+        memset(&a, 0xFF, sizeof(a));
+        memset(&b, 0xFF, sizeof(b));
         const int ra = n > 0 ? zxc_get_frame_info(arc, (size_t)n, &a, sizeof(a)) : -1;
         FILE* const f = tmpfile();
         int rb = -1;
@@ -1415,6 +1430,7 @@ int test_frame_info(void) {
             co.checksum_enabled && n > 0 ? zxc_le64(arc + n - test_footer_len(arc, (size_t)n)) : 0;
         const uint32_t did = v == 2 ? zxc_get_dict_id(arc, (size_t)n) : 0;
         if (ra != ZXC_OK || rb != ZXC_OK || pos != 5 || !frame_info_same(&a, &b) ||
+            !frame_info_padding_zero(&a) || !frame_info_padding_zero(&b) ||
             a.decompressed_size != N || a.compressed_size != (uint64_t)n || a.digest != digest ||
             a.block_size != 8192 || a.dict_id != did || (v == 2 && did == 0) ||
             a.format_version != ZXC_FILE_FORMAT_VERSION || a.has_checksum != (v >= 1) ||
@@ -1556,21 +1572,43 @@ int test_footer_strictness(void) {
     }
 
     /* 3. HAS_SEEK_TABLE set with no table: corrupt data, with or without the
-     *    digest that makes the footer longer than a SEK header. */
-    for (int cs = 0; cs <= 1 && ok; cs++) {
-        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = cs};
-        const int64_t m = zxc_compress(src, sizeof(src), bad, sizeof(bad), &co);
-        if (m <= 0) {
+     *    digest that makes the footer longer than a SEK header. 254 bytes start
+     *    the footer with 0xFE, the SEK block type. */
+    static const char* const lie[] = {"flag without table", "flag without table, checksums",
+                                      "flag without table, footer 0xFE"};
+    uint8_t runs[254];
+    memset(runs, 'a', sizeof(runs));
+    for (int k = 0; k < 3 && ok; k++) {
+        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = k == 1};
+        const int64_t m = k < 2 ? zxc_compress(src, sizeof(src), bad, sizeof(bad), &co)
+                                : zxc_compress(runs, sizeof(runs), bad, sizeof(bad), &co);
+        if (m <= 0 || (k == 2 && bad[m - 3] != ZXC_BLOCK_SEK)) {
+            printf("  [FAIL] %s: unexpected frame\n", lie[k]);
             ok = 0;
             break;
         }
         bad[6] |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
         zxc_file_header_sign(bad);
-        ok = all_decoders_say(cs ? "flag without table, checksums" : "flag without table", bad,
-                              (size_t)m, ZXC_ERROR_CORRUPT_DATA);
+        ok = all_decoders_say(lie[k], bad, (size_t)m, ZXC_ERROR_CORRUPT_DATA);
     }
 
-    /* 4. Short junk: the header speaks first, from a buffer or a file. */
+    /* 4. Cut shorter than the smallest frame: decode and probe agree. */
+    if (ok && n > 0) {
+        static uint8_t out[1024];
+        zxc_dctx* const dctx = zxc_create_dctx();
+        const int64_t r[] = {zxc_decompress(arc, 20, out, sizeof(out), NULL),
+                             zxc_decompress(arc, 20, NULL, 0, NULL),
+                             zxc_decompress_dctx(dctx, arc, 20, out, sizeof(out), NULL),
+                             zxc_decompress_dctx(dctx, arc, 20, NULL, 0, NULL)};
+        zxc_free_dctx(dctx);
+        for (size_t k = 0; k < 4; k++)
+            if (r[k] != ZXC_ERROR_SRC_TOO_SMALL) {
+                printf("  [FAIL] 20 bytes, call %zu: %lld\n", k, (long long)r[k]);
+                ok = 0;
+            }
+    }
+
+    /* 5. Short junk: the header speaks first, from a buffer or a file. */
     for (size_t len = 16; ok && len <= 26; len += 5) {
         uint8_t junk[26] = {0};
         zxc_frame_info_t fi;

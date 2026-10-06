@@ -1156,7 +1156,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                   : !checksum_enabled          ? "not verified (skipped by -N)"
                                   : (archive_has_checksum > 0) ? "verified (RapidHash)"
                                   : use_stdin                  ? "unknown (streamed input)"
-                                                               : "unknown (header unreadable)";
+                                                               : "unknown (frame unreadable)";
             if (json_output) {
                 printf(
                     "{\n"

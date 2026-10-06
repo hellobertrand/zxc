@@ -162,9 +162,8 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(src->size <
                  ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE))
         return NULL;
-    uint8_t foot[ZXC_FOOTER_TAIL_MAX];
-    const uint64_t avail = src->size - (ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE);
-    const size_t want = avail < sizeof(foot) ? (size_t)avail : sizeof(foot);
+    uint8_t foot[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
+    const size_t want = zxc_frame_tail_len(src->size);
     if (UNLIKELY(zxc_seek_source_read(src, foot, want, src->size - want) != ZXC_OK)) return NULL;
     zxc_frame_info_t fi;
     size_t footer_len = 0;

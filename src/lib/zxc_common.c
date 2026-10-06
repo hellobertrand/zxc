@@ -568,6 +568,7 @@ int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, const size_t
     if (UNLIKELY(frame != total || !zxc_footer_dsize_plausible(stored, chunk, total)))
         return ZXC_ERROR_CORRUPT_DATA;
 
+    ZXC_MEMSET(info, 0, sizeof(*info));  // padding too: zxc_frame_info_copy() hands it out
     info->decompressed_size = stored;
     info->compressed_size = frame;
     info->digest = cs ? zxc_le64(tail + tail_len - flen) : 0;
@@ -726,7 +727,7 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  */
 int zxc_check_file_footer(const uint8_t* footer, const size_t avail, const zxc_footer_layout_t* l,
                           const uint64_t src_size, uint64_t* digest) {
-    uint8_t want[ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE];
+    uint8_t want[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
     zxc_encode_footer(want, l, src_size, 0);
     const size_t n = avail < l->len ? avail : l->len;
     if (n > l->skip && memcmp(footer + l->skip, want + l->skip, n - l->skip) != 0)
@@ -735,6 +736,7 @@ int zxc_check_file_footer(const uint8_t* footer, const size_t avail, const zxc_f
     if (digest) *digest = l->skip ? zxc_le64(footer) : 0;
     return ZXC_OK;
 }
+
 /**
  * @brief Parses the two sizes back from the end of a frame.
  *
@@ -762,6 +764,7 @@ int zxc_parse_file_footer(const uint8_t* end, const size_t avail, uint64_t* src_
     *sizes_len = need;
     return ZXC_OK;
 }
+
 /**
  * @brief Writes the 12-byte GLO/GHI sub-header shared by both block types.
  *
@@ -911,10 +914,10 @@ uint64_t zxc_compress_bound(const size_t input_size) {
     if (n == 0) n = 1;
     return ZXC_FILE_HEADER_SIZE +
            (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_FORMAT_OVERHEAD)) +
-           (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE +   /* EOF block */
-           ZXC_BLOCK_HEADER_SIZE +                          /* SEK block header (seekable) */
-           zxc_seek_table_bytes(n) +                        /* SEK groups (seekable) */
-           ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE; /* optional digest + footer */
+           (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
+           ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
+           zxc_seek_table_bytes(n) +                      /* SEK groups (seekable) */
+           ZXC_FOOTER_MAX_SIZE_WITH_DIGEST;               /* optional digest + footer */
 }
 
 /**

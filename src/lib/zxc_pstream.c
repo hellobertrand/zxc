@@ -300,9 +300,9 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     }
     // LCOV_EXCL_STOP
     // Pre-size pending so the file header and footer paths never need realloc.
-    cs->pending_cap = ZXC_FILE_HEADER_SIZE > ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE
+    cs->pending_cap = ZXC_FILE_HEADER_SIZE > ZXC_FOOTER_MAX_SIZE_WITH_DIGEST
                           ? ZXC_FILE_HEADER_SIZE
-                          : ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE;
+                          : ZXC_FOOTER_MAX_SIZE_WITH_DIGEST;
     cs->pending = (uint8_t*)ZXC_MALLOC(cs->pending_cap);
     // LCOV_EXCL_START
     if (UNLIKELY(!cs->pending)) {
@@ -639,7 +639,7 @@ typedef enum {
  *      Seek-table flag declared by the file header.
  * @var zxc_dstream_s::scratch
  *      Generic 32-byte accumulator for the file header, block headers and the
- *      footer; must hold the largest, a footer of @ref ZXC_FOOTER_TAIL_MAX (25).
+ *      footer; must hold the largest, a footer of @ref ZXC_FOOTER_MAX_SIZE_WITH_DIGEST (25).
  * @var zxc_dstream_s::scratch_used
  *      Number of bytes currently held in @c scratch.
  * @var zxc_dstream_s::scratch_need
@@ -1046,8 +1046,9 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_NEED_SEK_HEADER: {
                 // Checked as bytes arrive: a wrong header fails without waiting.
                 const int full = ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in);
-                const int rc = zxc_check_seek_header(ds->scratch, ds->scratch_used, ds->total_out,
-                                                     ds->block_size, &ds->sek_remaining);
+                const int rc = zxc_check_seek_header(ds->scratch, ds->scratch_used, ds->frame_in,
+                                                     ds->total_out, ds->block_size,
+                                                     ds->file_has_checksum, &ds->sek_remaining);
                 if (UNLIKELY(rc == ZXC_ERROR_CORRUPT_DATA)) return ds_set_error(ds, rc);
                 if (!full) return (int64_t)produced;
                 ds->frame_in += ZXC_BLOCK_HEADER_SIZE + ds->sek_remaining;

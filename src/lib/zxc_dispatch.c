@@ -786,57 +786,25 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, size_t 
                                      const zxc_decompress_opts_t* opts, int inplace);
 
 /**
- * @brief The frame check of zxc_read_frame_info() on a whole buffer: header
- *        first, then the footer read from the end.
+ * @brief Validates a frame without decoding it: the check of
+ *        zxc_read_frame_info() on a whole buffer, header first.
+ *
+ * The footer's compressed size must be the whole input: one frame, starting at
+ * offset 0. Each caller adds its own policy on the result.
  *
  * @param[out] footer_len Footer bytes, digest included; may be NULL.
  */
 static int zxc_buffer_frame_info(const uint8_t* src, const size_t src_size, zxc_frame_info_t* info,
                                  size_t* footer_len) {
-    // The smallest archive: header, the mandatory EOF block, then the footer.
-    const size_t body = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE;
-    if (UNLIKELY(src_size < body + ZXC_FILE_FOOTER_MIN_SIZE)) {
+    if (UNLIKELY(!src)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE)) {
         size_t chunk = 0;
         const int hrc = zxc_read_file_header(src, src_size, &chunk, NULL, NULL, NULL);
         return hrc != ZXC_OK ? hrc : ZXC_ERROR_SRC_TOO_SMALL;
     }
-    const size_t tail =
-        src_size - body < ZXC_FOOTER_TAIL_MAX ? src_size - body : ZXC_FOOTER_TAIL_MAX;
+    const size_t tail = zxc_frame_tail_len(src_size);
     return zxc_read_frame_info(src, src + src_size - tail, tail, (uint64_t)src_size, info,
                                footer_len);
-}
-
-/**
- * @brief Validates a frame envelope without decoding it: file header, then the
- *        footer parsed back from the end.
- *
- * What every reader must clear before trusting an archive; each caller adds its
- * own policy: what to do with the size, which codes to surface. The footer's
- * compressed size must be the whole input: one frame, starting at offset 0.
- *
- * @param[in]  src        Archive bytes.
- * @param[in]  src_size   Archive size in bytes.
- * @param[out] dsize      Stored decompressed size.
- * @param[out] chunk_size Block size declared by the header, or NULL.
- * @param[out] has_cs     Set when the archive carries checksums, or NULL.
- * @param[out] has_seek   Set when the header announces a seek table, or NULL.
- * @param[out] footer_len Footer bytes, digest included, or NULL.
- * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
- */
-static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src_size,
-                                   uint64_t* RESTRICT dsize, size_t* RESTRICT chunk_size,
-                                   int* RESTRICT has_cs, int* RESTRICT has_seek,
-                                   size_t* RESTRICT footer_len) {
-    if (UNLIKELY(!src)) return ZXC_ERROR_NULL_INPUT;
-    zxc_frame_info_t info;
-    const int rc = zxc_buffer_frame_info(src, src_size, &info, footer_len);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-
-    *dsize = info.decompressed_size;
-    if (chunk_size) *chunk_size = info.block_size;
-    if (has_cs) *has_cs = info.has_checksum;
-    if (has_seek) *has_seek = info.has_seek_table;
-    return ZXC_OK;
 }
 
 /**
@@ -850,10 +818,10 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
  * @return @ref ZXC_OK to keep walking, or the code to hand back.
  */
 static int zxc_probe_reject_payload(const uint8_t* RESTRICT src, const size_t src_size) {
-    uint64_t dsize = 0;
-    const int rc = zxc_read_frame_envelope(src, src_size, &dsize, NULL, NULL, NULL, NULL);
+    zxc_frame_info_t info;
+    const int rc = zxc_buffer_frame_info(src, src_size, &info, NULL);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
-    return (dsize != 0) ? ZXC_ERROR_DST_TOO_SMALL : ZXC_OK;
+    return (info.decompressed_size != 0) ? ZXC_ERROR_DST_TOO_SMALL : ZXC_OK;
 }
 
 /**
@@ -882,8 +850,7 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
                        const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!src || (!dst && dst_capacity != 0))) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size, opts);
 
@@ -941,8 +908,8 @@ static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size
  * and @ref zxc_decompress_inplace always agree on what a buffer of at least
  * the bound must satisfy.
  *
- * The envelope is untrusted, so it goes through @ref zxc_read_frame_envelope
- * like @ref zxc_get_decompressed_size does; only the error mapping differs.
+ * The envelope is untrusted, so it goes through zxc_buffer_frame_info() like
+ * @ref zxc_get_decompressed_size does; only the error mapping differs.
  *
  * @param[in]  comp      Compressed archive; only the header and footer are read.
  * @param[in]  comp_size Size of the archive in bytes. The caller guarantees it
@@ -955,23 +922,20 @@ static uint64_t zxc_inplace_margin(const uint64_t dsize, const size_t chunk_size
  */
 static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64_t* dsize,
                              uint64_t* margin, uint64_t* floor) {
-    size_t chunk_size = 0;
-    int has_cs = 0;
-    int has_seek = 0;
+    zxc_frame_info_t info;
     size_t footer_len = 0;
-    uint64_t d = 0;
 
     // Own mapping: only a wrong magic word and a forged footer keep their code,
     // everything else reads as a bad header.
-    const int rc =
-        zxc_read_frame_envelope(comp, comp_size, &d, &chunk_size, &has_cs, &has_seek, &footer_len);
+    const int rc = zxc_buffer_frame_info(comp, comp_size, &info, &footer_len);
     if (UNLIKELY(rc != ZXC_OK))
         return (rc == ZXC_ERROR_BAD_MAGIC || rc == ZXC_ERROR_CORRUPT_DATA) ? rc
                                                                            : ZXC_ERROR_BAD_HEADER;
 
-    *dsize = d;
-    *margin = zxc_inplace_margin(d, chunk_size, has_cs, has_seek, footer_len);
-    *floor = (uint64_t)chunk_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
+    *dsize = info.decompressed_size;
+    *margin = zxc_inplace_margin(info.decompressed_size, info.block_size, info.has_checksum,
+                                 info.has_seek_table, footer_len);
+    *floor = (uint64_t)info.block_size + (uint64_t)ZXC_DECOMPRESS_TAIL_PAD;
     return ZXC_OK;
 }
 
@@ -992,7 +956,7 @@ static int zxc_inplace_probe(const uint8_t* comp, const size_t comp_size, uint64
  */
 // cppcheck-suppress unusedFunction
 size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
-    if (UNLIKELY(!src || src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE)) return 0;
+    if (UNLIKELY(!src || src_size < ZXC_FRAME_MIN_SIZE)) return 0;
     uint64_t dsize = 0;
     uint64_t margin = 0;
     uint64_t floor = 0;
@@ -1024,8 +988,7 @@ size_t zxc_decompress_inplace_bound(const void* src, const size_t src_size) {
 static int zxc_inplace_prepare(const void* buffer, const size_t buffer_capacity,
                                const size_t comp_size, const zxc_decompress_opts_t* opts,
                                const uint8_t** comp) {
-    if (UNLIKELY(!buffer || comp_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE ||
-                 comp_size > buffer_capacity))
+    if (UNLIKELY(!buffer || comp_size < ZXC_FRAME_MIN_SIZE || comp_size > buffer_capacity))
         return ZXC_ERROR_NULL_INPUT;
     const uint8_t* const c = (const uint8_t*)buffer + (buffer_capacity - comp_size);
     uint64_t dsize = 0;
@@ -1068,15 +1031,14 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
  * @brief Reads the decompressed size from a ZXC-compressed buffer.
  *
  * The size sits in the file footer, parsed back from the end, and is
- * untrusted, so it goes through @ref zxc_read_frame_envelope(): an envelope that
+ * untrusted, so it goes through zxc_buffer_frame_info(): an envelope that
  * does not hold up returns 0, and callers sizing an allocation inherit the check.
  */
 uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
-    uint64_t dsize = 0;
-    if (UNLIKELY(zxc_read_frame_envelope((const uint8_t*)src, src_size, &dsize, NULL, NULL, NULL,
-                                         NULL) != ZXC_OK))
+    zxc_frame_info_t info;
+    if (UNLIKELY(zxc_buffer_frame_info((const uint8_t*)src, src_size, &info, NULL) != ZXC_OK))
         return 0;
-    return dsize;
+    return info.decompressed_size;
 }
 
 /**
@@ -1103,7 +1065,7 @@ uint32_t zxc_get_dict_id(const void* src, const size_t src_size) {
 // cppcheck-suppress unusedFunction
 int zxc_get_frame_info(const void* src, const size_t src_size, zxc_frame_info_t* info,
                        const size_t info_size) {
-    if (UNLIKELY(!src || !info)) return ZXC_ERROR_NULL_INPUT;
+    if (UNLIKELY(!info)) return ZXC_ERROR_NULL_INPUT;
     zxc_frame_info_t got;
     const int rc = zxc_buffer_frame_info((const uint8_t*)src, src_size, &got, NULL);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
@@ -1425,8 +1387,7 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                             const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!dctx || !src || (!dst && dst_capacity != 0))) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE))
-        return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_dctx_probe(dctx, src, src_size, opts);
     return zxc_dctx_decode_frame(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity,
                                  opts, 0);
@@ -1559,8 +1520,9 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             size_t pos = (size_t)(ip - src) + ZXC_BLOCK_HEADER_SIZE;
             if (file_has_seek) {
                 uint64_t sek_bytes = 0;
-                const int src_rc = zxc_check_seek_header(src + pos, src_size - pos, total_out,
-                                                         runtime_chunk_size, &sek_bytes);
+                const int src_rc =
+                    zxc_check_seek_header(src + pos, src_size - pos, pos, total_out,
+                                          runtime_chunk_size, file_has_checksums, &sek_bytes);
                 if (UNLIKELY(src_rc != ZXC_OK)) return src_rc;
                 pos += ZXC_BLOCK_HEADER_SIZE;
                 if (UNLIKELY(sek_bytes > (uint64_t)(src_size - pos)))
