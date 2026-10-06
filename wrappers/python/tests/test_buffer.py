@@ -24,7 +24,6 @@ def test_compress_invalid_type(data):
         zxc.compress(data)
 
 
-
 def _footer_len(arc):
     """Footer bytes of a checksummed archive: digest, the two sizes, lengths."""
     lens = arc[-1]
@@ -33,6 +32,7 @@ def _footer_len(arc):
 
 def _flip(arc, at):
     return arc[:at] + bytes([arc[at] ^ 1]) + arc[at + 1 :]
+
 
 @pytest.mark.parametrize(
     "data,corrupt_func,exc",

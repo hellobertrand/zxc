@@ -2185,6 +2185,7 @@ static ZXC_ALWAYS_INLINE size_t zxc_uint_bytes(const uint64_t v) {
 
 /** @brief Where a frame's footer lies, from what precedes it. */
 typedef struct {
+    size_t skip;              /**< Digest bytes ahead of the sizes, 0 or 8. */
     size_t nd;                /**< Bytes of original_size. */
     size_t nf;                /**< Bytes of compressed_size. */
     size_t len;               /**< Footer bytes, digest included. */
@@ -2201,12 +2202,13 @@ static ZXC_ALWAYS_INLINE zxc_footer_layout_t zxc_footer_layout(const uint64_t pr
                                                                const uint64_t src_size,
                                                                const int checksum_enabled) {
     zxc_footer_layout_t l;
+    l.skip = checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U;
     l.nd = zxc_uint_bytes(src_size);
-    const uint64_t base = prefix + (checksum_enabled ? ZXC_FILE_DIGEST_SIZE : 0U) + l.nd + 1;
+    const uint64_t base = prefix + l.skip + l.nd + 1;
     l.nf = 1;
     while (zxc_uint_bytes(base + l.nf) > l.nf) l.nf++;
     l.compressed_size = base + l.nf;
-    l.len = (checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U) + l.nd + l.nf + 1;
+    l.len = l.skip + l.nd + l.nf + 1;
     return l;
 }
 
@@ -2222,15 +2224,17 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
                           const int checksum_enabled);
 
 /**
- * @brief Checks the footer a sequential reader reaches: @p footer must hold the
- *        @ref zxc_footer_layout(@p prefix, @p src_size, @p has_checksum) bytes.
+ * @brief Checks the footer a sequential reader reaches against @p l, the one
+ *        the frame implies, on the @p avail bytes it has.
+ *
+ * Compares only the bytes present: a mismatch is corruption, a matching but
+ * short prefix a truncation.
  *
  * @param[out] digest  The stored digest, 0 without checksums; may be NULL.
- * @return @ref ZXC_OK, or @ref ZXC_ERROR_CORRUPT_DATA when the sizes or the
- *         lengths byte are not the ones the frame implies.
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_CORRUPT_DATA or @ref ZXC_ERROR_SRC_TOO_SMALL.
  */
-int zxc_check_file_footer(const uint8_t* footer, uint64_t prefix, uint64_t src_size,
-                          int has_checksum, uint64_t* digest);
+int zxc_check_file_footer(const uint8_t* footer, size_t avail, const zxc_footer_layout_t* l,
+                          uint64_t src_size, uint64_t* digest);
 
 /**
  * @brief Parses the sizes back from the end of a frame.
@@ -2265,6 +2269,12 @@ int zxc_parse_file_footer(const uint8_t* end, size_t avail, uint64_t* src_size,
  */
 int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, size_t tail_len, uint64_t total,
                         zxc_frame_info_t* info, size_t* footer_len);
+
+/** @brief Copies the fields of @p got that fit the caller's @p info_size bytes. */
+static ZXC_ALWAYS_INLINE void zxc_frame_info_copy(zxc_frame_info_t* info, const size_t info_size,
+                                                  const zxc_frame_info_t* got) {
+    ZXC_MEMCPY(info, got, info_size < sizeof(*got) ? info_size : sizeof(*got));
+}
 /** @} */
 
 /**
@@ -2312,6 +2322,27 @@ static ZXC_ALWAYS_INLINE int zxc_seek_header_ok(const uint8_t* hdr, const uint64
     if (zxc_seek_size_field(table) != bh.comp_size) return 0;
     *sek_bytes = table;
     return 1;
+}
+
+/**
+ * @brief Checks the SEK block header on the @p avail bytes present, like
+ *        @ref zxc_check_file_footer: type and size field first, all of it at 8.
+ *
+ * @return @ref ZXC_OK, @ref ZXC_ERROR_CORRUPT_DATA or @ref ZXC_ERROR_SRC_TOO_SMALL.
+ */
+static ZXC_ALWAYS_INLINE int zxc_check_seek_header(const uint8_t* hdr, const size_t avail,
+                                                   const uint64_t total_out,
+                                                   const size_t block_size, uint64_t* sek_bytes) {
+    if (avail >= ZXC_BLOCK_HEADER_SIZE)
+        return zxc_seek_header_ok(hdr, total_out, block_size, sek_bytes) ? ZXC_OK
+                                                                         : ZXC_ERROR_CORRUPT_DATA;
+    if (avail >= 1 && hdr[0] != ZXC_BLOCK_SEK) return ZXC_ERROR_CORRUPT_DATA;
+    uint8_t field[4];
+    zxc_store_le32(field, zxc_seek_size_field(
+                              zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size))));
+    for (size_t i = 3; i < avail; i++)  // bytes 3..6: the payload size
+        if (hdr[i] != field[i - 3]) return ZXC_ERROR_CORRUPT_DATA;
+    return ZXC_ERROR_SRC_TOO_SMALL;
 }
 
 // ---------------------------------------------------------------------------

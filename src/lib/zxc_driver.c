@@ -686,11 +686,12 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         uint8_t sek[ZXC_BLOCK_HEADER_SIZE];
         uint64_t remaining = 0;
         uint64_t sek_bytes = 0;
-        if (UNLIKELY(fread(sek, 1, sizeof(sek), f_in) != sizeof(sek))) {
-            ctx->io_error = 1;
-        } else if (UNLIKELY(!zxc_seek_header_ok(sek, (uint64_t)w->total_bytes, ctx->chunk_size,
-                                                &remaining))) {
-            if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
+        // A short read is a truncation, unless the bytes read already disagree.
+        const size_t got = fread(sek, 1, sizeof(sek), f_in);
+        const int src_rc =
+            zxc_check_seek_header(sek, got, (uint64_t)w->total_bytes, ctx->chunk_size, &remaining);
+        if (UNLIKELY(src_rc != ZXC_OK)) {
+            if (src_rc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = src_rc;
             ctx->io_error = 1;
         }
         sek_bytes = remaining;
@@ -705,14 +706,15 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
     }
     const zxc_footer_layout_t fl =
         zxc_footer_layout(ctx->frame_in, (uint64_t)w->total_bytes, ctx->file_has_checksum);
-    if (!ctx->io_error && UNLIKELY(fread(footer, 1, fl.len, f_in) != fl.len)) ctx->io_error = 1;
-
     uint64_t stored_digest = 0;
-    if (!ctx->io_error &&
-        UNLIKELY(zxc_check_file_footer(footer, ctx->frame_in, (uint64_t)w->total_bytes,
-                                       ctx->file_has_checksum, &stored_digest) != ZXC_OK)) {
-        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
-        ctx->io_error = 1;
+    if (!ctx->io_error) {
+        const size_t got = fread(footer, 1, fl.len, f_in);
+        const int frc =
+            zxc_check_file_footer(footer, got, &fl, (uint64_t)w->total_bytes, &stored_digest);
+        if (UNLIKELY(frc != ZXC_OK)) {
+            if (frc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = frc;
+            ctx->io_error = 1;
+        }
     }
     if (!ctx->io_error && ctx->file_has_checksum && ctx->checksum_enabled &&
         UNLIKELY(stored_digest != d_digest)) {
@@ -1032,8 +1034,15 @@ static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
     const long long body = (long long)(ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE);
     int rc = ZXC_OK;
     // The smallest archive: header, the mandatory EOF block, then the footer.
+    // Too short for one, the header still speaks first, as in the buffer API.
     if (UNLIKELY(file_size < body + (long long)ZXC_FILE_FOOTER_MIN_SIZE)) {
-        rc = ZXC_ERROR_SRC_TOO_SMALL;
+        size_t chunk = 0;
+        const size_t n = file_size < (long long)sizeof(header) ? (size_t)file_size : sizeof(header);
+        if (UNLIKELY(fseeko(f_in, 0, SEEK_SET) != 0 || fread(header, 1, n, f_in) != n))
+            rc = ZXC_ERROR_IO;
+        else
+            rc = zxc_read_file_header(header, n, &chunk, NULL, NULL, NULL);
+        if (rc == ZXC_OK) rc = ZXC_ERROR_SRC_TOO_SMALL;
     } else {
         const size_t want =
             file_size - body < (long long)sizeof(tail) ? (size_t)(file_size - body) : sizeof(tail);
@@ -1069,11 +1078,11 @@ int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
  * Public API; see @c zxc_stream.h.
  */
 // cppcheck-suppress unusedFunction
-int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info) {
+int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, const size_t info_size) {
     if (UNLIKELY(!f_in || !info)) return ZXC_ERROR_NULL_INPUT;
     zxc_frame_info_t got;
     const int rc = zxc_stream_read_frame_info(f_in, &got);
-    if (rc == ZXC_OK) *info = got;
+    if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
     return rc;
 }
 

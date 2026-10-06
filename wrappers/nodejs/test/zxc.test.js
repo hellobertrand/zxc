@@ -79,7 +79,9 @@ describe("getFrameInfo", () => {
 
   test("throws on an invalid frame", () => {
     const comp = zxc.compress(Buffer.from("x".repeat(100)));
-    expect(() => zxc.getFrameInfo(Buffer.concat([comp, Buffer.from([0])]))).toThrow();
+    expect(() =>
+      zxc.getFrameInfo(Buffer.concat([comp, Buffer.from([0])])),
+    ).toThrow();
     expect(() => zxc.getFrameInfo("not a buffer")).toThrow(TypeError);
   });
 });

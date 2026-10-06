@@ -782,13 +782,13 @@ static int zxc_list_archive(const char* path, int json_output) {
 
     // Header and footer fields, read by the library.
     zxc_frame_info_t info;
-    const int frc = zxc_stream_get_frame_info(f, &info);
+    const int frc = zxc_stream_get_frame_info(f, &info, sizeof(info));
     fclose(f);
     if (frc != ZXC_OK) {
         fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(frc));
         return 1;
     }
-    const int64_t uncompressed_size = (int64_t)info.decompressed_size;
+    const uint64_t uncompressed_size = info.decompressed_size;
     const unsigned format_version = info.format_version;
     const size_t block_size_kb = info.block_size / 1024;
     const int has_checksum = info.has_checksum;
@@ -807,7 +807,7 @@ static int zxc_list_archive(const char* path, int json_output) {
     char dict_id_str[16];
 
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
-    format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
+    format_size_decimal(uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
     if (dict_id)
         snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
@@ -819,7 +819,7 @@ static int zxc_list_archive(const char* path, int json_output) {
             "{\n"
             "  \"filename\": \"%s\",\n"
             "  \"compressed_size_bytes\": %lld,\n"
-            "  \"uncompressed_size_bytes\": %lld,\n"
+            "  \"uncompressed_size_bytes\": %llu,\n"
             "  \"compression_ratio\": %.3f,\n"
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
@@ -827,8 +827,8 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"digest\": %s,\n"
             "  \"dict_id\": %s%s%s\n"
             "}\n",
-            path, file_size, (long long)uncompressed_size, ratio, format_version, block_size_kb,
-            has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
+            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version,
+            block_size_kb, has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
             dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
@@ -871,7 +871,8 @@ static int zxc_list_archive(const char* path, int json_output) {
  */
 static int zxc_archive_has_checksum(FILE* f) {
     zxc_frame_info_t info;
-    int declared = zxc_stream_get_frame_info(f, &info) == ZXC_OK ? info.has_checksum : -1;
+    int declared =
+        zxc_stream_get_frame_info(f, &info, sizeof(info)) == ZXC_OK ? info.has_checksum : -1;
     if (fseeko(f, 0, SEEK_SET) != 0) declared = -1;
     return declared;
 }

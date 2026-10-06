@@ -151,7 +151,8 @@ func GetFrameInfo(data []byte) (FrameInfo, error) {
 		return FrameInfo{}, ErrInvalidData
 	}
 	var fi C.zxc_frame_info_t
-	rc := C.zxc_get_frame_info(unsafe.Pointer(&data[0]), C.size_t(len(data)), &fi)
+	rc := C.zxc_get_frame_info(unsafe.Pointer(&data[0]), C.size_t(len(data)), &fi,
+		C.size_t(unsafe.Sizeof(fi)))
 	if rc != C.ZXC_OK {
 		return FrameInfo{}, errorFromCode(C.int64_t(rc))
 	}

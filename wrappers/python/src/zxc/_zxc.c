@@ -381,7 +381,7 @@ static PyObject* pyzxc_get_frame_info(PyObject* self, PyObject* arg) {
     if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
 
     zxc_frame_info_t fi;
-    const int rc = zxc_get_frame_info(view.buf, (size_t)view.len, &fi);
+    const int rc = zxc_get_frame_info(view.buf, (size_t)view.len, &fi, sizeof(fi));
 
     PyBuffer_Release(&view);
 

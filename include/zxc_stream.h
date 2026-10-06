@@ -115,12 +115,13 @@ ZXC_EXPORT int64_t zxc_stream_get_decompressed_size(FILE* f_in);
  * Same checks as zxc_get_frame_info(), on the whole file from offset 0. The
  * file position is restored afterwards.
  *
- * @param[in]  f_in  Input stream, opened in "rb" mode; must be seekable.
- * @param[out] info  Filled on success, untouched otherwise.
+ * @param[in]  f_in       Input stream, opened in "rb" mode; must be seekable.
+ * @param[out] info       Filled on success, untouched otherwise.
+ * @param[in]  info_size  `sizeof(*info)` as the caller compiled it.
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t, @ref ZXC_ERROR_IO
  *         included.
  */
-ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info);
+ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, size_t info_size);
 
 /* ========================================================================= */
 /*  Seekable FILE* open helper                                               */

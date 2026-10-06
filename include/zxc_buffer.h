@@ -225,8 +225,9 @@ ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
 /**
  * @brief What a frame's header and footer declare, read without decoding.
  *
- * Filled by zxc_get_frame_info() and zxc_stream_get_frame_info(). Bindings that
- * mirror it by hand check their layout against zxc_frame_info_size().
+ * Filled by zxc_get_frame_info() and zxc_stream_get_frame_info(); pass them
+ * `sizeof(zxc_frame_info_t)`. Fields are only ever added at the end: zero the
+ * struct first to read the ones this library does not know as 0.
  */
 typedef struct {
     uint64_t decompressed_size; /**< Source bytes the frame decodes to. */
@@ -247,13 +248,15 @@ typedef struct {
  * size is reachable. The blocks are not read, so a frame that passes may still
  * fail to decode.
  *
- * @param[in]  src       Compressed buffer.
- * @param[in]  src_size  Compressed size in bytes.
- * @param[out] info      Filled on success, untouched otherwise.
+ * @param[in]  src        Compressed buffer.
+ * @param[in]  src_size   Compressed size in bytes.
+ * @param[out] info       Filled on success, untouched otherwise.
+ * @param[in]  info_size  `sizeof(*info)` as the caller compiled it.
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t (e.g.
  *         @ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_CORRUPT_DATA).
  */
-ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info);
+ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                  size_t info_size);
 
 /**
  * @brief Returns `sizeof(zxc_frame_info_t)` as compiled into the library.

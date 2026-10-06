@@ -120,6 +120,7 @@ int test_glo_match_split(void);
 int test_buffer_error_codes(void);
 int test_get_decompressed_size(void);
 int test_frame_info(void);
+int test_footer_strictness(void);
 int test_decompress_inplace(void);
 int test_decompress_fast_vs_safe_path(void);
 int test_max_compressed_size_logic(void);

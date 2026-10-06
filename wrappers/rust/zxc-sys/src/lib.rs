@@ -368,11 +368,12 @@ unsafe extern "C" {
     ///
     /// # Safety
     /// - `src` must be a valid pointer to `src_size` bytes.
-    /// - `info` must be valid for writes.
+    /// - `info` must be valid for writes of `info_size` bytes.
     pub fn zxc_get_frame_info(
         src: *const c_void,
         src_size: usize,
         info: *mut zxc_frame_info_t,
+        info_size: usize,
     ) -> c_int;
 
     /// Returns `sizeof(zxc_frame_info_t)` as compiled into the C library.

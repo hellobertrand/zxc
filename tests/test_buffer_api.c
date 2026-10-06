@@ -1402,12 +1402,12 @@ int test_frame_info(void) {
         zxc_frame_info_t a, b;
         memset(&a, 0, sizeof(a));
         memset(&b, 0, sizeof(b));
-        const int ra = n > 0 ? zxc_get_frame_info(arc, (size_t)n, &a) : -1;
+        const int ra = n > 0 ? zxc_get_frame_info(arc, (size_t)n, &a, sizeof(a)) : -1;
         FILE* const f = tmpfile();
         int rb = -1;
         long pos = -1;
         if (f && n > 0 && fwrite(arc, 1, (size_t)n, f) == (size_t)n && fseek(f, 5, SEEK_SET) == 0) {
-            rb = zxc_stream_get_frame_info(f, &b);
+            rb = zxc_stream_get_frame_info(f, &b, sizeof(b));
             pos = ftell(f);
         }
         if (f) fclose(f);
@@ -1444,7 +1444,7 @@ int test_frame_info(void) {
             {"cut footer", arc, (size_t)n - 1, ZXC_ERROR_CORRUPT_DATA},
         };
         for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
-            const int r = zxc_get_frame_info(bad[k].p, bad[k].len, &keep);
+            const int r = zxc_get_frame_info(bad[k].p, bad[k].len, &keep, sizeof(keep));
             if (r != bad[k].want || memcmp(&keep, &before, sizeof(keep)) != 0) {
                 printf("  [FAIL] %s: %d, want %d (struct %s)\n", bad[k].what, r, bad[k].want,
                        memcmp(&keep, &before, sizeof(keep)) ? "written" : "intact");
@@ -1452,15 +1452,139 @@ int test_frame_info(void) {
             }
         }
         arc[0] ^= 0xFF;
-        if (zxc_get_frame_info(arc, (size_t)n, &keep) != ZXC_ERROR_BAD_MAGIC ||
-            zxc_get_frame_info(arc, (size_t)n, NULL) != ZXC_ERROR_NULL_INPUT ||
-            zxc_stream_get_frame_info(NULL, &keep) != ZXC_ERROR_NULL_INPUT) {
+        if (zxc_get_frame_info(arc, (size_t)n, &keep, sizeof(keep)) != ZXC_ERROR_BAD_MAGIC ||
+            zxc_get_frame_info(arc, (size_t)n, NULL, sizeof(keep)) != ZXC_ERROR_NULL_INPUT ||
+            zxc_stream_get_frame_info(NULL, &keep, sizeof(keep)) != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] bad magic or NULL output\n");
             ok = 0;
         }
     }
     free(src);
     free(arc);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Every decoder of one archive: buffer, in place, FILE* and push. */
+static int all_decoders_say(const char* what, const uint8_t* arc, const size_t n,
+                            const int64_t want) {
+    enum { CAP = 1 << 16 };
+    static uint8_t out[CAP];
+    const int64_t rb = zxc_decompress(arc, n, out, CAP, NULL);
+
+    // In place needs a block of room ahead of the archive: the largest block.
+    const size_t room = ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD;
+    uint8_t* const buf = (uint8_t*)malloc(room + n);
+    int64_t ri = ZXC_ERROR_MEMORY;
+    if (buf) {
+        memcpy(buf + room, arc, n);
+        ri = zxc_decompress_inplace(buf, room + n, n, NULL);
+        free(buf);
+    }
+
+    int64_t rf = ZXC_ERROR_IO;
+    FILE* const f = tmpfile();
+    if (f && fwrite(arc, 1, n, f) == n && fseek(f, 0, SEEK_SET) == 0)
+        rf = zxc_stream_decompress(f, NULL, NULL);
+    if (f) fclose(f);
+
+    int64_t rp = ZXC_ERROR_MEMORY;
+    zxc_dstream* const ds = zxc_dstream_create(NULL);
+    if (ds) {
+        zxc_inbuf_t in = {arc, n, 0};
+        zxc_outbuf_t ob = {out, CAP, 0};
+        rp = zxc_dstream_decompress(ds, &ob, &in);
+        // All input given: a decoder still waiting has not answered.
+        if (rp >= 0 && !zxc_dstream_finished(ds)) rp = ZXC_ERROR_SRC_TOO_SMALL;
+        zxc_dstream_free(ds);
+    }
+    if (rb == want && ri == want && rf == want && rp == want) return 1;
+    printf("  [FAIL] %s: buffer %lld, in place %lld, FILE* %lld, push %lld (want %lld)\n", what,
+           (long long)rb, (long long)ri, (long long)rf, (long long)rp, (long long)want);
+    return 0;
+}
+
+/* The footer has one valid encoding, and a forged one reads as corrupt data
+ * everywhere: never as truncation, an I/O error or a stream left waiting. */
+int test_footer_strictness(void) {
+    printf("=== TEST: Footer - one encoding, forgeries are corrupt data ===\n");
+    int ok = 1;
+    uint8_t src[300];
+    uint8_t arc[1024], bad[1024];
+    gen_random_data(src, sizeof(src));
+
+    /* 1. A compressed size on one byte more than it needs. A RAW frame of 220
+     *    bytes is 255 bytes, the most one byte holds: re-encoded on two, 256
+     *    fits exactly, so only the minimal-length rule refuses it. */
+    for (int seek = 0; seek <= 1 && ok; seek++) {
+        const zxc_compress_opts_t co = {.level = 1, .seekable = seek};
+        const size_t len = seek ? 200 : 220; /* the seek table adds 20 bytes */
+        const int64_t n = zxc_compress(src, len, arc, sizeof(arc), &co);
+        const size_t body = n > 0 ? (size_t)n - test_footer_len(arc, (size_t)n) : 0;
+        if (n != 255 || arc[n - 1] != 0x00) {
+            printf("  [FAIL] seek %d: expected a 255-byte frame, got %lld\n", seek, (long long)n);
+            ok = 0;
+            break;
+        }
+        memcpy(bad, arc, body);
+        bad[body] = (uint8_t)len;            /* original size, 1 byte */
+        zxc_store_le16(bad + body + 1, 256); /* compressed size, 2 bytes */
+        bad[body + 3] = 0x10;                /* L: nd = 1, nf = 2 */
+        const size_t bn = body + 4;
+        zxc_frame_info_t fi;
+        zxc_seekable* const s = zxc_seekable_open(bad, bn);
+        if (zxc_get_frame_info(bad, bn, &fi, sizeof(fi)) != ZXC_ERROR_CORRUPT_DATA ||
+            zxc_get_decompressed_size(bad, bn) != 0 || zxc_decompress_inplace_bound(bad, bn) != 0 ||
+            s != NULL) {
+            printf("  [FAIL] seek %d: a non-minimal footer was accepted\n", seek);
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+        ok = ok && all_decoders_say("non-minimal footer", bad, bn, ZXC_ERROR_CORRUPT_DATA);
+    }
+
+    /* 2. A well-formed footer storing a size shorter to encode than the real
+     *    one: the decoders expect a longer footer than the input holds. */
+    const zxc_compress_opts_t plain = {.level = 3};
+    const int64_t n = zxc_compress(src, sizeof(src), arc, sizeof(arc), &plain);
+    const uint64_t lies[] = {0, 255};
+    for (size_t k = 0; ok && n > 0 && k < 2; k++) {
+        const size_t bn = test_forge_footer_size(arc, (size_t)n, bad, sizeof(bad), lies[k]);
+        ok = all_decoders_say(lies[k] ? "size 255 for 300" : "size 0 for 300", bad, bn,
+                              ZXC_ERROR_CORRUPT_DATA);
+    }
+
+    /* 3. HAS_SEEK_TABLE set with no table: corrupt data, with or without the
+     *    digest that makes the footer longer than a SEK header. */
+    for (int cs = 0; cs <= 1 && ok; cs++) {
+        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = cs};
+        const int64_t m = zxc_compress(src, sizeof(src), bad, sizeof(bad), &co);
+        if (m <= 0) {
+            ok = 0;
+            break;
+        }
+        bad[6] |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
+        zxc_file_header_sign(bad);
+        ok = all_decoders_say(cs ? "flag without table, checksums" : "flag without table", bad,
+                              (size_t)m, ZXC_ERROR_CORRUPT_DATA);
+    }
+
+    /* 4. Short junk: the header speaks first, from a buffer or a file. */
+    for (size_t len = 16; ok && len <= 26; len += 5) {
+        uint8_t junk[26] = {0};
+        zxc_frame_info_t fi;
+        FILE* const f = tmpfile();
+        int rf = ZXC_ERROR_IO;
+        if (f && fwrite(junk, 1, len, f) == len && fseek(f, 0, SEEK_SET) == 0)
+            rf = zxc_stream_get_frame_info(f, &fi, sizeof(fi));
+        if (f) fclose(f);
+        if (zxc_get_frame_info(junk, len, &fi, sizeof(fi)) != ZXC_ERROR_BAD_MAGIC ||
+            rf != ZXC_ERROR_BAD_MAGIC) {
+            printf("  [FAIL] %zu junk bytes: FILE* %d, want BAD_MAGIC\n", len, rf);
+            ok = 0;
+        }
+    }
     if (!ok) return 0;
     printf("PASS\n\n");
     return 1;

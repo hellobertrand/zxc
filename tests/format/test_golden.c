@@ -410,7 +410,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
           (unsigned long long)compressed_size, size);
     const uint8_t* footer = buf + off;
     uint64_t stored_digest = 0;
-    CHECK(zxc_check_file_footer(footer, off, src_size, has_checksum, &stored_digest) == ZXC_OK,
+    const zxc_footer_layout_t fl = zxc_footer_layout(off, src_size, has_checksum);
+    CHECK(zxc_check_file_footer(footer, footer_len, &fl, src_size, &stored_digest) == ZXC_OK,
           "footer is not the one the frame implies");
 
     EMIT("\n[footer]\n");

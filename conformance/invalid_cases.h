@@ -64,8 +64,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
     {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
     {"sek_forged_entry", 0, NULL, 1, .generated = 1},
-    /* The flag promises an 8-byte SEK header where only the shorter footer is. */
-    {"sek_flag_no_table", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
+    {"sek_flag_no_table", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"sek_table_no_flag", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},

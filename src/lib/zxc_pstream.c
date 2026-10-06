@@ -638,8 +638,8 @@ typedef enum {
  * @var zxc_dstream_s::file_has_seek
  *      Seek-table flag declared by the file header.
  * @var zxc_dstream_s::scratch
- *      Generic 32-byte accumulator for fixed-size frames (file header, block
- *      header, footer); comfortably holds the largest (16-byte file header).
+ *      Generic 32-byte accumulator for the file header, block headers and the
+ *      footer; must hold the largest, a footer of @ref ZXC_FOOTER_TAIL_MAX (25).
  * @var zxc_dstream_s::scratch_used
  *      Number of bytes currently held in @c scratch.
  * @var zxc_dstream_s::scratch_need
@@ -1044,11 +1044,12 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_NEED_SEK_HEADER: {
-                if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
-                    return (int64_t)produced;
-                if (UNLIKELY(!zxc_seek_header_ok(ds->scratch, ds->total_out, ds->block_size,
-                                                 &ds->sek_remaining)))
-                    return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
+                // Checked as bytes arrive: a wrong header fails without waiting.
+                const int full = ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in);
+                const int rc = zxc_check_seek_header(ds->scratch, ds->scratch_used, ds->total_out,
+                                                     ds->block_size, &ds->sek_remaining);
+                if (UNLIKELY(rc == ZXC_ERROR_CORRUPT_DATA)) return ds_set_error(ds, rc);
+                if (!full) return (int64_t)produced;
                 ds->frame_in += ZXC_BLOCK_HEADER_SIZE + ds->sek_remaining;
                 ds->state = DS_DRAIN_SEK_PAYLOAD;
                 break;
@@ -1069,18 +1070,20 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_NEED_FOOTER: {
-                if (!ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in))
-                    return (int64_t)produced;
+                // Checked as bytes arrive, like the SEK header.
+                const int full = ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in);
+                const zxc_footer_layout_t fl =
+                    zxc_footer_layout(ds->frame_in, ds->total_out, ds->file_has_checksum);
+                const int rc =
+                    zxc_check_file_footer(ds->scratch, ds->scratch_used, &fl, ds->total_out, NULL);
+                if (UNLIKELY(rc == ZXC_ERROR_CORRUPT_DATA)) return ds_set_error(ds, rc);
+                if (!full) return (int64_t)produced;
                 ds->state = DS_VALIDATE_FOOTER;
                 break;
             }
 
             case DS_VALIDATE_FOOTER: {
-                uint64_t stored_digest = 0;
-                if (UNLIKELY(zxc_check_file_footer(ds->scratch, ds->frame_in, ds->total_out,
-                                                   ds->file_has_checksum,
-                                                   &stored_digest) != ZXC_OK))
-                    return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
+                const uint64_t stored_digest = ds->file_has_checksum ? zxc_le64(ds->scratch) : 0;
                 if (ds->file_has_checksum && ds->opts.checksum_enabled &&
                     UNLIKELY(stored_digest != ds->digest))
                     return ds_set_error(ds, ZXC_ERROR_BAD_CHECKSUM);

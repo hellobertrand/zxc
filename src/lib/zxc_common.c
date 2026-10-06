@@ -698,38 +698,42 @@ static uint64_t zxc_load_le_n(const uint8_t* src, const size_t n) {
  * @brief Writes the file footer: the archive digest when @p checksum_enabled,
  *        then the two sizes and their lengths byte.
  */
+/** @brief Encodes the @p l footer: digest, the two sizes, then L. */
+static void zxc_encode_footer(uint8_t* dst, const zxc_footer_layout_t* l, const uint64_t src_size,
+                              const uint64_t digest) {
+    if (l->skip) zxc_store_le64(dst, digest);
+    uint8_t* p = dst + l->skip;
+    zxc_store_le_n(p, src_size, l->nd);
+    p += l->nd;
+    zxc_store_le_n(p, l->compressed_size, l->nf);
+    p[l->nf] = (uint8_t)((l->nd - 1) | (l->nf - 1) << 4);
+}
+
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t prefix,
                           const uint64_t src_size, const uint64_t digest,
                           const int checksum_enabled) {
     const zxc_footer_layout_t l = zxc_footer_layout(prefix, src_size, checksum_enabled);
     if (UNLIKELY(dst_capacity < l.len)) return ZXC_ERROR_DST_TOO_SMALL;
-    uint8_t* p = dst;
-    if (checksum_enabled) {
-        zxc_store_le64(p, digest);
-        p += ZXC_FILE_DIGEST_SIZE;
-    }
-    zxc_store_le_n(p, src_size, l.nd);
-    p += l.nd;
-    zxc_store_le_n(p, l.compressed_size, l.nf);
-    p += l.nf;
-    *p = (uint8_t)((l.nd - 1) | (l.nf - 1) << 4);
+    zxc_encode_footer(dst, &l, src_size, digest);
     return (int)l.len;
 }
 
 /**
  * @brief Checks a footer against the one the frame implies.
  *
- * Compares all but the digest with the footer it would write: one encoding
- * per frame.
+ * Compares the bytes present, digest aside, with the footer it would write: one
+ * encoding per frame.
  */
-int zxc_check_file_footer(const uint8_t* footer, const uint64_t prefix, const uint64_t src_size,
-                          const int has_checksum, uint64_t* digest) {
+int zxc_check_file_footer(const uint8_t* footer, const size_t avail, const zxc_footer_layout_t* l,
+                          const uint64_t src_size, uint64_t* digest) {
     uint8_t want[ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE];
-    const int n = zxc_write_file_footer(want, sizeof(want), prefix, src_size, 0, has_checksum);
-    const size_t skip = has_checksum ? ZXC_FILE_DIGEST_SIZE : 0U;
-    if (digest) *digest = has_checksum ? zxc_le64(footer) : 0;
-    return memcmp(footer + skip, want + skip, (size_t)n - skip) == 0 ? ZXC_OK
-                                                                     : ZXC_ERROR_CORRUPT_DATA;
+    zxc_encode_footer(want, l, src_size, 0);
+    const size_t n = avail < l->len ? avail : l->len;
+    if (n > l->skip && memcmp(footer + l->skip, want + l->skip, n - l->skip) != 0)
+        return ZXC_ERROR_CORRUPT_DATA;
+    if (avail < l->len) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (digest) *digest = l->skip ? zxc_le64(footer) : 0;
+    return ZXC_OK;
 }
 
 /**
@@ -749,7 +753,11 @@ int zxc_parse_file_footer(const uint8_t* end, const size_t avail, uint64_t* src_
     if (UNLIKELY(avail < need)) return ZXC_ERROR_SRC_TOO_SMALL;
     const uint64_t d = zxc_load_le_n(end - need, nd);
     const uint64_t f = zxc_load_le_n(end - 1 - nf, nf);
-    if (UNLIKELY(zxc_uint_bytes(d) != nd || zxc_uint_bytes(f) != nf)) return ZXC_ERROR_CORRUPT_DATA;
+    // Minimal lengths: d on exactly nd bytes; f too, and nf the fewest that hold
+    // the total, which one byte less would not (f counts its own bytes).
+    if (UNLIKELY(zxc_uint_bytes(d) != nd || zxc_uint_bytes(f) != nf ||
+                 (nf > 1 && zxc_uint_bytes(f - 1) < nf)))
+        return ZXC_ERROR_CORRUPT_DATA;
     *src_size = d;
     *compressed_size = f;
     *sizes_len = need;

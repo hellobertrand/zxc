@@ -546,7 +546,7 @@ Reads the original size from the file footer without decompressing.
 ```c
 typedef struct {
     uint64_t decompressed_size; /* source bytes the frame decodes to */
-    uint64_t compressed_size;        /* compressed bytes, footer included */
+    uint64_t compressed_size;   /* compressed bytes, footer included */
     uint64_t digest;            /* archive digest; 0 without checksums */
     size_t   block_size;        /* 4 KB .. 2 MB */
     uint32_t dict_id;           /* dictionary the frame needs; 0 for none */
@@ -555,15 +555,21 @@ typedef struct {
     uint8_t  has_seek_table;
 } zxc_frame_info_t;
 
-ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info);
+ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                  size_t info_size);
 ZXC_EXPORT size_t zxc_frame_info_size(void);
 ```
 
 Reads what a frame's header and footer declare, without decoding: the header
 is validated as a decoder would, the footer parsed back from the end, and the
 frame must span all of `src` with a reachable size. Blocks are not read, so a
-frame that passes may still fail to decode. `zxc_frame_info_size()` returns
-`sizeof(zxc_frame_info_t)` for bindings that mirror the struct by hand.
+frame that passes may still fail to decode.
+
+Pass `sizeof(zxc_frame_info_t)` as `info_size`: the library writes only the
+fields that fit, so a program built against an older header stays in bounds
+when the struct grows (fields are only ever added at the end; zero the struct
+first to read unknown ones as 0). `zxc_frame_info_size()` returns the size the
+library was built with, for bindings that mirror the struct by hand.
 
 **Returns**: `ZXC_OK` with `*info` filled, or a negative `zxc_error_t` with
 `*info` untouched.
@@ -1115,7 +1121,7 @@ an I/O error).
 ### `zxc_stream_get_frame_info`
 
 ```c
-ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info);
+ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, size_t info_size);
 ```
 
 `zxc_get_frame_info()` on a seekable `FILE*`, read from offset 0. File position

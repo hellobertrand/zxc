@@ -81,6 +81,7 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     "number",
     "number",
+    "number",
   ]);
 
   const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
@@ -602,7 +603,7 @@ export default async function createZXC(moduleOverrides, factory) {
     const out = _alloc(FRAME_INFO_SIZE);
     try {
       Module.HEAPU8.set(data, src);
-      const rc = _get_frame_info(src, data.length, out);
+      const rc = _get_frame_info(src, data.length, out, FRAME_INFO_SIZE);
       if (rc < 0) {
         throw new Error(`ZXC frame info error: ${_error_name(rc)} (${rc})`);
       }

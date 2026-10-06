@@ -232,7 +232,7 @@ static Napi::Value GetFrameInfo(const Napi::CallbackInfo& info) {
 
     Napi::Buffer<uint8_t> src_buf = info[0].As<Napi::Buffer<uint8_t>>();
     zxc_frame_info_t fi;
-    const int rc = zxc_get_frame_info(src_buf.Data(), src_buf.Length(), &fi);
+    const int rc = zxc_get_frame_info(src_buf.Data(), src_buf.Length(), &fi, sizeof(fi));
     if (rc != ZXC_OK) {
         Napi::Error err = Napi::Error::New(env, zxc_error_name(rc));
         err.Set("code", Napi::Number::New(env, rc));

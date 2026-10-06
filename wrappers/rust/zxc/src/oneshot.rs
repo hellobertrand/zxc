@@ -230,6 +230,7 @@ pub fn frame_info(compressed: &[u8]) -> Result<FrameInfo> {
             compressed.as_ptr() as *const c_void,
             compressed.len(),
             &mut fi,
+            std::mem::size_of::<zxc_sys::zxc_frame_info_t>(),
         )
     };
     if rc < 0 {
