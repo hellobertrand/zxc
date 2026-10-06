@@ -2070,11 +2070,11 @@ int test_seekable_forged_total_size(void) {
     enum { BODY = ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE };
     uint8_t arc[BODY + ZXC_FILE_FOOTER_MAX_SIZE];
     for (size_t k = 0; k < sizeof(totals) / sizeof(totals[0]); k++) {
-        uint8_t* p = arc;
+        uint8_t* const eof_at = arc + ZXC_FILE_HEADER_SIZE;
         int fw = -1;
-        if (zxc_write_file_header(p, ZXC_FILE_HEADER_SIZE, BS, 0, 0, 1) < 0 ||
-            zxc_write_block_header(p += ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
-            zxc_seek_table_header(p += ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, 0) < 0 ||
+        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, BS, 0, 0, 1) < 0 ||
+            zxc_write_block_header(eof_at, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
+            zxc_seek_table_header(eof_at + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, 0) < 0 ||
             (fw = zxc_write_file_footer(arc + BODY, ZXC_FILE_FOOTER_MAX_SIZE, BODY, totals[k], 0,
                                         0)) < 0) {
             printf("Failed: fixture headers\n");

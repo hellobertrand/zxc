@@ -1610,7 +1610,7 @@ int test_footer_strictness(void) {
 
     /* 5. Short junk: the header speaks first, from a buffer or a file. */
     for (size_t len = 16; ok && len <= 26; len += 5) {
-        uint8_t junk[26] = {0};
+        const uint8_t junk[26] = {0};
         zxc_frame_info_t fi;
         FILE* const f = tmpfile();
         int rf = ZXC_ERROR_IO;

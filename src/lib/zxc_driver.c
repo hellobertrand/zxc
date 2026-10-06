@@ -680,8 +680,6 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
                                          const uint64_t d_digest) {
     // After the EOF block: the SEK block when the header announced one, then the
     // footer, whose length follows from the bytes read and the bytes produced.
-    uint8_t footer[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
-
     if (ctx->file_has_seek) {
         uint8_t sek[ZXC_BLOCK_HEADER_SIZE];
         uint64_t remaining = 0;
@@ -709,6 +707,7 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         zxc_footer_layout(ctx->frame_in, (uint64_t)w->total_bytes, ctx->file_has_checksum);
     uint64_t stored_digest = 0;
     if (!ctx->io_error) {
+        uint8_t footer[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
         const size_t got = fread(footer, 1, fl.len, f_in);
         const int frc =
             zxc_check_file_footer(footer, got, &fl, (uint64_t)w->total_bytes, &stored_digest);
@@ -1031,7 +1030,6 @@ static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
     const long long file_size = ftello(f_in);
 
     uint8_t header[ZXC_FILE_HEADER_SIZE];
-    uint8_t tail[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
     int rc = ZXC_OK;
     if (UNLIKELY(file_size < 0)) {
         rc = ZXC_ERROR_IO;
@@ -1045,6 +1043,7 @@ static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
             rc = zxc_read_file_header(header, n, &chunk, NULL, NULL, NULL);
         if (rc == ZXC_OK) rc = ZXC_ERROR_SRC_TOO_SMALL;
     } else {
+        uint8_t tail[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
         const size_t want = zxc_frame_tail_len((uint64_t)file_size);
         if (UNLIKELY(fseeko(f_in, 0, SEEK_SET) != 0 ||
                      fread(header, 1, sizeof(header), f_in) != sizeof(header) ||
