@@ -66,6 +66,10 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"sek_forged_entry", 0, NULL, 1, .generated = 1},
     {"sek_flag_no_table", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"sek_table_no_flag", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"sek_reserved_set", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"sek_flags_set", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"eof_reserved_set", ZXC_ERROR_BAD_HEADER, .generated = 1},
+    {"eof_flags_set", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_footer_digest", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
@@ -76,7 +80,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
 
-/* Re-sign an 8-byte block header at @p b after patching type or comp_size. */
+/* Re-sign an 8-byte block header at @p b after patching it. */
 static void resign_block_header(uint8_t* b) {
     uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
     memcpy(tmp, b, ZXC_BLOCK_HEADER_SIZE);
@@ -234,7 +238,8 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     } else if (!strcmp(name, "ghi_forged_offset")) {
         n = b->n_ghi;
         src = b->ghi;
-    } else if (!strcmp(name, "sek_forged_entry") || !strcmp(name, "sek_table_no_flag")) {
+    } else if (!strcmp(name, "sek_forged_entry") || !strcmp(name, "sek_table_no_flag") ||
+               !strcmp(name, "sek_reserved_set") || !strcmp(name, "sek_flags_set")) {
         n = b->n_seek;
         src = b->seek;
     }
@@ -340,6 +345,27 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
             ok = 0;
         } else {
             d[sek + ZXC_BLOCK_HEADER_SIZE] ^= 0xFFU; /* group 0's anchor only */
+        }
+    } else if (!strcmp(name, "sek_reserved_set") || !strcmp(name, "sek_flags_set")) {
+        /* Sec 5.5: SEK Block Flags and Reserved must be zero, even re-signed. */
+        const size_t eof = find_eof_block(d, len, 0);
+        const size_t sek = eof ? eof + ZXC_BLOCK_HEADER_SIZE : 0;
+        if (!sek || sek + ZXC_BLOCK_HEADER_SIZE > len || d[sek] != ZXC_BLOCK_SEK) {
+            fprintf(stderr, "  no SEK block found - the seekable base changed shape\n");
+            ok = 0;
+        } else {
+            d[sek + (strcmp(name, "sek_flags_set") ? 2 : 1)] = 1;
+            resign_block_header(d + sek);
+        }
+    } else if (!strcmp(name, "eof_reserved_set") || !strcmp(name, "eof_flags_set")) {
+        /* Sec 5.4: the EOF header has one form, every field but its type zero. */
+        const size_t eof = find_eof_block(d, len, 0);
+        if (!eof) {
+            fprintf(stderr, "  no EOF block found\n");
+            ok = 0;
+        } else {
+            d[eof + (strcmp(name, "eof_flags_set") ? 2 : 1)] = 1;
+            resign_block_header(d + eof);
         }
 
         /* --- Checksum defects (checksummed base) ---------------------------- */

@@ -648,6 +648,28 @@ int zxc_seek_table_header(uint8_t* dst, const size_t dst_capacity, const uint64_
     return zxc_write_block_header(dst, dst_capacity, &bh);
 }
 
+int zxc_check_eof_header(const uint8_t* hdr) {
+    const zxc_block_header_t eof = {
+        .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
+    uint8_t want[ZXC_BLOCK_HEADER_SIZE];
+    if (UNLIKELY(zxc_write_block_header(want, sizeof(want), &eof) < 0))
+        return ZXC_ERROR_BAD_HEADER;  // LCOV_EXCL_LINE
+    return memcmp(hdr, want, sizeof(want)) == 0 ? ZXC_OK : ZXC_ERROR_BAD_HEADER;
+}
+
+int zxc_check_seek_header(const uint8_t* hdr, const size_t avail, const uint64_t total_out,
+                          const size_t block_size, uint64_t* sek_bytes) {
+    const uint64_t n = zxc_seek_block_count(total_out, block_size);
+    uint8_t want[ZXC_BLOCK_HEADER_SIZE];
+    if (UNLIKELY(zxc_seek_table_header(want, sizeof(want), n) < 0))
+        return ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
+    const size_t m = avail < sizeof(want) ? avail : sizeof(want);
+    if (memcmp(hdr, want, m) != 0) return ZXC_ERROR_CORRUPT_DATA;
+    if (avail < sizeof(want)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (sek_bytes) *sek_bytes = zxc_seek_table_bytes(n);
+    return ZXC_OK;
+}
+
 size_t zxc_seek_write_group(uint8_t* RESTRICT dst, uint64_t* RESTRICT anchor,
                             const uint32_t* RESTRICT sizes, const uint32_t cnt) {
     zxc_store_le64(dst, *anchor);

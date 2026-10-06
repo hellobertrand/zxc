@@ -1511,8 +1511,7 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             return ZXC_ERROR_BAD_HEADER;
 
         if (UNLIKELY(bh.block_type == ZXC_BLOCK_EOF)) {
-            // EOF carries no payload; a non-zero comp_size is a malformed header.
-            if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
+            if (UNLIKELY(zxc_check_eof_header(ip) != ZXC_OK)) return ZXC_ERROR_BAD_HEADER;
 
             // After the EOF block: the SEK block when announced, then the footer
             // the frame implies. Nothing may follow it.
@@ -1520,9 +1519,8 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             size_t pos = (size_t)(ip - src) + ZXC_BLOCK_HEADER_SIZE;
             if (file_has_seek) {
                 uint64_t sek_bytes = 0;
-                const int src_rc =
-                    zxc_check_seek_header(src + pos, src_size - pos, pos, total_out,
-                                          runtime_chunk_size, file_has_checksums, &sek_bytes);
+                const int src_rc = zxc_check_seek_header(src + pos, src_size - pos, total_out,
+                                                         runtime_chunk_size, &sek_bytes);
                 if (UNLIKELY(src_rc != ZXC_OK)) return src_rc;
                 pos += ZXC_BLOCK_HEADER_SIZE;
                 if (UNLIKELY(sek_bytes > (uint64_t)(src_size - pos)))

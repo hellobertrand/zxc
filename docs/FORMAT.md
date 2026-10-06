@@ -95,8 +95,9 @@ Offset  Size  Field
   - `2` = GHI
   - `254` = SEK
   - `255` = EOF
-- **Block Flags**: currently not used by implementation (written as `0`).
-- **Reserved**: must be 0.
+- **Block Flags**: no flag is defined; must be 0.
+- **Reserved**: must be 0. In the EOF and SEK headers, this byte and Block Flags are checked
+  (§5.4, §5.5).
 - **Compressed Payload Size** (`comp_size`): payload size in bytes (does **not** include the optional trailing 4-byte block
   checksum). For a data block (RAW, GLO, GHI) it never exceeds the `block_size` declared in the
   file header: a block that would grow falls back to RAW, whose payload equals its content, so
@@ -461,8 +462,9 @@ Overflow rules:
 EOF marks end of block stream.
 
 Constraints:
-- block header is present (8 bytes)
-- Compressed Payload Size **must be 0**
+- block header is present (8 bytes), in its one valid form: type `255`, Block Flags,
+  Reserved and Compressed Payload Size **all 0**, and its header checksum; a decoder
+  rejects any other
 - no payload
 - no per-block trailing checksum
 
@@ -514,8 +516,9 @@ binds a block to its index.
 4. Calculate `seek_block_size = 8 + ⌈N / 64⌉ × 8 + N × 4`, in 64 bits.
 5. Seek backward by `seek_block_size` bytes from the start of the footer (its sizes, and the
    8-byte digest before them with `HAS_CHECKSUM=1`) to read the Block Header.
-6. Validate that Block Type is `254` (SEK) and Compressed Payload Size is the fold of
-   `⌈N / 64⌉ × 8 + N × 4`, and that an EOF block header sits 8 bytes before it.
+6. Require the 8-byte Block Header to be the one SEK header `N` admits: type `254`, Block
+   Flags and Reserved `0`, Compressed Payload Size the fold of `⌈N / 64⌉ × 8 + N × 4`, and
+   its header checksum; require an EOF block header 8 bytes before it.
 7. Nothing else is read at open. In a well-formed archive anchor + sizes lands exactly on
    the next anchor, or on the EOF block for the last group. A decoder validates a group alone
    when it accesses one of its blocks: anchor 0 is `16`, every anchor lies in
@@ -529,9 +532,15 @@ binds a block to its index.
 **Sequential Reading**: the file header says what follows the EOF block, so a decoder never
 guesses from those bytes, which is unreliable: the footer opens with the digest or the source
 size, and one value in about 65536 parses as a valid SEK header. With `HAS_SEEK_TABLE=1`, it reads the SEK
-block header and rejects it unless it is type `254` with a Compressed Payload Size equal to the
-fold of `T = ⌈N / 64⌉ × 8 + N × 4`, `N` derived from the bytes it produced; it then skips `T`
-bytes, counted in 64 bits, and reads the footer. With the flag clear, the footer comes next.
+block header and rejects it unless it is, byte for byte, the one header the frame admits: type
+`254`, Block Flags and Reserved `0`, a Compressed Payload Size equal to the fold of
+`T = ⌈N / 64⌉ × 8 + N × 4`, `N` derived from the bytes it produced, and its header checksum. It
+then skips `T` bytes, counted in 64 bits, and reads the footer. With the flag clear, the footer
+comes next.
+
+That header being fully determined, a decoder can check its bytes as they arrive: a differing
+byte is corruption, a matching but short prefix a truncation. With zero reserved bytes, a short
+footer behind a lying flag never matches its start, so it reads as corrupt, not truncated.
 
 ---
 
@@ -755,9 +764,9 @@ Example: 10 000 000 source bytes compressed to a 3 000 000-byte prefix, no check
 4. If enabled, verify the trailing block checksum over the decoded bytes,
    seeded with the block's position (§ 7.2).
 5. On EOF:
-   - require `comp_size == 0`,
-   - if `HAS_SEEK_TABLE=1`, read the SEK block header, require the payload size
-     § 5.5 derives from the output, and skip the table,
+   - require the EOF header's one form § 5.4 (Block Flags, Reserved and `comp_size` all 0),
+   - if `HAS_SEEK_TABLE=1`, read the SEK block header, require it to be the one
+     § 5.5 derives from the output, Block Flags and Reserved 0, and skip the table,
    - compute the footer § 8 implies from the produced output size and the bytes read so
      far, read exactly that many bytes, and require them to match, the digest aside,
    - require nothing to follow the footer,
@@ -791,7 +800,7 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
 - **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version. The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension.
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension. Exception: a decoder rejects an EOF or SEK header whose Block Flags or Reserved byte is non-zero (§5.4, §5.5).
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values as a corrupt header.
 
 ### 10.4 Minimum conforming decoder
@@ -829,10 +838,10 @@ The recommended behavior for each class is specified below.
 | **Unknown block type** | Block header, offset 0x00 | Reject. The block-type set is fixed per format version (see §10.3); a decoder must not skip past unrecognised data. |
 | **Block payload truncated** | While reading the Compressed Payload Size bytes | Reject. Unexpected end of stream. |
 | **Block checksum mismatch** | Trailing 4-byte checksum, after decoding the block | Reject block. The decoded bytes are wrong: corrupt payload, wrong dictionary, or a block out of place. |
-| **EOF block with non-zero comp_size** | EOF block header | Reject. Malformed EOF marker. |
+| **EOF header not in its one form** | EOF block header | Reject. Non-zero comp_size, Block Flags or Reserved (§5.4). |
 | **Data block comp_size above block size** | Block header, offset 0x03 | Reject. A data block never compresses past its own content (§4.1). |
 | **Block walk ends without an EOF block** | End of the block walk | Reject. A forged Compressed Payload Size can span the EOF marker; the resulting short decode must not be reported as success. |
-| **Seek-table flag disagrees with the tail** | Between the EOF block and the footer | Reject. `HAS_SEEK_TABLE=1` without the SEK block §5.5 derives from the output, or any byte there with `HAS_SEEK_TABLE=0`. |
+| **Seek-table flag disagrees with the tail** | Between the EOF block and the footer | Reject. `HAS_SEEK_TABLE=1` without the SEK header §5.5 derives from the output (Block Flags and Reserved 0), or any byte there with `HAS_SEEK_TABLE=0`. |
 | **Seek table group inconsistent** | SEK payload | Reject. A size outside `[8, one block]`, an anchor outside the data area, a group running past the EOF block, or a last group not ending on it (§5.5). |
 | **Block disagrees with its seek entry** | Block header, when a seekable reader accesses the block | Reject. The entry's size is not header + payload + checksum of the block found there (§5.5). |
 | **Footer mismatch** | File footer, after the digest | Reject. The sizes or `L` are not the ones the frame implies: wrong output size, wrong compressed frame size, a non-minimal length or a reserved bit set (§ 8). |

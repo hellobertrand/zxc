@@ -912,8 +912,9 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     ds->frame_in += ZXC_BLOCK_HEADER_SIZE;
 
     if (ds->cur_bh.block_type == (uint8_t)ZXC_BLOCK_EOF) {
-        // EOF block: comp_size must be 0; no payload, no checksum.
-        if (UNLIKELY(ds->cur_bh.comp_size != 0)) return ds_set_error(ds, ZXC_ERROR_BAD_BLOCK_SIZE);
+        // EOF block: one valid header, no payload, no checksum.
+        if (UNLIKELY(zxc_check_eof_header(ds->scratch) != ZXC_OK))
+            return ds_set_error(ds, ZXC_ERROR_BAD_HEADER);
         ds->state = ds->file_has_seek ? DS_NEED_SEK_HEADER : DS_NEED_FOOTER;
         ds->scratch_used = 0;
         ds->scratch_need =
@@ -1046,9 +1047,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_NEED_SEK_HEADER: {
                 // Checked as bytes arrive: a wrong header fails without waiting.
                 const int full = ds_pull(ds->scratch, &ds->scratch_used, ds->scratch_need, in);
-                const int rc = zxc_check_seek_header(ds->scratch, ds->scratch_used, ds->frame_in,
-                                                     ds->total_out, ds->block_size,
-                                                     ds->file_has_checksum, &ds->sek_remaining);
+                const int rc = zxc_check_seek_header(ds->scratch, ds->scratch_used, ds->total_out,
+                                                     ds->block_size, &ds->sek_remaining);
                 if (UNLIKELY(rc == ZXC_ERROR_CORRUPT_DATA)) return ds_set_error(ds, rc);
                 if (!full) return (int64_t)produced;
                 ds->frame_in += ZXC_BLOCK_HEADER_SIZE + ds->sek_remaining;

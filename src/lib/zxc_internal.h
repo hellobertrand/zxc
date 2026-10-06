@@ -2310,61 +2310,44 @@ static ZXC_ALWAYS_INLINE int zxc_footer_dsize_plausible(const uint64_t dsize,
 }
 
 /**
- * @brief Validates the SEK block header the file header announced.
+ * @brief Writes a seek table's block header for @p num_blocks entries.
  *
- * The flag says where the table is; this says whether it is the one the archive
- * needs: @ref zxc_seek_size_field of its @ref zxc_seek_table_bytes. The sequential
- * readers share it so they drain the same number of bytes: the full 64-bit count,
- * not the field.
+ * Shared by the writers and by the readers, which compare against it.
  *
- * @param[in]  hdr         The 8 bytes after the EOF block.
- * @param[in]  total_out   Bytes decoded: the archive's source size.
- * @param[in]  block_size  Block size from the file header.
- * @param[out] sek_bytes   The SEK payload length when valid; untouched otherwise.
- * @return 1 for the expected SEK header, 0 otherwise.
+ * @param[out] dst          Destination, at least @ref ZXC_BLOCK_HEADER_SIZE bytes.
+ * @param[in]  dst_capacity Size of @p dst.
+ * @param[in]  num_blocks   Blocks the table indexes.
+ * @return @ref ZXC_BLOCK_HEADER_SIZE, or a negative @ref zxc_error_t.
  */
-static ZXC_ALWAYS_INLINE int zxc_seek_header_ok(const uint8_t* hdr, const uint64_t total_out,
-                                                const size_t block_size, uint64_t* sek_bytes) {
-    zxc_block_header_t bh;
-    if (zxc_read_block_header(hdr, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK ||
-        bh.block_type != ZXC_BLOCK_SEK)
-        return 0;
-    const uint64_t table = zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size));
-    if (zxc_seek_size_field(table) != bh.comp_size) return 0;
-    *sek_bytes = table;
-    return 1;
-}
+int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint64_t num_blocks);
 
 /**
- * @brief Checks the SEK block header on the @p avail bytes present, like
- *        @ref zxc_check_file_footer: type and size field first, all of it at 8.
+ * @brief Checks an EOF block header against its one valid form: type 255, every
+ *        other field zero, and its header checksum.
  *
- * The @p prefix bytes before it and @p has_checksum give the footer the frame
- * would end with if it had no table: when that footer is shorter than a block
- * header and stands where the header should, the flag lies. A SEK header written
- * with its reserved bytes at zero never starts with such a footer.
+ * @param[in] hdr The 8 header bytes, already read as an EOF block.
+ * @return @ref ZXC_OK or @ref ZXC_ERROR_BAD_HEADER.
+ */
+int zxc_check_eof_header(const uint8_t* hdr);
+
+/**
+ * @brief Checks the SEK block header the file header announced, on the @p avail
+ *        bytes present.
  *
+ * A frame admits one header, the one zxc_seek_table_header() writes (reserved
+ * bytes zero), compared like the footer. A short footer never matches its start,
+ * so a flag set without a table reads as corrupt, not truncated.
+ *
+ * @param[in]  hdr        Bytes after the EOF block.
+ * @param[in]  avail      How many of them are present.
+ * @param[in]  total_out  Bytes the frame decoded to.
+ * @param[in]  block_size Block size from the file header.
+ * @param[out] sek_bytes  Table length in 64 bits (the field only holds its fold);
+ *                        may be NULL.
  * @return @ref ZXC_OK, @ref ZXC_ERROR_CORRUPT_DATA or @ref ZXC_ERROR_SRC_TOO_SMALL.
  */
-static ZXC_ALWAYS_INLINE int zxc_check_seek_header(const uint8_t* hdr, const size_t avail,
-                                                   const uint64_t prefix, const uint64_t total_out,
-                                                   const size_t block_size, const int has_checksum,
-                                                   uint64_t* sek_bytes) {
-    const zxc_footer_layout_t l = zxc_footer_layout(prefix, total_out, has_checksum);
-    if (l.len < ZXC_BLOCK_HEADER_SIZE && avail >= l.len &&
-        zxc_check_file_footer(hdr, l.len, &l, total_out, NULL) == ZXC_OK)
-        return ZXC_ERROR_CORRUPT_DATA;
-    if (avail >= ZXC_BLOCK_HEADER_SIZE)
-        return zxc_seek_header_ok(hdr, total_out, block_size, sek_bytes) ? ZXC_OK
-                                                                         : ZXC_ERROR_CORRUPT_DATA;
-    if (avail >= 1 && hdr[0] != ZXC_BLOCK_SEK) return ZXC_ERROR_CORRUPT_DATA;
-    uint8_t field[4];
-    zxc_store_le32(field, zxc_seek_size_field(
-                              zxc_seek_table_bytes(zxc_seek_block_count(total_out, block_size))));
-    for (size_t i = 3; i < avail; i++)  // bytes 3..6: the payload size
-        if (hdr[i] != field[i - 3]) return ZXC_ERROR_CORRUPT_DATA;
-    return ZXC_ERROR_SRC_TOO_SMALL;
-}
+int zxc_check_seek_header(const uint8_t* hdr, size_t avail, uint64_t total_out, size_t block_size,
+                          uint64_t* sek_bytes);
 
 // ---------------------------------------------------------------------------
 // Seekable cross-TU hooks (defined in zxc_seekable.c, consumed by the
@@ -2385,15 +2368,6 @@ static ZXC_ALWAYS_INLINE int zxc_check_seek_header(const uint8_t* hdr, const siz
  * @param[in]     ctx  Pointer previously returned by @c ZXC_MALLOC / @c ZXC_CALLOC.
  */
 void zxc_seekable_attach_owned_ctx(zxc_seekable* s, void* ctx);
-
-/**
- * @brief Writes a seek table's block header for @p num_blocks entries.
- *
- * Shared by the frame and streaming writers, which emit the entries after it.
- *
- * @return @ref ZXC_BLOCK_HEADER_SIZE, or a negative @ref zxc_error_t.
- */
-int zxc_seek_table_header(uint8_t* dst, size_t dst_capacity, uint64_t num_blocks);
 
 /**
  * @brief Writes one group (@p *anchor, then @p cnt sizes) into @p dst, which holds

@@ -957,23 +957,36 @@ int test_seek_tail_rule(void) {
     }
 
     uint64_t got = 0;
-    if (!zxc_seek_header_ok(peek, total_out, BS, &got) || got != table) {
+    if (zxc_check_seek_header(peek, sizeof(peek), total_out, BS, &got) != ZXC_OK || got != table) {
         printf("Failed: SEK of %llu blocks: matched %d, length %llu, want %llu\n",
                (unsigned long long)nblocks, got != 0, (unsigned long long)got,
                (unsigned long long)table);
         return 0;
     }
     /* Off by one block: the header field no longer agrees. */
-    if (zxc_seek_header_ok(peek, total_out - BS, BS, &got)) {
+    if (zxc_check_seek_header(peek, sizeof(peek), total_out - BS, BS, &got) == ZXC_OK) {
         printf("Failed: matched a SEK header for the wrong block count\n");
         return 0;
     }
     /* A lying flag: the footer's head where the SEK header should be. */
     uint8_t footer[ZXC_BLOCK_HEADER_SIZE];
     zxc_store_le64(footer, 10);
-    if (zxc_seek_header_ok(footer, 10, BS, &got)) {
+    if (zxc_check_seek_header(footer, sizeof(footer), 10, BS, &got) == ZXC_OK) {
         printf("Failed: a source size accepted as a SEK header\n");
         return 0;
+    }
+    /* A reserved byte set, hash recomputed: still refused. */
+    for (int at = 1; at <= 2; at++) {
+        uint8_t odd[ZXC_BLOCK_HEADER_SIZE];
+        memcpy(odd, peek, sizeof(odd));
+        odd[at] = 1;
+        odd[7] = 0;
+        odd[7] = zxc_hash8(odd);
+        if (zxc_check_seek_header(odd, sizeof(odd), total_out, BS, &got) !=
+            ZXC_ERROR_CORRUPT_DATA) {
+            printf("Failed: SEK header byte %d set was accepted\n", at);
+            return 0;
+        }
     }
     printf("PASS\n\n");
     return 1;

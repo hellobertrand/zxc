@@ -1592,6 +1592,33 @@ int test_footer_strictness(void) {
         ok = all_decoders_say(lie[k], bad, (size_t)m, ZXC_ERROR_CORRUPT_DATA);
     }
 
+    /* 3b. EOF or SEK header with Block Flags or Reserved set, hash recomputed:
+     *     each has one valid form, every reader refuses the others. */
+    static const char* const odd[] = {"EOF flags", "EOF reserved", "SEK flags", "SEK reserved"};
+    for (int k = 0; k < 4 && ok; k++) {
+        const zxc_compress_opts_t co = {.level = 3, .seekable = 1};
+        const int64_t m = zxc_compress(src, sizeof(src), bad, sizeof(bad), &co);
+        const size_t sek = m > 0 ? (size_t)m - test_footer_len(bad, (size_t)m) - 20 : 0;
+        const size_t hdr = k < 2 ? sek - ZXC_BLOCK_HEADER_SIZE : sek;
+        if (m <= 0 || bad[sek] != ZXC_BLOCK_SEK ||
+            bad[hdr] != (k < 2 ? ZXC_BLOCK_EOF : ZXC_BLOCK_SEK)) {
+            printf("  [FAIL] no EOF and SEK headers where expected\n");
+            ok = 0;
+            break;
+        }
+        bad[hdr + 1 + (k & 1)] = 1;
+        bad[hdr + 7] = 0;
+        bad[hdr + 7] = zxc_hash8(bad + hdr);
+        zxc_seekable* const s = zxc_seekable_open(bad, (size_t)m);
+        if (s) {
+            printf("  [FAIL] %s set: the seekable reader opened it\n", odd[k]);
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+        ok = ok && all_decoders_say(odd[k], bad, (size_t)m,
+                                    k < 2 ? ZXC_ERROR_BAD_HEADER : ZXC_ERROR_CORRUPT_DATA);
+    }
+
     /* 4. Cut shorter than the smallest frame: decode and probe agree. */
     if (ok && n > 0) {
         static uint8_t out[1024];

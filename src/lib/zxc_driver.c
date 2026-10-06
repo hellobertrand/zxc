@@ -552,12 +552,11 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
                 }
 
                 if (bh.block_type == ZXC_BLOCK_EOF) {
-                    if (UNLIKELY(bh.comp_size != 0)) {
-                        // LCOV_EXCL_START
+                    if (UNLIKELY(zxc_check_eof_header(bh_buf) != ZXC_OK)) {
                         ctx->io_error = 1;
+                        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_HEADER;
                         read_eof = 1;
                         goto _job_prepared;
-                        // LCOV_EXCL_STOP
                     }
                     ctx->frame_in += ZXC_BLOCK_HEADER_SIZE;
                     read_eof = 1;
@@ -687,8 +686,7 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         // A short read is a truncation, unless the bytes read already disagree.
         const size_t got = fread(sek, 1, sizeof(sek), f_in);
         const int src_rc =
-            zxc_check_seek_header(sek, got, ctx->frame_in, (uint64_t)w->total_bytes,
-                                  ctx->chunk_size, ctx->file_has_checksum, &remaining);
+            zxc_check_seek_header(sek, got, (uint64_t)w->total_bytes, ctx->chunk_size, &remaining);
         if (UNLIKELY(src_rc != ZXC_OK)) {
             if (src_rc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = src_rc;
             ctx->io_error = 1;
