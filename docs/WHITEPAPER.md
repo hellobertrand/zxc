@@ -410,14 +410,14 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 (Present immediately after the EOF Block)
 
 A mandatory footer closes the stream: an 8-byte **archive digest** when
-checksums are on, then the source size and the frame size, each on the fewest
+checksums are on, then the source size and the compressed frame size, each on the fewest
 bytes that hold it, and a last byte giving their two lengths.
 
 **Footer Structure (3 to 17 bytes, plus 8 with a digest):**
 
 ```
   +----------------+-------------+------------+---+
-  | Archive Digest | Source Size | Frame Size | L |
+  | Archive Digest | Source Size | Comp. Size | L |
   | (8, if -C)     | (1..8)      | (1..8)     | 1 |
   +----------------+-------------+------------+---+
                      L = (nd - 1) | (nf - 1) << 4
@@ -428,7 +428,7 @@ bytes that hold it, and a last byte giving their two lengths.
     `zxc -t` reports. A block reordered, dropped or altered changes it. It is not
     checked on a seekable range read, which never sees every block.
 *   **Source Size**: total size of the uncompressed data.
-*   **Frame Size**: bytes of the whole frame, footer included. Read back from
+*   **Compressed Size**: bytes of the whole frame, footer included. Read back from
     the last byte `L`, it locates the frame's header without any other field:
     a reader starting from the end of the file always finds where the frame
     begins.

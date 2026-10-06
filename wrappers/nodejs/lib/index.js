@@ -357,6 +357,20 @@ function getDecompressedSize(data) {
 }
 
 /**
+ * Reads a frame's header and footer, without decoding.
+ *
+ * @param {Buffer} data - Compressed data buffer.
+ * @returns {FrameInfo} The declared fields; `digest` is a BigInt, 0n without checksums.
+ * @throws {Error} On an invalid frame, with the zxc error name and `code`.
+ */
+function getFrameInfo(data) {
+  if (!Buffer.isBuffer(data)) {
+    throw new TypeError("data must be a Buffer");
+  }
+  return native.getFrameInfo(data);
+}
+
+/**
  * Decompress a ZXC compressed Buffer.
  *
  * @param {Buffer} data - Compressed data.
@@ -652,6 +666,7 @@ module.exports = {
   decompress,
   compressBound,
   getDecompressedSize,
+  getFrameInfo,
 
   // Dictionary API
   trainDict,

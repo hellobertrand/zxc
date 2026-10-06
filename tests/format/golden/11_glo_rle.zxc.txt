@@ -34,4 +34,4 @@ header_checksum:  0x83
 [footer]
 raw:              00 40 8E 1D 11
 src_size:         16384 (2 bytes)
-frame_size:       7566 (2 bytes)
+compressed_size:  7566 (2 bytes)

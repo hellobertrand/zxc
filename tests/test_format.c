@@ -656,7 +656,7 @@ int test_eof_block_structure() {
         return 0;
     }
 
-    // 1. Verify the footer: source size 4, frame size the whole archive.
+    // 1. Verify the footer: source size 4, compressed size the whole archive.
     uint64_t stored = 0, frame = 0;
     size_t sizes = 0;
     if (zxc_parse_file_footer(compressed + comp_size, (size_t)comp_size, &stored, &frame, &sizes) !=

@@ -140,4 +140,4 @@ entries:          6
 raw:              D8 AA D6 86 CE 49 97 51 09 53 59 04 11
 digest:           0x519749CE86D6AAD8
 src_size:         21257 (2 bytes)
-frame_size:       1113 (2 bytes)
+compressed_size:  1113 (2 bytes)

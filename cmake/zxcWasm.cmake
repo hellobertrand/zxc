@@ -67,6 +67,8 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         # Options-struct layout guards
         "_zxc_compress_opts_size"
         "_zxc_decompress_opts_size"
+        "_zxc_get_frame_info"
+        "_zxc_frame_info_size"
         "_malloc"
         "_free"
     )

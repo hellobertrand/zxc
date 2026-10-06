@@ -569,7 +569,7 @@ int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, const size_t
         return ZXC_ERROR_CORRUPT_DATA;
 
     info->decompressed_size = stored;
-    info->frame_size = frame;
+    info->compressed_size = frame;
     info->digest = cs ? zxc_le64(tail + tail_len - flen) : 0;
     info->block_size = chunk;
     info->dict_id = did;
@@ -710,7 +710,7 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     }
     zxc_store_le_n(p, src_size, l.nd);
     p += l.nd;
-    zxc_store_le_n(p, l.frame_size, l.nf);
+    zxc_store_le_n(p, l.compressed_size, l.nf);
     p += l.nf;
     *p = (uint8_t)((l.nd - 1) | (l.nf - 1) << 4);
     return (int)l.len;
@@ -739,7 +739,7 @@ int zxc_check_file_footer(const uint8_t* footer, const uint64_t prefix, const ui
  * refused.
  */
 int zxc_parse_file_footer(const uint8_t* end, const size_t avail, uint64_t* src_size,
-                          uint64_t* frame_size, size_t* sizes_len) {
+                          uint64_t* compressed_size, size_t* sizes_len) {
     if (UNLIKELY(avail < ZXC_FILE_FOOTER_MIN_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     const uint8_t L = end[-1];
     if (UNLIKELY(L & 0x88U)) return ZXC_ERROR_CORRUPT_DATA;
@@ -751,7 +751,7 @@ int zxc_parse_file_footer(const uint8_t* end, const size_t avail, uint64_t* src_
     const uint64_t f = zxc_load_le_n(end - 1 - nf, nf);
     if (UNLIKELY(zxc_uint_bytes(d) != nd || zxc_uint_bytes(f) != nf)) return ZXC_ERROR_CORRUPT_DATA;
     *src_size = d;
-    *frame_size = f;
+    *compressed_size = f;
     *sizes_len = need;
     return ZXC_OK;
 }

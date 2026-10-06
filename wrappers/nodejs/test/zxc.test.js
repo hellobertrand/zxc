@@ -58,6 +58,33 @@ describe("compress/decompress roundtrip", () => {
 });
 
 // =============================================================================
+// getFrameInfo
+// =============================================================================
+
+describe("getFrameInfo", () => {
+  for (const checksum of [false, true]) {
+    test(`reads the header and footer (checksum ${checksum})`, () => {
+      const data = Buffer.from("frame info ".repeat(500));
+      const comp = zxc.compress(data, { checksum });
+      const info = zxc.getFrameInfo(comp);
+      expect(info.decompressedSize).toBe(data.length);
+      expect(info.compressedSize).toBe(comp.length);
+      expect(info.hasChecksum).toBe(checksum);
+      expect(info.digest !== 0n).toBe(checksum);
+      expect(info.hasSeekTable).toBe(false);
+      expect(info.dictId).toBe(0);
+      expect(info.blockSize).toBeGreaterThanOrEqual(4096);
+    });
+  }
+
+  test("throws on an invalid frame", () => {
+    const comp = zxc.compress(Buffer.from("x".repeat(100)));
+    expect(() => zxc.getFrameInfo(Buffer.concat([comp, Buffer.from([0])]))).toThrow();
+    expect(() => zxc.getFrameInfo("not a buffer")).toThrow(TypeError);
+  });
+});
+
+// =============================================================================
 // compressBound
 // =============================================================================
 

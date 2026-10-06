@@ -375,7 +375,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     } else if (!strcmp(name, "bad_block_header_checksum")) {
         d[BLK0 + 7] ^= 0xFFU; /* left wrong: the header checksum is the defect */
     } else if (!strcmp(name, "bad_footer_size") || !strcmp(name, "bad_footer_digest")) {
-        /* Sec 8: [digest][source size][frame size][L], the lengths in L. */
+        /* Sec 8: [digest][source size][compressed size][L], the lengths in L. */
         uint64_t dsize = 0, frame = 0;
         size_t sizes = 0;
         if (zxc_parse_file_footer(d + len, len, &dsize, &frame, &sizes) != ZXC_OK) {

@@ -230,7 +230,7 @@ ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
  */
 typedef struct {
     uint64_t decompressed_size; /**< Source bytes the frame decodes to. */
-    uint64_t frame_size;        /**< Compressed bytes of the frame, footer included. */
+    uint64_t compressed_size;   /**< Compressed bytes of the frame, footer included. */
     uint64_t digest;            /**< Archive digest; 0 when @c has_checksum is 0. */
     size_t block_size;          /**< Block size, 4 KB to 2 MB. */
     uint32_t dict_id;           /**< Dictionary the frame needs; 0 for none. */

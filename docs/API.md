@@ -546,7 +546,7 @@ Reads the original size from the file footer without decompressing.
 ```c
 typedef struct {
     uint64_t decompressed_size; /* source bytes the frame decodes to */
-    uint64_t frame_size;        /* compressed bytes, footer included */
+    uint64_t compressed_size;        /* compressed bytes, footer included */
     uint64_t digest;            /* archive digest; 0 without checksums */
     size_t   block_size;        /* 4 KB .. 2 MB */
     uint32_t dict_id;           /* dictionary the frame needs; 0 for none */

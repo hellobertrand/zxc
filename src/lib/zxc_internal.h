@@ -2168,7 +2168,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 
 /**
  * @name File footer
- * @brief `[digest(8), with checksums] | original_size | frame_size | L` (FORMAT.md Sec 8).
+ * @brief `[digest(8), with checksums] | original_size | compressed_size | L` (FORMAT.md Sec 8).
  *
  * Sizes on the fewest little-endian bytes (1 to 8); L = (nd - 1) | (nf - 1) << 4
  * gives their lengths, so the footer parses back from the end without the
@@ -2185,16 +2185,16 @@ static ZXC_ALWAYS_INLINE size_t zxc_uint_bytes(const uint64_t v) {
 
 /** @brief Where a frame's footer lies, from what precedes it. */
 typedef struct {
-    size_t nd;           /**< Bytes of original_size. */
-    size_t nf;           /**< Bytes of frame_size. */
-    size_t len;          /**< Footer bytes, digest included. */
-    uint64_t frame_size; /**< The frame's bytes, footer included. */
+    size_t nd;                /**< Bytes of original_size. */
+    size_t nf;                /**< Bytes of compressed_size. */
+    size_t len;               /**< Footer bytes, digest included. */
+    uint64_t compressed_size; /**< The frame's bytes, footer included. */
 } zxc_footer_layout_t;
 
 /**
  * @brief The footer of a frame whose first @p prefix bytes precede it.
  *
- * frame_size counts its own bytes: nf is the fewest that hold the total, a
+ * compressed_size counts its own bytes: nf is the fewest that hold the total, a
  * unique choice both ends derive.
  */
 static ZXC_ALWAYS_INLINE zxc_footer_layout_t zxc_footer_layout(const uint64_t prefix,
@@ -2205,7 +2205,7 @@ static ZXC_ALWAYS_INLINE zxc_footer_layout_t zxc_footer_layout(const uint64_t pr
     const uint64_t base = prefix + (checksum_enabled ? ZXC_FILE_DIGEST_SIZE : 0U) + l.nd + 1;
     l.nf = 1;
     while (zxc_uint_bytes(base + l.nf) > l.nf) l.nf++;
-    l.frame_size = base + l.nf;
+    l.compressed_size = base + l.nf;
     l.len = (checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U) + l.nd + l.nf + 1;
     return l;
 }
@@ -2235,18 +2235,18 @@ int zxc_check_file_footer(const uint8_t* footer, uint64_t prefix, uint64_t src_s
 /**
  * @brief Parses the sizes back from the end of a frame.
  *
- * @param[in]  end       One past the frame's last byte.
- * @param[in]  avail     Bytes readable before @p end.
- * @param[out] src_size  Stored original size.
- * @param[out] frame_size Stored frame size.
- * @param[out] sizes_len Bytes of the two sizes and L; the digest, when the
- *                       header announces one, precedes them.
+ * @param[in]  end             One past the frame's last byte.
+ * @param[in]  avail           Bytes readable before @p end.
+ * @param[out] src_size        Stored original size.
+ * @param[out] compressed_size Stored compressed size of the frame.
+ * @param[out] sizes_len       Bytes of the two sizes and L; the digest, when
+ *                             the header announces one, precedes them.
  * @return @ref ZXC_OK, @ref ZXC_ERROR_SRC_TOO_SMALL, or
  *         @ref ZXC_ERROR_CORRUPT_DATA for a malformed lengths byte or a
  *         non-minimal length.
  */
 int zxc_parse_file_footer(const uint8_t* end, size_t avail, uint64_t* src_size,
-                          uint64_t* frame_size, size_t* sizes_len);
+                          uint64_t* compressed_size, size_t* sizes_len);
 
 /** @brief Most bytes a footer spans: the digest and the two longest sizes. */
 #define ZXC_FOOTER_TAIL_MAX (ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE)

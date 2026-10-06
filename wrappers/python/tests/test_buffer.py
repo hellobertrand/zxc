@@ -80,3 +80,26 @@ def test_compress_roundtrip(data):
         decompressed = zxc.decompress(compressed, out_size)
         assert len(data) == len(decompressed)
         assert data == decompressed
+
+
+@pytest.mark.parametrize("checksum", [False, True])
+def test_get_frame_info(checksum):
+    data = b"frame info " * 500
+    comp = zxc.compress(data, checksum=checksum)
+    info = zxc.get_frame_info(comp)
+    assert info.decompressed_size == len(data)
+    assert info.compressed_size == len(comp)
+    assert info.has_checksum is checksum
+    assert (info.digest != 0) is checksum
+    assert info.has_seek_table is False
+    assert info.dict_id == 0
+    assert info.block_size >= 4096
+    assert info.format_version > 0
+
+
+def test_get_frame_info_invalid():
+    comp = zxc.compress(b"x" * 100)
+    with pytest.raises(RuntimeError):
+        zxc.get_frame_info(comp + b"\0")  # the frame no longer spans the buffer
+    with pytest.raises(RuntimeError):
+        zxc.get_frame_info(b"not a zxc frame at all, long enough")

@@ -1373,8 +1373,9 @@ done:
 /* zxc_get_frame_info and its FILE* twin: every field against what the archive
  * was built with, the same answer from both, and nothing written on failure. */
 static int frame_info_same(const zxc_frame_info_t* a, const zxc_frame_info_t* b) {
-    return a->decompressed_size == b->decompressed_size && a->frame_size == b->frame_size &&
-           a->digest == b->digest && a->block_size == b->block_size && a->dict_id == b->dict_id &&
+    return a->decompressed_size == b->decompressed_size &&
+           a->compressed_size == b->compressed_size && a->digest == b->digest &&
+           a->block_size == b->block_size && a->dict_id == b->dict_id &&
            a->format_version == b->format_version && a->has_checksum == b->has_checksum &&
            a->has_seek_table == b->has_seek_table;
 }
@@ -1414,7 +1415,7 @@ int test_frame_info(void) {
             co.checksum_enabled && n > 0 ? zxc_le64(arc + n - test_footer_len(arc, (size_t)n)) : 0;
         const uint32_t did = v == 2 ? zxc_get_dict_id(arc, (size_t)n) : 0;
         if (ra != ZXC_OK || rb != ZXC_OK || pos != 5 || !frame_info_same(&a, &b) ||
-            a.decompressed_size != N || a.frame_size != (uint64_t)n || a.digest != digest ||
+            a.decompressed_size != N || a.compressed_size != (uint64_t)n || a.digest != digest ||
             a.block_size != 8192 || a.dict_id != did || (v == 2 && did == 0) ||
             a.format_version != ZXC_FILE_FORMAT_VERSION || a.has_checksum != (v >= 1) ||
             a.has_seek_table != (v >= 1)) {

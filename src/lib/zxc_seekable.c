@@ -165,11 +165,11 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
         src->size - body < sizeof(sizes) ? (size_t)(src->size - body) : sizeof(sizes);
     if (UNLIKELY(zxc_seek_source_read(src, sizes, want, src->size - want) != ZXC_OK)) return NULL;
     uint64_t total_decomp = 0;
-    uint64_t frame_size = 0;
+    uint64_t compressed_size = 0;
     size_t sizes_len = 0;
-    if (UNLIKELY(zxc_parse_file_footer(sizes + want, want, &total_decomp, &frame_size,
+    if (UNLIKELY(zxc_parse_file_footer(sizes + want, want, &total_decomp, &compressed_size,
                                        &sizes_len) != ZXC_OK ||
-                 frame_size != src->size))
+                 compressed_size != src->size))
         return NULL;
     const uint64_t footer_len = sizes_len + (file_has_chk ? ZXC_FILE_DIGEST_SIZE : 0U);
     if (UNLIKELY(src->size < body + footer_len)) return NULL;

@@ -396,17 +396,18 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         off += ZXC_BLOCK_HEADER_SIZE + (size_t)table;
     }
 
-    /* ---- File footer (Sec 8): [digest][source size][frame size][lengths] ----
+    /* ---- File footer (Sec 8): [digest][source size][compressed size][lengths] ----
      * Read back from the end, then checked against the one footer the frame
      * implies from the front: both readings must agree. */
-    uint64_t src_size = 0, frame_size = 0;
+    uint64_t src_size = 0, compressed_size = 0;
     size_t sizes = 0;
-    CHECK(zxc_parse_file_footer(buf + size, size - off, &src_size, &frame_size, &sizes) == ZXC_OK,
+    CHECK(zxc_parse_file_footer(buf + size, size - off, &src_size, &compressed_size, &sizes) ==
+              ZXC_OK,
           "footer does not parse from the end");
     const size_t footer_len = sizes + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
     CHECK(off + footer_len == size, "footer not at end (off %zu, size %zu)", off, size);
-    CHECK(frame_size == size, "frame size %llu != file size %zu", (unsigned long long)frame_size,
-          size);
+    CHECK(compressed_size == size, "compressed size %llu != file size %zu",
+          (unsigned long long)compressed_size, size);
     const uint8_t* footer = buf + off;
     uint64_t stored_digest = 0;
     CHECK(zxc_check_file_footer(footer, off, src_size, has_checksum, &stored_digest) == ZXC_OK,
@@ -421,7 +422,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     }
     EMIT("src_size:         %llu (%zu bytes)\n", (unsigned long long)src_size,
          (size_t)(footer[footer_len - 1] & 7) + 1);
-    EMIT("frame_size:       %llu (%zu bytes)\n", (unsigned long long)frame_size,
+    EMIT("compressed_size:  %llu (%zu bytes)\n", (unsigned long long)compressed_size,
          (size_t)(footer[footer_len - 1] >> 4) + 1);
     CHECK(src_size == in_size, "footer source size %llu != %zu input bytes",
           (unsigned long long)src_size, in_size);

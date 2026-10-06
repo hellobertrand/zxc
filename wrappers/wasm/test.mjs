@@ -388,6 +388,40 @@ async function main() {
     assert(arraysEqual(data, decoded), "pstream roundtrip byte-exact match");
   }
 
+  // --- 8b. Frame info (header and footer, no decoding) -----------------
+  console.log("\n8b. getFrameInfo");
+  {
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const data = new Uint8Array(5000);
+    for (let i = 0; i < data.length; i++) data[i] = (i * 13) & 0x3f;
+    for (const checksum of [false, true]) {
+      const comp = zxc.compress(data, { checksum });
+      const fi = zxc.getFrameInfo(comp);
+      assert(
+        fi.decompressedSize === data.length &&
+          fi.compressedSize === comp.length &&
+          fi.hasChecksum === checksum &&
+          (fi.digest !== 0n) === checksum &&
+          !fi.hasSeekTable &&
+          fi.dictId === 0 &&
+          fi.blockSize >= 4096 &&
+          fi.formatVersion > 0,
+        `frame info, checksum ${checksum}: ${fi.decompressedSize} B in ${fi.compressedSize} B`,
+      );
+    }
+    const comp = zxc.compress(data);
+    const padded = new Uint8Array(comp.length + 1);
+    padded.set(comp);
+    let threw = false;
+    try {
+      zxc.getFrameInfo(padded);
+    } catch {
+      threw = true;
+    }
+    assert(threw, "frame info refuses a trailing byte");
+  }
+
   // --- 9. WHATWG TransformStream adapters -------------------------------
   console.log("\n9. WHATWG TransformStream adapters + detectZxc");
   {

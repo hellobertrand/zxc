@@ -791,7 +791,7 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, size_t 
  *
  * What every reader must clear before trusting an archive; each caller adds its
  * own policy: what to do with the size, which codes to surface. The footer's
- * frame size must be the whole input: one frame, starting at offset 0.
+ * compressed size must be the whole input: one frame, starting at offset 0.
  *
  * @param[in]  src        Archive bytes.
  * @param[in]  src_size   Archive size in bytes.

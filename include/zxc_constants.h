@@ -102,9 +102,10 @@
 /** @brief File header size: Magic(4) + Version(1) + Chunk(1) + Flags(1) + Reserved(7) +
  * Checksum(2). */
 #define ZXC_FILE_HEADER_SIZE 16
-/** @brief Smallest file footer: original_size(1) + frame_size(1) + lengths(1). */
+/** @brief Smallest file footer: original_size(1) + compressed_size(1) + lengths(1). */
 #define ZXC_FILE_FOOTER_MIN_SIZE 3
-/** @brief Largest file footer, digest excluded: original_size(8) + frame_size(8) + lengths(1). */
+/** @brief Largest file footer, digest excluded: original_size(8) + compressed_size(8) + lengths(1).
+ */
 #define ZXC_FILE_FOOTER_MAX_SIZE 17
 /** @brief Archive digest, opening the footer when the header sets HAS_CHECKSUM. */
 #define ZXC_FILE_DIGEST_SIZE 8

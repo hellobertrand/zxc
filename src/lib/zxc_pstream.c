@@ -115,7 +115,7 @@ typedef enum {
  *      Running count of uncompressed bytes consumed; written into the file
  *      footer.
  * @var zxc_cstream_s::total_out
- *      Bytes of the frame staged so far; place the footer and its frame size.
+ *      Bytes of the frame staged so far; place the footer and its compressed size.
  * @var zxc_cstream_s::state
  *      Current state machine position (see @ref cstream_state_t).
  * @var zxc_cstream_s::error_code
@@ -368,7 +368,7 @@ static int cs_stage_eof(zxc_cstream* cs) {
 /**
  * @brief Stages the file footer into the @c pending buffer.
  *
- * The footer carries the input size and the frame size; @c pending holds the
+ * The footer carries the input size and the compressed size; @c pending holds the
  * largest one from creation.
  *
  * @param[in,out] cs Compression stream.

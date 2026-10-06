@@ -503,7 +503,7 @@ int test_context_api_empty_input(void) {
             printf("  [FAIL] zxc_create_cctx\n");
             break;
         }
-        /* Footer of an empty frame: size 0, frame size 27, lengths byte. */
+        /* Footer of an empty frame: size 0, compressed size 27, lengths byte. */
         const int64_t expected =
             ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE;
         const int64_t n1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &co);

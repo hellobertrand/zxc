@@ -508,7 +508,7 @@ binds a block to its index.
 1. Read the **File Header** (first 16 bytes) -> extract `block_size`; with `HAS_SEEK_TABLE`
    clear, the archive is not seekable.
 2. Parse the **File Footer** back from the end (§ 8) -> `total_decompressed_size` and
-   `frame_size`; require `frame_size` to be the whole input, the frame starting at offset 0.
+   `compressed_frame_size`; require it to be the whole input, the frame starting at offset 0.
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`, in 64 bits: no field
    holds `N`, so nothing caps it but the footer's 64-bit size.
 4. Calculate `seek_block_size = 8 + ⌈N / 64⌉ × 8 + N × 4`, in 64 bits.
@@ -713,22 +713,22 @@ block, on the seekable layout of § 5.5). It ends the frame.
 Size      Field
 8         archive_digest (u64)              -- only when HAS_CHECKSUM=1
 nd        original_source_size (LE, nd = 1..8 bytes)
-nf        frame_size (LE, nf = 1..8 bytes)
+nf        compressed_frame_size (LE, nf = 1..8 bytes)
 1         L = (nd - 1) | (nf - 1) << 4      -- bits 3 and 7 reserved, zero
 ```
 
 - **archive_digest**: the fold of § 7.3; present iff `HAS_CHECKSUM=1`.
 - **original_source_size**: full uncompressed size of the frame.
-- **frame_size**: bytes of the whole frame, from its magic word to `L` included.
+- **compressed_frame_size**: bytes of the whole frame, from its magic word to `L` included.
 - **L**: the lengths of the two sizes, the frame's last byte.
 
 Each size is written on the **fewest** bytes that hold it (0 takes one byte), and a
-decoder rejects any other length: a frame has exactly one valid footer. `frame_size`
+decoder rejects any other length: a frame has exactly one valid footer. `compressed_frame_size`
 counts its own bytes; `nf` is the smallest length for which the total it yields fits
 in `nf` bytes, which is unique.
 
 **Reading back from the end** (seekable reader, size queries): `L` gives `nd` and `nf`,
-so the two sizes are found without the file header; `frame_size` then gives the
+so the two sizes are found without the file header; `compressed_frame_size` then gives the
 offset of the frame's header, and with `HAS_CHECKSUM=1` the digest sits right before
 the sizes.
 
@@ -737,7 +737,7 @@ the offset the footer starts at, so it computes the one footer the frame implies
 compares it byte for byte, the digest aside; it reads no byte past `L`.
 
 Example: 10 000 000 source bytes compressed to a 3 000 000-byte prefix, no checksums:
-`80 96 98 | C7 C6 2D | 22` (size 0x989680 on 3 bytes, frame size 3 000 007 on 3, `L = 0x22`).
+`80 96 98 | C7 C6 2D | 22` (size 0x989680 on 3 bytes, compressed frame size 3 000 007 on 3, `L = 0x22`).
 
 ---
 
@@ -835,7 +835,7 @@ The recommended behavior for each class is specified below.
 | **Seek-table flag disagrees with the tail** | Between the EOF block and the footer | Reject. `HAS_SEEK_TABLE=1` without the SEK block §5.5 derives from the output, or any byte there with `HAS_SEEK_TABLE=0`. |
 | **Seek table group inconsistent** | SEK payload | Reject. A size outside `[8, one block]`, an anchor outside the data area, a group running past the EOF block, or a last group not ending on it (§5.5). |
 | **Block disagrees with its seek entry** | Block header, when a seekable reader accesses the block | Reject. The entry's size is not header + payload + checksum of the block found there (§5.5). |
-| **Footer mismatch** | File footer, after the digest | Reject. The sizes or `L` are not the ones the frame implies: wrong output size, wrong frame size, a non-minimal length or a reserved bit set (§ 8). |
+| **Footer mismatch** | File footer, after the digest | Reject. The sizes or `L` are not the ones the frame implies: wrong output size, wrong compressed frame size, a non-minimal length or a reserved bit set (§ 8). |
 | **Archive digest mismatch** | File footer, first 8 bytes (when `HAS_CHECKSUM=1`) | Reject (if verifying). Blocks were reordered, dropped or altered (§7.3). |
 | **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
 | **Match offset out of bounds** | During LZ copy | Reject. Offset references data before output start. |
@@ -1078,7 +1078,7 @@ BD 8A 9E 74 2A A2 9A B6 | 0A | 39 | 00
 
 - archive digest = `0xB69AA22A749E8ABD` (the fold of block #0's checksum, §7.3).
 - original source size = `0x0A = 10` bytes, on 1 byte.
-- frame size = `0x39 = 57` bytes, the whole archive, on 1 byte.
+- compressed frame size = `0x39 = 57` bytes, the whole archive, on 1 byte.
 - `L = 0x00`: both sizes on 1 byte.
 
 ### 14.3 Structural view with absolute offsets
@@ -1091,7 +1091,7 @@ BD 8A 9E 74 2A A2 9A B6 | 0A | 39 | 00
 0x26..0x2D  EOF Block Header (8)
 0x2E..0x35  Archive Digest (8)
 0x36        File Source Size (1)
-0x37        Frame Size (1)
+0x37        Compressed Frame Size (1)
 0x38        Lengths byte L (1)
 ```
 
@@ -1156,7 +1156,7 @@ BD 8A 9E 74 2A A2 9A B6 | 0A | 4D | 00
 ```
 
 - archive digest = `0xB69AA22A749E8ABD` (§7.3).
-- original source size = `10` bytes; frame size = `0x4D = 77` bytes; `L = 0x00`.
+- original source size = `10` bytes; compressed frame size = `0x4D = 77` bytes; `L = 0x00`.
 
 #### Structural view with absolute offsets
 
@@ -1171,7 +1171,7 @@ BD 8A 9E 74 2A A2 9A B6 | 0A | 4D | 00
 0x3E..0x41  Block #0 size (4)
 0x42..0x49  Archive Digest (8)
 0x4A        File Source Size (1)
-0x4B        Frame Size (1)
+0x4B        Compressed Frame Size (1)
 0x4C        Lengths byte L (1)
 ```
 

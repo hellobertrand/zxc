@@ -105,6 +105,26 @@ export function compress(data: Buffer, options?: CompressOptions): Buffer;
  */
 export function getDecompressedSize(data: Buffer): number;
 
+/** What a frame's header and footer declare (see getFrameInfo). */
+export interface FrameInfo {
+  decompressedSize: number;
+  compressedSize: number;
+  /** Archive digest; 0n when hasChecksum is false. */
+  digest: bigint;
+  blockSize: number;
+  /** Dictionary the frame needs; 0 for none. */
+  dictId: number;
+  formatVersion: number;
+  hasChecksum: boolean;
+  hasSeekTable: boolean;
+}
+
+/**
+ * Reads a frame's header and footer, without decoding.
+ * Throws on an invalid frame.
+ */
+export function getFrameInfo(data: Buffer): FrameInfo;
+
 /**
  * Decompress a ZXC compressed Buffer.
  */
