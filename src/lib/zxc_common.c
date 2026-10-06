@@ -694,10 +694,6 @@ static uint64_t zxc_load_le_n(const uint8_t* src, const size_t n) {
     return v;
 }
 
-/**
- * @brief Writes the file footer: the archive digest when @p checksum_enabled,
- *        then the two sizes and their lengths byte.
- */
 /** @brief Encodes the @p l footer: digest, the two sizes, then L. */
 static void zxc_encode_footer(uint8_t* dst, const zxc_footer_layout_t* l, const uint64_t src_size,
                               const uint64_t digest) {
@@ -709,6 +705,10 @@ static void zxc_encode_footer(uint8_t* dst, const zxc_footer_layout_t* l, const 
     p[l->nf] = (uint8_t)((l->nd - 1) | (l->nf - 1) << 4);
 }
 
+/**
+ * @brief Writes the file footer: the archive digest when @p checksum_enabled,
+ *        then the two sizes and their lengths byte.
+ */
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t prefix,
                           const uint64_t src_size, const uint64_t digest,
                           const int checksum_enabled) {
@@ -735,7 +735,6 @@ int zxc_check_file_footer(const uint8_t* footer, const size_t avail, const zxc_f
     if (digest) *digest = l->skip ? zxc_le64(footer) : 0;
     return ZXC_OK;
 }
-
 /**
  * @brief Parses the two sizes back from the end of a frame.
  *
@@ -763,7 +762,6 @@ int zxc_parse_file_footer(const uint8_t* end, const size_t avail, uint64_t* src_
     *sizes_len = need;
     return ZXC_OK;
 }
-
 /**
  * @brief Writes the 12-byte GLO/GHI sub-header shared by both block types.
  *
