@@ -507,7 +507,7 @@ binds a block to its index.
 **Backward Reading**:
 1. Read the **File Header** (first 16 bytes) -> extract `block_size`; with `HAS_SEEK_TABLE`
    clear, the archive is not seekable.
-2. Read the **File Footer** (last 8 bytes, or 16 with checksums) -> its first 8 bytes are `total_decompressed_size`.
+2. Read the last 8 bytes of the file: `total_decompressed_size`, the end of the **File Footer** (8 bytes, or 16 with checksums).
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`, in 64 bits: no field
    holds `N`, so nothing caps it but the footer's 64-bit size.
 4. Calculate `seek_block_size = 8 + ⌈N / 64⌉ × 8 + N × 4`, in 64 bits.
@@ -525,8 +525,9 @@ binds a block to its index.
    when it is damaged.
 
 **Sequential Reading**: the file header says what follows the EOF block, so a decoder never
-guesses from those bytes, which is unreliable: the footer opens with the source size, and one
-size in about 65536 parses as a valid SEK header. With `HAS_SEEK_TABLE=1`, it reads the SEK
+guesses from those bytes, which is unreliable: the footer opens with the source size, or the
+digest when checksums are on, and one value in about 65536 parses as a valid SEK header.
+With `HAS_SEEK_TABLE=1`, it reads the SEK
 block header and rejects it unless it is type `254` with a Compressed Payload Size equal to the
 fold of `T = ⌈N / 64⌉ × 8 + N × 4`, `N` derived from the bytes it produced; it then skips `T`
 bytes, counted in 64 bits, and reads the footer. With the flag clear, the footer comes next.
@@ -683,7 +684,7 @@ SIMD variants -- none of which touch the compressed bytes.
 
 ## 7.3 Archive digest (optional)
 
-When the file header sets `HAS_CHECKSUM=1`, an 8-byte **digest** follows the
+When the file header sets `HAS_CHECKSUM=1`, an 8-byte **digest** precedes the
 source size in the footer. It is an ordered 64-bit fold of every data block's
 checksum, in stream order:
 
@@ -705,17 +706,21 @@ block payloads on the wire beyond their checksums.
 ## 8. File Footer (8 or 16 bytes)
 
 Footer is mandatory, immediately after the EOF block header (or after the SEK
-block, on the seekable layout of § 5.5). The source size is the first 8 bytes;
-the digest, when `HAS_CHECKSUM=1`, follows it.
+block, on the seekable layout of § 5.5). The source size is always the last 8
+bytes of the file; the digest, when `HAS_CHECKSUM=1`, precedes it.
+
+Offsets are counted back from the end of the file:
 
 ```text
-Offset  Size  Field
-0x00    8     original_source_size (u64)
-0x08    8     archive_digest (u64)          -- only when HAS_CHECKSUM=1
+From end  Size  Field
+-16       8     archive_digest (u64)          -- only when HAS_CHECKSUM=1
+ -8       8     original_source_size (u64)
 ```
 
-- **original_source_size**: full uncompressed size of the file, the first 8 footer bytes.
-- **archive_digest**: the fold of § 7.3; present iff `HAS_CHECKSUM=1`, the last 8 bytes.
+- **archive_digest**: the fold of § 7.3; present iff `HAS_CHECKSUM=1`.
+- **original_source_size**: full uncompressed size of the file.
+  The optional field comes first so that the size sits at a fixed position from the
+  end: a reader finds it without the header's flags.
 
 ---
 
@@ -737,8 +742,8 @@ Offset  Size  Field
    - if `HAS_SEEK_TABLE=1`, read the SEK block header, require the payload size
      § 5.5 derives from the output, and skip the table,
    - read the footer (8 bytes, 16 when `HAS_CHECKSUM=1`),
-   - compare the first 8 footer bytes (`original_source_size`) with produced output size,
-   - if verifying, compare the trailing archive digest (§ 7.3) with the fold of the block checksums.
+   - compare the last 8 footer bytes (`original_source_size`) with produced output size,
+   - if verifying, compare the archive digest before them (§ 7.3) with the fold of the block checksums.
 
 ---
 
@@ -812,8 +817,8 @@ The recommended behavior for each class is specified below.
 | **Seek-table flag disagrees with the tail** | Between the EOF block and the footer | Reject. `HAS_SEEK_TABLE=1` without the SEK block §5.5 derives from the output, or any byte there with `HAS_SEEK_TABLE=0`. |
 | **Seek table group inconsistent** | SEK payload | Reject. A size outside `[8, one block]`, an anchor outside the data area, a group running past the EOF block, or a last group not ending on it (§5.5). |
 | **Block disagrees with its seek entry** | Block header, when a seekable reader accesses the block | Reject. The entry's size is not header + payload + checksum of the block found there (§5.5). |
-| **Footer source size mismatch** | File footer, offset 0x00 | Reject. Output size does not match declared original size. |
-| **Archive digest mismatch** | File footer, after the size (when `HAS_CHECKSUM=1`) | Reject (if verifying). Blocks were reordered, dropped or altered (§7.3). |
+| **Footer source size mismatch** | File footer, last 8 bytes | Reject. Output size does not match declared original size. |
+| **Archive digest mismatch** | File footer, before the size (when `HAS_CHECKSUM=1`) | Reject (if verifying). Blocks were reordered, dropped or altered (§7.3). |
 | **Decompressed output exceeds chunk size** | During LZ decode | Reject. Corrupt or malicious payload. |
 | **Match offset out of bounds** | During LZ copy | Reject. Offset references data before output start. |
 | **Varint exceeds maximum length** | Extras section | Reject. Overflow or corrupt extras data. |
@@ -987,8 +992,8 @@ Generated archive size: **62 bytes**.
 ```text
 00000000: F5 2E B0 9C 09 13 80 00 00 00 00 00 00 00 6D 86
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 0A 00
-00000030: 00 00 00 00 00 00 BD 8A 9E 74 2A A2 9A B6
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 BD 8A
+00000030: 9E 74 2A A2 9A B6 0A 00 00 00 00 00 00 00
 ```
 
 ### 14.2 Byte-level decoding
@@ -1050,11 +1055,11 @@ FF | 00 | 00 | 00 00 00 00 | 83
 #### D) File Footer (offset `0x2E`, 16 bytes)
 
 ```text
-0A 00 00 00 00 00 00 00 | BD 8A 9E 74 2A A2 9A B6
+BD 8A 9E 74 2A A2 9A B6 | 0A 00 00 00 00 00 00 00
 ```
 
-- original source size = `10` bytes (the first 8 footer bytes).
 - archive digest = `0xB69AA22A749E8ABD` (the fold of block #0's checksum, §7.3).
+- original source size = `10` bytes (the last 8 footer bytes).
 
 ### 14.3 Structural view with absolute offsets
 
@@ -1064,8 +1069,8 @@ FF | 00 | 00 | 00 00 00 00 | 83
 0x18..0x21  RAW Payload (10)
 0x22..0x25  RAW Block Checksum (4)
 0x26..0x2D  EOF Block Header (8)
-0x2E..0x35  File Source Size (8)
-0x36..0x3D  Archive Digest (8)
+0x2E..0x35  Archive Digest (8)
+0x36..0x3D  File Source Size (8)
 ```
 
 ### 14.4 Seekable Variant (with Seek Table)
@@ -1085,8 +1090,8 @@ Generated archive size: **82 bytes** (20 bytes larger than the non-seekable vari
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
 00000030: 00 0C 00 00 00 6F 10 00 00 00 00 00 00 00 16 00
-00000040: 00 00 0A 00 00 00 00 00 00 00 BD 8A 9E 74 2A A2
-00000050: 9A B6
+00000040: 00 00 BD 8A 9E 74 2A A2 9A B6 0A 00 00 00 00 00
+00000050: 00 00
 ```
 
 #### Byte-level decoding
@@ -1126,11 +1131,11 @@ Group 0 at `0x36`:
 **E) File Footer** (offset `0x42`, 16 bytes)
 
 ```text
-0A 00 00 00 00 00 00 00 | BD 8A 9E 74 2A A2 9A B6
+BD 8A 9E 74 2A A2 9A B6 | 0A 00 00 00 00 00 00 00
 ```
 
-- original source size = `10` bytes.
 - archive digest = `0xB69AA22A749E8ABD` (§7.3).
+- original source size = `10` bytes.
 
 #### Structural view with absolute offsets
 
@@ -1143,11 +1148,11 @@ Group 0 at `0x36`:
 0x2E..0x35  SEK Block Header (8)    <- seek table
 0x36..0x3D  Group 0 anchor (8)      <- offset of block #0
 0x3E..0x41  Block #0 size (4)
-0x42..0x49  File Source Size (8)
-0x4A..0x51  Archive Digest (8)
+0x42..0x49  Archive Digest (8)
+0x4A..0x51  File Source Size (8)
 ```
 
-> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer, so the footer stays at the very **end of the file** (its last 8 bytes, or 16 with checksums; § 8). Decoders that locate it from the end (`src + src_size - footer_len` for buffer APIs, `fseek(END - footer_len)` for file APIs, `footer_len` being 8 or 16) work unchanged with seekable archives. **Streaming decoders**, which reach the footer sequentially, learn from `HAS_SEEK_TABLE` whether a SEK block comes first.
+> **Compatibility note**: The SEK block is inserted between the EOF block and the file footer, so the footer stays at the very **end of the file** (its last 8 bytes, or 16 with checksums; § 8). The source size is always the file's last 8 bytes (`src + src_size - 8` for buffer APIs, `fseek(END - 8)` for file APIs), so decoders that read it from the end work unchanged with seekable archives. **Streaming decoders**, which reach the footer sequentially, learn from `HAS_SEEK_TABLE` whether a SEK block comes first.
 
 ---
 

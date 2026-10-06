@@ -821,7 +821,7 @@ static int zxc_read_frame_envelope(const uint8_t* RESTRICT src, const size_t src
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + zxc_footer_bytes(cs)))
         return ZXC_ERROR_SRC_TOO_SMALL;
 
-    const uint64_t stored = zxc_le64(src + src_size - zxc_footer_bytes(cs));
+    const uint64_t stored = zxc_read_file_footer(src + src_size - zxc_footer_bytes(cs), cs, NULL);
     if (UNLIKELY(!zxc_footer_dsize_plausible(stored, chunk, src_size)))
         return ZXC_ERROR_CORRUPT_DATA;
 
@@ -1531,24 +1531,24 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
             // EOF carries no payload; a non-zero comp_size is a malformed header.
             if (UNLIKELY(bh.comp_size != 0)) return ZXC_ERROR_BAD_HEADER;
 
-            // The footer is the source size then, when the archive carries
-            // checksums, the digest. Its length follows file_has_checksums, and
-            // it must lie past this EOF header: read from the end regardless, a
+            // The footer is the digest, when the archive carries checksums, then
+            // the source size. Its length follows file_has_checksums, and it
+            // must lie past this EOF header: read from the end regardless, a
             // short archive would hand back header or block bytes as a size.
             const size_t footer_len = zxc_footer_bytes(file_has_checksums);
             const size_t consumed = (size_t)(ip - (const uint8_t*)src) + ZXC_BLOCK_HEADER_SIZE;
             if (UNLIKELY(src_size < footer_len || src_size - footer_len < consumed))
                 return ZXC_ERROR_SRC_TOO_SMALL;
-            const uint8_t* const footer = (const uint8_t*)src + src_size - footer_len;
-            if (UNLIKELY(zxc_le64(footer) != (uint64_t)(op - op_start)))
-                return ZXC_ERROR_CORRUPT_DATA;
+            uint64_t stored_digest = 0;
+            const uint64_t stored_size = zxc_read_file_footer(
+                (const uint8_t*)src + src_size - footer_len, file_has_checksums, &stored_digest);
+            if (UNLIKELY(stored_size != (uint64_t)(op - op_start))) return ZXC_ERROR_CORRUPT_DATA;
             // Between the EOF block and the footer: the SEK block if announced, else nothing.
             if (UNLIKELY(!zxc_tail_gap_ok((const uint8_t*)src + consumed,
                                           src_size - footer_len - consumed, file_has_seek,
                                           (uint64_t)(op - op_start), runtime_chunk_size)))
                 return ZXC_ERROR_CORRUPT_DATA;
-            if (checksum_enabled && file_has_checksums &&
-                UNLIKELY(zxc_le64(footer + ZXC_FILE_FOOTER_SIZE) != digest))
+            if (checksum_enabled && file_has_checksums && UNLIKELY(stored_digest != digest))
                 return ZXC_ERROR_BAD_CHECKSUM;
             break;  // EOF reached, stop decoding
         }

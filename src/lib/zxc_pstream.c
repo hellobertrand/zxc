@@ -1067,10 +1067,13 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_VALIDATE_FOOTER: {
-                if (UNLIKELY(zxc_le64(ds->scratch) != ds->total_out))
+                uint64_t stored_digest = 0;
+                const uint64_t stored_size =
+                    zxc_read_file_footer(ds->scratch, ds->file_has_checksum, &stored_digest);
+                if (UNLIKELY(stored_size != ds->total_out))
                     return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
                 if (ds->file_has_checksum && ds->opts.checksum_enabled &&
-                    UNLIKELY(zxc_le64(ds->scratch + ZXC_FILE_FOOTER_SIZE) != ds->digest))
+                    UNLIKELY(stored_digest != ds->digest))
                     return ds_set_error(ds, ZXC_ERROR_BAD_CHECKSUM);
                 ds->state = DS_DONE;
                 return (int64_t)produced;

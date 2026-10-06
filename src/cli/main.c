@@ -812,19 +812,20 @@ static int zxc_list_archive(const char* path, int json_output) {
         block_size_kb = 0;  // unknown / unsupported code
     }
 
-    // Flags byte, bit 7 (FORMAT.md 3); the library keeps layout constants internal.
-    enum { ZXC_HEADER_FLAGS = 6, ZXC_DIGEST_BYTES = 8 };
+    // Flags byte, bit 7 (FORMAT.md 3); its offset is internal to the library.
+    enum { ZXC_HEADER_FLAGS = 6 };
     const int has_checksum = (header[ZXC_HEADER_FLAGS] & ZXC_FILE_FLAG_HAS_CHECKSUM) != 0;
     const char* checksum_method = has_checksum ? "RapidHash" : "-";
 
-    // Archive digest: the last 8 bytes (after the 8-byte size), present with checksums.
+    // Archive digest: the 8 bytes before the size, present with checksums.
+    enum { ZXC_FOOTER_WITH_DIGEST = ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_SIZE };
     char digest_str[24] = "null";
-    if (has_checksum && file_size >= (long long)(ZXC_FILE_HEADER_SIZE + 2 * ZXC_DIGEST_BYTES)) {
-        uint8_t dg[ZXC_DIGEST_BYTES];
-        if (fseeko(f, file_size - ZXC_DIGEST_BYTES, SEEK_SET) == 0 &&
+    if (has_checksum && file_size >= (long long)(ZXC_FILE_HEADER_SIZE + ZXC_FOOTER_WITH_DIGEST)) {
+        uint8_t dg[ZXC_FILE_DIGEST_SIZE];
+        if (fseeko(f, file_size - ZXC_FOOTER_WITH_DIGEST, SEEK_SET) == 0 &&
             fread(dg, 1, sizeof(dg), f) == sizeof(dg)) {
             uint64_t v = 0;
-            for (int i = 0; i < ZXC_DIGEST_BYTES; i++) v |= (uint64_t)dg[i] << (8 * i);
+            for (int i = 0; i < ZXC_FILE_DIGEST_SIZE; i++) v |= (uint64_t)dg[i] << (8 * i);
             snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)v);
         }
     }

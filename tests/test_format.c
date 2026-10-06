@@ -1234,7 +1234,9 @@ int test_footer_digest(void) {
             printf("[FAIL] non-deterministic -C output\n");
             break;
         }
-        const uint64_t digest = zxc_le64(a + ca - ZXC_FILE_DIGEST_SIZE);
+        /* Footer: [digest][src_size]. */
+        const size_t digest_at = (size_t)ca - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE;
+        const uint64_t digest = zxc_le64(a + digest_at);
         if (digest == 0) {
             printf("[FAIL] digest is zero on a non-empty archive\n");
             break;
@@ -1247,7 +1249,7 @@ int test_footer_digest(void) {
             printf("[FAIL] verified decode of intact archive\n");
             break;
         }
-        a[ca - ZXC_FILE_DIGEST_SIZE] ^= 0xFF;
+        a[digest_at] ^= 0xFF;
         if (zxc_decompress(a, (size_t)ca, out, N, &verify) != ZXC_ERROR_BAD_CHECKSUM) {
             printf("[FAIL] flipped digest not caught\n");
             break;
@@ -1261,7 +1263,7 @@ int test_footer_digest(void) {
         const int64_t ce = zxc_compress(NULL, 0, e, sizeof(e), &co);
         if (ce <=
                 (int64_t)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE) - 1 ||
-            zxc_le64(e + ce - ZXC_FILE_DIGEST_SIZE) != 0) {
+            zxc_le64(e + ce - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE) != 0) {
             printf("[FAIL] empty -C archive digest\n");
             break;
         }

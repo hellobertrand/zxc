@@ -436,16 +436,16 @@ int test_buffer_error_codes() {
     {
         uint8_t* corrupt = malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
-        // Checksummed, so the footer is [src_size(8)][digest(8)]: the last 8 bytes
-        // are the digest. Aimed there, this passed on BAD_CHECKSUM and never
-        // exercised the size mismatch it is named for.
-        const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE;
+        // The size is the last 8 bytes, behind the digest. Exact code: aimed at
+        // the digest, this passes on BAD_CHECKSUM without testing the size.
+        const size_t footer_offset = (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE;
         corrupt[footer_offset] ^= 0x01;  // Flip a bit in the stored source size
         uint8_t* out = malloc(test_src_sz);
         zxc_decompress_opts_t _do45 = {.checksum_enabled = 1};
         r = zxc_decompress(corrupt, (size_t)comp_sz, out, test_src_sz, &_do45);
-        if (r >= 0) {
-            printf("  [FAIL] size mismatch: expected < 0, got %lld\n", (long long)r);
+        if (r != ZXC_ERROR_CORRUPT_DATA) {
+            printf("  [FAIL] size mismatch: expected %d, got %lld\n", ZXC_ERROR_CORRUPT_DATA,
+                   (long long)r);
             free(corrupt);
             free(out);
             free(test_src);

@@ -1586,8 +1586,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const
 /**
  * @brief Folds a data block's 32-bit checksum into the running archive digest.
  *
- * The digest, stored after the source size in the file footer when checksums are
- * on, is this fold over every block in stream order: an ordered 64-bit identity
+ * The digest, stored before the source size in the file footer when checksums
+ * are on, is this fold over every block in stream order: an ordered 64-bit identity
  * of the archive that a reordered or altered block changes. Verified on a full
  * decode, never on a range read. Seed 0 for the first block.
  *
@@ -2169,13 +2169,14 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 /**
  * @brief Writes the ZXC file footer into @p dst.
  *
- * The original uncompressed size (@c ZXC_FILE_FOOTER_SIZE, 8 bytes, always first),
- * then the archive digest when checksums are on.
+ * The archive digest when checksums are on, then the original uncompressed size
+ * (@c ZXC_FILE_FOOTER_SIZE, 8 bytes): always last, so found from the end
+ * without the header's flags.
  *
  * @param[out] dst               Destination buffer.
  * @param[in]  dst_capacity      Total capacity of @p dst in bytes.
  * @param[in]  src_size          Original uncompressed size of the data.
- * @param[in]  digest            Archive digest, written after the size when
+ * @param[in]  digest            Archive digest, written before the size when
  *                               @p checksum_enabled.
  * @param[in]  checksum_enabled  Non-zero to emit the digest.
  *
@@ -2185,10 +2186,25 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
 int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, const uint64_t src_size,
                           const uint64_t digest, const int checksum_enabled);
 
-/** @brief Footer bytes at the end of an archive: base size, plus the digest when
- *  @p checksum_enabled. */
+/** @brief Footer bytes at the end of an archive: the digest when
+ *  @p checksum_enabled, then the base size. */
 static ZXC_ALWAYS_INLINE size_t zxc_footer_bytes(const int checksum_enabled) {
     return ZXC_FILE_FOOTER_SIZE + (checksum_enabled ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U);
+}
+
+/**
+ * @brief Reads the footer written by @ref zxc_write_file_footer: the one place
+ *        its layout is spelled out on the read side.
+ *
+ * @param[in]  footer        The @ref zxc_footer_bytes(@p has_checksum) footer bytes.
+ * @param[in]  has_checksum  Checksum flag from the file header.
+ * @param[out] digest        The archive digest, 0 without checksums; may be NULL.
+ * @return The stored source size.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_read_file_footer(const uint8_t* footer,
+                                                       const int has_checksum, uint64_t* digest) {
+    if (digest) *digest = has_checksum ? zxc_le64(footer) : 0;
+    return zxc_le64(footer + zxc_footer_bytes(has_checksum) - ZXC_FILE_FOOTER_SIZE);
 }
 
 /**

@@ -376,8 +376,8 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     } else if (!strcmp(name, "bad_footer_size")) {
         d[len - ZXC_FILE_FOOTER_SIZE] ^= 0xFFU; /* declared source size */
     } else if (!strcmp(name, "bad_footer_digest")) {
-        /* Checksummed base: the digest is the footer's last 8 bytes (Sec 8). */
-        d[len - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU;
+        /* Checksummed base: the digest opens the footer (Sec 8). */
+        d[len - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU;
     } else if (!strcmp(name, "glo_forged_offset")) {
         /* GHI has its own vector. The first sequence has only its literal run
          * behind it, so any large offset reaches before the output start. */

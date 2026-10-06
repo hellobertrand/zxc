@@ -20,7 +20,7 @@
  *     SEK seek table. (Type 2 is reserved/removed.)
  *   - Optional per-block checksum over the block's decoded bytes, seeded with
  *     its position, recomputed from the regenerated input (Sec 7.2).
- *   - The file footer: the source size then, when checksummed, the archive digest (Sec 8).
+ *   - The file footer: the archive digest when checksummed, then the source size (Sec 8).
  *
  * Each file is also round-tripped: decompressed and compared byte-for-byte
  * against its deterministically regenerated input (see golden_cases.h).
@@ -350,9 +350,12 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     CHECK((size_t)data_blocks == (in_size + bs - 1) / bs, "%d data blocks for %zu input bytes",
           data_blocks, in_size);
 
-    /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ---- */
-    int seek_present = 0;
-    if (off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE <= size && buf[off] == GC_BLOCK_SEK) {
+    /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ----
+     * Announced by the header flag, never guessed from the byte after EOF: with
+     * checksums that byte opens the digest, and 1 in 256 is 0xFE. */
+    if (has_seek) {
+        CHECK(off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE <= size, "SEK header past EOF");
+        CHECK(buf[off] == GC_BLOCK_SEK, "block after EOF is type %u, expected SEK", buf[off]);
         const uint8_t* sh = buf + off;
         uint32_t comp = zxc_le32(sh + 3);
         uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
@@ -390,23 +393,19 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             expect += sz;
         }
         off += ZXC_BLOCK_HEADER_SIZE + (size_t)table;
-        seek_present = 1;
     }
-    CHECK(seek_present == has_seek, "SEK present=%d but header flag=%d", seek_present, has_seek);
-    CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
-          gc->expect_seek);
 
-    /* ---- File footer (Sec 8): the size first, then the digest when checksummed ---- */
+    /* ---- File footer (Sec 8): the digest when checksummed, then the size, last ---- */
     const size_t footer_len =
         (size_t)ZXC_FILE_FOOTER_SIZE + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
     CHECK(off + footer_len == size, "footer not at end (off %zu, size %zu)", off, size);
     const uint8_t* footer = buf + size - footer_len;
-    uint64_t src_size = zxc_le64(footer);
+    uint64_t stored_digest = 0;
+    const uint64_t src_size = zxc_read_file_footer(footer, has_checksum, &stored_digest);
 
     EMIT("\n[footer]\n");
     emit_hex("raw:", footer, footer_len);
     if (has_checksum) {
-        const uint64_t stored_digest = zxc_le64(footer + ZXC_FILE_FOOTER_SIZE);
         CHECK(stored_digest == digest, "footer digest 0x%016llX != recomputed 0x%016llX",
               (unsigned long long)stored_digest, (unsigned long long)digest);
         EMIT("digest:           0x%016llX\n", (unsigned long long)stored_digest);

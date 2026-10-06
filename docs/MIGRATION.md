@@ -39,7 +39,9 @@ the seek table:
   and each is **seeded with the block's frame position**, so a block moved or
   duplicated within an archive no longer verifies.
 - **The whole-archive hash is gone**; the footer instead carries an optional
-  8-byte **archive digest** folded from the block checksums (§ 7.3).
+  8-byte **archive digest** folded from the block checksums (§ 7.3). It comes
+  before the source size, which is now always the file's last 8 bytes (§ 8);
+  a tool that read the v8 size 12 bytes from the end must be updated.
 - **The seek table is rebuilt as self-validating groups** of one 64-bit anchor
   and 64 block sizes, and its presence is announced by the `HAS_SEEK_TABLE`
   header flag (bit 5) instead of being probed for.

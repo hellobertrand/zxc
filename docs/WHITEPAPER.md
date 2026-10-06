@@ -409,24 +409,26 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 ### 5.6 File Footer
 (Present immediately after the EOF Block)
 
-A mandatory footer closes the stream with the total source size in its first
-8 bytes, followed by an 8-byte **archive digest** when checksums are on.
+A mandatory footer closes the stream with the total source size in its last
+8 bytes, preceded by an 8-byte **archive digest** when checksums are on.
 
 **Footer Structure (8 bytes, 16 with a digest):**
 
 ```
-  Offset:  0               8              16
-          +---------------+---------------+
-          | Source Size   | Archive Digest|
-          | (8 bytes)     | (8, if -C)    |
-          +---------------+---------------+
+  Without checksums:       With checksums (-C):
+  Offset:  0               8   Offset:  0               8              16
+          +---------------+            +---------------+---------------+
+          | Source Size   |            | Archive Digest| Source Size   |
+          | (8 bytes)     |            | (8 bytes)     | (8 bytes)     |
+          +---------------+            +---------------+---------------+
 ```
 
-*   **Original Source Size** (8 bytes): Total size of the uncompressed data.
 *   **Archive Digest** (8 bytes, only with checksums): an ordered fold of every
     block's checksum -- a whole-archive identity that a full decode verifies and
     `zxc -t` reports. A block reordered, dropped or altered changes it. It is not
     checked on a seekable range read, which never sees every block.
+*   **Original Source Size** (8 bytes): Total size of the uncompressed data.
+    Always the last 8 bytes of the file, whether or not a digest precedes it.
 
 Per-block integrity does not need the digest: every block's checksum is seeded
 with its position (§5.8), so a block out of place already fails on its own,

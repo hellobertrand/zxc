@@ -580,7 +580,7 @@ async function main() {
       probe.free();
       const forged = compressed.slice();
       const tableBytes = Math.ceil(n / 64) * 8 + n * 4;
-      // Group 0's anchor opens the table, before the 16-byte footer (size, digest).
+      // Group 0's anchor opens the table, before the 16-byte footer (digest, size).
       const anchor = forged.length - 16 - tableBytes;
       assert(forged[anchor] === 16, "forged byte is group 0's anchor");
       forged[anchor] ^= 0xff;

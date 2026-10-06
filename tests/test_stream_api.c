@@ -486,9 +486,9 @@ int test_stream_get_decompressed_size_errors() {
     printf("  [PASS] bad magic -> ZXC_ERROR_BAD_MAGIC\n");
 
     // 3b. A header only the magic word of which is intact must not yield a
-    //     size: the flag byte that places the footer is unverified, and the 8
-    //     bytes it points at may be anything. Same verdict as the decoders.
-    //     A forged footer size is capped like the buffer API caps it.
+    //     size: its block size caps the stored one, so it must be verified
+    //     first. Same verdict as the decoders. A forged footer size is capped
+    //     like the buffer API caps it.
     {
         const size_t src_sz = 4096;
         uint8_t* src = malloc(src_sz);
@@ -509,8 +509,8 @@ int test_stream_get_decompressed_size_errors() {
             int expect;
         } forge[] = {
             {"header checksum", 14, ZXC_ERROR_BAD_HEADER},
-            {"footer size", (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE + 7,
-             ZXC_ERROR_CORRUPT_DATA},
+            /* Top byte of the size: the archive's last byte. */
+            {"footer size", (size_t)comp_sz - 1, ZXC_ERROR_CORRUPT_DATA},
         };
         for (size_t k = 0; k < sizeof(forge) / sizeof(forge[0]); k++) {
             FILE* f = tmpfile();
@@ -676,7 +676,7 @@ int test_stream_engine_errors() {
         }
         fclose(f_comp_out);
 
-        // Corrupt the stored source size in footer (last 12 bytes: [src_size(8)] + [hash(4)])
+        // Corrupt the stored source size, the archive's last 8 bytes
         const size_t footer_off = comp_file_sz - ZXC_FILE_FOOTER_SIZE;
         comp_data[footer_off] ^= 0x01;  // Flip a bit in stored source size
 
@@ -691,12 +691,14 @@ int test_stream_engine_errors() {
         fclose(f_corrupt);
         fclose(f_dec_out);
         free(src);
-        if (r >= 0) {
-            printf("  [FAIL] corrupt footer size: expected < 0, got %lld\n", (long long)r);
+        // Exact code: a reader taking the digest for the size fails on BAD_CHECKSUM.
+        if (r != ZXC_ERROR_CORRUPT_DATA) {
+            printf("  [FAIL] corrupt footer size: expected %d, got %lld\n", ZXC_ERROR_CORRUPT_DATA,
+                   (long long)r);
             return 0;
         }
     }
-    printf("  [PASS] zxc_stream_decompress corrupt footer -> negative\n");
+    printf("  [PASS] zxc_stream_decompress corrupt footer -> CORRUPT_DATA\n");
 
     // 5. Stream decompress with corrupted global checksum
     {

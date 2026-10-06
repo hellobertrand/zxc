@@ -161,12 +161,12 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     if (UNLIKELY(src->size < ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + footer_len))
         return NULL;
 
-    // Step 2: read the source size, the first 8 bytes of the footer.
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (UNLIKELY(zxc_seek_source_read(src, footer, sizeof(footer), src->size - footer_len) !=
+    // Step 2: read the source size from the footer.
+    uint8_t footer[ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE];
+    if (UNLIKELY(zxc_seek_source_read(src, footer, (size_t)footer_len, src->size - footer_len) !=
                  ZXC_OK))
         return NULL;
-    const uint64_t total_decomp = zxc_le64(footer);
+    const uint64_t total_decomp = zxc_read_file_footer(footer, file_has_chk, NULL);
 
     // Step 3: derive num_blocks = ceil(total_decomp / block_size)
     const uint64_t num_blocks = zxc_seek_block_count(total_decomp, block_size);
