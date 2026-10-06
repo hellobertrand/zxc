@@ -79,6 +79,13 @@ Maximum compressed output size for a given input size.
 
 Read the original size from a compressed buffer without decompressing.
 
+### `zxc.getFrameInfo(data) -> object`
+
+Read the frame's header and footer without decoding: `decompressedSize`,
+`compressedSize`, `digest` (a `BigInt`, `0n` without checksums), `blockSize`,
+`dictId`, `formatVersion`, `hasChecksum`, `hasSeekTable`. Throws on an
+invalid frame.
+
 ### `zxc.createCompressContext(opts?) -> CompressContext`
 
 Create a reusable compression context (avoids per-call allocation). `opts`

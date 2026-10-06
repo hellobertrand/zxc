@@ -301,9 +301,9 @@ pub use file::{
     file_decompressed_size,
 };
 pub use oneshot::{
-    compress, compress_bound, compress_to, compress_with_options, decompress, decompress_to,
-    decompress_with_options, decompressed_size, default_level, max_level, min_level,
-    runtime_version, version, version_string,
+    FrameInfo, compress, compress_bound, compress_to, compress_with_options, decompress,
+    decompress_to, decompress_with_options, decompressed_size, default_level, frame_info,
+    max_level, min_level, runtime_version, version, version_string,
 };
 pub use pstream::{CStream, CStreamProgress, DStream, DStreamProgress};
 pub use seekable::{Seekable, seek_table_size, write_seek_table};

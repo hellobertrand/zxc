@@ -75,6 +75,7 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
 static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_get_frame_info(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_min_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_max_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_default_level(PyObject* self, PyObject* args);
@@ -158,6 +159,7 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_stream_decompress", (PyCFunction)pyzxc_stream_decompress, METH_VARARGS | METH_KEYWORDS,
      NULL},
     {"pyzxc_get_decompressed_size", (PyCFunction)pyzxc_get_decompressed_size, METH_O, NULL},
+    {"pyzxc_get_frame_info", (PyCFunction)pyzxc_get_frame_info, METH_O, NULL},
     {"pyzxc_cctx_create", (PyCFunction)pyzxc_cctx_create, METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_cctx_compress", (PyCFunction)pyzxc_cctx_compress, METH_VARARGS, NULL},
     {"pyzxc_cctx_free", (PyCFunction)pyzxc_cctx_free, METH_O, NULL},
@@ -368,6 +370,27 @@ static PyObject* pyzxc_get_decompressed_size(PyObject* self, PyObject* arg) {
     PyBuffer_Release(&view);
 
     return Py_BuildValue("K", n);
+}
+
+/* (decompressed_size, compressed_size, digest, block_size, dict_id, format_version,
+ * has_checksum, has_seek_table), or RuntimeError with the zxc error name. */
+static PyObject* pyzxc_get_frame_info(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+
+    zxc_frame_info_t fi;
+    const int rc = zxc_get_frame_info(view.buf, (size_t)view.len, &fi, sizeof(fi));
+
+    PyBuffer_Release(&view);
+
+    if (rc != ZXC_OK) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
+    return Py_BuildValue("KKKnkBOO", (unsigned long long)fi.decompressed_size,
+                         (unsigned long long)fi.compressed_size, (unsigned long long)fi.digest,
+                         (Py_ssize_t)fi.block_size, (unsigned long)fi.dict_id, fi.format_version,
+                         fi.has_checksum ? Py_True : Py_False,
+                         fi.has_seek_table ? Py_True : Py_False);
 }
 
 static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwargs) {

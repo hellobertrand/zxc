@@ -98,6 +98,13 @@ Returns the maximum compressed size for a given input size.
 
 Returns the original size from a ZXC compressed buffer (reads footer only).
 
+### `getFrameInfo(data)`
+
+Reads the frame's header and footer without decoding: `decompressedSize`,
+`compressedSize`, `digest` (a `BigInt`, `0n` without checksums), `blockSize`,
+`dictId`, `formatVersion`, `hasChecksum`, `hasSeekTable`. Throws on an
+invalid frame.
+
 ### Constants
 
 | Constant         | Value | Description            |

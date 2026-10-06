@@ -541,6 +541,39 @@ Reads the original size from the file footer without decompressing.
 
 **Returns**: original size, or `0` if the buffer is invalid.
 
+### `zxc_get_frame_info`
+
+```c
+typedef struct {
+    uint64_t decompressed_size; /* source bytes the frame decodes to */
+    uint64_t compressed_size;   /* compressed bytes, footer included */
+    uint64_t digest;            /* archive digest; 0 without checksums */
+    size_t   block_size;        /* 4 KB .. 2 MB */
+    uint32_t dict_id;           /* dictionary the frame needs; 0 for none */
+    uint8_t  format_version;
+    uint8_t  has_checksum;
+    uint8_t  has_seek_table;
+} zxc_frame_info_t;
+
+ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                  size_t info_size);
+ZXC_EXPORT size_t zxc_frame_info_size(void);
+```
+
+Reads what a frame's header and footer declare, without decoding: the header
+is validated as a decoder would, the footer parsed back from the end, and the
+frame must span all of `src` with a reachable size. Blocks are not read, so a
+frame that passes may still fail to decode.
+
+Pass `sizeof(zxc_frame_info_t)` as `info_size`: the library writes only the
+fields that fit, so a program built against an older header stays in bounds
+when the struct grows (fields are only ever added at the end; zero the struct
+first to read unknown ones as 0). `zxc_frame_info_size()` returns the size the
+library was built with, for bindings that mirror the struct by hand.
+
+**Returns**: `ZXC_OK` with `*info` filled, or a negative `zxc_error_t` with
+`*info` untouched.
+
 ---
 
 ## 8. Block API
@@ -1085,6 +1118,17 @@ position is restored.
 `ZXC_ERROR_SRC_TOO_SMALL`, `ZXC_ERROR_CORRUPT_DATA` for an implausible size, or
 an I/O error).
 
+### `zxc_stream_get_frame_info`
+
+```c
+ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, size_t info_size);
+```
+
+`zxc_get_frame_info()` on a seekable `FILE*`, read from offset 0. File position
+is restored.
+
+**Returns**: `ZXC_OK`, or a negative `zxc_error_t` (`ZXC_ERROR_IO` included).
+
 ---
 
 ## 10b. Push Streaming API
@@ -1177,7 +1221,7 @@ ZXC_EXPORT int64_t zxc_cstream_end(zxc_cstream* cs, zxc_outbuf_t* out);
 ```
 
 Finalises the stream: compresses any partial last block, emits the EOF
-block (8 B) and the file footer (8 B, 16 with a digest).  **Must be called** to produce a
+block (8 B) and the file footer (3 to 17 B, plus 8 with a digest).  **Must be called** to produce a
 valid ZXC file.
 
 Reentrant the same way `_compress` is: loop until it returns `0`.
@@ -1711,7 +1755,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **69 symbols** (verified with `nm -gU`):
+The shared library exports **72 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1784,6 +1828,9 @@ The shared library exports **69 symbols** (verified with `nm -gU`):
 | 67 | `zxc_compress_opts_size` | Info | `zxc_opts.h` |
 | 68 | `zxc_decompress_opts_size` | Info | `zxc_opts.h` |
 | 69 | `zxc_decompress_inplace_dctx` | Context | `zxc_buffer.h` |
+| 70 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
+| 71 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
+| 72 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

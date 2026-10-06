@@ -29,7 +29,8 @@
  * Detection from end of file:
  *   1. Read file header (first 16 bytes) => block_size, and HAS_SEEK_TABLE:
  *      clear, the archive is not seekable
- *   2. Read file footer (last 8 bytes) => total_decompressed_size
+ *   2. Parse the footer back from its last byte => total_decompressed_size, and
+ *      a compressed size that must be the whole source
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
  *   4. Read the EOF and SEK block headers in one go, validate both
  *   5. Groups are read and checked on access
@@ -155,18 +156,20 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
-    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8) + footer,
-    // 8 bytes or 16 with a digest: 40 or 48. Only the header says which.
-    const uint64_t footer_len = zxc_footer_bytes(file_has_chk);
-    if (UNLIKELY(src->size < ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + footer_len))
+    // Step 2: the frame check every reader shares; its frame must be the whole
+    // source, which also turns away concatenated archives.
+    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8) + footer.
+    if (UNLIKELY(src->size <
+                 ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE))
         return NULL;
-
-    // Step 2: read the source size, the first 8 bytes of the footer.
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (UNLIKELY(zxc_seek_source_read(src, footer, sizeof(footer), src->size - footer_len) !=
-                 ZXC_OK))
+    uint8_t foot[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
+    const size_t want = zxc_frame_tail_len(src->size);
+    if (UNLIKELY(zxc_seek_source_read(src, foot, want, src->size - want) != ZXC_OK)) return NULL;
+    zxc_frame_info_t fi;
+    size_t footer_len = 0;
+    if (UNLIKELY(zxc_read_frame_info(header, foot, want, src->size, &fi, &footer_len) != ZXC_OK))
         return NULL;
-    const uint64_t total_decomp = zxc_le64(footer);
+    const uint64_t total_decomp = fi.decompressed_size;
 
     // Step 3: derive num_blocks = ceil(total_decomp / block_size)
     const uint64_t num_blocks = zxc_seek_block_count(total_decomp, block_size);
@@ -195,15 +198,9 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     uint8_t tail[2 * ZXC_BLOCK_HEADER_SIZE];
     if (UNLIKELY(zxc_seek_source_read(src, tail, sizeof(tail), eof_off) != ZXC_OK)) return NULL;
 
-    zxc_block_header_t eof_bh;
-    zxc_block_header_t bh;
-    if (UNLIKELY(zxc_read_block_header(tail, ZXC_BLOCK_HEADER_SIZE, &eof_bh) != ZXC_OK ||
-                 eof_bh.block_type != ZXC_BLOCK_EOF || eof_bh.comp_size != 0))
-        return NULL;
-    if (UNLIKELY(zxc_read_block_header(tail + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh) !=
-                     ZXC_OK ||
-                 bh.block_type != ZXC_BLOCK_SEK ||
-                 bh.comp_size != zxc_seek_size_field(zxc_seek_table_bytes(num_blocks))))
+    if (UNLIKELY(zxc_check_eof_header(tail) != ZXC_OK ||
+                 zxc_check_seek_header(tail + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE,
+                                       total_decomp, block_size, NULL) != ZXC_OK))
         return NULL;
 
     zxc_seekable* const s = (zxc_seekable*)ZXC_CALLOC(1, sizeof(zxc_seekable));

@@ -201,7 +201,7 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
 static int validate_structure(const char* ctx, const golden_case_t* gc, const uint8_t* buf,
                               size_t size, const uint8_t* input, size_t in_size) {
     /* ---- File header (Sec 3) ---- */
-    CHECK(size >= ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE, "file too small (%zu)", size);
+    CHECK(size >= ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE, "file too small (%zu)", size);
 
     CHECK(zxc_le32(buf) == ZXC_MAGIC_WORD, "bad magic 0x%08X", zxc_le32(buf));
     CHECK(buf[4] == ZXC_FILE_FORMAT_VERSION, "version %u != %u", buf[4],
@@ -350,9 +350,13 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
     CHECK((size_t)data_blocks == (in_size + bs - 1) / bs, "%d data blocks for %zu input bytes",
           data_blocks, in_size);
 
-    /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ---- */
-    int seek_present = 0;
-    if (off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE <= size && buf[off] == GC_BLOCK_SEK) {
+    /* ---- Optional SEK block (Sec 5.5), located after EOF, before footer ----
+     * Announced by the header flag, never guessed from the byte after EOF,
+     * which opens the footer otherwise and may be 0xFE. */
+    if (has_seek) {
+        CHECK(off + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE <= size,
+              "SEK header past end");
+        CHECK(buf[off] == GC_BLOCK_SEK, "block after EOF is type %u, expected SEK", buf[off]);
         const uint8_t* sh = buf + off;
         uint32_t comp = zxc_le32(sh + 3);
         uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
@@ -363,7 +367,7 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         const uint64_t table = zxc_seek_table_bytes((uint64_t)data_blocks);
         CHECK(comp == zxc_seek_size_field(table), "SEK comp_size %u != table bytes (%llu) folded",
               comp, (unsigned long long)table);
-        CHECK(off + ZXC_BLOCK_HEADER_SIZE + table + ZXC_FILE_FOOTER_SIZE <= size,
+        CHECK(off + ZXC_BLOCK_HEADER_SIZE + table + ZXC_FILE_FOOTER_MIN_SIZE <= size,
               "SEK groups overrun file");
         EMIT("\n[seek table @%zu]\n", off);
         emit_hex("raw:", sh, ZXC_BLOCK_HEADER_SIZE);
@@ -390,28 +394,37 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             expect += sz;
         }
         off += ZXC_BLOCK_HEADER_SIZE + (size_t)table;
-        seek_present = 1;
     }
-    CHECK(seek_present == has_seek, "SEK present=%d but header flag=%d", seek_present, has_seek);
-    CHECK(seek_present == gc->expect_seek, "SEK present=%d, expected %d", seek_present,
-          gc->expect_seek);
 
-    /* ---- File footer (Sec 8): the size first, then the digest when checksummed ---- */
-    const size_t footer_len =
-        (size_t)ZXC_FILE_FOOTER_SIZE + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
+    /* ---- File footer (Sec 8): [digest][source size][compressed size][lengths] ----
+     * Read back from the end, then checked against the one footer the frame
+     * implies from the front: both readings must agree. */
+    uint64_t src_size = 0, compressed_size = 0;
+    size_t sizes = 0;
+    CHECK(zxc_parse_file_footer(buf + size, size - off, &src_size, &compressed_size, &sizes) ==
+              ZXC_OK,
+          "footer does not parse from the end");
+    const size_t footer_len = sizes + (has_checksum ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
     CHECK(off + footer_len == size, "footer not at end (off %zu, size %zu)", off, size);
-    const uint8_t* footer = buf + size - footer_len;
-    uint64_t src_size = zxc_le64(footer);
+    CHECK(compressed_size == size, "compressed size %llu != file size %zu",
+          (unsigned long long)compressed_size, size);
+    const uint8_t* footer = buf + off;
+    uint64_t stored_digest = 0;
+    const zxc_footer_layout_t fl = zxc_footer_layout(off, src_size, has_checksum);
+    CHECK(zxc_check_file_footer(footer, footer_len, &fl, src_size, &stored_digest) == ZXC_OK,
+          "footer is not the one the frame implies");
 
     EMIT("\n[footer]\n");
     emit_hex("raw:", footer, footer_len);
     if (has_checksum) {
-        const uint64_t stored_digest = zxc_le64(footer + ZXC_FILE_FOOTER_SIZE);
         CHECK(stored_digest == digest, "footer digest 0x%016llX != recomputed 0x%016llX",
               (unsigned long long)stored_digest, (unsigned long long)digest);
         EMIT("digest:           0x%016llX\n", (unsigned long long)stored_digest);
     }
-    EMIT("src_size:         %llu\n", (unsigned long long)src_size);
+    EMIT("src_size:         %llu (%zu bytes)\n", (unsigned long long)src_size,
+         (size_t)(footer[footer_len - 1] & 7) + 1);
+    EMIT("compressed_size:  %llu (%zu bytes)\n", (unsigned long long)compressed_size,
+         (size_t)(footer[footer_len - 1] >> 4) + 1);
     CHECK(src_size == in_size, "footer source size %llu != %zu input bytes",
           (unsigned long long)src_size, in_size);
 

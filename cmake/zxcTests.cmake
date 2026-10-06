@@ -27,8 +27,8 @@ if(ZXC_BUILD_TESTS)
         tests/test_dict.c
     )
 
-    # When building shared libraries, create a static version for tests
-    # This allows tests to access internal functions for unit testing
+    # When building shared libraries, create a static version for tests and the
+    # tools below that reach internal functions: the shared library hides them.
     if(BUILD_SHARED_LIBS)
         # Create a static library specifically for tests.
         # zxc_huffman.c lives in the per-variant build (see zxc_add_variant)
@@ -68,12 +68,12 @@ if(ZXC_BUILD_TESTS)
         target_compile_definitions(zxc_lib_static PUBLIC ZXC_STATIC_DEFINE)
         target_link_libraries(zxc_lib_static PRIVATE Threads::Threads)
 
-        # Link tests against static library
-        target_link_libraries(zxc_test PRIVATE zxc_lib_static)
+        set(ZXC_INTERNAL_LIB zxc_lib_static)
     else()
         # For static builds, use the main library
-        target_link_libraries(zxc_test PRIVATE zxc_lib)
+        set(ZXC_INTERNAL_LIB zxc_lib)
     endif()
+    target_link_libraries(zxc_test PRIVATE ${ZXC_INTERNAL_LIB})
 
     zxc_apply_common_flags(zxc_test)
     target_compile_options(zxc_test PRIVATE
@@ -104,7 +104,7 @@ if(ZXC_BUILD_TESTS)
 
     # --- Conformance suite ---------------------------------------------------
     add_executable(zxc_conformance_test conformance/test_conformance.c)
-    target_link_libraries(zxc_conformance_test PRIVATE zxc_lib)
+    target_link_libraries(zxc_conformance_test PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_conformance_test PRIVATE ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/lib
         ${RAPIDHASH_INCLUDE_DIR})
@@ -121,10 +121,10 @@ if(ZXC_BUILD_TESTS)
 
     # --- Golden-file format conformance --------------------------------------
     # Parses the byte-frozen golden files and validates every on-disk field
-    # against docs/FORMAT.md. Needs the private header (static-inline hashes),
-    # hence the src/lib + rapidhash include paths.
+    # against docs/FORMAT.md. Needs the private header and internal functions,
+    # hence the src/lib + rapidhash include paths and ZXC_INTERNAL_LIB.
     add_executable(zxc_format_golden_test tests/format/test_golden.c)
-    target_link_libraries(zxc_format_golden_test PRIVATE zxc_lib)
+    target_link_libraries(zxc_format_golden_test PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_format_golden_test PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/lib
@@ -152,7 +152,7 @@ if(ZXC_BUILD_TESTS)
 
     # Maintainer-only tool that rebuilds the current version's valid vectors.
     add_executable(zxc_valid_gen conformance/gen_valid.c)
-    target_link_libraries(zxc_valid_gen PRIVATE zxc_lib)
+    target_link_libraries(zxc_valid_gen PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_valid_gen PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/lib
@@ -165,7 +165,7 @@ if(ZXC_BUILD_TESTS)
 
     # Maintainer-only tool that rebuilds the current version's invalid vectors.
     add_executable(zxc_invalid_gen conformance/gen_invalid.c)
-    target_link_libraries(zxc_invalid_gen PRIVATE zxc_lib)
+    target_link_libraries(zxc_invalid_gen PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_invalid_gen PRIVATE
         ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/lib

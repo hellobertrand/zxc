@@ -1,5 +1,5 @@
 file:             05_block_glo_huffman
-size:             5768 bytes
+size:             5765 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 00 00 00 00 00 00 00 00 ED 80
@@ -32,5 +32,6 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              00 40 00 00 00 00 00 00
-src_size:         16384
+raw:              00 40 85 16 11
+src_size:         16384 (2 bytes)
+compressed_size:  5765 (2 bytes)

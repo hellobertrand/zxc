@@ -1,5 +1,5 @@
 file:             01_empty_eof_only
-size:             32 bytes
+size:             27 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 00 00 00 00 00 00 00 00 ED 80
@@ -15,5 +15,6 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              00 00 00 00 00 00 00 00
-src_size:         0
+raw:              00 1B 00
+src_size:         0 (1 bytes)
+compressed_size:  27 (1 bytes)

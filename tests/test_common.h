@@ -63,6 +63,39 @@ uint32_t zxc_test_rand(void);
 
 void gen_random_data(uint8_t* buf, size_t size);
 void gen_lz_data(uint8_t* buf, size_t size);
+
+/* --- File footer (FORMAT.md Sec 8) ------------------------------------- */
+
+/* Footer bytes of a single-frame archive, digest included; 0 if malformed. */
+static inline size_t test_footer_len(const uint8_t* arc, const size_t n) {
+    uint64_t dsize = 0, frame = 0;
+    size_t sizes = 0;
+    if (n < ZXC_FILE_HEADER_SIZE || zxc_parse_file_footer(arc + n, n, &dsize, &frame, &sizes) != 0)
+        return 0;
+    return sizes + ((arc[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? ZXC_FILE_DIGEST_SIZE : 0);
+}
+
+/* Copies @p arc to @p out with its footer rewritten to store @p src_size (digest
+ * kept), as a forger would: the footer stays well-formed, only the size lies.
+ * Returns the new length, 0 if @p cap is too small. */
+static inline size_t test_forge_footer_size(const uint8_t* arc, const size_t n, uint8_t* out,
+                                            const size_t cap, const uint64_t src_size) {
+    const size_t flen = test_footer_len(arc, n);
+    const int cs = (arc[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) != 0;
+    if (flen == 0 || n - flen > cap) return 0;
+    const size_t body = n - flen;
+    memcpy(out, arc, body);
+    const uint64_t digest = cs ? zxc_le64(arc + body) : 0;
+    const int w = zxc_write_file_footer(out + body, cap - body, body, src_size, digest, cs);
+    return w < 0 ? 0 : body + (size_t)w;
+}
+
+/* Offset of the footer's original_size field; its length is the low 3 bits
+ * of the last byte, plus one. */
+static inline size_t test_footer_size_at(const uint8_t* arc, const size_t n) {
+    const uint8_t lens = arc[n - 1];
+    return n - 1 - ((size_t)(lens >> 4) + 1) - ((size_t)(lens & 7) + 1);
+}
 void gen_num_data(uint8_t* buf, size_t size);
 void gen_num_data_zero(uint8_t* buf, size_t size);
 void gen_num_data_small(uint8_t* buf, size_t size);
@@ -86,6 +119,8 @@ int test_min_dist_policy(void);
 int test_glo_match_split(void);
 int test_buffer_error_codes(void);
 int test_get_decompressed_size(void);
+int test_frame_info(void);
+int test_footer_strictness(void);
 int test_decompress_inplace(void);
 int test_decompress_fast_vs_safe_path(void);
 int test_max_compressed_size_logic(void);

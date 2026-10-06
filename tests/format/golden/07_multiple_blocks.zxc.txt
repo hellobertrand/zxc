@@ -1,5 +1,5 @@
 file:             07_multiple_blocks
-size:             1076 bytes
+size:             1073 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 0C 80 00 00 00 00 00 00 00 CC 27
@@ -123,6 +123,7 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              09 53 00 00 00 00 00 00 D8 AA D6 86 CE 49 97 51
+raw:              D8 AA D6 86 CE 49 97 51 09 53 31 04 11
 digest:           0x519749CE86D6AAD8
-src_size:         21257
+src_size:         21257 (2 bytes)
+compressed_size:  1073 (2 bytes)

@@ -5,7 +5,7 @@ ZXC - High-performance lossless compression
 Copyright (c) Bertrand Lebonnois and contributors.
 """
 
-from typing import Protocol, Optional
+from typing import NamedTuple, Protocol, Optional
 
 # ---------- constants ----------
 LEVEL_FASTEST: int
@@ -79,6 +79,18 @@ def stream_decompress(
     src: FileLike, dst: FileLike, n_threads: int = 0, checksum: bool = False
 ) -> int: ...
 def get_decompressed_size(data: bytes) -> int: ...
+
+class FrameInfo(NamedTuple):
+    decompressed_size: int
+    compressed_size: int
+    digest: int
+    block_size: int
+    dict_id: int
+    format_version: int
+    has_checksum: bool
+    has_seek_table: bool
+
+def get_frame_info(data: bytes) -> FrameInfo: ...
 
 # ---------- pre-trained dictionaries ----------
 def train_dict(samples: list[bytes], max_size: int = 65535) -> bytes: ...

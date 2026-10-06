@@ -185,6 +185,69 @@ pub fn decompressed_size(compressed: &[u8]) -> Option<u64> {
     }
 }
 
+/// What a frame's header and footer declare, read by [`frame_info`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FrameInfo {
+    /// Source bytes the frame decodes to.
+    pub decompressed_size: u64,
+    /// Compressed bytes of the frame, footer included.
+    pub compressed_size: u64,
+    /// Archive digest; 0 when `has_checksum` is false.
+    pub digest: u64,
+    /// Block size in bytes.
+    pub block_size: usize,
+    /// Dictionary the frame needs; 0 for none.
+    pub dict_id: u32,
+    /// Format version of the frame.
+    pub format_version: u8,
+    /// Blocks carry checksums and the footer a digest.
+    pub has_checksum: bool,
+    /// A seek table precedes the footer.
+    pub has_seek_table: bool,
+}
+
+/// Reads a frame's header and footer, without decoding.
+///
+/// The frame must span all of `compressed`; blocks are not read, so a frame
+/// that passes may still fail to decode.
+///
+/// # Example
+///
+/// ```rust
+/// use zxc::{compress, frame_info, Level};
+///
+/// let data = b"Hello, world!";
+/// let compressed = compress(data, Level::Default, None)?;
+/// let info = frame_info(&compressed)?;
+/// assert_eq!(info.decompressed_size, data.len() as u64);
+/// assert_eq!(info.compressed_size, compressed.len() as u64);
+/// # Ok::<(), zxc::Error>(())
+/// ```
+pub fn frame_info(compressed: &[u8]) -> Result<FrameInfo> {
+    let mut fi = zxc_sys::zxc_frame_info_t::default();
+    let rc = unsafe {
+        zxc_sys::zxc_get_frame_info(
+            compressed.as_ptr() as *const c_void,
+            compressed.len(),
+            &mut fi,
+            std::mem::size_of::<zxc_sys::zxc_frame_info_t>(),
+        )
+    };
+    if rc < 0 {
+        return Err(error_from_code(rc as i64));
+    }
+    Ok(FrameInfo {
+        decompressed_size: fi.decompressed_size,
+        compressed_size: fi.compressed_size,
+        digest: fi.digest,
+        block_size: fi.block_size,
+        dict_id: fi.dict_id,
+        format_version: fi.format_version,
+        has_checksum: fi.has_checksum != 0,
+        has_seek_table: fi.has_seek_table != 0,
+    })
+}
+
 /// Decompresses ZXC-compressed data.
 ///
 /// This is a convenience function that queries the output size and allocates
@@ -332,6 +395,29 @@ pub fn default_level() -> i32 {
 #[cfg(test)]
 mod tests {
     use crate::*;
+
+    #[test]
+    fn frame_info_reads_header_and_footer() {
+        let data = b"frame info ".repeat(500);
+        for checksum in [false, true] {
+            let comp = compress(&data, Level::Default, Some(checksum)).unwrap();
+            let fi = frame_info(&comp).unwrap();
+            assert_eq!(fi.decompressed_size, data.len() as u64);
+            assert_eq!(fi.compressed_size, comp.len() as u64);
+            assert_eq!(fi.has_checksum, checksum);
+            assert_eq!(fi.digest != 0, checksum);
+            assert!(!fi.has_seek_table);
+            assert_eq!(fi.dict_id, 0);
+            assert!(fi.block_size >= 4096);
+        }
+        let mut comp = compress(&data, Level::Default, None).unwrap();
+        comp.push(0);
+        assert!(
+            frame_info(&comp).is_err(),
+            "a trailing byte must be refused"
+        );
+        assert!(frame_info(&[]).is_err());
+    }
 
     #[test]
     fn test_roundtrip() {
