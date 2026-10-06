@@ -64,7 +64,8 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"truncated_mid_block", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
     {"zero_length", ZXC_ERROR_SRC_TOO_SMALL},
     {"sek_forged_entry", 0, NULL, 1, .generated = 1},
-    {"sek_flag_no_table", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    /* The flag promises an 8-byte SEK header where only the shorter footer is. */
+    {"sek_flag_no_table", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
     {"sek_table_no_flag", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
@@ -239,7 +240,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         src = b->seek;
     }
 
-    if (n < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE) {
+    if (n < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE) {
         fprintf(stderr, "  base archive for '%s' is only %zu bytes\n", name, n);
         return 0;
     }
@@ -373,11 +374,17 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         /* --- Remaining rows of the error table (FORMAT.md Sec 11.1) -------- */
     } else if (!strcmp(name, "bad_block_header_checksum")) {
         d[BLK0 + 7] ^= 0xFFU; /* left wrong: the header checksum is the defect */
-    } else if (!strcmp(name, "bad_footer_size")) {
-        d[len - ZXC_FILE_FOOTER_SIZE] ^= 0xFFU; /* declared source size */
-    } else if (!strcmp(name, "bad_footer_digest")) {
-        /* Checksummed base: the digest is the footer's last 8 bytes (Sec 8). */
-        d[len - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU;
+    } else if (!strcmp(name, "bad_footer_size") || !strcmp(name, "bad_footer_digest")) {
+        /* Sec 8: [digest][source size][frame size][L], the lengths in L. */
+        uint64_t dsize = 0, frame = 0;
+        size_t sizes = 0;
+        if (zxc_parse_file_footer(d + len, len, &dsize, &frame, &sizes) != ZXC_OK) {
+            ok = 0;
+        } else if (!strcmp(name, "bad_footer_size")) {
+            d[len - sizes] ^= 0xFFU; /* low byte of the declared source size */
+        } else {
+            d[len - sizes - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU; /* checksummed base */
+        }
     } else if (!strcmp(name, "glo_forged_offset")) {
         /* GHI has its own vector. The first sequence has only its literal run
          * behind it, so any large offset reaches before the output start. */

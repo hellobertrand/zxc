@@ -7,7 +7,6 @@ package zxc
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"testing"
 )
@@ -57,13 +56,54 @@ func TestFixCctxStickyLevel(t *testing.T) {
 	}
 }
 
+// footerLen is the footer's length: the digest when the header announces
+// checksums, then the two sizes and their lengths byte (FORMAT.md 8).
+func footerLen(arc []byte) int {
+	lens := arc[len(arc)-1]
+	n := int(lens&7) + int(lens>>4) + 3
+	if arc[6]&0x80 != 0 {
+		n += 8
+	}
+	return n
+}
+
+// forgeFooterSize rewrites arc's footer to store size, keeping it well formed
+// as a forger would: the digest, then the minimal sizes and their lengths byte.
+func forgeFooterSize(arc []byte, size uint64) []byte {
+	sizes := footerLen(arc)
+	if arc[6]&0x80 != 0 {
+		sizes -= 8
+	}
+	out := append([]byte(nil), arc[:len(arc)-sizes]...)
+	uintBytes := func(v uint64) int {
+		n := 1
+		for n < 8 && v>>(8*n) != 0 {
+			n++
+		}
+		return n
+	}
+	nd := uintBytes(size)
+	base := uint64(len(out) + nd + 1)
+	nf := 1
+	for uintBytes(base+uint64(nf)) > nf {
+		nf++
+	}
+	for i, v := 0, size; i < nd; i, v = i+1, v>>8 {
+		out = append(out, byte(v))
+	}
+	for i, v := 0, base+uint64(nf); i < nf; i, v = i+1, v>>8 {
+		out = append(out, byte(v))
+	}
+	return append(out, byte((nd-1)|(nf-1)<<4))
+}
+
 func TestFixDecompressCraftedFooter(t *testing.T) {
 	comp, err := Compress([]byte("hello world hello world"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Footer = original_size(8); patch it to 2^64-1.
-	binary.LittleEndian.PutUint64(comp[len(comp)-8:], ^uint64(0))
+	// A well-formed footer storing 2^64-1.
+	comp = forgeFooterSize(comp, ^uint64(0))
 	defer func() {
 		if r := recover(); r != nil {
 			t.Fatalf("Decompress panicked on crafted footer: %v", r)
@@ -82,7 +122,7 @@ func TestDecompressZeroedFooterSize(t *testing.T) {
 	// A stored size of 0 is plausible, so the C size probe reports the archive
 	// as empty; only the block walk contradicts it. Decompress must not hand
 	// that back as a buffer-sizing error.
-	binary.LittleEndian.PutUint64(comp[len(comp)-8:], 0)
+	comp = forgeFooterSize(comp, 0)
 	if _, err := Decompress(comp); !errors.Is(err, ErrInvalidData) {
 		t.Fatalf("want ErrInvalidData, got %v", err)
 	}

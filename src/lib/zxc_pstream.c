@@ -114,6 +114,8 @@ typedef enum {
  * @var zxc_cstream_s::total_in
  *      Running count of uncompressed bytes consumed; written into the file
  *      footer.
+ * @var zxc_cstream_s::total_out
+ *      Bytes of the frame staged so far; place the footer and its frame size.
  * @var zxc_cstream_s::state
  *      Current state machine position (see @ref cstream_state_t).
  * @var zxc_cstream_s::error_code
@@ -134,6 +136,7 @@ struct zxc_cstream_s {
 
     uint64_t block_index;
     uint64_t total_in;
+    uint64_t total_out;
     uint64_t digest;
 
     cstream_state_t state;
@@ -194,6 +197,7 @@ static int cs_compress_block_from(zxc_cstream* cs, const uint8_t* RESTRICT src, 
     cs->pending_len = (size_t)csize;
     cs->pending_pos = 0;
     cs->total_in += len;
+    cs->total_out += (uint64_t)csize;
     if (cs->opts.checksum_enabled && cs->pending_len >= ZXC_BLOCK_CHECKSUM_SIZE)
         cs->digest = zxc_digest_combine(
             cs->digest, zxc_le32(cs->pending + cs->pending_len - ZXC_BLOCK_CHECKSUM_SIZE));
@@ -295,9 +299,10 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
         return NULL;
     }
     // LCOV_EXCL_STOP
-    // Pre-size pending so the file header path never needs realloc.
-    cs->pending_cap =
-        ZXC_FILE_HEADER_SIZE > ZXC_FILE_FOOTER_SIZE ? ZXC_FILE_HEADER_SIZE : ZXC_FILE_FOOTER_SIZE;
+    // Pre-size pending so the file header and footer paths never need realloc.
+    cs->pending_cap = ZXC_FILE_HEADER_SIZE > ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE
+                          ? ZXC_FILE_HEADER_SIZE
+                          : ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE;
     cs->pending = (uint8_t*)ZXC_MALLOC(cs->pending_cap);
     // LCOV_EXCL_START
     if (UNLIKELY(!cs->pending)) {
@@ -323,6 +328,7 @@ static int cs_stage_file_header(zxc_cstream* cs) {
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
+    cs->total_out = (uint64_t)w;
     return ZXC_OK;
 }
 
@@ -355,29 +361,22 @@ static int cs_stage_eof(zxc_cstream* cs) {
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
+    cs->total_out += (uint64_t)w;
     return ZXC_OK;
 }
 
 /**
  * @brief Stages the file footer into the @c pending buffer.
  *
- * The footer carries the total uncompressed input size.
+ * The footer carries the input size and the frame size; @c pending holds the
+ * largest one from creation.
  *
  * @param[in,out] cs Compression stream.
  * @return @ref ZXC_OK on success, negative @ref zxc_error_t on failure.
  */
 static int cs_stage_footer(zxc_cstream* cs) {
-    const size_t footer_len = zxc_footer_bytes(cs->opts.checksum_enabled);
-    // LCOV_EXCL_START
-    if (UNLIKELY(footer_len > cs->pending_cap)) {
-        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, footer_len);
-        if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
-        cs->pending = nb;
-        cs->pending_cap = footer_len;
-    }
-    // LCOV_EXCL_STOP
-    const int w = zxc_write_file_footer(cs->pending, cs->pending_cap, cs->total_in, cs->digest,
-                                        cs->opts.checksum_enabled);
+    const int w = zxc_write_file_footer(cs->pending, cs->pending_cap, cs->total_out, cs->total_in,
+                                        cs->digest, cs->opts.checksum_enabled);
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
@@ -675,6 +674,8 @@ typedef enum {
  * @var zxc_dstream_s::total_out
  *      Cumulative decompressed output size; cross-checked against the
  *      file footer.
+ * @var zxc_dstream_s::frame_in
+ *      Bytes of the frame consumed so far; place the footer.
  * @var zxc_dstream_s::state
  *      Current state machine position (see @ref dstream_state_t).
  * @var zxc_dstream_s::error_code
@@ -707,6 +708,7 @@ struct zxc_dstream_s {
 
     uint64_t block_index;
     uint64_t total_out;
+    uint64_t frame_in;
     uint64_t digest;
 
     dstream_state_t state;
@@ -879,6 +881,7 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     // LCOV_EXCL_STOP
     ds->inner_initialized = 1;
 
+    ds->frame_in = ZXC_FILE_HEADER_SIZE;
     ds->state = DS_NEED_BLOCK_HEADER;
     ds->scratch_used = 0;
     ds->scratch_need = ZXC_BLOCK_HEADER_SIZE;
@@ -906,6 +909,7 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
 
     const int rc = zxc_read_block_header(ds->scratch, ds->scratch_used, &ds->cur_bh);
     if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
+    ds->frame_in += ZXC_BLOCK_HEADER_SIZE;
 
     if (ds->cur_bh.block_type == (uint8_t)ZXC_BLOCK_EOF) {
         // EOF block: comp_size must be 0; no payload, no checksum.
@@ -913,7 +917,9 @@ static int ds_handle_need_block_header(zxc_dstream* ds, zxc_inbuf_t* in) {
         ds->state = ds->file_has_seek ? DS_NEED_SEK_HEADER : DS_NEED_FOOTER;
         ds->scratch_used = 0;
         ds->scratch_need =
-            ds->file_has_seek ? ZXC_BLOCK_HEADER_SIZE : zxc_footer_bytes(ds->file_has_checksum);
+            ds->file_has_seek
+                ? ZXC_BLOCK_HEADER_SIZE
+                : zxc_footer_layout(ds->frame_in, ds->total_out, ds->file_has_checksum).len;
         return 0;
     }
 
@@ -991,6 +997,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             case DS_NEED_BLOCK_PAYLOAD: {
                 if (!ds_pull(ds->payload, &ds->payload_used, ds->payload_need, in))
                     return (int64_t)produced;
+                ds->frame_in += ds->payload_need - ZXC_BLOCK_HEADER_SIZE;
                 ds->state = DS_DECODE_BLOCK;
                 break;
             }
@@ -1042,6 +1049,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 if (UNLIKELY(!zxc_seek_header_ok(ds->scratch, ds->total_out, ds->block_size,
                                                  &ds->sek_remaining)))
                     return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
+                ds->frame_in += ZXC_BLOCK_HEADER_SIZE + ds->sek_remaining;
                 ds->state = DS_DRAIN_SEK_PAYLOAD;
                 break;
             }
@@ -1055,7 +1063,8 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 if (ds->sek_remaining > 0) return (int64_t)produced;
                 ds->state = DS_NEED_FOOTER;
                 ds->scratch_used = 0;
-                ds->scratch_need = zxc_footer_bytes(ds->file_has_checksum);
+                ds->scratch_need =
+                    zxc_footer_layout(ds->frame_in, ds->total_out, ds->file_has_checksum).len;
                 break;
             }
 
@@ -1067,10 +1076,13 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
             }
 
             case DS_VALIDATE_FOOTER: {
-                if (UNLIKELY(zxc_le64(ds->scratch) != ds->total_out))
+                uint64_t stored_digest = 0;
+                if (UNLIKELY(zxc_check_file_footer(ds->scratch, ds->frame_in, ds->total_out,
+                                                   ds->file_has_checksum,
+                                                   &stored_digest) != ZXC_OK))
                     return ds_set_error(ds, ZXC_ERROR_CORRUPT_DATA);
                 if (ds->file_has_checksum && ds->opts.checksum_enabled &&
-                    UNLIKELY(zxc_le64(ds->scratch + ZXC_FILE_FOOTER_SIZE) != ds->digest))
+                    UNLIKELY(stored_digest != ds->digest))
                     return ds_set_error(ds, ZXC_ERROR_BAD_CHECKSUM);
                 ds->state = DS_DONE;
                 return (int64_t)produced;

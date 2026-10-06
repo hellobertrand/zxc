@@ -27,24 +27,24 @@ typedef struct {
 } pin_t;
 
 static const pin_t k_pinned[PIN_N_LEVELS] = {
-    {0x99C6C1997DB628A9ULL, 223845}, /* level 1 */
-    {0x91796E093EFA64ADULL, 222405}, /* level 2 */
-    {0x06C22FC583B18C75ULL, 173876}, /* level 3 */
-    {0x0E5382C65830FBBEULL, 171770}, /* level 4 */
-    {0x45C16437087ADCDDULL, 139540}, /* level 5 */
-    {0x3E2770F1157913D6ULL, 130413}, /* level 6 */
-    {0xBE746F21D9A50B72ULL, 111924}, /* level 7 */
+    {0x36C96735B3A565DBULL, 223833}, /* level 1 */
+    {0xB5EB4781D0EFE78AULL, 222393}, /* level 2 */
+    {0x424864B0A99731CBULL, 173864}, /* level 3 */
+    {0x87D3C44BDE492C01ULL, 171758}, /* level 4 */
+    {0x94A86B43DDE7F561ULL, 139528}, /* level 5 */
+    {0xC1FEBE4D18A42B2AULL, 130401}, /* level 6 */
+    {0xB30932DF2B576440ULL, 111912}, /* level 7 */
 };
 
 /* Same inputs in 4 KB blocks, with a dictionary trained on them. */
 static const pin_t k_pinned_dict[PIN_N_LEVELS] = {
-    {0x7B9F551034F95A75ULL, 119480}, /* level 1 */
-    {0xFEDE0B894EB0F9F4ULL, 119250}, /* level 2 */
-    {0x45AA6E12DBCD1E55ULL, 92521},  /* level 3 */
-    {0x3DD0C1931482DB24ULL, 89763},  /* level 4 */
-    {0x0A5281108179335AULL, 81045},  /* level 5 */
-    {0x83F3B69BB3485BAFULL, 77428},  /* level 6 */
-    {0x365B064EF9A02834ULL, 76643},  /* level 7 */
+    {0xBA0DF6B6EF9B95F3ULL, 119474}, /* level 1 */
+    {0x54F85B5B39336220ULL, 119244}, /* level 2 */
+    {0x76C6844E3FD2F926ULL, 92515},  /* level 3 */
+    {0x944E79B1BFCCE382ULL, 89757},  /* level 4 */
+    {0x821667D37CCE1EB4ULL, 81039},  /* level 5 */
+    {0xF625C75A1E0D6E6CULL, 77422},  /* level 6 */
+    {0x01267CB60CF4A48AULL, 76637},  /* level 7 */
 };
 
 /* Own splitmix64: the shared test PRNG stays untouched for the tests that run

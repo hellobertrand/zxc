@@ -497,9 +497,12 @@ mod tests {
         let n = Seekable::from_bytes(arc.clone())
             .expect("open failed")
             .num_blocks() as usize;
-        // Group 0's anchor opens the table, before the 16-byte footer (size, digest).
+        // Group 0's anchor opens the table, before the footer, whose length the
+        // last byte gives.
         let table = n.div_ceil(64) * 8 + n * 4;
-        let anchor = arc.len() - 16 - table;
+        let lens = arc[arc.len() - 1] as usize;
+        let footer = (lens & 7) + (lens >> 4) + 3 + if arc[6] & 0x80 != 0 { 8 } else { 0 };
+        let anchor = arc.len() - footer - table;
         assert_eq!(arc[anchor], 16, "not group 0's anchor");
         arc[anchor] ^= 0xFF;
 

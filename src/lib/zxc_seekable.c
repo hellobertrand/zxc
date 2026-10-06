@@ -155,18 +155,24 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* src) {
     const uint32_t block_size = (uint32_t)block_size_sz;
     if (UNLIKELY(block_size == 0)) return NULL;  // LCOV_EXCL_LINE
 
-    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8) + footer,
-    // 8 bytes or 16 with a digest: 40 or 48. Only the header says which.
-    const uint64_t footer_len = zxc_footer_bytes(file_has_chk);
-    if (UNLIKELY(src->size < ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + footer_len))
+    // Step 2: the footer, parsed back from the end. Its frame must be the whole
+    // source, which also turns away concatenated archives.
+    // Minimum: file_header(16) + eof_block(8) + seek_block_header(8) + footer.
+    const uint64_t body = ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE;
+    if (UNLIKELY(src->size < body + ZXC_FILE_FOOTER_MIN_SIZE)) return NULL;
+    uint8_t sizes[ZXC_FILE_FOOTER_MAX_SIZE];
+    const size_t want =
+        src->size - body < sizeof(sizes) ? (size_t)(src->size - body) : sizeof(sizes);
+    if (UNLIKELY(zxc_seek_source_read(src, sizes, want, src->size - want) != ZXC_OK)) return NULL;
+    uint64_t total_decomp = 0;
+    uint64_t frame_size = 0;
+    size_t sizes_len = 0;
+    if (UNLIKELY(zxc_parse_file_footer(sizes + want, want, &total_decomp, &frame_size,
+                                       &sizes_len) != ZXC_OK ||
+                 frame_size != src->size))
         return NULL;
-
-    // Step 2: read the source size, the first 8 bytes of the footer.
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
-    if (UNLIKELY(zxc_seek_source_read(src, footer, sizeof(footer), src->size - footer_len) !=
-                 ZXC_OK))
-        return NULL;
-    const uint64_t total_decomp = zxc_le64(footer);
+    const uint64_t footer_len = sizes_len + (file_has_chk ? ZXC_FILE_DIGEST_SIZE : 0U);
+    if (UNLIKELY(src->size < body + footer_len)) return NULL;
 
     // Step 3: derive num_blocks = ceil(total_decomp / block_size)
     const uint64_t num_blocks = zxc_seek_block_count(total_decomp, block_size);

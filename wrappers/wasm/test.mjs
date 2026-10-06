@@ -580,8 +580,11 @@ async function main() {
       probe.free();
       const forged = compressed.slice();
       const tableBytes = Math.ceil(n / 64) * 8 + n * 4;
-      // Group 0's anchor opens the table, before the 16-byte footer (size, digest).
-      const anchor = forged.length - 16 - tableBytes;
+      // Group 0's anchor opens the table, before the footer, whose length the
+      // last byte gives.
+      const lens = forged[forged.length - 1];
+      const footer = (lens & 7) + (lens >> 4) + 3 + (forged[6] & 0x80 ? 8 : 0);
+      const anchor = forged.length - footer - tableBytes;
       assert(forged[anchor] === 16, "forged byte is group 0's anchor");
       forged[anchor] ^= 0xff;
       const sf = zxc.createSeekable(forged);
