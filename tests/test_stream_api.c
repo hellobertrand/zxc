@@ -1643,7 +1643,8 @@ int test_stream_footer_looks_like_sek(void) {
     return ok;
 }
 
-/* FILE* and buffer decoders must return @p want; push decodes @p n bytes, stops at @p push_end. */
+/* FILE* and buffer decoders must return @p want (into @p out, 2 * @p n bytes); push decodes
+ * @p n bytes, stops at @p push_end. */
 static int trailing_verdict(const uint8_t* arc, const size_t total, const size_t n,
                             const uint8_t* src, uint8_t* out, const int64_t want,
                             const size_t push_end, const char* what) {
@@ -1652,7 +1653,7 @@ static int trailing_verdict(const uint8_t* arc, const size_t total, const size_t
     if (f && fwrite(arc, 1, total, f) == total && fseek(f, 0, SEEK_SET) == 0)
         rf = zxc_stream_decompress(f, NULL, NULL);
     if (f) fclose(f);
-    const int64_t rb = zxc_decompress(arc, total, out, n, NULL);
+    const int64_t rb = zxc_decompress(arc, total, out, 2 * n, NULL);
 
     zxc_dstream* const ds = zxc_dstream_create(NULL);
     zxc_inbuf_t in = {arc, total, 0};
@@ -1668,8 +1669,9 @@ static int trailing_verdict(const uint8_t* arc, const size_t total, const size_t
     return 0;
 }
 
-/* Bytes after the footer: corrupt for the FILE* and buffer decoders; the push API
- * stops at the footer and leaves them to the caller. */
+/* Bytes after the footer: another frame decodes after the first, anything else is
+ * corrupt for the FILE* and buffer decoders; the push API stops at the footer and
+ * leaves them to the caller. */
 int test_stream_trailing_bytes(void) {
     printf("=== TEST: Stream - bytes after the footer ===\n");
     const size_t n = 3 * 4096 + 5;
@@ -1677,7 +1679,7 @@ int test_stream_trailing_bytes(void) {
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(2 * cap);
     uint8_t* const forged = malloc(cap + ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE);
-    uint8_t* const out = malloc(n);
+    uint8_t* const out = malloc(2 * n);
     int ok = src && arc && forged && out;
     if (ok) gen_lz_data(src, n);
 
@@ -1691,15 +1693,21 @@ int test_stream_trailing_bytes(void) {
         }
         char what[96];
 
-        // No tail, one byte, a second archive.
+        // No tail, one byte, four bytes that are no magic word, a second archive.
         memcpy(arc + len, arc, (size_t)len);
-        const size_t tails[] = {0, 1, (size_t)len};
+        const size_t tails[] = {0, 1, 4, (size_t)len};
+        const int64_t wants[] = {(int64_t)n, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA,
+                                 2 * (int64_t)n};
+        uint8_t* const tail = arc + len;
         for (size_t t = 0; ok && t < sizeof(tails) / sizeof(tails[0]); t++) {
             snprintf(what, sizeof(what), "checksum %d, seekable %d, %zu trailing bytes", v & 1,
                      v >> 1, tails[t]);
-            ok =
-                trailing_verdict(arc, (size_t)len + tails[t], n, src, out,
-                                 tails[t] ? ZXC_ERROR_CORRUPT_DATA : (int64_t)n, (size_t)len, what);
+            uint8_t saved[4];
+            memcpy(saved, tail, sizeof(saved));
+            if (tails[t] == 4) memset(tail, 0xA5, 4);
+            ok = trailing_verdict(arc, (size_t)len + tails[t], n, src, out, wants[t], (size_t)len,
+                                  what);
+            memcpy(tail, saved, sizeof(saved));
         }
 
         // Flag cleared, [EOF][valid footer][SEK][footer]: the first footer checks

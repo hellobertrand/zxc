@@ -127,6 +127,11 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * and blocking, so @c n_threads and the progress callback in @p opts are
  * ignored.
  *
+ * @par Concatenated frames
+ * @p src may hold several frames back to back (archives concatenated as
+ * they are). They decode one after the other into @p dst. Anything else
+ * after a frame is @ref ZXC_ERROR_CORRUPT_DATA.
+ *
  * @par Asking without a destination
  * A NULL @p dst, or a @p dst_capacity of 0, decodes nothing and reports what
  * the archive holds: 0 for a well-formed empty one, @ref ZXC_ERROR_DST_TOO_SMALL
@@ -198,12 +203,13 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
                                           const zxc_decompress_opts_t* opts);
 
 /**
- * @brief Reads the original size from an archive footer, without decoding.
+ * @brief Reads the original size from the archive footers, without decoding.
  *
- * The footer is untrusted input, so the value is checked for plausibility
- * against the archive size (each block costs at least a block header and
- * decodes to at most one block): a forged footer claiming an absurd size
- * returns 0 rather than driving an oversized allocation.
+ * Walks the block headers of every frame (see zxc_decompress() for
+ * concatenated frames) and sums the sizes their footers store. A footer is
+ * untrusted input, so each value is checked against the blocks its frame
+ * holds (each decodes to at most one block): a forged footer claiming an
+ * absurd size returns 0 rather than driving an oversized allocation.
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.

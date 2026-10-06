@@ -173,6 +173,10 @@ int test_stream_get_decompressed_size_errors(void);
 int test_stream_engine_errors(void);
 int test_stream_trailing_bytes(void);
 
+/* --- Containers (test_container.c) --- */
+int test_container_concat(void);
+int test_container_seekable_refused(void);
+
 /* Push Streaming API (zxc_pstream.h) */
 int test_pstream_roundtrip_basic(void);
 int test_pstream_roundtrip_no_checksum(void);

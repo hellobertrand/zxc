@@ -11,7 +11,8 @@ It formalizes the current reference implementation of format version **9**.
 - **Byte order**: all multi-byte integers are **little-endian**.
 - **Unit**: offsets are in bytes, zero-based from the start of each structure.
 - **Checksum mode**: enabled globally by a flag in the file header.
-- **Block model**: a file is a sequence of blocks terminated by an EOF block, then a footer.
+- **Block model**: a frame is a sequence of blocks terminated by an EOF block, then a footer.
+  A file is one or more frames (§ 2.1).
 
 ---
 
@@ -36,6 +37,34 @@ It formalizes the current reference implementation of format version **9**.
 | File Footer          | 3 to 17 bytes, plus 8 with a digest
 +----------------------+
 ```
+
+This is one **frame**. Sections 3 to 8 describe it; a file holds one or more.
+
+### 2.1 Concatenated frames
+
+A file holds one or more frames back to back, each the layout above starting
+with the ZXC magic word `0x9CB02EF5`. Frames are independent: each has its own
+header, block size, flags, block indices (the checksum seed of § 7.2 restarts
+at 0) and footer. Their outputs are concatenated in order, so
+`cat a.zxc b.zxc` decodes to `cat a b`.
+
+After each footer, the decoder reads the next 4 bytes:
+
+| Next bytes                  | Action                                 |
+|-----------------------------|----------------------------------------|
+| end of input                | done                                   |
+| `0x9CB02EF5`                | decode the next frame                  |
+| anything else, or 1-3 bytes | reject as corrupt data                 |
+
+An empty file is truncated; a bad magic word at offset 0 is a bad magic word.
+The frame layout is unchanged, so a single-frame file is byte-identical to a
+file written before concatenation was allowed, and a decoder that predates it
+rejects a concatenated file (bytes after the footer) rather than misreading it.
+
+Each footer stores its frame's `compressed_frame_size` (§ 8), so a reader can
+also walk the frames back from the end of the input without decoding them, as
+the size queries do. The seekable reader (§ 5.5) addresses one frame: that size
+must span the whole input, which refuses a concatenated file.
 
 ---
 
@@ -769,8 +798,9 @@ Example: 10 000 000 source bytes compressed to a 3 000 000-byte prefix, no check
      § 5.5 derives from the output, Block Flags and Reserved 0, and skip the table,
    - compute the footer § 8 implies from the produced output size and the bytes read so
      far, read exactly that many bytes, and require them to match, the digest aside,
-   - require nothing to follow the footer,
    - if verifying, compare the archive digest (§ 7.3) with the fold of the block checksums.
+6. After the footer, read the next 4 bytes and follow § 2.1: end of input,
+   another frame (back to step 1), or reject.
 
 ---
 

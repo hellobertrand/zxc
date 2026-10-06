@@ -398,7 +398,7 @@ GHI Block Data Layout:
 ### 5.5 Specific Header: EOF (End of File)
 (Block Type 255)
 
-The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable or when concatenating streams.
+The **EOF** block marks the end of the ZXC stream. It ensures that the decompressor knows exactly when to stop processing, allowing for robust stream termination even when file size metadata is unavailable. Since each frame ends on its own footer, frames can be concatenated: the buffer and `FILE*` decoders read the next magic word after a footer and decode the next frame, or stop at the end of input (FORMAT.md § 2.1).
 
 *   **Structure**: Standard 8-byte Block Header.
 *   **Flags**: written as `0`.

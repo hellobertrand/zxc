@@ -55,6 +55,19 @@ describe("compress/decompress roundtrip", () => {
     expect(decompressed.length).toBe(data.length);
     expect(Buffer.compare(decompressed, data)).toBe(0);
   });
+
+  test("concatenated archives decode as one", () => {
+    // FORMAT.md 2.1: frames back to back; the size query sums them.
+    const a = Buffer.from("first frame ".repeat(50));
+    const b = Buffer.from("second frame ".repeat(70));
+    const joined = Buffer.concat([
+      zxc.compress(a),
+      zxc.compress(b, { checksum: true }),
+    ]);
+    expect(zxc.getDecompressedSize(joined)).toBe(a.length + b.length);
+    const out = zxc.decompress(joined);
+    expect(Buffer.compare(out, Buffer.concat([a, b]))).toBe(0);
+  });
 });
 
 // =============================================================================

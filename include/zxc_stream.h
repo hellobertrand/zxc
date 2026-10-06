@@ -77,8 +77,10 @@ ZXC_EXPORT int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compre
 /**
  * @brief Decompresses one file stream into another.
  *
- * Same pipeline as compression, for the same throughput reasons. Bytes after
- * the footer are @ref ZXC_ERROR_CORRUPT_DATA.
+ * Same pipeline as compression, for the same throughput reasons. After a
+ * footer, the next 4 bytes decide: the end of the input stops, a ZXC magic word
+ * starts another frame decoded after the first, and anything else is
+ * @ref ZXC_ERROR_CORRUPT_DATA.
  *
  * @param[in]  f_in   Input stream, opened in "rb" mode.
  * @param[out] f_out  Output stream, opened in "wb" mode.
@@ -93,12 +95,14 @@ ZXC_EXPORT int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out,
                                          const zxc_decompress_opts_t* opts);
 
 /**
- * @brief Reads the original size from a ZXC file's footer, without decoding.
+ * @brief Reads the original size from a ZXC file's footers, without decoding.
  *
- * The file header is validated first, as a decoder would (magic, version,
- * header checksum, block size), and the size is checked against what the
- * archive could hold, so a value comes back only from a file a decoder would
- * accept. The file position is restored afterwards.
+ * Walks the whole file from offset 0: every frame's header is validated as a
+ * decoder would (magic, version, header checksum, block size), its block
+ * headers are walked to its footer, and the stored size is checked against the
+ * blocks it holds. Concatenated frames add up (see zxc_stream_decompress()).
+ * The file position
+ * is restored afterwards.
  *
  * @param[in] f_in  Input stream, opened in "rb" mode.
  *

@@ -1527,5 +1527,47 @@ else
     fi
 fi
 
+# 35. Containers: concatenated frames
+echo "Testing containers..."
+
+# 35.1 Two archives back to back decode as one stream, from a file and from stdin
+"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_a.zxc"
+"$ZXC_BIN" -1 -N -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_b.zxc"
+cat "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_b.zxc" > "$TEST_DIR/cat.zxc"
+cat "$TEST_FILE" "$TEST_FILE" > "$TEST_DIR/cat.expected"
+"$ZXC_BIN" -d -c "$TEST_DIR/cat.zxc" > "$TEST_DIR/cat.dec"
+"$ZXC_BIN" -d -c < "$TEST_DIR/cat.zxc" > "$TEST_DIR/cat_pipe.dec"
+if cmp -s "$TEST_DIR/cat.expected" "$TEST_DIR/cat.dec" &&
+    cmp -s "$TEST_DIR/cat.expected" "$TEST_DIR/cat_pipe.dec"; then
+    log_pass "Concatenated archives decode (file and stdin)"
+else
+    log_fail "Concatenated archives should decode to both inputs"
+fi
+
+# 35.2 -t accepts them and reports the mixed checksums; -l -j counts the frames
+OUT=$("$ZXC_BIN" -t -v "$TEST_DIR/cat.zxc")
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/cat.zxc")
+if [[ "$OUT" == *"OK"* ]] && [[ "$OUT" == *"partly verified"* ]] &&
+    [[ "$JSON_OUT" == *'"frames": 2'* ]] && [[ "$JSON_OUT" == *'"checksum_method": "mixed"'* ]]; then
+    log_pass "-t and -l on concatenated archives"
+else
+    echo "  -t: $OUT"
+    echo "  -l: $JSON_OUT"
+    log_fail "-t / -l should handle concatenated archives"
+fi
+
+# 35.3 Trailing garbage after the last footer is an error
+cp "$TEST_DIR/cat.zxc" "$TEST_DIR/cat_bad.zxc"
+printf 'JUNK' >> "$TEST_DIR/cat_bad.zxc"
+set +e
+"$ZXC_BIN" -t "$TEST_DIR/cat_bad.zxc" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ $RET -ne 0 ]]; then
+    log_pass "Trailing garbage rejected"
+else
+    log_fail "Trailing garbage after the last footer must fail"
+fi
+
 echo "All tests passed!"
 exit 0

@@ -719,13 +719,7 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
         ctx->io_error = 1;
     }
-    // Nothing may follow the footer, as for the buffer decoders. EOF without feof
-    // is a read error.
-    if (!ctx->io_error && UNLIKELY(fgetc(f_in) != EOF)) {
-        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
-        ctx->io_error = 1;
-    }
-    if (!ctx->io_error && UNLIKELY(!feof(f_in))) ctx->io_error = 1;  // LCOV_EXCL_LINE
+    // What follows the footer is the container's business: see zxc_stream_decompress().
 }
 
 /**
@@ -764,6 +758,8 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
  * @param[in]  dict             Optional dictionary content, or NULL.
  * @param[in]  dict_size        Dictionary length in bytes (0 if none).
  * @param[in]  dict_huf         Optional shared literal Huffman table, or NULL.
+ * @param[in]  magic            Decompression: the frame's first 4 bytes, already
+ *                              read from @p f_in by the container walk.
  * @return Total bytes written to the output on success, or a negative
  *         @ref zxc_error_t code.
  */
@@ -772,7 +768,7 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
                                      const int checksum_enabled, const int seekable,
                                      zxc_progress_callback_t progress_cb, void* user_data,
                                      const uint8_t* dict, const size_t dict_size,
-                                     const uint8_t* dict_huf) {
+                                     const uint8_t* dict_huf, const uint8_t* magic) {
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     zxc_stream_ctx_t ctx;
@@ -800,7 +796,9 @@ static int64_t zxc_stream_engine_run(FILE* f_in, FILE* f_out, const int n_thread
         // Decompression Mode: Read and validate file header
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         uint32_t header_dict_id = 0;
-        if (UNLIKELY(fread(h, 1, ZXC_FILE_HEADER_SIZE, f_in) != ZXC_FILE_HEADER_SIZE))
+        ZXC_MEMCPY(h, magic, sizeof(uint32_t));
+        if (UNLIKELY(fread(h + sizeof(uint32_t), 1, ZXC_FILE_HEADER_SIZE - sizeof(uint32_t),
+                           f_in) != ZXC_FILE_HEADER_SIZE - sizeof(uint32_t)))
             return ZXC_ERROR_SRC_TOO_SMALL;
 
         const int hrc = zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, &runtime_chunk_sz,
@@ -991,16 +989,45 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
 
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     return zxc_stream_engine_run(f_in, f_out, n_threads, 1, level, block_size, checksum_enabled,
-                                 seekable, cb, ud, dict, dict_size, dict_huf);
+                                 seekable, cb, ud, dict, dict_size, dict_huf, NULL);
+}
+
+/** @brief Progress across frames: each engine run counts from 0, the caller
+ *  sees the bytes of the frames before it added. */
+typedef struct {
+    zxc_progress_callback_t cb;
+    const void* user_data;
+    uint64_t base;
+} zxc_frame_progress_t;
+
+// LCOV_EXCL_START
+static void zxc_frame_progress(const uint64_t done, const uint64_t total, const void* user_data) {
+    const zxc_frame_progress_t* const p = (const zxc_frame_progress_t*)user_data;
+    p->cb(p->base + done, total, p->user_data);
+}
+// LCOV_EXCL_STOP
+
+/**
+ * @brief Reads exactly @p len bytes, telling a clean end from a short read.
+ *
+ * @return @ref ZXC_OK; 1 when the input ended before the first byte;
+ *         @p short_code when it ended inside the range; @ref ZXC_ERROR_IO on
+ *         a read error.
+ */
+static int zxc_stream_read_exact(FILE* f, void* dst, const size_t len, const int short_code) {
+    const size_t got = fread(dst, 1, len, f);
+    if (LIKELY(got == len)) return ZXC_OK;
+    if (UNLIKELY(ferror(f))) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+    return got == 0 ? 1 : short_code;
 }
 
 /**
  * @brief Decompresses a @c FILE* stream to another @c FILE* stream.
  *
- * Public API; full contract in @c zxc_stream.h. Resolves the options (threads,
- * checksums, dictionary), then drives @ref zxc_stream_engine_run in
- * decompression mode. The block size and level are recovered from the archive
- * header, not from @p opts.
+ * Public API; full contract in @c zxc_stream.h. Walks the container: before
+ * each frame the next 4 bytes are the end of the input, a ZXC magic word
+ * (drives @ref zxc_stream_engine_run in decompression mode) or an error. The
+ * block size and level are recovered from each frame header, not from @p opts.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1009,12 +1036,47 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
-    zxc_progress_callback_t cb = opts ? opts->progress_cb : NULL;
-    void* ud = opts ? opts->user_data : NULL;
-
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
-    return zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled, 0, cb, ud, dict,
-                                 dict_size, dict_huf);
+    zxc_frame_progress_t progress = {opts ? opts->progress_cb : NULL, opts ? opts->user_data : NULL,
+                                     0};
+    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+
+    uint8_t magic[sizeof(uint32_t)];
+    int rc = zxc_stream_read_exact(f_in, magic, sizeof(magic), ZXC_ERROR_SRC_TOO_SMALL);
+
+    int64_t total = 0;
+    for (int frames = 0;; frames++) {
+        if (rc == 1) {
+            // A clean end of input, after at least one frame.
+            rc = frames ? ZXC_OK : ZXC_ERROR_SRC_TOO_SMALL;
+            break;
+        }
+        if (UNLIKELY(rc != ZXC_OK)) break;
+        if (UNLIKELY(zxc_le32(magic) != ZXC_MAGIC_WORD)) {
+            rc = frames ? ZXC_ERROR_CORRUPT_DATA : ZXC_ERROR_BAD_MAGIC;
+            break;
+        }
+        const int64_t r = zxc_stream_engine_run(f_in, f_out, n_threads, 0, 0, 0, checksum_enabled,
+                                                0, progress.cb ? zxc_frame_progress : NULL,
+                                                &progress, dict, dict_size, dict_huf, magic);
+        if (UNLIKELY(r < 0)) {
+            rc = (int)r;
+            break;
+        }
+        total += r;
+        progress.base = (uint64_t)total;
+        rc = zxc_stream_read_exact(f_in, magic, sizeof(magic), ZXC_ERROR_CORRUPT_DATA);
+    }
+    return rc != ZXC_OK ? rc : total;
+}
+
+/** @brief @ref zxc_scan_src_t over a @c FILE*. */
+static int zxc_file_scan_read(const zxc_scan_src_t* src, const uint64_t off, void* dst,
+                              const size_t len) {
+    FILE* const f = (FILE*)src->ctx;
+    if (UNLIKELY(fseeko(f, (long long)off, SEEK_SET) != 0 || fread(dst, 1, len, f) != len))
+        return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+    return ZXC_OK;
 }
 
 /**
@@ -1056,17 +1118,28 @@ static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
 }
 
 /**
- * @brief Reads the total decompressed size from an archive's footer.
+ * @brief Reads the total decompressed size from the footers of a file.
  *
- * Public API; see @c zxc_stream.h. The frame-info read, reduced to its size.
+ * Public API; see @c zxc_stream.h. Walks the whole file, from offset 0, through
+ * @ref zxc_scan_container, the same walk as @ref zxc_get_decompressed_size, and
+ * restores the caller's stream position. Does not decompress any data.
  */
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
-    zxc_frame_info_t info;
-    const int rc = zxc_stream_read_frame_info(f_in, &info);
+    const long long saved_pos = ftello(f_in);
+    if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
+    if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
+    const long long file_size = ftello(f_in);
+    zxc_container_info_t info;
+    int rc = ZXC_ERROR_IO;
+    if (LIKELY(file_size >= 0)) {
+        const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, (uint64_t)file_size};
+        rc = zxc_scan_container(&src, 0, &info);
+    }
+    fseeko(f_in, saved_pos, SEEK_SET);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
-    if (UNLIKELY(info.decompressed_size > (uint64_t)INT64_MAX)) return ZXC_ERROR_CORRUPT_DATA;
-    return (int64_t)info.decompressed_size;
+    if (UNLIKELY(info.dsize > (uint64_t)INT64_MAX)) return ZXC_ERROR_CORRUPT_DATA;
+    return (int64_t)info.dsize;
 }
 
 /**

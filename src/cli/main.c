@@ -736,6 +736,82 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
     return 0;
 }
 
+/* What the CLI walk reads; the library keeps these internal (FORMAT.md 2.1, 3). */
+static const uint32_t ZXC_CLI_MAGIC = 0x9CB02EF5U;
+enum { ZXC_CLI_FLAG_CHECKSUM = 0x80 /* HAS_CHECKSUM: block checksums and a digest */ };
+
+/** @brief What a walk of a container finds. */
+typedef struct {
+    uint8_t header[ZXC_FILE_HEADER_SIZE]; /* the first frame's header */
+    uint64_t frames;                      /* ZXC frames */
+    uint64_t checksummed;                 /* frames whose header sets HAS_CHECKSUM */
+    uint64_t digest;                      /* the last frame's digest, when it has one */
+} cli_container_t;
+
+static uint32_t cli_le32(const uint8_t* p) {
+    return (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24;
+}
+static uint64_t cli_le64(const uint8_t* p) {
+    return (uint64_t)cli_le32(p) | (uint64_t)cli_le32(p + 4) << 32;
+}
+
+static int cli_read_at(FILE* f, const uint64_t off, void* dst, const size_t n) {
+    return (off <= (uint64_t)LLONG_MAX && fseeko(f, (long long)off, SEEK_SET) == 0 &&
+            fread(dst, 1, n, f) == n)
+               ? 0
+               : -1;
+}
+
+/**
+ * @brief Walks the frames concatenated in @p f, from the last back to the
+ *        first: each footer ends with L, the lengths of its two sizes, the
+ *        second of which is the frame's compressed size (FORMAT.md 8).
+ *
+ * Only reads footers and headers; integrity is the library's job, which
+ * zxc_stream_get_decompressed_size() has already done. Rewinds @p f.
+ *
+ * @return 0 on success, -1 on a layout the walk cannot follow.
+ */
+static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
+    memset(c, 0, sizeof(*c));
+    uint64_t end = file_size;
+    int rc = 0;
+    while (rc == 0 && end > 0) {
+        uint8_t t[ZXC_FILE_FOOTER_MAX_SIZE];
+        const size_t n = end < sizeof(t) ? (size_t)end : sizeof(t);
+        uint8_t h[ZXC_FILE_HEADER_SIZE];
+        if (cli_read_at(f, end - n, t, n) != 0) {
+            rc = -1;
+            break;
+        }
+        const size_t nd = (size_t)(t[n - 1] & 0x07U) + 1;
+        const size_t nf = (size_t)(t[n - 1] >> 4 & 0x07U) + 1;
+        uint64_t frame = 0;
+        for (size_t i = nf; i > 0; i--) frame = frame << 8 | t[n - 1 - nf + i - 1];
+        if (nd + nf + 1 > n || frame < ZXC_FILE_HEADER_SIZE || frame > end ||
+            cli_read_at(f, end - frame, h, sizeof(h)) != 0 || cli_le32(h) != ZXC_CLI_MAGIC) {
+            rc = -1;
+            break;
+        }
+        const int cs = (h[6] & ZXC_CLI_FLAG_CHECKSUM) != 0;
+        if (cs && c->frames == 0) {  // the digest sits before the sizes
+            uint8_t dg[ZXC_FILE_DIGEST_SIZE];
+            if (cli_read_at(f, end - (nd + nf + 1) - sizeof(dg), dg, sizeof(dg)) != 0) {
+                rc = -1;
+                break;
+            }
+            c->digest = cli_le64(dg);
+        }
+        c->frames++;
+        c->checksummed += (uint64_t)cs;
+        memcpy(c->header, h, sizeof(h));  // the first frame's, once the walk is done
+        end -= frame;
+    }
+    if (rc == 0 && c->frames == 0) rc = -1;
+    if (fseeko(f, 0, SEEK_SET) != 0) rc = -1;
+    return rc;
+}
+
 static int zxc_list_archive(const char* path, int json_output) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
@@ -780,23 +856,35 @@ static int zxc_list_archive(const char* path, int json_output) {
         fseeko(f, 0, SEEK_SET);
     }
 
-    // Header and footer fields, read by the library.
-    zxc_frame_info_t info;
-    const int frc = zxc_stream_get_frame_info(f, &info, sizeof(info));
+    // Totals over every frame, checked by the library.
+    const int64_t uncompressed = zxc_stream_get_decompressed_size(f);
+    // What the library does not report per frame: their count, which carry
+    // checksums, the first one's header and the last one's digest.
+    cli_container_t cont;
+    const int walked = uncompressed >= 0 ? zxc_cli_walk(f, (uint64_t)file_size, &cont) : -1;
     fclose(f);
-    if (frc != ZXC_OK) {
-        fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(frc));
+    if (uncompressed < 0 || walked != 0) {
+        fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n",
+                zxc_error_name(uncompressed < 0 ? (int)uncompressed : ZXC_ERROR_CORRUPT_DATA));
         return 1;
     }
-    const uint64_t uncompressed_size = info.decompressed_size;
-    const unsigned format_version = info.format_version;
-    const size_t block_size_kb = info.block_size / 1024;
-    const int has_checksum = info.has_checksum;
-    const char* checksum_method = has_checksum ? "RapidHash" : "-";
+    const uint64_t uncompressed_size = (uint64_t)uncompressed;
+    const uint8_t* const header = cont.header;
+    const unsigned format_version = header[4];
+    // Block size is stored at offset 5 as a log2 exponent (4 KB..2 MB).
+    const uint8_t chunk_code = header[5];
+    const size_t block_size_kb =
+        chunk_code >= ZXC_BLOCK_SIZE_MIN_LOG2 && chunk_code <= ZXC_BLOCK_SIZE_MAX_LOG2
+            ? ((size_t)1U << chunk_code) / 1024
+            : 0;
+    // Checksums when every frame carries them; a digest only describes one frame.
+    const int has_checksum = cont.checksummed == cont.frames;
+    const int mixed_checksum = cont.checksummed != 0 && !has_checksum;
+    const char* checksum_method = has_checksum ? "RapidHash" : mixed_checksum ? "mixed" : "-";
     char digest_str[24] = "null";
-    if (has_checksum)
-        snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)info.digest);
-    const uint32_t dict_id = info.dict_id;
+    if (has_checksum && cont.frames == 1)
+        snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)cont.digest);
+    const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
@@ -825,11 +913,16 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"block_size_kb\": %zu,\n"
             "  \"checksum_method\": \"%s\",\n"
             "  \"digest\": %s,\n"
-            "  \"dict_id\": %s%s%s\n"
+            "  \"dict_id\": %s%s%s,\n"
+            "  \"frames\": %llu\n"
             "}\n",
             path, file_size, (unsigned long long)uncompressed_size, ratio, format_version,
-            block_size_kb, has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
-            dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
+            block_size_kb,
+            has_checksum     ? "RapidHash"
+            : mixed_checksum ? "mixed"
+                             : "none",
+            digest_str, dict_id ? "\"" : "", dict_id ? dict_id_str : "null", dict_id ? "\"" : "",
+            (unsigned long long)cont.frames);
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
@@ -838,10 +931,14 @@ static int zxc_list_archive(const char* path, int json_output) {
             "Block Format: %u\n"
             "Block Size:   %zu KB\n"
             "Checksum Method: %s\n",
-            path, format_version, block_size_kb, has_checksum ? "RapidHash" : "None");
+            path, format_version, block_size_kb,
+            has_checksum     ? "RapidHash"
+            : mixed_checksum ? "Mixed"
+                             : "None");
 
-        if (has_checksum) printf("Digest:          %s\n", digest_str);
+        if (has_checksum && cont.frames == 1) printf("Digest:          %s\n", digest_str);
         if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
+        if (cont.frames > 1) printf("Frames:          %llu\n", (unsigned long long)cont.frames);
 
         printf(
             "-----------------------\n"
@@ -855,26 +952,31 @@ static int zxc_list_archive(const char* path, int json_output) {
                "Ratio", "Checksum", "Dict ID", "Filename");
         printf("  %12s   %12s   %5.2f   %-10s   %-10s   %s\n", comp_str, uncomp_str, ratio,
                checksum_method, dict_id_str, path);
+        if (cont.frames > 1) printf("  (%llu frames)\n", (unsigned long long)cont.frames);
     }
 
     return 0;
 }
 
 /**
- * @brief Reports whether an archive's header declares a global checksum.
+ * @brief Reports whether an archive's frames declare checksums.
  *
- * Reads the frame info from @p f and rewinds it to the start, where decoding
+ * Walks the container in @p f and rewinds it to the start, where decoding
  * begins, so the checksum status describes the same file that is decoded.
  *
  * @param[in] f Seekable input stream for the archive (not stdin).
- * @return 1 if declared, 0 if not, -1 if the frame could not be read.
+ * @return 1 if every frame declares one, 2 if only some do, 0 if none does,
+ *         -1 if the layout could not be read.
  */
 static int zxc_archive_has_checksum(FILE* f) {
-    zxc_frame_info_t info;
-    int declared =
-        zxc_stream_get_frame_info(f, &info, sizeof(info)) == ZXC_OK ? info.has_checksum : -1;
-    if (fseeko(f, 0, SEEK_SET) != 0) declared = -1;
-    return declared;
+    cli_container_t c;
+    if (fseeko(f, 0, SEEK_END) != 0) return -1;
+    const long long size = ftello(f);
+    if (size < 0 || zxc_cli_walk(f, (uint64_t)size, &c) != 0) {
+        fseeko(f, 0, SEEK_SET);
+        return -1;
+    }
+    return c.checksummed == 0 ? 0 : c.checksummed == c.frames ? 1 : 2;
 }
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -1148,15 +1250,18 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         if (mode == MODE_INTEGRITY) {
             // Test mode: show result
             // checksum_method uses the same spellings as -l -j
-            const int verified = (archive_has_checksum > 0) && checksum_enabled;
-            const char* method = (archive_has_checksum > 0)    ? "RapidHash"
+            const int verified = (archive_has_checksum == 1) && checksum_enabled;
+            const char* method = (archive_has_checksum == 1)   ? "RapidHash"
+                                 : (archive_has_checksum == 2) ? "mixed"
                                  : (archive_has_checksum == 0) ? "none"
                                                                : "unknown";
-            const char* summary = (archive_has_checksum == 0)  ? "not verified (archive has none)"
-                                  : !checksum_enabled          ? "not verified (skipped by -N)"
-                                  : (archive_has_checksum > 0) ? "verified (RapidHash)"
-                                  : use_stdin                  ? "unknown (streamed input)"
-                                                               : "unknown (frame unreadable)";
+            const char* summary = (archive_has_checksum == 0)   ? "not verified (archive has none)"
+                                  : !checksum_enabled           ? "not verified (skipped by -N)"
+                                  : (archive_has_checksum == 1) ? "verified (RapidHash)"
+                                  : (archive_has_checksum == 2)
+                                      ? "partly verified (some frames have none)"
+                                  : use_stdin ? "unknown (streamed input)"
+                                              : "unknown (frame unreadable)";
             if (json_output) {
                 printf(
                     "{\n"
