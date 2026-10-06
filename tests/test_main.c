@@ -54,6 +54,8 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_error_codes),
     TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),
+    TEST_CASE(test_frame_info),
+    TEST_CASE(test_footer_strictness),
     TEST_CASE(test_decompress_fast_vs_safe_path),
     TEST_CASE(test_max_compressed_size_logic),
     TEST_CASE(test_decompress_empty_frame_null_dst),

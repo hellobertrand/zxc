@@ -219,6 +219,41 @@ static Napi::Value GetDecompressedSize(const Napi::CallbackInfo& info) {
 }
 
 // =============================================================================
+// getFrameInfo(buffer: Buffer): object (throws on an invalid frame)
+// =============================================================================
+static Napi::Value GetFrameInfo(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer as first argument")
+            .ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    Napi::Buffer<uint8_t> src_buf = info[0].As<Napi::Buffer<uint8_t>>();
+    zxc_frame_info_t fi;
+    const int rc = zxc_get_frame_info(src_buf.Data(), src_buf.Length(), &fi, sizeof(fi));
+    if (rc != ZXC_OK) {
+        Napi::Error err = Napi::Error::New(env, zxc_error_name(rc));
+        err.Set("code", Napi::Number::New(env, rc));
+        err.ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+
+    // Sizes as numbers, like getDecompressedSize; the 64-bit digest as a BigInt.
+    Napi::Object out = Napi::Object::New(env);
+    out.Set("decompressedSize", Napi::Number::New(env, static_cast<double>(fi.decompressed_size)));
+    out.Set("compressedSize", Napi::Number::New(env, static_cast<double>(fi.compressed_size)));
+    out.Set("digest", Napi::BigInt::New(env, static_cast<uint64_t>(fi.digest)));
+    out.Set("blockSize", Napi::Number::New(env, static_cast<double>(fi.block_size)));
+    out.Set("dictId", Napi::Number::New(env, fi.dict_id));
+    out.Set("formatVersion", Napi::Number::New(env, fi.format_version));
+    out.Set("hasChecksum", Napi::Boolean::New(env, fi.has_checksum != 0));
+    out.Set("hasSeekTable", Napi::Boolean::New(env, fi.has_seek_table != 0));
+    return out;
+}
+
+// =============================================================================
 // Dictionary API
 // =============================================================================
 
@@ -1312,6 +1347,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("decompress", Napi::Function::New(env, Decompress, "decompress"));
     exports.Set("getDecompressedSize",
                 Napi::Function::New(env, GetDecompressedSize, "getDecompressedSize"));
+    exports.Set("getFrameInfo", Napi::Function::New(env, GetFrameInfo, "getFrameInfo"));
     exports.Set("errorName", Napi::Function::New(env, ErrorName, "errorName"));
 
     // Dictionary API

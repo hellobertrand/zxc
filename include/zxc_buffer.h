@@ -222,6 +222,48 @@ ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_
  */
 ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
 
+/**
+ * @brief What a frame's header and footer declare, read without decoding.
+ *
+ * Filled by zxc_get_frame_info() and zxc_stream_get_frame_info(); pass them
+ * `sizeof(zxc_frame_info_t)`. Fields are only ever added at the end: zero the
+ * struct first to read the ones this library does not know as 0.
+ */
+typedef struct {
+    uint64_t decompressed_size; /**< Source bytes the frame decodes to. */
+    uint64_t compressed_size;   /**< Compressed bytes of the frame, footer included. */
+    uint64_t digest;            /**< Archive digest; 0 when @c has_checksum is 0. */
+    size_t block_size;          /**< Block size, 4 KB to 2 MB. */
+    uint32_t dict_id;           /**< Dictionary the frame needs; 0 for none. */
+    uint8_t format_version;     /**< Format version of the frame. */
+    uint8_t has_checksum;       /**< 1 when blocks carry checksums and the footer a digest. */
+    uint8_t has_seek_table;     /**< 1 when a seek table precedes the footer. */
+} zxc_frame_info_t;
+
+/**
+ * @brief Reads a frame's header and footer, without decoding.
+ *
+ * Validates the header as a decoder would, parses the footer back from the end
+ * of @p src, and checks that the frame spans all of @p src and that its stored
+ * size is reachable. The blocks are not read, so a frame that passes may still
+ * fail to decode.
+ *
+ * @param[in]  src        Compressed buffer.
+ * @param[in]  src_size   Compressed size in bytes.
+ * @param[out] info       Filled on success, untouched otherwise.
+ * @param[in]  info_size  `sizeof(*info)` as the caller compiled it.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t (e.g.
+ *         @ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_CORRUPT_DATA).
+ */
+ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                  size_t info_size);
+
+/**
+ * @brief Returns `sizeof(zxc_frame_info_t)` as compiled into the library.
+ * @see zxc_compress_opts_size
+ */
+ZXC_EXPORT size_t zxc_frame_info_size(void);
+
 /* ========================================================================= */
 /*  Block-Level API (no file framing)                                        */
 /* ========================================================================= */

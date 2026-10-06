@@ -66,6 +66,10 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"sek_forged_entry", 0, NULL, 1, .generated = 1},
     {"sek_flag_no_table", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"sek_table_no_flag", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"sek_reserved_set", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"sek_flags_set", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"eof_reserved_set", ZXC_ERROR_BAD_HEADER, .generated = 1},
+    {"eof_flags_set", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_footer_digest", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
@@ -76,7 +80,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])
 
-/* Re-sign an 8-byte block header at @p b after patching type or comp_size. */
+/* Re-sign an 8-byte block header at @p b after patching it. */
 static void resign_block_header(uint8_t* b) {
     uint8_t tmp[ZXC_BLOCK_HEADER_SIZE];
     memcpy(tmp, b, ZXC_BLOCK_HEADER_SIZE);
@@ -234,12 +238,13 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     } else if (!strcmp(name, "ghi_forged_offset")) {
         n = b->n_ghi;
         src = b->ghi;
-    } else if (!strcmp(name, "sek_forged_entry") || !strcmp(name, "sek_table_no_flag")) {
+    } else if (!strcmp(name, "sek_forged_entry") || !strcmp(name, "sek_table_no_flag") ||
+               !strcmp(name, "sek_reserved_set") || !strcmp(name, "sek_flags_set")) {
         n = b->n_seek;
         src = b->seek;
     }
 
-    if (n < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE) {
+    if (n < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE) {
         fprintf(stderr, "  base archive for '%s' is only %zu bytes\n", name, n);
         return 0;
     }
@@ -341,6 +346,27 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         } else {
             d[sek + ZXC_BLOCK_HEADER_SIZE] ^= 0xFFU; /* group 0's anchor only */
         }
+    } else if (!strcmp(name, "sek_reserved_set") || !strcmp(name, "sek_flags_set")) {
+        /* Sec 5.5: SEK Block Flags and Reserved must be zero, even re-signed. */
+        const size_t eof = find_eof_block(d, len, 0);
+        const size_t sek = eof ? eof + ZXC_BLOCK_HEADER_SIZE : 0;
+        if (!sek || sek + ZXC_BLOCK_HEADER_SIZE > len || d[sek] != ZXC_BLOCK_SEK) {
+            fprintf(stderr, "  no SEK block found - the seekable base changed shape\n");
+            ok = 0;
+        } else {
+            d[sek + (strcmp(name, "sek_flags_set") ? 2 : 1)] = 1;
+            resign_block_header(d + sek);
+        }
+    } else if (!strcmp(name, "eof_reserved_set") || !strcmp(name, "eof_flags_set")) {
+        /* Sec 5.4: the EOF header has one form, every field but its type zero. */
+        const size_t eof = find_eof_block(d, len, 0);
+        if (!eof) {
+            fprintf(stderr, "  no EOF block found\n");
+            ok = 0;
+        } else {
+            d[eof + (strcmp(name, "eof_flags_set") ? 2 : 1)] = 1;
+            resign_block_header(d + eof);
+        }
 
         /* --- Checksum defects (checksummed base) ---------------------------- */
     } else if (!strcmp(name, "bad_block_checksum")) {
@@ -373,11 +399,17 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         /* --- Remaining rows of the error table (FORMAT.md Sec 11.1) -------- */
     } else if (!strcmp(name, "bad_block_header_checksum")) {
         d[BLK0 + 7] ^= 0xFFU; /* left wrong: the header checksum is the defect */
-    } else if (!strcmp(name, "bad_footer_size")) {
-        d[len - ZXC_FILE_FOOTER_SIZE] ^= 0xFFU; /* declared source size */
-    } else if (!strcmp(name, "bad_footer_digest")) {
-        /* Checksummed base: the digest is the footer's last 8 bytes (Sec 8). */
-        d[len - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU;
+    } else if (!strcmp(name, "bad_footer_size") || !strcmp(name, "bad_footer_digest")) {
+        /* Sec 8: [digest][source size][compressed size][L], the lengths in L. */
+        uint64_t dsize = 0, frame = 0;
+        size_t sizes = 0;
+        if (zxc_parse_file_footer(d + len, len, &dsize, &frame, &sizes) != ZXC_OK) {
+            ok = 0;
+        } else if (!strcmp(name, "bad_footer_size")) {
+            d[len - sizes] ^= 0xFFU; /* low byte of the declared source size */
+        } else {
+            d[len - sizes - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU; /* checksummed base */
+        }
     } else if (!strcmp(name, "glo_forged_offset")) {
         /* GHI has its own vector. The first sequence has only its literal run
          * behind it, so any large offset reaches before the output start. */

@@ -440,8 +440,8 @@ int test_context_api_seekable_compress(void) {
         uint8_t* const arc = malloc(cap);
         const int64_t full = arc ? zxc_compress(src, n, arc, cap, &plain) : -1;
         const size_t table = zxc_seek_table_size(74);
-        const size_t cuts[] = {1, ZXC_FILE_FOOTER_SIZE, ZXC_FILE_FOOTER_SIZE + 1,
-                               ZXC_FILE_FOOTER_SIZE + table - 1, ZXC_FILE_FOOTER_SIZE + table};
+        const size_t fl = full > 0 ? test_footer_len(arc, (size_t)full) : 0;
+        const size_t cuts[] = {1, fl, fl + 1, fl + table - 1, fl + table};
         for (size_t i = 0; full > 0 && i < sizeof(cuts) / sizeof(cuts[0]); i++) {
             const size_t c = (size_t)full - cuts[i];
             const int64_t r1 = zxc_compress(src, n, arc, c, &plain);
@@ -503,8 +503,9 @@ int test_context_api_empty_input(void) {
             printf("  [FAIL] zxc_create_cctx\n");
             break;
         }
+        /* Footer of an empty frame: size 0, compressed size 27, lengths byte. */
         const int64_t expected =
-            ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+            ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE;
         const int64_t n1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &co);
         const int64_t n2 = zxc_compress_cctx(cctx, NULL, 0, from_ctx, sizeof(from_ctx), &co);
         if (n1 != expected || n2 != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
@@ -559,7 +560,8 @@ int test_context_api_empty_input(void) {
         const zxc_decompress_opts_t cs_do = {.checksum_enabled = 1};
         const int64_t cn = zxc_compress(ck_text, sizeof(ck_text) - 1, bad, sizeof(bad), &cs_co);
         const int64_t ck_at =
-            cn - (int64_t)(ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE + ZXC_BLOCK_HEADER_SIZE) - 1;
+            cn > 0 ? cn - (int64_t)(test_footer_len(bad, (size_t)cn) + ZXC_BLOCK_HEADER_SIZE) - 1
+                   : -1;
         if (ck_at < 0) {
             printf("  [FAIL] block+checksum setup: %lld\n", (long long)cn);
             break;
@@ -579,7 +581,7 @@ int test_context_api_empty_input(void) {
         dict_do.dict = dict;
         dict_do.dict_size = sizeof(dict);
         const int64_t dn = zxc_compress(NULL, 0, bad, sizeof(bad), &dict_co);
-        if (dn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+        if (dn <= (int64_t)ZXC_FILE_FOOTER_MIN_SIZE) {
             printf("  [FAIL] empty+dict setup: %lld\n", (long long)dn);
             break;
         }
@@ -590,12 +592,15 @@ int test_context_api_empty_input(void) {
         static const char payload[] = "a forged footer must read as corrupt data, not as size";
         const int64_t fn =
             zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &co);
-        if (fn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+        uint8_t forged[256];
+        const size_t forged_n =
+            fn > 0 ? test_forge_footer_size(bad, (size_t)fn, forged, sizeof(forged), UINT64_MAX)
+                   : 0;
+        if (forged_n == 0) {
             printf("  [FAIL] forged footer setup: compress returned %lld\n", (long long)fn);
             break;
         }
-        memset(bad + fn - ZXC_FILE_FOOTER_SIZE, 0xFF, 4);
-        disagreed += !probe_and_decode("forged stored size", bad, (size_t)fn, NULL,
+        disagreed += !probe_and_decode("forged stored size", forged, forged_n, NULL,
                                        ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA);
 
         /* Archives that store data: the probe has no buffer to decode into, so
@@ -603,7 +608,7 @@ int test_context_api_empty_input(void) {
          * sides are pinned: neither half follows from the other. */
         const int64_t pn =
             zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &co);
-        if (pn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+        if (pn <= (int64_t)ZXC_FILE_FOOTER_MIN_SIZE) {
             printf("  [FAIL] payload archive setup: %lld\n", (long long)pn);
             break;
         }
@@ -611,15 +616,14 @@ int test_context_api_empty_input(void) {
                                        ZXC_ERROR_DST_TOO_SMALL, (int64_t)(sizeof(payload) - 1));
         /* A footer claiming an empty payload the blocks contradict. */
         uint8_t zeroed[256];
-        memcpy(zeroed, bad, (size_t)pn);
-        memset(zeroed + pn - ZXC_FILE_FOOTER_SIZE, 0, 8);
-        disagreed += !probe_and_decode("payload behind a zeroed size", zeroed, (size_t)pn, NULL,
+        const size_t zn = test_forge_footer_size(bad, (size_t)pn, zeroed, sizeof(zeroed), 0);
+        disagreed += !probe_and_decode("payload behind a zeroed size", zeroed, zn, NULL,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_CORRUPT_DATA);
         /* Same, with the dictionary the archive needs: the probe still refuses
          * on capacity, through the dictionary bounce path this time. */
         const int64_t pdn =
             zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &dict_co);
-        if (pdn <= (int64_t)ZXC_FILE_FOOTER_SIZE) {
+        if (pdn <= (int64_t)ZXC_FILE_FOOTER_MIN_SIZE) {
             printf("  [FAIL] dict payload archive setup: %lld\n", (long long)pdn);
             break;
         }

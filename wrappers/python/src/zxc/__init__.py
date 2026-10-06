@@ -8,6 +8,7 @@ Copyright (c) Bertrand Lebonnois and contributors.
 from __future__ import annotations
 
 import io as _io
+from typing import NamedTuple
 
 from ._zxc import (
     pyzxc_compress,
@@ -15,6 +16,7 @@ from ._zxc import (
     pyzxc_stream_compress,
     pyzxc_stream_decompress,
     pyzxc_get_decompressed_size,
+    pyzxc_get_frame_info,
     pyzxc_min_level,
     pyzxc_max_level,
     pyzxc_default_level,
@@ -98,6 +100,8 @@ __all__ = [
     "stream_compress",
     "stream_decompress",
     "get_decompressed_size",
+    "get_frame_info",
+    "FrameInfo",
     # Reusable contexts
     "Cctx",
     "Dctx",
@@ -342,6 +346,34 @@ def get_decompressed_size(data: bytes) -> int:
         This function does not decompress the data, it only reads the footer for size info.
     """
     return pyzxc_get_decompressed_size(data)
+
+
+class FrameInfo(NamedTuple):
+    """What a frame's header and footer declare (see `get_frame_info`)."""
+
+    decompressed_size: int
+    compressed_size: int
+    digest: int
+    """Archive digest; 0 when `has_checksum` is False."""
+    block_size: int
+    dict_id: int
+    """Dictionary the frame needs; 0 for none."""
+    format_version: int
+    has_checksum: bool
+    has_seek_table: bool
+
+
+def get_frame_info(data: bytes) -> FrameInfo:
+    """Read a frame's header and footer, without decoding.
+
+    The header is validated as a decoder would, the footer parsed back from the
+    end, and the frame must span all of ``data``. Blocks are not read, so a frame
+    that passes may still fail to decode.
+
+    Raises:
+        RuntimeError: on an invalid frame, with the zxc error name.
+    """
+    return FrameInfo(*pyzxc_get_frame_info(data))
 
 
 def decompress(

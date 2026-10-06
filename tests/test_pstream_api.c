@@ -281,10 +281,10 @@ int test_pstream_empty_input(void) {
         printf("compress NULL/0 failed\n");
         return 0;
     }
-    /* Checksums on: header (16) + EOF block (8) + size and digest (16) = 40.
-     * At 32 a footer missing its digest passed. */
-    if (comp_size < 40) {
-        printf("expected >=40 bytes, got %zu\n", comp_size);
+    /* Checksums on: header (16) + EOF block (8) + digest (8) + sizes (3) = 35.
+     * Without the digest it would be 27. */
+    if (comp_size != 35) {
+        printf("expected 35 bytes, got %zu\n", comp_size);
         free(comp);
         return 0;
     }

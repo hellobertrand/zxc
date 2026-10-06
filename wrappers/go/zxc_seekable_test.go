@@ -141,9 +141,9 @@ func TestSeekableForgedGroupIsAnError(t *testing.T) {
 	}
 	n := int(probe.NumBlocks())
 	probe.Close()
-	// Group 0's anchor opens the table, before the 16-byte footer (size, digest).
+	// Group 0's anchor opens the table, before the footer.
 	table := (n+63)/64*8 + n*4
-	anchor := len(arc) - 16 - table
+	anchor := len(arc) - footerLen(arc) - table
 	if arc[anchor] != 16 {
 		t.Fatalf("byte %d = %d, not group 0's anchor", anchor, arc[anchor])
 	}

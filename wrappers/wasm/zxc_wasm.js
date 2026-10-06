@@ -77,6 +77,12 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     ["number", "number"],
   );
+  const _get_frame_info = Module.cwrap("zxc_get_frame_info", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
 
   const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
   const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
@@ -316,6 +322,13 @@ export default async function createZXC(moduleOverrides, factory) {
   // Total: 28 bytes in WASM32
   const DECOMPRESS_OPTS_SIZE = 28;
 
+  // zxc_frame_info_t:
+  //   u64 decompressed_size (0) | u64 compressed_size (8) | u64 digest (16)
+  //   size_t block_size (24) | u32 dict_id (28)
+  //   u8 format_version (32) | u8 has_checksum (33) | u8 has_seek_table (34)
+  // Total: 40 bytes in WASM32 (8-byte alignment)
+  const FRAME_INFO_SIZE = 40;
+
   // Layout guard: the offsets above are hand-mirrored from zxc_opts.h. The
   // library exports its compiled sizeof()s; a mismatch means the C structs
   // changed without this file being updated -- fail loudly at load time
@@ -323,13 +336,20 @@ export default async function createZXC(moduleOverrides, factory) {
   {
     const _copts_size = Module.cwrap("zxc_compress_opts_size", "number", []);
     const _dopts_size = Module.cwrap("zxc_decompress_opts_size", "number", []);
+    const _finfo_size = Module.cwrap("zxc_frame_info_size", "number", []);
     const cSize = _copts_size();
     const dSize = _dopts_size();
-    if (cSize !== COMPRESS_OPTS_SIZE || dSize !== DECOMPRESS_OPTS_SIZE) {
+    const fSize = _finfo_size();
+    if (
+      cSize !== COMPRESS_OPTS_SIZE ||
+      dSize !== DECOMPRESS_OPTS_SIZE ||
+      fSize !== FRAME_INFO_SIZE
+    ) {
       throw new Error(
         `ZXC: options struct layout drift detected -- ` +
           `zxc_compress_opts_t is ${cSize} bytes (wrapper assumes ${COMPRESS_OPTS_SIZE}), ` +
-          `zxc_decompress_opts_t is ${dSize} bytes (wrapper assumes ${DECOMPRESS_OPTS_SIZE}). ` +
+          `zxc_decompress_opts_t is ${dSize} bytes (wrapper assumes ${DECOMPRESS_OPTS_SIZE}), ` +
+          `zxc_frame_info_t is ${fSize} bytes (wrapper assumes ${FRAME_INFO_SIZE}). ` +
           `Update the struct layout section of zxc_wasm.js.`,
       );
     }
@@ -567,6 +587,41 @@ export default async function createZXC(moduleOverrides, factory) {
       return _u64(_get_decompressed_size(ptr, data.length));
     } finally {
       _free(ptr);
+    }
+  }
+
+  /**
+   * Reads a frame's header and footer, without decoding.
+   * @param {Uint8Array} data - Compressed data.
+   * @returns {{decompressedSize: number, compressedSize: number, digest: bigint,
+   *   blockSize: number, dictId: number, formatVersion: number,
+   *   hasChecksum: boolean, hasSeekTable: boolean}} `digest` is 0n without checksums.
+   * @throws {Error} On an invalid frame.
+   */
+  function getFrameInfo(data) {
+    const src = _alloc(data.length);
+    const out = _alloc(FRAME_INFO_SIZE);
+    try {
+      Module.HEAPU8.set(data, src);
+      const rc = _get_frame_info(src, data.length, out, FRAME_INFO_SIZE);
+      if (rc < 0) {
+        throw new Error(`ZXC frame info error: ${_error_name(rc)} (${rc})`);
+      }
+      const w = out >> 2;
+      const u32 = Module.HEAPU32;
+      return {
+        decompressedSize: u32[w + 1] * 0x100000000 + u32[w],
+        compressedSize: u32[w + 3] * 0x100000000 + u32[w + 2],
+        digest: (BigInt(u32[w + 5]) << 32n) | BigInt(u32[w + 4]),
+        blockSize: u32[w + 6],
+        dictId: u32[w + 7],
+        formatVersion: Module.HEAPU8[out + 32],
+        hasChecksum: Module.HEAPU8[out + 33] !== 0,
+        hasSeekTable: Module.HEAPU8[out + 34] !== 0,
+      };
+    } finally {
+      _free(out);
+      _free(src);
     }
   }
 
@@ -1652,6 +1707,7 @@ export default async function createZXC(moduleOverrides, factory) {
     decompress,
     compressBound,
     getDecompressedSize,
+    getFrameInfo,
     createCompressContext,
     createDecompressContext,
     createCStream,

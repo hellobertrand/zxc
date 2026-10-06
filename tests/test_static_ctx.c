@@ -776,22 +776,32 @@ static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig
             ok = 0;
         }
     }
-    /* Padding before the footer. */
+    /* Padding before the footer, which a forger re-signs to cover it. */
     if (ok) {
         const size_t pad = 4096;
-        const size_t footer = ZXC_FILE_FOOTER_SIZE + (checksum ? ZXC_FILE_DIGEST_SIZE : 0);
-        uint8_t* const bad = (uint8_t*)malloc(csz + pad);
+        const size_t body = csz - test_footer_len(comp, csz);
+        uint8_t* const bad =
+            (uint8_t*)malloc(body + pad + ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE);
         size_t bneed = 0;
+        size_t blen = 0;
         if (bad) {
-            memcpy(bad, comp, csz - footer);
-            memset(bad + csz - footer, 0xA5, pad);
-            memcpy(bad + csz - footer + pad, comp + csz - footer, footer);
-            bneed = zxc_decompress_inplace_bound(bad, csz + pad);
+            memcpy(bad, comp, body);
+            memset(bad + body, 0xA5, pad);
+            const uint64_t digest = checksum ? zxc_le64(comp + body) : 0;
+            const int fw = zxc_write_file_footer(
+                bad + body + pad, ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE, body + pad,
+                zxc_get_decompressed_size(comp, csz), digest, checksum);
+            blen = fw > 0 ? body + pad + (size_t)fw : 0;
+            bneed = blen ? zxc_decompress_inplace_bound(bad, blen) : 0;
         }
         uint8_t* const b2 = bneed ? (uint8_t*)malloc(bneed) : NULL;
+        if (!b2) {
+            printf("  [FAIL] %s: padded archive gave no bound\n", label);
+            ok = 0;
+        }
         if (b2) {
-            memcpy(b2 + bneed - csz - pad, bad, csz + pad);
-            const int64_t r = zxc_decompress_inplace_dctx(d, b2, bneed, csz + pad, &dop);
+            memcpy(b2 + bneed - blen, bad, blen);
+            const int64_t r = zxc_decompress_inplace_dctx(d, b2, bneed, blen, &dop);
             if (r != ZXC_ERROR_CORRUPT_DATA) {
                 printf("  [FAIL] %s: padded -> %lld\n", label, (long long)r);
                 ok = 0;

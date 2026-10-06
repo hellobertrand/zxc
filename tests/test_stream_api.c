@@ -182,11 +182,11 @@ int test_truncated_input() {
     }
 
     // Try decompressing with progressively cropped size
-    // 1. Cut off the Footer (last ZXC_FILE_FOOTER_SIZE bytes)
-    if (comp_sz > ZXC_FILE_FOOTER_SIZE) {
+    // 1. Cut off the Footer
+    const size_t flen = test_footer_len(compressed, (size_t)comp_sz);
+    if (flen && (size_t)comp_sz > flen) {
         zxc_decompress_opts_t _do15 = {.checksum_enabled = 1};
-        if (zxc_decompress(compressed, (size_t)(comp_sz - ZXC_FILE_FOOTER_SIZE), decomp_buf,
-                           SRC_SIZE, &_do15) >= 0) {
+        if (zxc_decompress(compressed, (size_t)comp_sz - flen, decomp_buf, SRC_SIZE, &_do15) >= 0) {
             printf("Failed: Should fail when footer is missing\n");
             free(compressed);
             free(decomp_buf);
@@ -431,6 +431,21 @@ cleanup:
     return result;
 }
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+// Reads endless zeros and seeks anywhere, but once at the end no longer tells where.
+static int read_zeros(void* cookie, char* buf, const int len) {
+    (void)cookie;
+    memset(buf, 0, (size_t)len);
+    return len;
+}
+static fpos_t tell_fails_after_end(void* cookie, const fpos_t off, const int whence) {
+    int* const at_end = (int*)cookie;
+    if (whence == SEEK_END) *at_end = 1;
+    if (whence == SEEK_CUR && *at_end) return -1;
+    return whence == SEEK_END ? 100 + off : off;
+}
+#endif
+
 int test_stream_get_decompressed_size_errors() {
     printf("=== TEST: Unit - zxc_stream_get_decompressed_size Error Codes ===\n");
 
@@ -462,6 +477,24 @@ int test_stream_get_decompressed_size_errors() {
     }
     printf("  [PASS] file too small -> ZXC_ERROR_SRC_TOO_SMALL\n");
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+    // 2b. A stream that seeks to its end but cannot tell where that is: an I/O
+    //     error, never a read sized by the failed tell.
+    {
+        static int tell_after_end = 0;
+        tell_after_end = 0;
+        FILE* f = funopen(&tell_after_end, read_zeros, NULL, tell_fails_after_end, NULL);
+        zxc_frame_info_t fi;
+        const int rc = f ? zxc_stream_get_frame_info(f, &fi, sizeof(fi)) : ZXC_ERROR_IO;
+        if (f) fclose(f);
+        if (!f || rc != ZXC_ERROR_IO) {
+            printf("  [FAIL] failed tell: expected %d, got %d\n", ZXC_ERROR_IO, rc);
+            return 0;
+        }
+    }
+    printf("  [PASS] failed tell -> ZXC_ERROR_IO\n");
+#endif
+
     // 3. Bad magic word
     {
         FILE* f = tmpfile();
@@ -470,7 +503,7 @@ int test_stream_get_decompressed_size_errors() {
             return 0;
         }
         // Write enough bytes but with wrong magic
-        uint8_t garbage[ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
+        uint8_t garbage[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MAX_SIZE];
         memset(garbage, 0, sizeof(garbage));
         fwrite(garbage, 1, sizeof(garbage), f);
         fseek(f, 0, SEEK_SET);
@@ -486,9 +519,8 @@ int test_stream_get_decompressed_size_errors() {
     printf("  [PASS] bad magic -> ZXC_ERROR_BAD_MAGIC\n");
 
     // 3b. A header only the magic word of which is intact must not yield a
-    //     size: the flag byte that places the footer is unverified, and the 8
-    //     bytes it points at may be anything. Same verdict as the decoders.
-    //     A forged footer size is capped like the buffer API caps it.
+    //     size: its block size caps the stored one. Same verdict as the
+    //     decoders. A forged footer size is capped like the buffer API caps it.
     {
         const size_t src_sz = 4096;
         uint8_t* src = malloc(src_sz);
@@ -503,37 +535,49 @@ int test_stream_get_decompressed_size_errors() {
             free(comp);
             return 0;
         }
+        // The header checksum flipped, then a well-formed footer storing 2^63 - 1
+        // bytes, far beyond what the blocks hold.
+        uint8_t* const forged = malloc(cap + ZXC_FILE_FOOTER_MAX_SIZE);
+        const size_t forged_sz =
+            forged ? test_forge_footer_size(comp, (size_t)comp_sz, forged,
+                                            cap + ZXC_FILE_FOOTER_MAX_SIZE, INT64_MAX)
+                   : 0;
         struct {
             const char* what;
-            size_t at;
+            const uint8_t* arc;
+            size_t len;
+            size_t flip;
             int expect;
         } forge[] = {
-            {"header checksum", 14, ZXC_ERROR_BAD_HEADER},
-            {"footer size", (size_t)comp_sz - ZXC_FILE_FOOTER_SIZE - ZXC_FILE_DIGEST_SIZE + 7,
-             ZXC_ERROR_CORRUPT_DATA},
+            {"header checksum", comp, (size_t)comp_sz, 14, ZXC_ERROR_BAD_HEADER},
+            {"footer size", forged, forged_sz, (size_t)-1, ZXC_ERROR_CORRUPT_DATA},
         };
         for (size_t k = 0; k < sizeof(forge) / sizeof(forge[0]); k++) {
             FILE* f = tmpfile();
-            if (!f) {
-                printf("  [SKIP] tmpfile failed\n");
+            if (!f || forge[k].len == 0) {
+                printf("  [SKIP] tmpfile or forge failed\n");
+                if (f) fclose(f);
+                free(forged);
                 free(src);
                 free(comp);
                 return 0;
             }
-            comp[forge[k].at] ^= 0x7F; /* the size stays positive as an int64 */
-            fwrite(comp, 1, (size_t)comp_sz, f);
-            comp[forge[k].at] ^= 0x7F;
+            if (forge[k].flip != (size_t)-1) comp[forge[k].flip] ^= 0x7F;
+            fwrite(forge[k].arc, 1, forge[k].len, f);
+            if (forge[k].flip != (size_t)-1) comp[forge[k].flip] ^= 0x7F;
             fseek(f, 0, SEEK_SET);
             r = zxc_stream_get_decompressed_size(f);
             fclose(f);
             if (r != forge[k].expect) {
                 printf("  [FAIL] forged %s: expected %s, got %lld\n", forge[k].what,
                        zxc_error_name(forge[k].expect), (long long)r);
+                free(forged);
                 free(src);
                 free(comp);
                 return 0;
             }
         }
+        free(forged);
         free(src);
         free(comp);
     }
@@ -676,9 +720,8 @@ int test_stream_engine_errors() {
         }
         fclose(f_comp_out);
 
-        // Corrupt the stored source size in footer (last 12 bytes: [src_size(8)] + [hash(4)])
-        const size_t footer_off = comp_file_sz - ZXC_FILE_FOOTER_SIZE;
-        comp_data[footer_off] ^= 0x01;  // Flip a bit in stored source size
+        // Corrupt the stored source size in the footer
+        comp_data[test_footer_size_at(comp_data, (size_t)comp_file_sz)] ^= 0x01;
 
         FILE* f_corrupt = tmpfile();
         FILE* f_dec_out = tmpfile();
@@ -776,17 +819,19 @@ int test_stream_engine_errors() {
 
         fseek(f_comp_out, 0, SEEK_END);
         const long comp_file_sz = ftell(f_comp_out);
-        // Truncate: remove the EOF block header + footer
-        const long trunc_sz = comp_file_sz - (ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE);
-        uint8_t* comp_data = malloc(trunc_sz);
+        uint8_t* comp_data = malloc((size_t)comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
-        if (fread(comp_data, 1, trunc_sz, f_comp_out) != (size_t)trunc_sz) {
+        if (fread(comp_data, 1, (size_t)comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
             printf("  [FAIL] fread failed\n");
             fclose(f_comp_out);
             free(comp_data);
             return 0;
         }
         fclose(f_comp_out);
+        // Truncate: remove the EOF block header + footer
+        const long trunc_sz =
+            comp_file_sz -
+            (long)(ZXC_BLOCK_HEADER_SIZE + test_footer_len(comp_data, (size_t)comp_file_sz));
 
         FILE* f_corrupt = tmpfile();
         FILE* f_dec_out = tmpfile();
@@ -1156,8 +1201,7 @@ int test_stream_corrupt_block_header(void) {
     if (ok) {
         // [file header][block 1][8 bytes no header parser accepts][footer for 1 block]
         const size_t keep = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-        const size_t flen = keep + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
-        uint8_t* forged = malloc(flen);
+        uint8_t* forged = malloc(keep + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MAX_SIZE);
         FILE* f_bad = tmpfile();
         if (!forged || !f_bad) {
             printf("  [SKIP] allocation failed\n");
@@ -1169,8 +1213,9 @@ int test_stream_corrupt_block_header(void) {
         }
         memcpy(forged, arc, keep);
         memset(forged + keep, 0xFF, ZXC_BLOCK_HEADER_SIZE);
-        zxc_write_file_footer(forged + keep + ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_FOOTER_SIZE, bs, 0,
-                              0);
+        const size_t at = keep + ZXC_BLOCK_HEADER_SIZE;
+        const size_t flen =
+            at + (size_t)zxc_write_file_footer(forged + at, ZXC_FILE_FOOTER_MAX_SIZE, at, bs, 0, 0);
         fwrite(forged, 1, flen, f_bad);
         fseek(f_bad, 0, SEEK_SET);
 
@@ -1631,7 +1676,7 @@ int test_stream_trailing_bytes(void) {
     const size_t cap = (size_t)zxc_compress_bound(n);
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(2 * cap);
-    uint8_t* const forged = malloc(cap + ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE);
+    uint8_t* const forged = malloc(cap + ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE);
     uint8_t* const out = malloc(n);
     int ok = src && arc && forged && out;
     if (ok) gen_lz_data(src, n);
@@ -1660,11 +1705,14 @@ int test_stream_trailing_bytes(void) {
         // Flag cleared, [EOF][valid footer][SEK][footer]: the first footer checks
         // out, only the end-of-input check catches the rest.
         if (ok && co.seekable) {
-            const size_t fl = zxc_footer_bytes(co.checksum_enabled);
-            const size_t sek = (size_t)len - fl - ZXC_BLOCK_HEADER_SIZE -
+            const size_t old_fl = test_footer_len(arc, (size_t)len);
+            const size_t sek = (size_t)len - old_fl - ZXC_BLOCK_HEADER_SIZE -
                                (size_t)zxc_seek_table_bytes(zxc_seek_block_count(n, 4096));
+            const uint64_t digest = co.checksum_enabled ? zxc_le64(arc + (size_t)len - old_fl) : 0;
             memcpy(forged, arc, sek);
-            memcpy(forged + sek, arc + len - fl, fl);
+            const size_t fl = (size_t)zxc_write_file_footer(
+                forged + sek, ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE, sek, n, digest,
+                co.checksum_enabled);
             memcpy(forged + sek + fl, arc + sek, (size_t)len - sek);
             forged[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_SEEK_TABLE;
             zxc_file_header_sign(forged);

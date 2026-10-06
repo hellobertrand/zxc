@@ -83,14 +83,24 @@ def test_stream_invalid_src_dst(tmp_path, src, dst, expected_error, match):
             dst.close()
 
 
+def _footer_len(arc):
+    """Footer bytes of a checksummed archive: digest, the two sizes, lengths."""
+    lens = arc[-1]
+    return 8 + (lens & 7) + (lens >> 4) + 3
+
+
+def _flip(arc, at):
+    return arc[:at] + bytes([arc[at] ^ 1]) + arc[at + 1 :]
+
+
 @pytest.mark.parametrize(
     "data,corrupt_func,exc",
     [
-        # Flip the last byte of the block's checksum: it precedes the 8-byte
-        # EOF block and the 16-byte footer (digest + size).
+        # Flip the last byte of the block's checksum, before the 8-byte EOF
+        # block and the footer.
         (
             b"hello world" * 10,
-            lambda x: x[:-25] + bytes([x[-25] ^ 1]) + x[-24:],
+            lambda x: _flip(x, len(x) - _footer_len(x) - 9),
             RuntimeError,
         ),
         (b"a" * 10, lambda x: b"", RuntimeError),

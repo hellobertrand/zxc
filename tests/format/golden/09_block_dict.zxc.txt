@@ -1,5 +1,5 @@
 file:             09_block_dict
-size:             96 bytes
+size:             92 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 40 AD FB 05 F0 00 00 00 59 E8
@@ -33,5 +33,6 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              00 10 00 00 00 00 00 00
-src_size:         4096
+raw:              00 10 5C 01
+src_size:         4096 (2 bytes)
+compressed_size:  92 (1 bytes)

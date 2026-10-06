@@ -211,6 +211,28 @@ impl Default for zxc_compress_opts_t {
     }
 }
 
+/// What a frame's header and footer declare (mirrors `zxc_frame_info_t`).
+#[repr(C)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct zxc_frame_info_t {
+    /// Source bytes the frame decodes to.
+    pub decompressed_size: u64,
+    /// Compressed bytes of the frame, footer included.
+    pub compressed_size: u64,
+    /// Archive digest; 0 when `has_checksum` is 0.
+    pub digest: u64,
+    /// Block size, 4 KB to 2 MB.
+    pub block_size: usize,
+    /// Dictionary the frame needs; 0 for none.
+    pub dict_id: u32,
+    /// Format version of the frame.
+    pub format_version: u8,
+    /// 1 when blocks carry checksums and the footer a digest.
+    pub has_checksum: u8,
+    /// 1 when a seek table precedes the footer.
+    pub has_seek_table: u8,
+}
+
 /// Decompression options (mirrors `zxc_decompress_opts_t` from C API).
 #[repr(C)]
 #[derive(Debug, Clone)]
@@ -337,6 +359,26 @@ unsafe extern "C" {
     ///
     /// Original uncompressed size in bytes, or 0 if invalid.
     pub fn zxc_get_decompressed_size(src: *const c_void, src_size: usize) -> u64;
+
+    /// Reads a frame's header and footer, without decoding.
+    ///
+    /// # Returns
+    ///
+    /// `ZXC_OK` with `*info` filled, or a negative error code.
+    ///
+    /// # Safety
+    /// - `src` must be a valid pointer to `src_size` bytes.
+    /// - `info` must be valid for writes of `info_size` bytes.
+    pub fn zxc_get_frame_info(
+        src: *const c_void,
+        src_size: usize,
+        info: *mut zxc_frame_info_t,
+        info_size: usize,
+    ) -> c_int;
+
+    /// Returns `sizeof(zxc_frame_info_t)` as compiled into the C library.
+    /// See [`zxc_compress_opts_size`].
+    pub fn zxc_frame_info_size() -> usize;
 
     /// Returns the minimum single-buffer size for an in-place decompression.
     ///
@@ -1097,6 +1139,11 @@ mod tests {
                 std::mem::size_of::<super::zxc_decompress_opts_t>(),
                 super::zxc_decompress_opts_size(),
                 "zxc_decompress_opts_t layout drift: update the Rust mirror in zxc-sys"
+            );
+            assert_eq!(
+                std::mem::size_of::<super::zxc_frame_info_t>(),
+                super::zxc_frame_info_size(),
+                "zxc_frame_info_t layout drift: update the Rust mirror in zxc-sys"
             );
         }
     }

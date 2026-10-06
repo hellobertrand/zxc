@@ -1,5 +1,5 @@
 file:             12_glo_huffman_dict
-size:             544 bytes
+size:             541 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 40 4F A2 87 7B 00 00 00 19 27
@@ -33,5 +33,6 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              81 0F 00 00 00 00 00 00
-src_size:         3969
+raw:              81 0F 1D 02 11
+src_size:         3969 (2 bytes)
+compressed_size:  541 (2 bytes)

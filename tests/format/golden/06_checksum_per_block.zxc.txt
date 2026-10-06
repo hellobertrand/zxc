@@ -1,5 +1,5 @@
 file:             06_checksum_per_block
-size:             219 bytes
+size:             215 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 80 00 00 00 00 00 00 00 6D 86
@@ -33,6 +33,7 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              00 20 00 00 00 00 00 00 E1 06 7F 41 20 51 77 99
+raw:              E1 06 7F 41 20 51 77 99 00 20 D7 01
 digest:           0x99775120417F06E1
-src_size:         8192
+src_size:         8192 (2 bytes)
+compressed_size:  215 (1 bytes)

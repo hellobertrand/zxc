@@ -656,25 +656,22 @@ int test_eof_block_structure() {
         return 0;
     }
 
-    // Validating Footer and EOF Block
-    // Total Overhead: 8 bytes (Footer) + 8 bytes (EOF Header) = 16 bytes
-    if (comp_size < 16) {
-        printf("Failed: Compressed size too small for Footer + EOF (%lld)\n", (long long)comp_size);
-        free(compressed);
-        return 0;
-    }
-
-    // 1. Verify 8-byte Footer: [SrcSize (8)]
-    const uint8_t* footer_ptr = compressed + comp_size - ZXC_FILE_FOOTER_SIZE;
-    if (zxc_le64(footer_ptr) != 4) {
-        printf("Failed: Footer mismatch. Src: %llu\n", (unsigned long long)zxc_le64(footer_ptr));
+    // 1. Verify the footer: source size 4, compressed size the whole archive.
+    uint64_t stored = 0, frame = 0;
+    size_t sizes = 0;
+    if (zxc_parse_file_footer(compressed + comp_size, (size_t)comp_size, &stored, &frame, &sizes) !=
+            ZXC_OK ||
+        stored != 4 || frame != (uint64_t)comp_size ||
+        (size_t)comp_size < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + sizes) {
+        printf("Failed: Footer mismatch. Src: %llu, frame %llu of %lld\n",
+               (unsigned long long)stored, (unsigned long long)frame, (long long)comp_size);
         free(compressed);
         return 0;
     }
 
     // 2. Verify EOF Block Header (8 bytes)
     // Should be immediately before the footer
-    const uint8_t* eof_ptr = compressed + comp_size - ZXC_FILE_FOOTER_SIZE - ZXC_BLOCK_HEADER_SIZE;
+    const uint8_t* eof_ptr = compressed + comp_size - sizes - ZXC_BLOCK_HEADER_SIZE;
     uint8_t expected[8] = {0xFF, 0, 0, 0, 0, 0, 0, 0};
     expected[7] = zxc_hash8(expected);
 
@@ -960,23 +957,36 @@ int test_seek_tail_rule(void) {
     }
 
     uint64_t got = 0;
-    if (!zxc_seek_header_ok(peek, total_out, BS, &got) || got != table) {
+    if (zxc_check_seek_header(peek, sizeof(peek), total_out, BS, &got) != ZXC_OK || got != table) {
         printf("Failed: SEK of %llu blocks: matched %d, length %llu, want %llu\n",
                (unsigned long long)nblocks, got != 0, (unsigned long long)got,
                (unsigned long long)table);
         return 0;
     }
     /* Off by one block: the header field no longer agrees. */
-    if (zxc_seek_header_ok(peek, total_out - BS, BS, &got)) {
+    if (zxc_check_seek_header(peek, sizeof(peek), total_out - BS, BS, &got) == ZXC_OK) {
         printf("Failed: matched a SEK header for the wrong block count\n");
         return 0;
     }
     /* A lying flag: the footer's head where the SEK header should be. */
     uint8_t footer[ZXC_BLOCK_HEADER_SIZE];
     zxc_store_le64(footer, 10);
-    if (zxc_seek_header_ok(footer, 10, BS, &got)) {
+    if (zxc_check_seek_header(footer, sizeof(footer), 10, BS, &got) == ZXC_OK) {
         printf("Failed: a source size accepted as a SEK header\n");
         return 0;
+    }
+    /* A reserved byte set, hash recomputed: still refused. */
+    for (int at = 1; at <= 2; at++) {
+        uint8_t odd[ZXC_BLOCK_HEADER_SIZE];
+        memcpy(odd, peek, sizeof(odd));
+        odd[at] = 1;
+        odd[7] = 0;
+        odd[7] = zxc_hash8(odd);
+        if (zxc_check_seek_header(odd, sizeof(odd), total_out, BS, &got) !=
+            ZXC_ERROR_CORRUPT_DATA) {
+            printf("Failed: SEK header byte %d set was accepted\n", at);
+            return 0;
+        }
     }
     printf("PASS\n\n");
     return 1;
@@ -1005,12 +1015,11 @@ int test_tail_between_eof_and_footer(void) {
 
     int ok = 1;
     const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
-    /* Checksummed (16-byte footer) and plain (8-byte) both. */
+    /* Checksummed footer and plain both. */
     for (int cs = 0; cs <= 1 && ok; cs++) {
         const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = cs};
         const int64_t alen = zxc_compress(src, n, arc, cap, &co);
-        const size_t footer_len =
-            (size_t)ZXC_FILE_FOOTER_SIZE + (cs ? (size_t)ZXC_FILE_DIGEST_SIZE : 0);
+        const size_t footer_len = alen > 0 ? test_footer_len(arc, (size_t)alen) : 0;
         if (alen <= (int64_t)footer_len) {
             printf("  [FAIL] cs=%d: compress returned %lld\n", cs, (long long)alen);
             ok = 0;
@@ -1151,7 +1160,8 @@ int test_seek_flag_contract(void) {
     if (ok) {
         const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
         const int64_t el = zxc_compress(NULL, 0, seek, cap, &so);
-        const size_t want = ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE;
+        const size_t want =
+            ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE;
         FILE* const fi = tmpfile();
         FILE* const fo = tmpfile();
         int64_t fl = -1;
@@ -1234,7 +1244,9 @@ int test_footer_digest(void) {
             printf("[FAIL] non-deterministic -C output\n");
             break;
         }
-        const uint64_t digest = zxc_le64(a + ca - ZXC_FILE_DIGEST_SIZE);
+        /* The digest opens the footer. */
+        const size_t digest_at = (size_t)ca - test_footer_len(a, (size_t)ca);
+        const uint64_t digest = zxc_le64(a + digest_at);
         if (digest == 0) {
             printf("[FAIL] digest is zero on a non-empty archive\n");
             break;
@@ -1247,7 +1259,7 @@ int test_footer_digest(void) {
             printf("[FAIL] verified decode of intact archive\n");
             break;
         }
-        a[ca - ZXC_FILE_DIGEST_SIZE] ^= 0xFF;
+        a[digest_at] ^= 0xFF;
         if (zxc_decompress(a, (size_t)ca, out, N, &verify) != ZXC_ERROR_BAD_CHECKSUM) {
             printf("[FAIL] flipped digest not caught\n");
             break;
@@ -1256,12 +1268,12 @@ int test_footer_digest(void) {
             printf("[FAIL] unverified decode should ignore the digest\n");
             break;
         }
-        /* Empty -C archive: digest of zero blocks is 0, footer is 16 bytes. */
+        /* Empty -C archive: digest of zero blocks is 0, opening the footer. */
         uint8_t e[64];
         const int64_t ce = zxc_compress(NULL, 0, e, sizeof(e), &co);
-        if (ce <=
-                (int64_t)(ZXC_FILE_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE) - 1 ||
-            zxc_le64(e + ce - ZXC_FILE_DIGEST_SIZE) != 0) {
+        if (ce < (int64_t)(ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_DIGEST_SIZE +
+                           ZXC_FILE_FOOTER_MIN_SIZE) ||
+            zxc_le64(e + ce - test_footer_len(e, (size_t)ce)) != 0) {
             printf("[FAIL] empty -C archive digest\n");
             break;
         }

@@ -34,6 +34,7 @@
 #include "../include/zxc_buffer.h"
 #include "../include/zxc_constants.h"
 #include "../include/zxc_error.h"
+#include "../src/lib/zxc_internal.h"
 
 #define FUZZ_INPLACE_MAX_INPUT (64 << 10) /* 64 KiB of fuzzer bytes */
 #define FUZZ_INPLACE_UNIT 4096            /* zero and noise run granularity */
@@ -148,15 +149,16 @@ static void fuzz_one(const uint8_t* data, size_t size, const run_ctx_t* c) {
                                     .checksum_enabled = checksum,
                                     .seekable = seekable};
     const size_t cbound = (size_t)zxc_compress_bound(n);
-    uint8_t* const arc = (uint8_t*)malloc(cbound + pad);
+    uint8_t* const arc = (uint8_t*)malloc(cbound + pad + ZXC_FILE_FOOTER_MAX_SIZE);
     int64_t csize = arc ? zxc_compress(src, n, arc, cbound, &co) : -1;
     if (csize > 0 && short_bs) {
-        // Same header, EOF block and footer; blocks re-encoded at short_bs.
+        // Same header and EOF block; blocks re-encoded at short_bs, then the
+        // footer they imply.
         const zxc_compress_opts_t so = {.level = level, .block_size = short_bs};
         zxc_cctx* const cc = zxc_create_cctx(&so);
-        const size_t tail = 8 + ZXC_FILE_FOOTER_SIZE; /* EOF block header, then footer */
-        uint8_t end[8 + ZXC_FILE_FOOTER_SIZE];
-        memcpy(end, arc + csize - tail, tail);
+        const size_t tail = 8 + ZXC_FILE_FOOTER_MAX_SIZE; /* EOF block header, then footer */
+        const zxc_block_header_t eof = {
+            .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
         size_t pos = ZXC_FILE_HEADER_SIZE;
         for (size_t off = 0; cc && off < n && pos + tail <= cbound; off += short_bs) {
             const size_t take = n - off < short_bs ? n - off : short_bs;
@@ -171,8 +173,10 @@ static void fuzz_one(const uint8_t* data, size_t size, const run_ctx_t* c) {
         if (pos == 0)
             csize = -1;
         else {
-            memcpy(arc + pos, end, tail);
-            csize = (int64_t)(pos + tail);
+            zxc_write_block_header(arc + pos, ZXC_BLOCK_HEADER_SIZE, &eof);
+            pos += ZXC_BLOCK_HEADER_SIZE;
+            const int fw = zxc_write_file_footer(arc + pos, cbound - pos, pos, n, 0, 0);
+            csize = fw > 0 ? (int64_t)(pos + (size_t)fw) : -1;
         }
     }
     if (csize <= 0) {
@@ -187,11 +191,17 @@ static void fuzz_one(const uint8_t* data, size_t size, const run_ctx_t* c) {
     assert(d == SKIPPED || (d == (int64_t)n && memcmp(out, src, n) == 0));
     free(out);
 
-    // Pad before the footer.
-    const size_t footer = ZXC_FILE_FOOTER_SIZE + (checksum ? ZXC_FILE_DIGEST_SIZE : 0);
-    memmove(arc + len - footer + pad, arc + len - footer, footer);
-    memset(arc + len - footer, 0xA5, pad);
-    const int64_t p = decode_inplace(arc, len + pad, NULL, checksum, c, block_size);
+    // Pad before the footer, re-signed to cover it as a forger would.
+    uint64_t dsize = 0, frame = 0;
+    size_t sizes = 0;
+    if (zxc_parse_file_footer(arc + len, len, &dsize, &frame, &sizes) != ZXC_OK) abort();
+    const size_t body = len - sizes - (checksum ? ZXC_FILE_DIGEST_SIZE : 0);
+    const uint64_t digest = checksum ? zxc_le64(arc + body) : 0;
+    memset(arc + body, 0xA5, pad);
+    const int fw = zxc_write_file_footer(arc + body + pad, cbound + ZXC_FILE_FOOTER_MAX_SIZE - body,
+                                         body + pad, dsize, digest, checksum);
+    const int64_t p =
+        fw > 0 ? decode_inplace(arc, body + pad + (size_t)fw, NULL, checksum, c, block_size) : -1;
     assert(p == SKIPPED || p < 0);
     (void)d;
     (void)p;

@@ -7,11 +7,11 @@ Reference test vectors for validating any ZXC decoder implementation.
 ```
 v9/                 Corpus for format version 9 (FORMAT_VERSION declares it)
   valid/            17 *.zxc archives, *.expected outputs, *.zxd dictionaries
-  invalid/          30 *.zxc archives that must be rejected
+  invalid/          34 *.zxc archives that must be rejected
   vectors.sha256    Byte-stability manifest
 v8/                 Corpus for format version 8, kept until 0.15.x ships
 valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
-invalid_cases.h     Recipe for the 24 generated invalid ones; gen_invalid.c likewise
+invalid_cases.h     Recipe for the 28 generated invalid ones; gen_invalid.c likewise
 ```
 
 Vectors are frozen **per format version** and never regenerated once that version ships.
@@ -84,7 +84,7 @@ compression level, only the block type and the encodings it selects:
 All four literal encodings (`enc_lit` 0 to 3) and both token encodings
 (`enc_tok` 0 and 2) are exercised.
 
-30 invalid vectors, covering every row of the error table in `FORMAT.md` §11.1,
+34 invalid vectors, covering every row of the error table in `FORMAT.md` §11.1,
 each a well-formed archive with exactly one field corrupted (except the six
 malformed-preamble cases, which never reach version-dependent parsing).
 

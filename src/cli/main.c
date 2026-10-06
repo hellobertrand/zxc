@@ -377,9 +377,6 @@ typedef enum {
 
 enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS };
 
-// File header flags byte, bit 7 (docs/FORMAT.md 3.1); private to zxc_internal.h
-#define ZXC_FILE_FLAG_HAS_CHECKSUM 0x80U
-
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
@@ -783,56 +780,23 @@ static int zxc_list_archive(const char* path, int json_output) {
         fseeko(f, 0, SEEK_SET);
     }
 
-    // Use public API to get decompressed size
-    const int64_t uncompressed_size = zxc_stream_get_decompressed_size(f);
-    if (uncompressed_size < 0) {
-        fclose(f);
-        fprintf(stderr, "Error: Not a valid ZXC archive\n");
-        return 1;
-    }
-
-    // Read header for format info (rewind after API call)
-    uint8_t header[ZXC_FILE_HEADER_SIZE];
-    if (fseeko(f, 0, SEEK_SET) != 0 ||
-        fread(header, 1, ZXC_FILE_HEADER_SIZE, f) != ZXC_FILE_HEADER_SIZE) {
-        fclose(f);
-        fprintf(stderr, "Error: Cannot read file header\n");
-        return 1;
-    }
-
-    // Extract header fields
-    const uint8_t format_version = header[4];
-    // Block size is stored at offset 5 as a log2 exponent (codes 12..21 = 2^code,
-    // i.e. 4 KB..2 MB). Convert to KB.
-    const uint8_t chunk_code = header[5];
-    size_t block_size_kb;
-    if (chunk_code >= ZXC_BLOCK_SIZE_MIN_LOG2 && chunk_code <= ZXC_BLOCK_SIZE_MAX_LOG2) {
-        block_size_kb = ((size_t)1U << chunk_code) / 1024;
-    } else {
-        block_size_kb = 0;  // unknown / unsupported code
-    }
-
-    // Flags byte, bit 7 (FORMAT.md 3); the library keeps layout constants internal.
-    enum { ZXC_HEADER_FLAGS = 6, ZXC_DIGEST_BYTES = 8 };
-    const int has_checksum = (header[ZXC_HEADER_FLAGS] & ZXC_FILE_FLAG_HAS_CHECKSUM) != 0;
-    const char* checksum_method = has_checksum ? "RapidHash" : "-";
-
-    // Archive digest: the last 8 bytes (after the 8-byte size), present with checksums.
-    char digest_str[24] = "null";
-    if (has_checksum && file_size >= (long long)(ZXC_FILE_HEADER_SIZE + 2 * ZXC_DIGEST_BYTES)) {
-        uint8_t dg[ZXC_DIGEST_BYTES];
-        if (fseeko(f, file_size - ZXC_DIGEST_BYTES, SEEK_SET) == 0 &&
-            fread(dg, 1, sizeof(dg), f) == sizeof(dg)) {
-            uint64_t v = 0;
-            for (int i = 0; i < ZXC_DIGEST_BYTES; i++) v |= (uint64_t)dg[i] << (8 * i);
-            snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)v);
-        }
-    }
-
+    // Header and footer fields, read by the library.
+    zxc_frame_info_t info;
+    const int frc = zxc_stream_get_frame_info(f, &info, sizeof(info));
     fclose(f);
-
-    // Dictionary ID (from header flag bit 6 + bytes 7-10)
-    const uint32_t dict_id = zxc_get_dict_id(header, ZXC_FILE_HEADER_SIZE);
+    if (frc != ZXC_OK) {
+        fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(frc));
+        return 1;
+    }
+    const uint64_t uncompressed_size = info.decompressed_size;
+    const unsigned format_version = info.format_version;
+    const size_t block_size_kb = info.block_size / 1024;
+    const int has_checksum = info.has_checksum;
+    const char* checksum_method = has_checksum ? "RapidHash" : "-";
+    char digest_str[24] = "null";
+    if (has_checksum)
+        snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)info.digest);
+    const uint32_t dict_id = info.dict_id;
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
@@ -843,7 +807,7 @@ static int zxc_list_archive(const char* path, int json_output) {
     char dict_id_str[16];
 
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
-    format_size_decimal((uint64_t)uncompressed_size, uncomp_str, sizeof(uncomp_str));
+    format_size_decimal(uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
     if (dict_id)
         snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
@@ -855,7 +819,7 @@ static int zxc_list_archive(const char* path, int json_output) {
             "{\n"
             "  \"filename\": \"%s\",\n"
             "  \"compressed_size_bytes\": %lld,\n"
-            "  \"uncompressed_size_bytes\": %lld,\n"
+            "  \"uncompressed_size_bytes\": %llu,\n"
             "  \"compression_ratio\": %.3f,\n"
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
@@ -863,8 +827,8 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"digest\": %s,\n"
             "  \"dict_id\": %s%s%s\n"
             "}\n",
-            path, file_size, (long long)uncompressed_size, ratio, format_version, block_size_kb,
-            has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
+            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version,
+            block_size_kb, has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
             dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
@@ -899,18 +863,16 @@ static int zxc_list_archive(const char* path, int json_output) {
 /**
  * @brief Reports whether an archive's header declares a global checksum.
  *
- * Reads the header from @p f and rewinds it to the start, where decoding
+ * Reads the frame info from @p f and rewinds it to the start, where decoding
  * begins, so the checksum status describes the same file that is decoded.
  *
  * @param[in] f Seekable input stream for the archive (not stdin).
- * @return 1 if declared, 0 if not, -1 if the header could not be read.
+ * @return 1 if declared, 0 if not, -1 if the frame could not be read.
  */
 static int zxc_archive_has_checksum(FILE* f) {
-    uint8_t header[ZXC_FILE_HEADER_SIZE];
-    int declared = -1;
-    if (fseeko(f, 0, SEEK_SET) == 0 &&
-        fread(header, 1, ZXC_FILE_HEADER_SIZE, f) == ZXC_FILE_HEADER_SIZE)
-        declared = (header[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) != 0;
+    zxc_frame_info_t info;
+    int declared =
+        zxc_stream_get_frame_info(f, &info, sizeof(info)) == ZXC_OK ? info.has_checksum : -1;
     if (fseeko(f, 0, SEEK_SET) != 0) declared = -1;
     return declared;
 }
@@ -1194,7 +1156,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                   : !checksum_enabled          ? "not verified (skipped by -N)"
                                   : (archive_has_checksum > 0) ? "verified (RapidHash)"
                                   : use_stdin                  ? "unknown (streamed input)"
-                                                               : "unknown (header unreadable)";
+                                                               : "unknown (frame unreadable)";
             if (json_output) {
                 printf(
                     "{\n"

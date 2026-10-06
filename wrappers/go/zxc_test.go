@@ -712,3 +712,29 @@ func BenchmarkDecompress(b *testing.B) {
 		}
 	}
 }
+
+func TestGetFrameInfo(t *testing.T) {
+	data := bytes.Repeat([]byte("frame info "), 500)
+	for _, checksum := range []bool{false, true} {
+		comp, err := Compress(data, WithChecksum(checksum))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fi, err := GetFrameInfo(comp)
+		if err != nil {
+			t.Fatalf("checksum %v: %v", checksum, err)
+		}
+		if fi.DecompressedSize != uint64(len(data)) || fi.CompressedSize != uint64(len(comp)) ||
+			fi.HasChecksum != checksum || (fi.Digest != 0) != checksum || fi.HasSeekTable ||
+			fi.DictID != 0 || fi.BlockSize < 4096 || fi.FormatVersion == 0 {
+			t.Fatalf("checksum %v: %+v", checksum, fi)
+		}
+	}
+	comp, _ := Compress(data)
+	if _, err := GetFrameInfo(append(comp, 0)); err == nil {
+		t.Fatal("a trailing byte must be refused")
+	}
+	if _, err := GetFrameInfo(nil); err == nil {
+		t.Fatal("empty input must be refused")
+	}
+}

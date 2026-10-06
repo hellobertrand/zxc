@@ -1,5 +1,5 @@
 file:             02_block_raw
-size:             4136 bytes
+size:             4133 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 00 00 00 00 00 00 00 00 ED 80
@@ -23,5 +23,6 @@ type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              00 10 00 00 00 00 00 00
-src_size:         4096
+raw:              00 10 25 10 11
+src_size:         4096 (2 bytes)
+compressed_size:  4133 (2 bytes)

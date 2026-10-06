@@ -409,24 +409,34 @@ The **EOF** block marks the end of the ZXC stream. It ensures that the decompres
 ### 5.6 File Footer
 (Present immediately after the EOF Block)
 
-A mandatory footer closes the stream with the total source size in its first
-8 bytes, followed by an 8-byte **archive digest** when checksums are on.
+A mandatory footer closes the stream: an 8-byte **archive digest** when
+checksums are on, then the source size and the compressed frame size, each on the fewest
+bytes that hold it, and a last byte giving their two lengths.
 
-**Footer Structure (8 bytes, 16 with a digest):**
+**Footer Structure (3 to 17 bytes, plus 8 with a digest):**
 
 ```
-  Offset:  0               8              16
-          +---------------+---------------+
-          | Source Size   | Archive Digest|
-          | (8 bytes)     | (8, if -C)    |
-          +---------------+---------------+
+  +----------------+-------------+------------+---+
+  | Archive Digest | Source Size | Comp. Size | L |
+  | (8, if -C)     | (1..8)      | (1..8)     | 1 |
+  +----------------+-------------+------------+---+
+                     L = (nd - 1) | (nf - 1) << 4
 ```
 
-*   **Original Source Size** (8 bytes): Total size of the uncompressed data.
 *   **Archive Digest** (8 bytes, only with checksums): an ordered fold of every
     block's checksum -- a whole-archive identity that a full decode verifies and
     `zxc -t` reports. A block reordered, dropped or altered changes it. It is not
     checked on a seekable range read, which never sees every block.
+*   **Source Size**: total size of the uncompressed data.
+*   **Compressed Size**: bytes of the whole frame, footer included. Read back from
+    the last byte `L`, it locates the frame's header without any other field:
+    a reader starting from the end of the file always finds where the frame
+    begins.
+
+The sizes cost what they hold: 5 bytes for a small frame, 9 for one of a few
+hundred MB, against a fixed 16 for two plain 64-bit fields. A sequential decoder
+knows both values when it reaches the footer, so it derives the one valid
+encoding and compares it byte for byte.
 
 Per-block integrity does not need the digest: every block's checksum is seeded
 with its position (§5.8), so a block out of place already fails on its own,

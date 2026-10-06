@@ -132,6 +132,42 @@ func DecompressedSize(data []byte) (uint64, error) {
 	return uint64(size), nil
 }
 
+// FrameInfo is what a frame's header and footer declare.
+type FrameInfo struct {
+	DecompressedSize uint64 // source bytes the frame decodes to
+	CompressedSize   uint64 // compressed bytes of the frame, footer included
+	Digest           uint64 // archive digest; 0 when HasChecksum is false
+	BlockSize        int
+	DictID           uint32 // dictionary the frame needs; 0 for none
+	FormatVersion    uint8
+	HasChecksum      bool
+	HasSeekTable     bool
+}
+
+// GetFrameInfo reads a frame's header and footer, without decoding. The frame
+// must span all of data.
+func GetFrameInfo(data []byte) (FrameInfo, error) {
+	if len(data) == 0 {
+		return FrameInfo{}, ErrInvalidData
+	}
+	var fi C.zxc_frame_info_t
+	rc := C.zxc_get_frame_info(unsafe.Pointer(&data[0]), C.size_t(len(data)), &fi,
+		C.size_t(unsafe.Sizeof(fi)))
+	if rc != C.ZXC_OK {
+		return FrameInfo{}, errorFromCode(C.int64_t(rc))
+	}
+	return FrameInfo{
+		DecompressedSize: uint64(fi.decompressed_size),
+		CompressedSize:   uint64(fi.compressed_size),
+		Digest:           uint64(fi.digest),
+		BlockSize:        int(fi.block_size),
+		DictID:           uint32(fi.dict_id),
+		FormatVersion:    uint8(fi.format_version),
+		HasChecksum:      fi.has_checksum != 0,
+		HasSeekTable:     fi.has_seek_table != 0,
+	}, nil
+}
+
 // Decompress decompresses ZXC-compressed data.
 //
 // The output size is read from the compressed data footer. For pre-allocated

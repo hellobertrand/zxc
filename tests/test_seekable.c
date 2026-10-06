@@ -955,8 +955,8 @@ int test_seekable_truncated_input() {
         return 0;
     }
 
-    /* A checksummed archive carries a 16-byte footer, so its floor is 48, not
-     * the 40 of a plain one; cut to 47 it is short of its own footer. */
+    /* A checksummed archive carries an 8-byte digest on top of its sizes: cut
+     * below that floor it is short of its own footer. */
     zxc_compress_opts_t chk = {.level = 1, .seekable = 1, .checksum_enabled = 1};
     const int64_t csize_chk = zxc_compress(src, SRC_SIZE, dst, dst_cap, &chk);
     if (csize_chk <= 0) {
@@ -966,7 +966,7 @@ int test_seekable_truncated_input() {
         return 0;
     }
     s = zxc_seekable_open(dst, ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE +
-                                   ZXC_FILE_FOOTER_SIZE + ZXC_FILE_DIGEST_SIZE - 1);
+                                   ZXC_FILE_FOOTER_MIN_SIZE + ZXC_FILE_DIGEST_SIZE - 1);
     if (s) {
         printf("Failed: should reject a checksummed archive short of its footer\n");
         zxc_seekable_free(s);
@@ -2066,19 +2066,21 @@ int test_seekable_forged_total_size(void) {
     const uint64_t totals[] = {UINT64_MAX, UINT64_MAX - (BS - 2)};
     const zxc_block_header_t eof = {
         .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
-    /* [file header 16][EOF 8][SEK header for 0 blocks 8][footer 8] */
-    uint8_t arc[ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_SIZE];
+    /* [file header 16][EOF 8][SEK header for 0 blocks 8][footer] */
+    enum { BODY = ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE };
+    uint8_t arc[BODY + ZXC_FILE_FOOTER_MAX_SIZE];
     for (size_t k = 0; k < sizeof(totals) / sizeof(totals[0]); k++) {
-        uint8_t* p = arc;
-        if (zxc_write_file_header(p, ZXC_FILE_HEADER_SIZE, BS, 0, 0, 1) < 0 ||
-            zxc_write_block_header(p += ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
-            zxc_seek_table_header(p += ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, 0) < 0 ||
-            zxc_write_file_footer(p + ZXC_BLOCK_HEADER_SIZE, ZXC_FILE_FOOTER_SIZE, totals[k], 0,
-                                  0) < 0) {
+        uint8_t* const eof_at = arc + ZXC_FILE_HEADER_SIZE;
+        int fw = -1;
+        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, BS, 0, 0, 1) < 0 ||
+            zxc_write_block_header(eof_at, ZXC_BLOCK_HEADER_SIZE, &eof) < 0 ||
+            zxc_seek_table_header(eof_at + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, 0) < 0 ||
+            (fw = zxc_write_file_footer(arc + BODY, ZXC_FILE_FOOTER_MAX_SIZE, BODY, totals[k], 0,
+                                        0)) < 0) {
             printf("Failed: fixture headers\n");
             return 0;
         }
-        zxc_seekable* const s = zxc_seekable_open(arc, sizeof(arc));
+        zxc_seekable* const s = zxc_seekable_open(arc, BODY + (size_t)fw);
         if (s) {
             printf("Failed: total %llu opened with %llu blocks\n", (unsigned long long)totals[k],
                    (unsigned long long)zxc_seekable_get_num_blocks(s));
@@ -2111,9 +2113,9 @@ int test_seekable_eof_with_payload(void) {
     const uint64_t n = zxc_seekable_get_num_blocks(s);
     zxc_seekable_free(s);
 
-    /* [data blocks][EOF 8][SEK 8 + table][footer 8] */
-    uint8_t* const eof = arc + csize - ZXC_FILE_FOOTER_SIZE - (size_t)zxc_seek_table_bytes(n) -
-                         2 * ZXC_BLOCK_HEADER_SIZE;
+    /* [data blocks][EOF 8][SEK 8 + table][footer] */
+    uint8_t* const eof = arc + csize - test_footer_len(arc, (size_t)csize) -
+                         (size_t)zxc_seek_table_bytes(n) - 2 * ZXC_BLOCK_HEADER_SIZE;
     const zxc_block_header_t forged = {
         .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 1};
     zxc_block_header_t back;
@@ -2150,7 +2152,7 @@ typedef struct {
     uint8_t blk_hdr[ZXC_BLOCK_HEADER_SIZE]; /* every block is RAW, full, same header */
     uint8_t eof_hdr[ZXC_BLOCK_HEADER_SIZE];
     uint8_t sek_hdr[ZXC_BLOCK_HEADER_SIZE];
-    uint8_t footer[ZXC_FILE_FOOTER_SIZE];
+    uint8_t footer[ZXC_FILE_FOOTER_MAX_SIZE];
     int counting; /* cleared before the multi-threaded read: workers only read it */
     int calls;
 } synth_ctx_t;
@@ -2209,9 +2211,10 @@ int test_seekable_beyond_old_cap(void) {
     c.n = (1ULL << 32) + 5;
     c.counting = 1;
     c.eof_off = ZXC_FILE_HEADER_SIZE + c.n * SYNTH_BLK;
-    c.size =
-        c.eof_off + 2 * ZXC_BLOCK_HEADER_SIZE + zxc_seek_table_bytes(c.n) + ZXC_FILE_FOOTER_SIZE;
+    const uint64_t footer_at = c.eof_off + 2 * ZXC_BLOCK_HEADER_SIZE + zxc_seek_table_bytes(c.n);
     const uint64_t total = c.n * SYNTH_BS;
+    const int fw = zxc_write_file_footer(c.footer, sizeof(c.footer), footer_at, total, 0, 0);
+    c.size = footer_at + (uint64_t)(fw > 0 ? fw : 0);
     const zxc_block_header_t raw = {
         .block_type = ZXC_BLOCK_RAW, .block_flags = 0, .reserved = 0, .comp_size = SYNTH_BS};
     const zxc_block_header_t eof = {
@@ -2219,8 +2222,7 @@ int test_seekable_beyond_old_cap(void) {
     if (zxc_write_file_header(c.file_hdr, sizeof(c.file_hdr), SYNTH_BS, 0, 0, 1) < 0 ||
         zxc_write_block_header(c.blk_hdr, sizeof(c.blk_hdr), &raw) < 0 ||
         zxc_write_block_header(c.eof_hdr, sizeof(c.eof_hdr), &eof) < 0 ||
-        zxc_seek_table_header(c.sek_hdr, sizeof(c.sek_hdr), c.n) < 0 ||
-        zxc_write_file_footer(c.footer, sizeof(c.footer), total, 0, 0) < 0) {
+        zxc_seek_table_header(c.sek_hdr, sizeof(c.sek_hdr), c.n) < 0 || fw < 0) {
         printf("  [FAIL] fixture headers\n");
         return 0;
     }
@@ -2296,8 +2298,9 @@ int test_seekable_mt_group_boundary(void) {
             printf("  [FAIL] compress -> %lld\n", (long long)csize);
             break;
         }
-        /* [header][blocks][EOF][SEK header][group 0][group 1][group 2][footer 8] */
-        uint8_t* const g0 = arc + csize - ZXC_FILE_FOOTER_SIZE - (size_t)zxc_seek_table_bytes(NB);
+        /* [header][blocks][EOF][SEK header][group 0][group 1][group 2][footer] */
+        uint8_t* const g0 =
+            arc + csize - test_footer_len(arc, (size_t)csize) - (size_t)zxc_seek_table_bytes(NB);
         uint8_t* const g1 = g0 + ZXC_SEEK_GROUP_BYTES;
         const uint32_t sz0 = zxc_le32(g0 + ZXC_SEEK_ANCHOR_SIZE);
         const uint32_t sz63 =
@@ -2369,7 +2372,8 @@ int test_seekable_forged_table_entry() {
 
     const uint64_t entry_max = ZXC_BLOCK_HEADER_SIZE + BS;
     /* [file header][blocks][EOF][SEK header][group 0][group 1][group 2][footer] */
-    uint8_t* const g0 = dst + csize - ZXC_FILE_FOOTER_SIZE - (size_t)zxc_seek_table_bytes(NB);
+    const size_t flen = test_footer_len(dst, (size_t)csize);
+    uint8_t* const g0 = dst + csize - flen - (size_t)zxc_seek_table_bytes(NB);
     uint8_t* const g1 = g0 + ZXC_SEEK_GROUP_BYTES;
 #define SIZE_AT(i)                                                               \
     (g0 + ((i) / ZXC_SEEK_GROUP) * ZXC_SEEK_GROUP_BYTES + ZXC_SEEK_ANCHOR_SIZE + \
@@ -2385,8 +2389,8 @@ int test_seekable_forged_table_entry() {
 
     int ok = out != NULL;
     /* The blocks end at the EOF header, before the SEK header and its table. */
-    const uint64_t eof_off = (uint64_t)csize - ZXC_FILE_FOOTER_SIZE - zxc_seek_table_bytes(NB) -
-                             2 * ZXC_BLOCK_HEADER_SIZE;
+    const uint64_t eof_off =
+        (uint64_t)csize - flen - zxc_seek_table_bytes(NB) - 2 * ZXC_BLOCK_HEADER_SIZE;
     if (ok && (zxc_le64(g0) != ZXC_FILE_HEADER_SIZE || sz0 + 8 > entry_max || sz1 < 16 ||
                sz1 + 1 > entry_max || szl + 1 > entry_max || szl < 16 ||
                /* group 1 with two sizes maxed runs past the EOF block */
