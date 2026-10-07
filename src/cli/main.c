@@ -894,9 +894,13 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
     const char* seekable_state = cont.seekable == cont.frames ? "enabled"
                                  : cont.seekable              ? "mixed"
                                                               : "disabled";
-    char digest_str[24] = "null";
-    if (has_checksum && cont.frames == 1)
-        snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)cont.digest);
+    const int has_digest = has_checksum && cont.frames == 1;
+    char digest_str[24] = "";  // quoted in JSON only
+    char digest_json[sizeof(digest_str) + 2] = "null";
+    if (has_digest) {
+        snprintf(digest_str, sizeof(digest_str), "0x%016llX", (unsigned long long)cont.digest);
+        snprintf(digest_json, sizeof(digest_json), "\"%s\"", digest_str);
+    }
     const uint32_t dict_id = cont.first.dict_id;
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
@@ -935,7 +939,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
             "  \"seekable\": \"%s\",\n"
             "  \"digest\": %s,\n"
             "  \"dict_id\": ",
-            checksum_state, seekable_state, digest_str);
+            checksum_state, seekable_state, digest_json);
         cli_print_dict_ids(&cont, 1);
         printf(
             ",\n"
@@ -957,7 +961,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
             "Seekable:      %s\n",
             checksum_state, seekable_state);
 
-        if (has_checksum && cont.frames == 1) printf("Digest:        %s\n", digest_str);
+        if (has_digest) printf("Digest:        %s\n", digest_str);
         if (show_dict) {
             printf("Dictionary ID: ");
             cli_print_dict_ids(&cont, 0);
@@ -1579,26 +1583,6 @@ int main(int argc, char** argv) {
                 return 0;
             default:
                 return 1;
-        }
-    }
-
-    // Handle positional arguments for mode selection (e.g., "zxc z file")
-    if (optind < argc && mode != MODE_BENCHMARK) {
-        if (strcmp(argv[optind], "z") == 0) {
-            mode = MODE_COMPRESS;
-            optind++;
-        } else if (strcmp(argv[optind], "d") == 0) {
-            mode = MODE_DECOMPRESS;
-            optind++;
-        } else if (strcmp(argv[optind], "l") == 0 || strcmp(argv[optind], "list") == 0) {
-            mode = MODE_LIST;
-            optind++;
-        } else if (strcmp(argv[optind], "t") == 0 || strcmp(argv[optind], "test") == 0) {
-            mode = MODE_INTEGRITY;
-            optind++;
-        } else if (strcmp(argv[optind], "b") == 0) {
-            mode = MODE_BENCHMARK;
-            optind++;
         }
     }
 

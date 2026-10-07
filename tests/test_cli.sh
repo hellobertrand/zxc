@@ -290,8 +290,9 @@ else
 fi
 
 LIST_OUT=$("$ZXC_BIN" -l -v "$EMPTY.zxc")
-if [[ "$LIST_OUT" == *"Checksum:      enabled"* ]]; then
-    log_pass "-l -v reports the checksum of an empty -C archive"
+if [[ "$LIST_OUT" == *"Checksum:      enabled"* ]] &&
+   [[ "$LIST_OUT" == *"Digest:        0x"* ]]; then
+    log_pass "-l -v reports the checksum of an empty -C archive, digest unquoted"
 else
     log_fail "-l -v should report a checksum on an empty -C archive: $LIST_OUT"
 fi
@@ -1598,6 +1599,23 @@ if [[ $RET -ne 0 ]]; then
 else
     log_fail "Trailing garbage after the last footer must fail"
 fi
+
+# 36. Modes come from options only: a bare argument is a file, whatever its name
+echo "Testing files named like modes..."
+WORD_DIR="$TEST_DIR/words"
+mkdir -p "$WORD_DIR"
+for w in z d l list t test b; do
+    printf 'file named %s\n' "$w" > "$WORD_DIR/$w"
+    cp "$WORD_DIR/$w" "$WORD_DIR/$w.orig"
+    set +e
+    (cd "$WORD_DIR" && "$ZXC_ABS" "$w" && "$ZXC_ABS" -d -- "$w.zxc") > /dev/null 2>&1
+    RET=$?
+    set -e
+    if [[ $RET -ne 0 ]] || ! cmp -s "$WORD_DIR/$w.orig" "$WORD_DIR/$w"; then
+        log_fail "'zxc $w' must compress the file named '$w'"
+    fi
+done
+log_pass "Files named like modes compress and decompress"
 
 echo "All tests passed!"
 exit 0
