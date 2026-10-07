@@ -574,6 +574,27 @@ library was built with, for bindings that mirror the struct by hand.
 **Returns**: `ZXC_OK` with `*info` filled, or a negative `zxc_error_t` with
 `*info` untouched.
 
+### `zxc_get_last_frame_info`
+
+```c
+ZXC_EXPORT int zxc_get_last_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                       size_t info_size);
+```
+
+The same checks on the last frame of `src`, which may start anywhere: at
+`src_size - info.compressed_size`. Each footer stores its frame's compressed
+size, so concatenated frames are walked back from the end without decoding:
+
+```c
+size_t n = src_size;
+while (n > 0) {
+    if (zxc_get_last_frame_info(src, n, &info, sizeof(info)) != ZXC_OK) break;
+    n -= info.compressed_size;  /* the frame before ends here */
+}
+```
+
+**Returns**: as `zxc_get_frame_info()`.
+
 ---
 
 ## 8. Block API
@@ -1129,6 +1150,20 @@ is restored.
 
 **Returns**: `ZXC_OK`, or a negative `zxc_error_t` (`ZXC_ERROR_IO` included).
 
+### `zxc_stream_get_last_frame_info`
+
+```c
+ZXC_EXPORT int zxc_stream_get_last_frame_info(FILE* f_in, uint64_t end, zxc_frame_info_t* info,
+                                              size_t info_size);
+```
+
+`zxc_get_last_frame_info()` on the first `end` bytes of a seekable `FILE*`:
+pass the file size, then `end - info.compressed_size`, to walk its frames back
+to the first. File position is restored.
+
+**Returns**: `ZXC_OK`, or a negative `zxc_error_t`: `ZXC_ERROR_SRC_TOO_SMALL`
+when `end` is past the end of the file, `ZXC_ERROR_IO` included.
+
 ---
 
 ## 10b. Push Streaming API
@@ -1281,8 +1316,13 @@ ZXC_EXPORT int64_t zxc_dstream_decompress(
 Drives the parser state machine (file header → blocks → EOF → optional
 SEK → footer).  Each call makes as much progress as `in` and `out` allow.
 
-Trailing bytes after the validated footer are silently ignored (the
-caller can inspect `in->pos` to detect how many were consumed).
+Each call stops at the end of a frame, `in->pos` just past it: a caller after
+one frame stops there. A later call with input decodes the next frame
+(concatenated archives) into the same output. Input that does not open with the
+magic word is `ZXC_ERROR_CORRUPT_DATA`, from its first byte; a frame that does is
+checked like the first, so a bad header gets its own code (`ZXC_ERROR_BAD_VERSION`,
+`ZXC_ERROR_DICT_REQUIRED`, ...), and input that stops inside the magic word is
+simply not finished.
 
 **Returns**:
 - `>0` — number of decompressed bytes written into `out` this call;
@@ -1296,7 +1336,8 @@ caller can inspect `in->pos` to detect how many were consumed).
 ZXC_EXPORT int zxc_dstream_finished(const zxc_dstream* ds);
 ```
 
-Returns `1` iff the parser has fully validated the file footer.  Callers
+Returns `1` iff the last call ended on a validated footer, until a call with
+more input starts the next frame.  Callers
 that have finished feeding input should check this to detect truncated
 streams: `zxc_dstream_decompress` returning `0` with no output is
 ambiguous (DONE vs need-more-input) — `_finished` disambiguates.
@@ -1382,7 +1423,9 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
 ```
 
 Opens a seekable archive from a memory buffer.  The buffer must remain
-valid for the lifetime of the handle.
+valid for the lifetime of the handle. Concatenated seekable archives open as one:
+blocks and offsets run across the frames. Every frame must carry a seek table;
+block sizes, checksums and dictionaries may differ.
 
 **Returns**: handle (0 blocks if the archive is empty), or `NULL` if the buffer is not a valid
 seekable archive.
@@ -1438,8 +1481,8 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 ```
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
-to fetch the file header, footer, and the EOF/SEK block headers at open time
-(3 reads, whatever the block count), then one read per seek table group a
+to fetch each frame's footer, file header and EOF/SEK block headers at open time
+(3 reads per frame, whatever the block count), then one read per seek table group a
 range covers and once per block during decompression;
 `zxc_seekable_get_block_comp_size()` reads the block's group per call. No
 `FILE*` is involved — this is the entry point to use for kernel space,
@@ -1692,7 +1735,7 @@ ZXC_EXPORT int zxc_seekable_set_dict(
 );
 ```
 
-Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Must be called before any `zxc_seekable_decompress_range()` call.
+Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Call it once per dictionary the frames use: one no frame uses is `ZXC_ERROR_DICT_MISMATCH`, and a range through a frame whose dictionary is missing returns `ZXC_ERROR_DICT_REQUIRED`.
 
 ### `zxc_seekable_set_checksum`
 
@@ -1755,7 +1798,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **72 symbols** (verified with `nm -gU`):
+The shared library exports **74 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1831,6 +1874,8 @@ The shared library exports **72 symbols** (verified with `nm -gU`):
 | 70 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
 | 71 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
 | 72 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
+| 73 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
+| 74 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

@@ -242,6 +242,7 @@ if not meson.is_subproject()
       'tests/test_static_ctx.c',
       'tests/test_pstream_api.c',
       'tests/test_stream_api.c',
+      'tests/test_container.c',
       'tests/test_seekable.c',
       'tests/test_seekable_mt.c',
       'tests/test_format.c',

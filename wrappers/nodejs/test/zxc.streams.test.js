@@ -101,6 +101,34 @@ describe("DecompressStream error paths", () => {
   });
 });
 
+describe("Concatenated archives", () => {
+  const a = Buffer.from("first frame ".repeat(5000));
+  const b = Buffer.from("second frame ".repeat(7000));
+  const fa = zxc.compress(a);
+  const joined = Buffer.concat([fa, zxc.compress(b, { checksum: true })]);
+  const pieces = (buf, n) =>
+    Array.from({ length: Math.ceil(buf.length / n) }, (_, i) =>
+      buf.subarray(i * n, (i + 1) * n),
+    );
+
+  test("DecompressStream decodes every frame, in 7-byte chunks", async () => {
+    const out = await gather(
+      Readable.from(pieces(joined, 7)).pipe(zxc.createDecompressStream()),
+    );
+    expect(out.equals(Buffer.concat([a, b]))).toBe(true);
+  });
+
+  test("bytes after a footer that start no frame are an error", async () => {
+    await expect(
+      gather(
+        Readable.from([Buffer.concat([fa, Buffer.from("junk")])]).pipe(
+          zxc.createDecompressStream(),
+        ),
+      ),
+    ).rejects.toThrow();
+  });
+});
+
 describe("detectZxc", () => {
   test("detects a frame produced by compress()", () => {
     const frame = zxc.compress(Buffer.from("sniff me"));

@@ -203,9 +203,10 @@ func (d *DStream) OutSize() int {
 	return int(C.zxc_dstream_out_size(d.ptr))
 }
 
-// Finished reports whether the decoder has reached and validated the file
-// footer. Useful to detect truncated streams: if the input source is
-// drained and Finished returns false, the stream ended prematurely.
+// Finished reports whether the input so far ends on a validated footer; more
+// input starts the next frame. Useful to detect truncated streams: if the
+// input source is drained and Finished returns false, the stream ended
+// prematurely.
 func (d *DStream) Finished() bool {
 	if d == nil || d.ptr == nil {
 		return false
@@ -219,10 +220,10 @@ func (d *DStream) Finished() bool {
 //   - consumed: bytes read from in.
 //   - produced: bytes written into out.
 //
-// A return of (0, 0, nil) when in is non-empty means no progress could be
-// made: either the parser is waiting for more input (feed more), or the
-// stream has reached DONE state (any trailing bytes in in are ignored).
-// Use [DStream.Finished] to disambiguate.
+// Each call stops at the end of a frame, consumed pointing just past it: a
+// caller after one frame stops there once [DStream.Finished] is true. A later
+// call with more input decodes the next frame (concatenated archives); input
+// that does not open with the magic word is an error.
 func (d *DStream) Decompress(out, in []byte) (consumed, produced int, err error) {
 	if d == nil || d.ptr == nil {
 		return 0, 0, ErrNullInput

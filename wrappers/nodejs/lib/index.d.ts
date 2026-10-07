@@ -100,8 +100,8 @@ export function compressBound(inputSize: number): number;
 export function compress(data: Buffer, options?: CompressOptions): Buffer;
 
 /**
- * Returns the original decompressed size from a ZXC compressed buffer.
- * Reads the footer without performing decompression.
+ * Returns the original decompressed size from a ZXC compressed buffer, summed
+ * over concatenated archives. Reads the footers without decompressing.
  */
 export function getDecompressedSize(data: Buffer): number;
 
@@ -120,8 +120,9 @@ export interface FrameInfo {
 }
 
 /**
- * Reads a frame's header and footer, without decoding.
- * Throws on an invalid frame.
+ * Reads a frame's header and footer, without decoding. The frame must span
+ * all of `data`: concatenated archives throw, getDecompressedSize gives their
+ * total. Throws on an invalid frame.
  */
 export function getFrameInfo(data: Buffer): FrameInfo;
 
@@ -309,9 +310,12 @@ export interface DStreamOptions {
  */
 export class DStream {
   constructor(options?: DStreamOptions);
-  /** Push compressed bytes and return any decompressed bytes produced. */
+  /**
+   * Push compressed bytes and return any decompressed bytes produced. An error
+   * found after a frame's output is thrown by the next call, that output first.
+   */
   decompress(data: Buffer): Buffer;
-  /** True once the decoder has reached and validated the file footer. */
+  /** True when the input so far ends on a validated footer. */
   finished(): boolean;
   /** Release native resources. Idempotent. */
   close(): void;
@@ -343,7 +347,8 @@ export class CompressStream extends Transform {
 }
 
 /**
- * `stream.Transform` that decompresses a ZXC frame. Emits `'error'` with
+ * `stream.Transform` that decompresses ZXC frames (concatenated archives as
+ * one stream). Emits `'error'` with
  * `code === 'ZXC_TRUNCATED'` if the input ends before the footer.
  */
 export class DecompressStream extends Transform {
@@ -425,9 +430,10 @@ export class Seekable {
    */
   decompressRange(offset: number, length: number): Buffer;
   /**
-   * Attach a pre-trained dictionary to this handle. Must be called before
-   * any `decompressRange` call when the archive was compressed with a
-   * dictionary. The content is copied internally.
+   * Attach a pre-trained dictionary to this handle. Required before
+   * `decompressRange` reaches a frame compressed with a dictionary; call it
+   * once per dictionary when concatenated frames use several. One no frame
+   * uses throws. The content is copied internally.
    */
   setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
   /**

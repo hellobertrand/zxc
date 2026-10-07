@@ -282,7 +282,7 @@ fi
 
 # An empty archive still carries a checksum and a digest
 LIST_OUT=$("$ZXC_BIN" -l -j "$EMPTY.zxc")
-if [[ "$LIST_OUT" == *'"checksum_method": "RapidHash"'* ]] &&
+if [[ "$LIST_OUT" == *'"checksum": "enabled"'* ]] &&
    [[ "$LIST_OUT" == *'"digest": "0x'* ]]; then
     log_pass "-l reports the checksum of an empty -C archive"
 else
@@ -290,7 +290,7 @@ else
 fi
 
 LIST_OUT=$("$ZXC_BIN" -l -v "$EMPTY.zxc")
-if [[ "$LIST_OUT" == *"Checksum Method: RapidHash"* ]]; then
+if [[ "$LIST_OUT" == *"Checksum:      enabled"* ]]; then
     log_pass "-l -v reports the checksum of an empty -C archive"
 else
     log_fail "-l -v should report a checksum on an empty -C archive: $LIST_OUT"
@@ -304,7 +304,7 @@ if ! wait_for_file "$NOCK.zxc"; then
     log_fail "Could not create no-checksum archive $NOCK.zxc"
 fi
 LIST_OUT=$("$ZXC_BIN" -l -j "$NOCK.zxc")
-if [[ "$LIST_OUT" == *'"checksum_method": "none"'* ]]; then
+if [[ "$LIST_OUT" == *'"checksum": "disabled"'* ]]; then
     log_pass "-l reports no checksum for a -N archive"
 else
     log_fail "-l should report no checksum for a -N archive: $LIST_OUT"
@@ -323,7 +323,7 @@ fi
 
 OUT=$("$ZXC_BIN" -t -j "$NOCK.zxc" 2>&1)
 if [[ "$OUT" == *'"checksum_verified": false'* ]] &&
-   [[ "$OUT" == *'"checksum_method": "none"'* ]]; then
+   [[ "$OUT" == *'"checksum": "disabled"'* ]]; then
     log_pass "-t -j reports checksum_verified=false, method none for a -N archive"
 else
     log_fail "-t -j reports a verified checksum for an archive that carries none: $OUT"
@@ -338,7 +338,7 @@ set +e
 OUT=$("$ZXC_BIN" -t -v "$BAD" 2>&1)
 OUTJ=$("$ZXC_BIN" -t -j "$BAD" 2>&1)
 set -e
-if [[ "$OUT" != *"verified (RapidHash)"* ]] && [[ "$OUTJ" != *'"checksum_verified": true'* ]]; then
+if [[ "$OUT" != *"Checksum:     verified"* ]] && [[ "$OUTJ" != *'"checksum_verified": true'* ]]; then
     log_pass "-t does not vouch for a corrupted -N archive"
 else
     log_fail "-t reports a corrupted -N archive as checksum-verified: $OUT / $OUTJ"
@@ -356,7 +356,7 @@ set -e
 if [[ $RET -eq 0 ]] && [[ "$OUT" == *": OK"* ]] &&
    [[ "$OUT" == *"unknown (streamed input)"* ]] &&
    [[ "$OUTJ" == *'"checksum_verified": false'* ]] &&
-   [[ "$OUTJ" == *'"checksum_method": "unknown"'* ]]; then
+   [[ "$OUTJ" == *'"checksum": "unknown"'* ]]; then
     log_pass "-t on a pipe reads the archive and reports an unknown checksum"
 else
     log_fail "-t on a pipe should succeed and report an unknown checksum (exit $RET): $OUT / $OUTJ"
@@ -365,9 +365,9 @@ fi
 # A -C archive is still verified
 OUT=$("$ZXC_BIN" -t -v "$TEST_FILE_XC_ARG" 2>&1)
 OUTJ=$("$ZXC_BIN" -t -j "$TEST_FILE_XC_ARG" 2>&1)
-if [[ "$OUT" == *"verified (RapidHash)"* ]] &&
+if [[ "$OUT" == *"Checksum:     verified"* ]] &&
    [[ "$OUTJ" == *'"checksum_verified": true'* ]] &&
-   [[ "$OUTJ" == *'"checksum_method": "RapidHash"'* ]]; then
+   [[ "$OUTJ" == *'"checksum": "enabled"'* ]]; then
     log_pass "-t still reports a checksummed archive as verified"
 else
     log_fail "-t should report a -C archive as checksum-verified: $OUT / $OUTJ"
@@ -381,7 +381,7 @@ OUTJ=$("$ZXC_BIN" -t -j -N "$TEST_FILE_XC_ARG" 2>&1)
 set -e
 if [[ $RET -eq 0 ]] && [[ "$OUT" == *"not verified (skipped by -N)"* ]] &&
    [[ "$OUTJ" == *'"checksum_verified": false'* ]] &&
-   [[ "$OUTJ" == *'"checksum_method": "RapidHash"'* ]]; then
+   [[ "$OUTJ" == *'"checksum": "enabled"'* ]]; then
     log_pass "-t -N distinguishes a skipped check from an absent checksum"
 else
     log_fail "-t -N should report the archive checksum as present but unchecked (exit $RET): $OUT / $OUTJ"
@@ -389,7 +389,7 @@ fi
 
 # Empty -C archive from 9b
 OUTJ=$("$ZXC_BIN" -t -j "$EMPTY.zxc" 2>&1)
-if [[ "$OUTJ" == *'"checksum_method": "RapidHash"'* ]] &&
+if [[ "$OUTJ" == *'"checksum": "enabled"'* ]] &&
    [[ "$OUTJ" == *'"checksum_verified": true'* ]]; then
     log_pass "-t reports the checksum of an empty -C archive"
 else
@@ -438,7 +438,7 @@ fi
 
 # Verbose list mode
 OUT=$("$ZXC_BIN" -l -v "$TEST_FILE_XC_ARG")
-if [[ "$OUT" == *"Block Format:"* ]] && [[ "$OUT" == *"Block Size:"* ]] && [[ "$OUT" == *"Checksum Method:"* ]]; then
+if [[ "$OUT" == *"Block Format:"* ]] && [[ "$OUT" == *"Block Size:"* ]] && [[ "$OUT" == *"Checksum:"* ]]; then
     log_pass "List command verbose output"
 else
     log_fail "List command verbose output failed"
@@ -678,7 +678,7 @@ if [[ "$JSON_OUT" == *'"filename"'* ]] && \
    [[ "$JSON_OUT" == *'"uncompressed_size_bytes"'* ]] && \
    [[ "$JSON_OUT" == *'"compression_ratio"'* ]] && \
    [[ "$JSON_OUT" == *'"format_version"'* ]] && \
-   [[ "$JSON_OUT" == *'"checksum_method"'* ]]; then
+   [[ "$JSON_OUT" == *'"checksum"'* ]]; then
     log_pass "List mode JSON output (single file)"
 else
     log_fail "List mode JSON output missing expected fields"
@@ -1525,6 +1525,78 @@ else
         echo "  -t stderr: $(cat "$TEST_DIR/prog5.err")"
         log_fail "-t progress should be labeled 'Testing'"
     fi
+fi
+
+# 35. Containers: concatenated frames
+echo "Testing containers..."
+
+# 35.1 Two archives back to back decode as one stream, from a file and from stdin
+"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_a.zxc"
+"$ZXC_BIN" -1 -N -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_b.zxc"
+cat "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_b.zxc" > "$TEST_DIR/cat.zxc"
+cat "$TEST_FILE" "$TEST_FILE" > "$TEST_DIR/cat.expected"
+"$ZXC_BIN" -d -c "$TEST_DIR/cat.zxc" > "$TEST_DIR/cat.dec"
+"$ZXC_BIN" -d -c < "$TEST_DIR/cat.zxc" > "$TEST_DIR/cat_pipe.dec"
+if cmp -s "$TEST_DIR/cat.expected" "$TEST_DIR/cat.dec" &&
+    cmp -s "$TEST_DIR/cat.expected" "$TEST_DIR/cat_pipe.dec"; then
+    log_pass "Concatenated archives decode (file and stdin)"
+else
+    log_fail "Concatenated archives should decode to both inputs"
+fi
+
+# 35.2 -t accepts them and reports the mixed checksums; -l counts the frames
+OUT=$("$ZXC_BIN" -t -v "$TEST_DIR/cat.zxc")
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/cat.zxc")
+LIST_OUT=$("$ZXC_BIN" -l "$TEST_DIR/cat.zxc")
+if [[ "$OUT" == *"OK"* ]] && [[ "$OUT" == *"partly verified"* ]] &&
+    [[ "$JSON_OUT" == *'"frames": 2'* ]] && [[ "$JSON_OUT" == *'"checksum": "mixed"'* ]] &&
+    [[ "$LIST_OUT" == *"Frames"* ]] &&
+    echo "$LIST_OUT" | awk 'NR==3 {exit !($NF == 2)}'; then
+    log_pass "-t and -l on concatenated archives"
+else
+    echo "  -t: $OUT"
+    echo "  -l: $JSON_OUT"
+    echo "$LIST_OUT"
+    log_fail "-t / -l should handle concatenated archives"
+fi
+
+# 35.2b -l: a Seekable column; Filename only when several files are listed
+ONE=$("$ZXC_BIN" -l "$TEST_DIR/cat.zxc")
+TWO=$("$ZXC_BIN" -l "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_b.zxc")
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/cat_b.zxc")
+if [[ "$ONE" != *"Filename"* ]] && [[ "$ONE" == *"Seekable"* ]] && [[ "$ONE" == *"mixed"* ]] &&
+    [[ "$TWO" == *"Filename"* ]] && [[ "$TWO" == *"cat_b.zxc"* ]] &&
+    [[ "$JSON_OUT" == *'"seekable": "enabled"'* ]]; then
+    log_pass "-l shows Seekable, and Filename only for several files"
+else
+    echo "$ONE"
+    echo "$TWO"
+    log_fail "-l columns are wrong"
+fi
+
+# 35.2c Block sizes that differ between frames: listed by -v, an array in JSON
+"$ZXC_BIN" -B 256K -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_c.zxc"
+cat "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_c.zxc" > "$TEST_DIR/cat_bs.zxc"
+VOUT=$("$ZXC_BIN" -l -v "$TEST_DIR/cat_bs.zxc")
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/cat_bs.zxc")
+if [[ "$VOUT" == *"Block Size:    256 KB, 512 KB"* ]] && [[ "$JSON_OUT" == *'"block_size_kb": [256, 512]'* ]]; then
+    log_pass "-l reports block sizes that differ between frames"
+else
+    echo "$VOUT"
+    log_fail "-l should report every block size"
+fi
+
+# 35.3 Trailing garbage after the last footer is an error
+cp "$TEST_DIR/cat.zxc" "$TEST_DIR/cat_bad.zxc"
+printf 'JUNK' >> "$TEST_DIR/cat_bad.zxc"
+set +e
+"$ZXC_BIN" -t "$TEST_DIR/cat_bad.zxc" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ $RET -ne 0 ]]; then
+    log_pass "Trailing garbage rejected"
+else
+    log_fail "Trailing garbage after the last footer must fail"
 fi
 
 echo "All tests passed!"

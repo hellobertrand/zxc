@@ -320,6 +320,17 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
+
+/** @brief Whether the first @p n bytes (up to 4) at @p p agree with the magic word, so
+ *  a frame may start there: the check a reader makes as bytes arrive. */
+static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
+    static const uint8_t magic[4] = {(uint8_t)ZXC_MAGIC_WORD, (uint8_t)(ZXC_MAGIC_WORD >> 8),
+                                     (uint8_t)(ZXC_MAGIC_WORD >> 16),
+                                     (uint8_t)(ZXC_MAGIC_WORD >> 24)};
+    for (size_t i = 0; i < n && i < sizeof(magic); i++)
+        if (p[i] != magic[i]) return 0;
+    return 1;
+}
 /** @brief Current on-disk file format version. The decoder accepts only this
  *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
 #define ZXC_FILE_FORMAT_VERSION 9
@@ -2131,6 +2142,77 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
                          int* out_has_checksum, uint32_t* out_dict_id, int* out_has_seek);
+
+// ---------------------------------------------------------------------------
+// Container scan: frames back to back, measured without decoding (FORMAT.md,
+// Sec 2.1).
+// ---------------------------------------------------------------------------
+
+/**
+ * @struct zxc_scan_src_t
+ * @brief Where a container scan reads from: memory, or a positioned callback
+ *        (the FILE* size query). Offsets are relative to the container start.
+ */
+typedef struct zxc_scan_src_s {
+    /** Reads @p len bytes at @p off; NULL reads from @c data. Returns
+     *  @ref ZXC_OK or a negative @ref zxc_error_t. Bounds are checked first. */
+    int (*read_at)(const struct zxc_scan_src_s* src, uint64_t off, void* dst, size_t len);
+    const uint8_t* data; /**< Container bytes when @c read_at is NULL. */
+    void* ctx;           /**< Opaque state for @c read_at. */
+    uint64_t size;       /**< Container size in bytes. */
+} zxc_scan_src_t;
+
+/** @brief A scan source over @p size bytes of memory at @p data. */
+static ZXC_ALWAYS_INLINE zxc_scan_src_t zxc_scan_src_mem(const uint8_t* data, const size_t size) {
+    zxc_scan_src_t src = {NULL, data, NULL, (uint64_t)size};
+    return src;
+}
+
+/** @brief What @ref zxc_scan_container learns about a container. */
+typedef struct {
+    uint64_t dsize;         /**< Sum of the stored decompressed sizes. */
+    uint64_t frames;        /**< ZXC frames. */
+    uint32_t first_dict_id; /**< Dictionary id of the first frame, 0 without one. */
+    int uses_dict;          /**< A frame bound to a dictionary. */
+} zxc_container_info_t;
+
+/**
+ * @brief Tells whether a frame starts at @p pos.
+ *
+ * A wrong magic word is @ref ZXC_ERROR_BAD_MAGIC at offset 0, as for a single
+ * frame, and @ref ZXC_ERROR_CORRUPT_DATA after one.
+ *
+ * @param[in] src  Container source.
+ * @param[in] pos  Offset just past the previous frame, 0 for the first.
+ * @return 1 on a frame, 0 at the end of the input, or a negative @ref zxc_error_t.
+ */
+int zxc_container_next(const zxc_scan_src_t* src, uint64_t pos);
+
+/**
+ * @brief Measures the frame ending at @p end without decoding: its footer's
+ *        compressed size gives where it starts.
+ *
+ * @param[in]  src   Container source.
+ * @param[in]  end   Offset just past the frame.
+ * @param[out] start Offset of the frame's header.
+ * @param[out] info  Its header and footer, checked like zxc_get_frame_info().
+ * @param[out] footer_len Footer bytes, digest included; may be NULL.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
+ */
+int zxc_scan_frame(const zxc_scan_src_t* src, uint64_t end, uint64_t* start, zxc_frame_info_t* info,
+                   size_t* footer_len);
+
+/**
+ * @brief Measures a whole container without decoding: frames from the last back
+ *        to the first through @ref zxc_scan_frame.
+ *
+ * @param[in]  src       Container source.
+ * @param[in]  req_chunk Block size every frame must declare, 0 for any.
+ * @param[out] info      Totals over the container.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t; an empty container is
+ *         @ref ZXC_ERROR_SRC_TOO_SMALL.
+ */
+int zxc_scan_container(const zxc_scan_src_t* src, size_t req_chunk, zxc_container_info_t* info);
 
 /**
  * @brief Encodes a block header into @p dst.

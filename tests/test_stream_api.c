@@ -1643,33 +1643,67 @@ int test_stream_footer_looks_like_sek(void) {
     return ok;
 }
 
-/* FILE* and buffer decoders must return @p want; push decodes @p n bytes, stops at @p push_end. */
+/* Every decoder must return @p want into @p out (2 * @p n bytes), the push one @p want_push:
+ * it cannot tell input that stops inside a magic word from input still coming, and
+ * reports that as not finished (SRC_TOO_SMALL here). Push stops at each frame's end, so
+ * it is called until it errs or makes no progress, into its own buffer. */
 static int trailing_verdict(const uint8_t* arc, const size_t total, const size_t n,
                             const uint8_t* src, uint8_t* out, const int64_t want,
-                            const size_t push_end, const char* what) {
+                            const int64_t want_push, const char* what) {
     FILE* const f = tmpfile();
     int64_t rf = -1;
     if (f && fwrite(arc, 1, total, f) == total && fseek(f, 0, SEEK_SET) == 0)
         rf = zxc_stream_decompress(f, NULL, NULL);
     if (f) fclose(f);
-    const int64_t rb = zxc_decompress(arc, total, out, n, NULL);
+    const int64_t rb = zxc_decompress(arc, total, out, 2 * n, NULL);
+    int ok = rb == want && (rb < 0 || (memcmp(out, src, n) == 0 &&
+                                       (rb == (int64_t)n || memcmp(out + n, src, n) == 0)));
 
-    zxc_dstream* const ds = zxc_dstream_create(NULL);
+    uint8_t* const pout = malloc(2 * n);
+    zxc_dstream* const ds = pout ? zxc_dstream_create(NULL) : NULL;
     zxc_inbuf_t in = {arc, total, 0};
-    zxc_outbuf_t ob = {out, n, 0};
-    const int64_t rp = ds ? zxc_dstream_decompress(ds, &ob, &in) : -1;
-    const int push_ok = rp == (int64_t)n && zxc_dstream_finished(ds) && in.pos == push_end &&
-                        memcmp(out, src, n) == 0;
+    zxc_outbuf_t ob = {pout, 2 * n, 0};
+    int64_t rp = ds ? 0 : -1;
+    while (rp >= 0) {
+        const size_t before = in.pos;
+        rp = zxc_dstream_decompress(ds, &ob, &in);
+        if (rp == 0 && in.pos == before) break;
+    }
+    if (rp >= 0) rp = zxc_dstream_finished(ds) ? (int64_t)ob.pos : ZXC_ERROR_SRC_TOO_SMALL;
     zxc_dstream_free(ds);
+    ok = ok && rf == want && rp == want_push &&
+         (rp < 0 ||
+          (memcmp(pout, src, n) == 0 && (rp == (int64_t)n || memcmp(pout + n, src, n) == 0)));
+    free(pout);
 
-    if (rf == want && rb == want && push_ok) return 1;
-    printf("Failed: %s: FILE* %lld, buffer %lld (want %lld), push stopped at %zu (want %zu)\n",
-           what, (long long)rf, (long long)rb, (long long)want, in.pos, push_end);
+    if (ok) return 1;
+    printf("Failed: %s: FILE* %lld, buffer %lld (want %lld), push %lld (want %lld)\n", what,
+           (long long)rf, (long long)rb, (long long)want, (long long)rp, (long long)want_push);
     return 0;
 }
 
-/* Bytes after the footer: corrupt for the FILE* and buffer decoders; the push API
- * stops at the footer and leaves them to the caller. */
+/* A frame then bytes that open no other, in one call: the call hands over the frame,
+ * in->pos on its end, and only the next call reports the junk. */
+static int push_frame_then_junk(const uint8_t* arc, const size_t len, const size_t n,
+                                const uint8_t* src, uint8_t* out) {
+    zxc_dstream* const ds = zxc_dstream_create(NULL);
+    zxc_inbuf_t in = {arc, len + 4, 0};
+    zxc_outbuf_t ob = {out, 2 * n, 0};
+    const int64_t r1 = ds ? zxc_dstream_decompress(ds, &ob, &in) : -1;
+    const int done = ds && zxc_dstream_finished(ds);
+    const size_t at = in.pos;
+    const int64_t r2 = ds ? zxc_dstream_decompress(ds, &ob, &in) : -1;
+    zxc_dstream_free(ds);
+    if (r1 == (int64_t)n && done && at == len && memcmp(out, src, n) == 0 &&
+        r2 == ZXC_ERROR_CORRUPT_DATA)
+        return 1;
+    printf("Failed: frame then junk: first call %lld (done %d, at %zu of %zu), then %lld\n",
+           (long long)r1, done, at, len, (long long)r2);
+    return 0;
+}
+
+/* Bytes after the footer: another frame decodes after the first, anything else is
+ * corrupt, for every decoder; push hands over the frame before it says so. */
 int test_stream_trailing_bytes(void) {
     printf("=== TEST: Stream - bytes after the footer ===\n");
     const size_t n = 3 * 4096 + 5;
@@ -1677,7 +1711,7 @@ int test_stream_trailing_bytes(void) {
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(2 * cap);
     uint8_t* const forged = malloc(cap + ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE);
-    uint8_t* const out = malloc(n);
+    uint8_t* const out = malloc(2 * n);
     int ok = src && arc && forged && out;
     if (ok) gen_lz_data(src, n);
 
@@ -1691,15 +1725,22 @@ int test_stream_trailing_bytes(void) {
         }
         char what[96];
 
-        // No tail, one byte, a second archive.
+        // No tail, one byte, four bytes that are no magic word, a second archive.
         memcpy(arc + len, arc, (size_t)len);
-        const size_t tails[] = {0, 1, (size_t)len};
+        const size_t tails[] = {0, 1, 4, (size_t)len};
+        const int64_t wants[] = {(int64_t)n, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA,
+                                 2 * (int64_t)n};
+        uint8_t* const tail = arc + len;
         for (size_t t = 0; ok && t < sizeof(tails) / sizeof(tails[0]); t++) {
             snprintf(what, sizeof(what), "checksum %d, seekable %d, %zu trailing bytes", v & 1,
                      v >> 1, tails[t]);
-            ok =
-                trailing_verdict(arc, (size_t)len + tails[t], n, src, out,
-                                 tails[t] ? ZXC_ERROR_CORRUPT_DATA : (int64_t)n, (size_t)len, what);
+            uint8_t saved[4];
+            memcpy(saved, tail, sizeof(saved));
+            if (tails[t] == 4) memset(tail, 0xA5, 4);
+            ok = trailing_verdict(arc, (size_t)len + tails[t], n, src, out, wants[t],
+                                  tails[t] == 1 ? ZXC_ERROR_SRC_TOO_SMALL : wants[t], what);
+            if (ok && tails[t] == 4) ok = push_frame_then_junk(arc, (size_t)len, n, src, out);
+            memcpy(tail, saved, sizeof(saved));
         }
 
         // Flag cleared, [EOF][valid footer][SEK][footer]: the first footer checks
@@ -1718,7 +1759,7 @@ int test_stream_trailing_bytes(void) {
             zxc_file_header_sign(forged);
             snprintf(what, sizeof(what), "checksum %d, footer then an unannounced table", v & 1);
             ok = trailing_verdict(forged, (size_t)len + fl, n, src, out, ZXC_ERROR_CORRUPT_DATA,
-                                  sek + fl, what);
+                                  ZXC_ERROR_CORRUPT_DATA, what);
         }
     }
 

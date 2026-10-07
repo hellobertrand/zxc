@@ -127,6 +127,10 @@ ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* ds
  * and blocking, so @c n_threads and the progress callback in @p opts are
  * ignored.
  *
+ * @par Concatenated frames
+ * @p src may hold several frames back to back; they decode in order into
+ * @p dst. Anything else after a frame is @ref ZXC_ERROR_CORRUPT_DATA.
+ *
  * @par Asking without a destination
  * A NULL @p dst, or a @p dst_capacity of 0, decodes nothing and reports what
  * the archive holds: 0 for a well-formed empty one, @ref ZXC_ERROR_DST_TOO_SMALL
@@ -198,12 +202,11 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
                                           const zxc_decompress_opts_t* opts);
 
 /**
- * @brief Reads the original size from an archive footer, without decoding.
+ * @brief Reads the original size from the archive footers, without decoding.
  *
- * The footer is untrusted input, so the value is checked for plausibility
- * against the archive size (each block costs at least a block header and
- * decodes to at most one block): a forged footer claiming an absurd size
- * returns 0 rather than driving an oversized allocation.
+ * Sums the sizes the footers store, walking the frames back from the end. Each
+ * frame is checked like zxc_get_frame_info(), its size against what its bytes
+ * can hold: a forged footer returns 0 rather than drive an oversized allocation.
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.
@@ -225,9 +228,9 @@ ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
 /**
  * @brief What a frame's header and footer declare, read without decoding.
  *
- * Filled by zxc_get_frame_info() and zxc_stream_get_frame_info(); pass them
- * `sizeof(zxc_frame_info_t)`. Fields are only ever added at the end: zero the
- * struct first to read the ones this library does not know as 0.
+ * Filled by zxc_get_frame_info(), zxc_get_last_frame_info() and their FILE*
+ * twins; pass them `sizeof(zxc_frame_info_t)`. Fields are only ever added at
+ * the end: zero the struct first to read the ones this library does not know as 0.
  */
 typedef struct {
     uint64_t decompressed_size; /**< Source bytes the frame decodes to. */
@@ -257,6 +260,29 @@ typedef struct {
  */
 ZXC_EXPORT int zxc_get_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
                                   size_t info_size);
+
+/**
+ * @brief Reads the last frame of @p src, without decoding.
+ *
+ * Same checks as zxc_get_frame_info(), but the frame starts at
+ * `src_size - info->compressed_size`, so concatenated frames walk back:
+ *
+ * @code
+ * size_t n = src_size;
+ * while (n > 0) {
+ *     if (zxc_get_last_frame_info(src, n, &info, sizeof(info)) != ZXC_OK) break;
+ *     n -= info.compressed_size;  // the frame before ends here
+ * }
+ * @endcode
+ *
+ * @param[in]  src        Compressed buffer.
+ * @param[in]  src_size   Bytes of @p src the frame ends.
+ * @param[out] info       Filled on success, untouched otherwise.
+ * @param[in]  info_size  `sizeof(*info)` as the caller compiled it.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
+ */
+ZXC_EXPORT int zxc_get_last_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                       size_t info_size);
 
 /**
  * @brief Returns `sizeof(zxc_frame_info_t)` as compiled into the library.

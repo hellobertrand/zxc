@@ -103,3 +103,11 @@ def test_get_frame_info_invalid():
         zxc.get_frame_info(comp + b"\0")  # the frame no longer spans the buffer
     with pytest.raises(RuntimeError):
         zxc.get_frame_info(b"not a zxc frame at all, long enough")
+
+
+def test_concatenated_archives():
+    # Two archives back to back decode as one (FORMAT.md 2.1); the size query sums them.
+    a, b = b"first frame " * 50, b"second frame " * 70
+    joined = zxc.compress(a) + zxc.compress(b, checksum=True)
+    assert zxc.get_decompressed_size(joined) == len(a) + len(b)
+    assert zxc.decompress(joined, len(a) + len(b)) == a + b

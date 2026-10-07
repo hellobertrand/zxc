@@ -26,7 +26,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Decompress FILE. This is the default mode when **zxc** is invoked under the name **unzxc** (typically an installed symlink). An explicit mode flag still takes precedence.
 
 **-l**, **--list**
-: List archive information, including compressed size, uncompressed size, compression ratio, checksum method, and dictionary ID (if any). Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
+: List archive information: compressed size, uncompressed size, compression ratio, checksum and seek table (`enabled`, `disabled`, or `mixed` across concatenated frames), dictionary ID (if any) and frame count; the file name is shown when several files are listed. Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
 
 **--train**
 : Train a dictionary from the input *FILE*s given as training samples. The output path is set with **-o** (see **--output**); when **-o** is omitted, the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory. See **DICTIONARIES**.
@@ -34,7 +34,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-t**, **--test**
 : Test the integrity of a compressed FILE. It decodes the file and verifies its checksum (if present) without writing any output.
 : Checksum status reflects the archive header. With **-t**, three outcomes are reported: verified, none present, or skipped via **-N**. Input streamed from a pipe reports unknown, since its header cannot be re-read. All four cases exit 0 on a valid archive.
-: Under **-j**, `checksum_verified` is true only when a checksum was actually checked. `checksum_method` reports `RapidHash`, `none`, or `unknown` (pipe input).
+: Under **-j**, `checksum_verified` is true only when a checksum was actually checked. `checksum` reports `enabled`, `disabled`, `mixed` (concatenated frames that differ), or `unknown` (pipe input), the same values as **-l**.
 
 **-b**, **--bench** [*N*]
 : Benchmark in-memory performance. Loads the input file entirely into RAM and measures raw algorithm throughput (default duration is 5 seconds).
@@ -114,6 +114,10 @@ Dictionaries are external `.zxd` files referenced from the archive header by a 3
 When **--train**'s **-o** targets a directory (or is omitted, defaulting to the current directory), **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
 
 If no matching dictionary can be found (or supplied), decompression fails with a dictionary-required error rather than producing corrupt output.
+
+## CONCATENATED ARCHIVES
+
+Archives can be concatenated (`cat a.zxc b.zxc > ab.zxc`): **-d** decodes them one after the other into one output, and **-t** checks every one. Each keeps its own block size, checksum, seek table and dictionary; **-l** reports the frame count and `mixed` where they differ; with **-v** or **-j** it lists every block size and dictionary ID instead. **-D** supplies one dictionary: frames compressed with another fail with a dictionary-mismatch error.
 
 ## EXAMPLES
 

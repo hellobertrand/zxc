@@ -543,6 +543,90 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     return ZXC_OK;
 }
 
+/** @brief Reads a byte range of a scan source, refusing ranges past its end. */
+static int zxc_scan_read(const zxc_scan_src_t* src, const uint64_t off, void* dst,
+                         const size_t len) {
+    if (UNLIKELY(off > src->size || (uint64_t)len > src->size - off))
+        return ZXC_ERROR_SRC_TOO_SMALL;
+    if (src->read_at) return src->read_at(src, off, dst, len);
+    ZXC_MEMCPY(dst, src->data + off, len);
+    return ZXC_OK;
+}
+
+int zxc_container_next(const zxc_scan_src_t* src, const uint64_t pos) {
+    if (pos == src->size) return 0;
+    uint8_t m[sizeof(uint32_t)];
+    if (src->size - pos >= sizeof(m)) {
+        const int rc = zxc_scan_read(src, pos, m, sizeof(m));
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+        if (zxc_magic_prefix_ok(m, sizeof(m))) return 1;
+    }
+    return pos == 0 ? ZXC_ERROR_BAD_MAGIC : ZXC_ERROR_CORRUPT_DATA;
+}
+
+int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* start,
+                   zxc_frame_info_t* info, size_t* footer_len) {
+    uint8_t h[ZXC_FILE_HEADER_SIZE];
+    int rc;
+    // Too short for a frame: what is left starts the input, its header speaks first.
+    if (UNLIKELY(end < ZXC_FRAME_MIN_SIZE)) {
+        const size_t n = end < sizeof(h) ? (size_t)end : sizeof(h);
+        size_t chunk = 0;
+        rc = zxc_scan_read(src, 0, h, n);
+        if (rc == ZXC_OK) rc = zxc_read_file_header(h, n, &chunk, NULL, NULL, NULL);
+        return rc != ZXC_OK ? rc : ZXC_ERROR_SRC_TOO_SMALL;
+    }
+    uint8_t tail[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];  // end > sizeof(tail)
+    rc = zxc_scan_read(src, end - sizeof(tail), tail, sizeof(tail));
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    uint64_t dsize = 0;
+    uint64_t frame = 0;
+    size_t sizes = 0;
+    rc = zxc_parse_file_footer(tail + sizeof(tail), sizeof(tail), &dsize, &frame, &sizes);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    if (UNLIKELY(frame < ZXC_FRAME_MIN_SIZE || frame > end)) return ZXC_ERROR_CORRUPT_DATA;
+
+    const uint64_t at = end - frame;
+    rc = zxc_scan_read(src, at, h, sizeof(h));
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    const size_t tl = zxc_frame_tail_len(frame);
+    rc = zxc_read_frame_info(h, tail + sizeof(tail) - tl, tl, frame, info, footer_len);
+    // Past the first frame, a wrong magic word is a broken container.
+    if (UNLIKELY(rc == ZXC_ERROR_BAD_MAGIC && at != 0)) return ZXC_ERROR_CORRUPT_DATA;
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    *start = at;
+    return ZXC_OK;
+}
+
+int zxc_scan_container(const zxc_scan_src_t* src, const size_t req_chunk,
+                       zxc_container_info_t* info) {
+    ZXC_MEMSET(info, 0, sizeof(*info));
+    // The first header speaks first, as for a single frame: junk is a bad magic word.
+    uint8_t h[ZXC_FILE_HEADER_SIZE];
+    const size_t n = src->size < sizeof(h) ? (size_t)src->size : sizeof(h);
+    size_t chunk = 0;
+    int hrc = zxc_scan_read(src, 0, h, n);
+    if (hrc == ZXC_OK) hrc = zxc_read_file_header(h, n, &chunk, NULL, NULL, NULL);
+    if (UNLIKELY(hrc != ZXC_OK)) return hrc;
+
+    uint64_t end = src->size;
+    do {
+        zxc_frame_info_t fi;
+        uint64_t start = 0;
+        const int rc = zxc_scan_frame(src, end, &start, &fi, NULL);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+        if (UNLIKELY(req_chunk && fi.block_size != req_chunk)) return ZXC_ERROR_BAD_BLOCK_SIZE;
+        if (UNLIKELY(fi.decompressed_size > UINT64_MAX - info->dsize))
+            return ZXC_ERROR_CORRUPT_DATA;
+        info->dsize += fi.decompressed_size;
+        info->frames++;
+        info->first_dict_id = fi.dict_id;  // walking back, the last one seen is first
+        if (fi.dict_id) info->uses_dict = 1;
+        end = start;
+    } while (end > 0);
+    return ZXC_OK;
+}
+
 /**
  * @brief Validates a frame from its header and the end of its bytes.
  *

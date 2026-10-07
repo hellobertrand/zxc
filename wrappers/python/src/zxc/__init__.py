@@ -334,7 +334,8 @@ def compress(
 
 
 def get_decompressed_size(data: bytes) -> int:
-    """Get the original decompressed size of a ZXC compressed buffer.
+    """Get the original decompressed size of a ZXC compressed buffer, summed
+    over concatenated archives.
 
     Args:
         data (bytes): Compressed bytes buffer.
@@ -367,8 +368,9 @@ def get_frame_info(data: bytes) -> FrameInfo:
     """Read a frame's header and footer, without decoding.
 
     The header is validated as a decoder would, the footer parsed back from the
-    end, and the frame must span all of ``data``. Blocks are not read, so a frame
-    that passes may still fail to decode.
+    end, and the frame must span all of ``data``: concatenated archives are
+    refused, :func:`get_decompressed_size` gives their total. Blocks are not
+    read, so a frame that passes may still fail to decode.
 
     Raises:
         RuntimeError: on an invalid frame, with the zxc error name.
@@ -555,9 +557,10 @@ class Seekable:
     def set_dict(self, dict: bytes, dict_huf: bytes | None = None) -> None:
         """Attach a pre-trained dictionary to this seekable handle.
 
-        Required before :meth:`decompress_range` when the archive was
-        compressed with a dictionary. The content is copied internally, so
-        *dict* may be freed after this call.
+        Required before :meth:`decompress_range` reaches a frame compressed
+        with a dictionary. Call it once per dictionary when concatenated frames
+        use several; one no frame uses raises. The content is copied
+        internally, so *dict* may be freed after this call.
         """
         self._ensure_open()
         dict, dict_huf = _split_dict_arg(dict, dict_huf)
@@ -802,8 +805,9 @@ class DStream:
 
     The Python counterpart of the C ``zxc_dstream``. Feed compressed bytes
     via :meth:`decompress`; each call returns the decompressed bytes
-    produced so far. After all input has been fed, :attr:`finished` becomes
-    ``True`` once the file footer is validated.
+    produced so far. Concatenated archives decode as one stream; after all
+    input has been fed, :attr:`finished` is ``True`` if it ended on a validated
+    footer.
 
     Example::
 
@@ -823,7 +827,8 @@ class DStream:
         """Push *data* and return the decompressed bytes produced.
 
         May return ``b""`` if the parser is still waiting for more input
-        (e.g. mid-header).
+        (e.g. mid-header). An error found after a frame's output (bytes that
+        open no other frame) is raised by the next call, that output first.
         """
         if self._handle is None:
             raise ValueError("DStream is closed")
@@ -831,8 +836,8 @@ class DStream:
 
     @property
     def finished(self) -> bool:
-        """``True`` once the decoder has reached and validated the file
-        footer. Useful to detect truncated input."""
+        """``True`` when the input so far ends on a validated footer, until more
+        input starts the next frame. Useful to detect truncated input."""
         if self._handle is None:
             return False
         return pyzxc_dstream_finished(self._handle)
@@ -885,10 +890,15 @@ class DStream:
 
 
 class ZxcReader(_io.RawIOBase):
-    """Decompresses a ZXC frame read from a binary file-like object.
+    """Decompresses ZXC frames (concatenated archives too) read from a binary
+    file-like object.
 
     Implements the standard :class:`io.RawIOBase` interface so it can be
     plugged into any code that expects a readable binary stream.
+
+    Like gzip and zstd readers it reads the source until it ends, so
+    concatenated archives decode as one stream; on a source that stays open
+    after one frame, use :class:`DStream` and stop once it is finished.
 
     Raises :class:`OSError` with ``errno=None`` if the underlying source is
     drained before the ZXC footer is reached (truncated frame).
@@ -923,9 +933,8 @@ class ZxcReader(_io.RawIOBase):
         if n_out == 0:
             return 0
 
+        # A finished frame may be followed by another: stop only once the source ends.
         while not self._pending:
-            if self._ds.finished:
-                return 0
             inbuf = b""
             if not self._eof_src:
                 chunk = self._src.read(self._bufsize)

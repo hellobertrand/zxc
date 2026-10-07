@@ -736,7 +736,102 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
     return 0;
 }
 
-static int zxc_list_archive(const char* path, int json_output) {
+/** @brief What a walk of a container finds. */
+typedef struct {
+    zxc_frame_info_t first; /* the first frame */
+    uint64_t frames;        /* ZXC frames */
+    uint64_t checksummed;   /* frames carrying checksums */
+    uint64_t seekable;      /* frames carrying a seek table */
+    uint32_t block_sizes;   /* OR of every block size, each a power of 2 */
+    uint32_t* dict_ids;     /* distinct dictionary ids in file order, 0 for none */
+    size_t num_dict_ids;
+    size_t cap_dict_ids;
+    uint64_t dsize;  /* their decompressed sizes, summed */
+    uint64_t digest; /* the last frame's digest, when it has one */
+} cli_container_t;
+
+/**
+ * @brief Walks the frames concatenated in @p f, from the last back to the first,
+ *        through zxc_stream_get_last_frame_info(). Rewinds @p f; free
+ *        @c c->dict_ids afterwards, whatever the result.
+ *
+ * @return @ref ZXC_OK, or the library's verdict on the first frame that fails.
+ */
+static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
+    memset(c, 0, sizeof(*c));
+    uint64_t end = file_size;
+    int rc = ZXC_OK;
+    do {
+        zxc_frame_info_t fi;
+        rc = zxc_stream_get_last_frame_info(f, end, &fi, sizeof(fi));
+        if (rc != ZXC_OK) break;
+        if (c->frames++ == 0) c->digest = fi.digest;
+        c->checksummed += fi.has_checksum;
+        c->seekable += fi.has_seek_table;
+        if (fi.decompressed_size > UINT64_MAX - c->dsize) {
+            rc = ZXC_ERROR_CORRUPT_DATA;
+            break;
+        }
+        c->dsize += fi.decompressed_size;
+        c->block_sizes |= (uint32_t)fi.block_size;
+        // File order of first appearance: walking back, a repeat moves to the end,
+        // and the list is reversed below.
+        size_t k = 0;
+        while (k < c->num_dict_ids && c->dict_ids[k] != fi.dict_id) k++;
+        if (k < c->num_dict_ids) {
+            memmove(c->dict_ids + k, c->dict_ids + k + 1,
+                    (c->num_dict_ids - k - 1) * sizeof(uint32_t));
+            c->dict_ids[c->num_dict_ids - 1] = fi.dict_id;
+        } else {
+            if (c->num_dict_ids == c->cap_dict_ids) {
+                const size_t cap = c->cap_dict_ids ? 2 * c->cap_dict_ids : 4;
+                uint32_t* const grown = (uint32_t*)realloc(c->dict_ids, cap * sizeof(uint32_t));
+                if (!grown) {
+                    rc = ZXC_ERROR_MEMORY;
+                    break;
+                }
+                c->dict_ids = grown;
+                c->cap_dict_ids = cap;
+            }
+            c->dict_ids[c->num_dict_ids++] = fi.dict_id;
+        }
+        c->first = fi;  // the first frame's, once the walk is done
+        end -= fi.compressed_size;
+    } while (end > 0);
+    for (size_t i = 0; i < c->num_dict_ids / 2; i++) {
+        const uint32_t t = c->dict_ids[i];
+        c->dict_ids[i] = c->dict_ids[c->num_dict_ids - 1 - i];
+        c->dict_ids[c->num_dict_ids - 1 - i] = t;
+    }
+    if (fseeko(f, 0, SEEK_SET) != 0 && rc == ZXC_OK) rc = ZXC_ERROR_IO;
+    return rc;
+}
+
+/** @brief Prints the block sizes, ascending; in JSON an array when they differ. */
+static void cli_print_block_sizes(const cli_container_t* c, const int json) {
+    const int many = (c->block_sizes & (c->block_sizes - 1)) != 0;
+    if (json && many) printf("[");
+    for (uint32_t b = c->block_sizes; b; b &= b - 1)
+        printf(json ? "%s%u" : "%s%u KB", b == c->block_sizes ? "" : ", ", (b & (0U - b)) / 1024);
+    if (json && many) printf("]");
+}
+
+/** @brief Prints the dictionary ids in file order, "none" (JSON null) for frames
+ *  without one; in JSON an array when they differ. */
+static void cli_print_dict_ids(const cli_container_t* c, const int json) {
+    if (json && c->num_dict_ids > 1) printf("[");
+    for (size_t i = 0; i < c->num_dict_ids; i++) {
+        const uint32_t id = c->dict_ids[i];
+        if (i) printf(", ");
+        if (id)
+            printf(json ? "\"0x%08X\"" : "0x%08X", id);
+        else
+            printf(json ? "null" : "none");
+    }
+    if (json && c->num_dict_ids > 1) printf("]");
+}
+
+static int zxc_list_archive(const char* path, int json_output, int show_name) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
         fprintf(stderr, "Error: Invalid input file '%s': %s\n", path, strerror(errno));
@@ -780,23 +875,29 @@ static int zxc_list_archive(const char* path, int json_output) {
         fseeko(f, 0, SEEK_SET);
     }
 
-    // Header and footer fields, read by the library.
-    zxc_frame_info_t info;
-    const int frc = zxc_stream_get_frame_info(f, &info, sizeof(info));
+    // Every frame, checked by the library.
+    cli_container_t cont;
+    const int walked = zxc_cli_walk(f, (uint64_t)file_size, &cont);
     fclose(f);
-    if (frc != ZXC_OK) {
-        fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(frc));
+    if (walked != ZXC_OK) {
+        free(cont.dict_ids);
+        fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(walked));
         return 1;
     }
-    const uint64_t uncompressed_size = info.decompressed_size;
-    const unsigned format_version = info.format_version;
-    const size_t block_size_kb = info.block_size / 1024;
-    const int has_checksum = info.has_checksum;
-    const char* checksum_method = has_checksum ? "RapidHash" : "-";
+    const uint64_t uncompressed_size = cont.dsize;
+    const unsigned format_version = cont.first.format_version;
+    const int mixed_dict = cont.num_dict_ids > 1;
+    // Checksums when every frame carries them; a digest only describes one frame.
+    const int has_checksum = cont.checksummed == cont.frames;
+    const int mixed_checksum = cont.checksummed != 0 && !has_checksum;
+    const char* checksum_state = has_checksum ? "enabled" : mixed_checksum ? "mixed" : "disabled";
+    const char* seekable_state = cont.seekable == cont.frames ? "enabled"
+                                 : cont.seekable              ? "mixed"
+                                                              : "disabled";
     char digest_str[24] = "null";
-    if (has_checksum)
-        snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)info.digest);
-    const uint32_t dict_id = info.dict_id;
+    if (has_checksum && cont.frames == 1)
+        snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)cont.digest);
+    const uint32_t dict_id = cont.first.dict_id;
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
@@ -809,10 +910,13 @@ static int zxc_list_archive(const char* path, int json_output) {
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
     format_size_decimal(uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
-    if (dict_id)
+    if (mixed_dict)
+        snprintf(dict_id_str, sizeof(dict_id_str), "mixed");
+    else if (dict_id)
         snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
     else
         snprintf(dict_id_str, sizeof(dict_id_str), "-");
+    const int show_dict = dict_id || mixed_dict;
 
     if (json_output) {
         printf(
@@ -822,59 +926,86 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"uncompressed_size_bytes\": %llu,\n"
             "  \"compression_ratio\": %.3f,\n"
             "  \"format_version\": %u,\n"
-            "  \"block_size_kb\": %zu,\n"
-            "  \"checksum_method\": \"%s\",\n"
+            "  \"block_size_kb\": ",
+            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version);
+        cli_print_block_sizes(&cont, 1);
+        printf(
+            ",\n"
+            "  \"checksum\": \"%s\",\n"
+            "  \"seekable\": \"%s\",\n"
             "  \"digest\": %s,\n"
-            "  \"dict_id\": %s%s%s\n"
+            "  \"dict_id\": ",
+            checksum_state, seekable_state, digest_str);
+        cli_print_dict_ids(&cont, 1);
+        printf(
+            ",\n"
+            "  \"frames\": %llu\n"
             "}\n",
-            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version,
-            block_size_kb, has_checksum ? "RapidHash" : "none", digest_str, dict_id ? "\"" : "",
-            dict_id ? dict_id_str : "null", dict_id ? "\"" : "");
+            (unsigned long long)cont.frames);
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
             "\nFile: %s\n"
             "-----------------------\n"
-            "Block Format: %u\n"
-            "Block Size:   %zu KB\n"
-            "Checksum Method: %s\n",
-            path, format_version, block_size_kb, has_checksum ? "RapidHash" : "None");
+            "Block Format:  %u\n"
+            "Block Size:    ",
+            path, format_version);
+        cli_print_block_sizes(&cont, 0);
+        printf(
+            "\n"
+            "Checksum:      %s\n"
+            "Seekable:      %s\n",
+            checksum_state, seekable_state);
 
-        if (has_checksum) printf("Digest:          %s\n", digest_str);
-        if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
+        if (has_checksum && cont.frames == 1) printf("Digest:        %s\n", digest_str);
+        if (show_dict) {
+            printf("Dictionary ID: ");
+            cli_print_dict_ids(&cont, 0);
+            printf("\n");
+        }
+        if (cont.frames > 1) printf("Frames:        %llu\n", (unsigned long long)cont.frames);
 
         printf(
             "-----------------------\n"
-            "Comp. Size:   %s\n"
-            "Uncomp. Size: %s\n"
-            "Ratio:        %.2f\n",
+            "Comp. Size:    %s\n"
+            "Uncomp. Size:  %s\n"
+            "Ratio:         %.2f\n",
             comp_str, uncomp_str, ratio);
     } else {
-        // Normal mode: table format
-        printf("\n  %12s   %12s   %5s   %-10s   %-10s   %s\n", "Compressed", "Uncompressed",
-               "Ratio", "Checksum", "Dict ID", "Filename");
-        printf("  %12s   %12s   %5.2f   %-10s   %-10s   %s\n", comp_str, uncomp_str, ratio,
-               checksum_method, dict_id_str, path);
+        // Normal mode: table format, the file named only when several are listed
+        printf("\n  %12s   %12s   %5s   %-10s   %-10s   %-10s   %6s%s\n", "Compressed",
+               "Uncompressed", "Ratio", "Checksum", "Seekable", "Dict ID", "Frames",
+               show_name ? "   Filename" : "");
+        printf("  %12s   %12s   %5.2f   %-10s   %-10s   %-10s   %6llu%s%s\n", comp_str, uncomp_str,
+               ratio, checksum_state, seekable_state, dict_id_str, (unsigned long long)cont.frames,
+               show_name ? "   " : "", show_name ? path : "");
     }
 
+    free(cont.dict_ids);
     return 0;
 }
 
 /**
- * @brief Reports whether an archive's header declares a global checksum.
+ * @brief Reports whether an archive's frames declare checksums.
  *
- * Reads the frame info from @p f and rewinds it to the start, where decoding
+ * Walks the container in @p f and rewinds it to the start, where decoding
  * begins, so the checksum status describes the same file that is decoded.
  *
  * @param[in] f Seekable input stream for the archive (not stdin).
- * @return 1 if declared, 0 if not, -1 if the frame could not be read.
+ * @return 1 if every frame declares one, 2 if only some do, 0 if none does,
+ *         -1 if the layout could not be read.
  */
 static int zxc_archive_has_checksum(FILE* f) {
-    zxc_frame_info_t info;
-    int declared =
-        zxc_stream_get_frame_info(f, &info, sizeof(info)) == ZXC_OK ? info.has_checksum : -1;
-    if (fseeko(f, 0, SEEK_SET) != 0) declared = -1;
-    return declared;
+    cli_container_t c;
+    if (fseeko(f, 0, SEEK_END) != 0) return -1;
+    const long long size = ftello(f);
+    const int rc = size < 0 ? ZXC_ERROR_IO : zxc_cli_walk(f, (uint64_t)size, &c);
+    if (size >= 0) free(c.dict_ids);
+    if (rc != ZXC_OK) {
+        fseeko(f, 0, SEEK_SET);
+        return -1;
+    }
+    return c.checksummed == 0 ? 0 : c.checksummed == c.frames ? 1 : 2;
 }
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -1147,26 +1278,29 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (bytes >= 0) {
         if (mode == MODE_INTEGRITY) {
             // Test mode: show result
-            // checksum_method uses the same spellings as -l -j
-            const int verified = (archive_has_checksum > 0) && checksum_enabled;
-            const char* method = (archive_has_checksum > 0)    ? "RapidHash"
-                                 : (archive_has_checksum == 0) ? "none"
-                                                               : "unknown";
-            const char* summary = (archive_has_checksum == 0)  ? "not verified (archive has none)"
-                                  : !checksum_enabled          ? "not verified (skipped by -N)"
-                                  : (archive_has_checksum > 0) ? "verified (RapidHash)"
-                                  : use_stdin                  ? "unknown (streamed input)"
-                                                               : "unknown (frame unreadable)";
+            // "checksum" uses the same spellings as -l
+            const int verified = (archive_has_checksum == 1) && checksum_enabled;
+            const char* state = (archive_has_checksum == 1)   ? "enabled"
+                                : (archive_has_checksum == 2) ? "mixed"
+                                : (archive_has_checksum == 0) ? "disabled"
+                                                              : "unknown";
+            const char* summary = (archive_has_checksum == 0)   ? "not verified (archive has none)"
+                                  : !checksum_enabled           ? "not verified (skipped by -N)"
+                                  : (archive_has_checksum == 1) ? "verified"
+                                  : (archive_has_checksum == 2)
+                                      ? "partly verified (some frames have none)"
+                                  : use_stdin ? "unknown (streamed input)"
+                                              : "unknown (frame unreadable)";
             if (json_output) {
                 printf(
                     "{\n"
                     "  \"filename\": \"%s\",\n"
                     "  \"status\": \"ok\",\n"
                     "  \"checksum_verified\": %s,\n"
-                    "  \"checksum_method\": \"%s\",\n"
+                    "  \"checksum\": \"%s\",\n"
                     "  \"time_seconds\": %.6f\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>", verified ? "true" : "false", method, dt);
+                    in_path ? in_path : "<stdin>", verified ? "true" : "false", state, dt);
             } else if (g_verbose) {
                 printf(
                     "%s: OK\n"
@@ -1953,7 +2087,7 @@ int main(int argc, char** argv) {
         if (json_output && num_files > 1) printf("[\n");
 
         for (int i = optind; i < argc; i++) {
-            const int r = zxc_list_archive(argv[i], json_output);
+            const int r = zxc_list_archive(argv[i], json_output, num_files > 1);
             // Keep the JSON array well-formed: a failed entry prints nothing,
             // so emit an error object in its place
             if (r != 0 && json_output)
