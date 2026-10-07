@@ -99,11 +99,13 @@ three goals:
    self-contained core suitable for embedding in operating system
    kernels or freestanding environments.
 
-The format is block-oriented. A file is a sequence of independently
+The format is block-oriented. A frame is a sequence of independently
 decodable blocks of a fixed maximum decompressed size, terminated by
 a distinguished end-of-stream block and followed by a small footer
-carrying the original source size and, when checksums are enabled, a
-digest of the whole archive.
+carrying the original source size, the frame's compressed size and,
+when checksums are enabled, a digest of the whole frame. A file is one
+or more frames back to back, so archives concatenated as they are
+decode as one.
 
 Three payload encodings are defined: RAW (uncompressed), GLO
 (general LZ at higher ratio, with separated streams and optional
@@ -134,6 +136,11 @@ Block:
   block header, a payload of Compressed Payload Size bytes, and an
   OPTIONAL 4-byte trailing checksum.
 
+Frame:
+: A File Header, its data blocks, the EOF block, the SEK block when
+  flagged, and the File Footer: the unit {{overall-structure}} lays out.
+  A file holds one or more frames ({{concatenated-frames}}).
+
 Block size:
 : The maximum decompressed size of a single block, derived from the
   chunk-size code in the file header. A block size is a power of two
@@ -151,7 +158,7 @@ Conforming decoder:
 
 # Overall Structure of a ZXC File {#overall-structure}
 
-A ZXC file is the concatenation, in this order, of:
+A ZXC frame is the concatenation, in this order, of:
 
 ~~~
 +-----------------------------+
@@ -166,19 +173,44 @@ A ZXC file is the concatenation, in this order, of:
 +-----------------------------+
 |   SEK Block (if flagged)    |
 +-----------------------------+
-|   File Footer (8/16 bytes)  |
+| File Footer (3 to 17 bytes, |
+|   plus 8 with a digest)     |
 +-----------------------------+
 ~~~
 
-The File Footer always ends the file. It is 8 bytes long, or 16 when
-HAS_CHECKSUM = 1 ({{file-footer}}), so its length follows from the File
-Header alone. Decoders MAY rely on this invariant to locate the footer
-by seeking that many bytes before the end of the file.
+The File Footer always ends the frame. Its last byte gives the lengths
+of its two sizes ({{file-footer}}), so a decoder MAY parse it back from
+the end of the frame without reading the File Header.
 
 The SEK block is present if and only if the File Header sets
 HAS_SEEK_TABLE ({{file-header}}). A conforming encoder MUST emit exactly
 one EOF block per stream, then the SEK block when HAS_SEEK_TABLE = 1,
 then the footer.
+
+## Concatenated Frames {#concatenated-frames}
+
+A file holds one or more frames back to back, each starting with the
+Magic 0x9CB02EF5. Frames are independent: each has its own File Header,
+block size, flags, block indices (the checksum seed of
+{{per-block-checksum}} restarts at 0) and File Footer. Their outputs are
+concatenated in order, so two archives concatenated as they are decode to
+their two sources concatenated.
+
+After each File Footer, a decoder reads the next 4 bytes:
+
+- at the end of the input, decoding is complete;
+- the Magic starts the next frame;
+- anything else, including 1 to 3 trailing bytes, MUST be rejected as
+  corrupt data.
+
+An empty input is truncated, and a bad Magic at offset 0 is a bad magic.
+A single-frame file is the frame layout alone, so a decoder that does not
+support concatenation rejects a concatenated file (bytes after the
+footer) rather than misreading it.
+
+Each File Footer stores its frame's Compressed Frame Size, so a reader
+MAY also walk the frames back from the end of the input without decoding
+them ({{sek-block}}).
 
 # File Header {#file-header}
 
@@ -272,11 +304,13 @@ than skipping it ({{compatibility-rules}}).
 ## Block Header Semantics
 
 Block Flags (u8):
-: RESERVED. Encoders MUST write 0. Decoders MUST ignore non-zero
-  values from future revisions.
+: RESERVED: no flag is defined. Encoders MUST write 0. Decoders MUST
+  ignore non-zero values, except in the EOF and SEK block headers,
+  which they MUST reject ({{eof-block}}, {{sek-block}}).
 
 Reserved (u8):
-: MUST be set to 0 by encoders. MUST be ignored by decoders.
+: MUST be set to 0 by encoders. Decoders MUST ignore it, except in
+  the EOF and SEK block headers, as for Block Flags.
 
 Compressed Payload Size:
 : The size in bytes of the block payload. This size does NOT
@@ -701,7 +735,7 @@ Payload Size is 0.
 
 The table is a sequence of groups of 64 data blocks. A group is its
 Anchor, the byte offset of its first block's header from the start of
-the file as a u64, followed by one u32 per block: the block's on-disk
+the frame (its File Header) as a u64, followed by one u32 per block: the block's on-disk
 size, that is its header, payload and trailing checksum if any. Group j
 starts j x 264 bytes into the table, and only the last group MAY hold
 fewer than 64 sizes. Block i starts at the Anchor of group floor(i / 64)
@@ -734,19 +768,22 @@ The table is not authenticated ({{seek-table-integrity}}).
 A decoder that accesses blocks without scanning the archive linearly MAY
 use the following procedure:
 
-1. Read the File Header (first 16 bytes) and derive the block size from
-   the Chunk Size Code. If HAS_SEEK_TABLE is clear, the archive is not
-   seekable.
-2. Read the File Footer (last 8 bytes, or 16 when HAS_CHECKSUM = 1) and
-   extract Source Size from its first 8 bytes.
+1. Parse the File Footer back from the end of the input ({{file-footer}})
+   and extract Source Size and Compressed Frame Size, which gives where
+   the frame's File Header starts.
+2. Read that File Header and derive the block size from the Chunk Size
+   Code. If HAS_SEEK_TABLE is clear, the input is not seekable.
 3. Compute N = ceil(Source Size / block size).
 4. Compute the size of the SEK block as 8 + T ({{sek-layout}}).
-5. Seek backward by that many bytes from the start of the footer to
+5. Seek backward by that many bytes from the start of the footer (its
+   sizes, preceded by the 8-byte Archive Digest when HAS_CHECKSUM = 1) to
    locate the SEK block header.
-6. Validate that the located block has Block Type == 254, that its
-   Compressed Payload Size equals the fold of T, and that an EOF block
-   header occupies the 8 bytes before it. A decoder MUST reject an
-   archive that fails this check.
+6. Validate that the located header is the one SEK block header N admits:
+   Block Type 254, Block Flags and Reserved 0, a Compressed Payload Size
+   equal to the fold of T, and its Header Checksum; and that the one valid
+   EOF block header ({{eof-block}}) occupies the 8 bytes before it. A
+   decoder MUST reject an archive that fails this check. A decoder MAY
+   defer this check to the first access of the frame's blocks.
 7. Read nothing else when the archive is opened. A decoder validates a
    group when it first accesses one of its blocks, and MUST reject the
    access unless the Anchor of group 0 is 16, every Anchor lies between
@@ -765,19 +802,33 @@ lands exactly on the next group's Anchor, or on the EOF block for the
 last group. Checking the next Anchor is OPTIONAL, and refuses an intact
 group when that Anchor is damaged.
 
+Anchors are offsets from the frame's own File Header, so a frame's table
+reads the same once concatenated ({{concatenated-frames}}). The frame
+before ends where this one starts: a decoder repeats the procedure from
+step 1 until the start of the input. Blocks and decompressed offsets then
+run across the frames in order, and a block's checksum seed remains its
+index within its frame.
+
 ## Sequential Reading
 
 The File Header states what follows the EOF block, so a sequential
 decoder never guesses from those bytes. Guessing would be unreliable:
-the footer opens with Source Size, and about one size in 65536 parses as
-a valid SEK block header.
+the footer opens with the Archive Digest or Source Size, and about one
+value in 65536 parses as a valid SEK block header.
 
 With HAS_SEEK_TABLE = 1, a decoder reads the SEK block header and MUST
-reject it unless its Block Type is 254 and its Compressed Payload Size
-equals the fold of T, with N derived from the bytes it produced. It then
-skips T bytes, counted in 64 bits, and reads the footer. With
-HAS_SEEK_TABLE = 0, the footer comes next, and a SEK block found there
-MUST be rejected.
+reject it unless it is, byte for byte, the one header the frame admits:
+Block Type 254, Block Flags and Reserved 0, a Compressed Payload Size
+equal to the fold of T, with N derived from the bytes it produced, and
+its Header Checksum. It then skips T bytes, counted in 64 bits, and
+reads the footer. With HAS_SEEK_TABLE = 0, the footer comes next, and a
+SEK block found there MUST be rejected.
+
+That header being fully determined, a decoder MAY check its bytes as
+they arrive: a differing byte is corrupt data, a matching but short
+prefix a truncation. With zero reserved bytes, a footer shorter than 8
+bytes behind a flag that lies never matches its start, so it reads as
+corrupt data, never as a truncated table.
 
 # EOF Block (Type 255) {#eof-block}
 
@@ -785,8 +836,9 @@ The EOF block marks the end of the data block stream.
 
 A conforming EOF block:
 
-- MUST have an 8-byte block header.
-- MUST have Compressed Payload Size == 0.
+- MUST have an 8-byte block header in its one valid form: Block
+  Type 255, Block Flags, Reserved and Compressed Payload Size all 0,
+  and its Header Checksum. Decoders MUST reject any other.
 - MUST NOT carry a payload.
 - MUST NOT be followed by a trailing 4-byte checksum, regardless of
   the HAS_CHECKSUM flag.
@@ -970,8 +1022,8 @@ alter the compressed bytes.
 
 ## Archive Digest {#archive-digest}
 
-When HAS_CHECKSUM = 1, the File Footer carries an 8-byte Archive Digest
-after Source Size. It is an ordered 64-bit fold of the checksums of all
+When HAS_CHECKSUM = 1, the File Footer opens with an 8-byte Archive
+Digest, before the sizes. It is an ordered 64-bit fold of the checksums of all
 data blocks, in stream order, where c is the 4-byte value stored after a
 block, widened to 64 bits:
 
@@ -994,24 +1046,52 @@ table cannot verify it, since it does not see every block.
 
 # File Footer {#file-footer}
 
-The File Footer is mandatory and ends the file. It is 8 bytes long when
-HAS_CHECKSUM = 0 and 16 bytes long when HAS_CHECKSUM = 1. It follows the
-EOF block header, or the SEK block when HAS_SEEK_TABLE = 1.
+The File Footer is mandatory and ends the frame. It follows the EOF
+block header, or the SEK block when HAS_SEEK_TABLE = 1.
 
 ~~~
- Offset  Size  Field
- 0x00    8     Source Size
- 0x08    8     Archive Digest (only when HAS_CHECKSUM = 1)
+ Size  Field
+ 8     Archive Digest (only when HAS_CHECKSUM = 1)
+ nd    Source Size (LE, nd = 1..8 bytes)
+ nf    Compressed Frame Size (LE, nf = 1..8 bytes)
+ 1     L = (nd - 1) | (nf - 1) << 4   (bits 3 and 7 RESERVED, 0)
 ~~~
-
-Source Size:
-: The total uncompressed size of the source data, in bytes. After
-  decoding, a conforming decoder MUST verify that its produced
-  output size matches this value.
 
 Archive Digest:
 : The fold of the per-block checksums defined in {{archive-digest}}.
   Present if and only if HAS_CHECKSUM = 1.
+
+Source Size:
+: The total uncompressed size of the frame, in bytes. After decoding,
+  a conforming decoder MUST verify that its produced output size
+  matches this value.
+
+Compressed Frame Size:
+: The size of the whole frame in bytes, from its Magic to L included.
+
+L:
+: The lengths of the two sizes; the frame's last byte.
+
+Each size MUST be written on the fewest bytes that hold it (0 takes one
+byte), and a decoder MUST reject any other length or a non-zero reserved
+bit of L: a frame has exactly one valid footer. Compressed Frame Size
+counts its own bytes; nf is the smallest length for which the total it
+yields fits in nf bytes, which is unique. The footer is 3 to 17 bytes
+long, plus 8 with the Archive Digest.
+
+Reading back from the end (the seekable reader, size queries), L gives
+nd and nf, so the two sizes are found without the File Header; Compressed
+Frame Size then gives the offset of the frame's File Header, and with
+HAS_CHECKSUM = 1 the Archive Digest sits right before the sizes.
+
+Reading forward (sequential decoders), a decoder knows the bytes it
+produced and the offset the footer starts at, so it computes the one
+footer the frame implies and compares it byte for byte, the Archive
+Digest aside; it reads no byte past L.
+
+For example, 10 000 000 source bytes compressed to a 3 000 000-byte
+prefix without checksums end with 80 96 98 | C7 C6 2D | 22: Source Size
+0x989680 on 3 bytes, Compressed Frame Size 3 000 007 on 3, L = 0x22.
 
 # Pre-Trained Dictionary Support {#dictionary}
 
@@ -1209,7 +1289,8 @@ following procedure:
 2. Loop over blocks:
 
    a. Read the 8-byte block header. Validate the Header Checksum.
-   b. If the block is the EOF block, exit the loop.
+   b. If the block is the EOF block, require its one valid form
+      ({{eof-block}}) and exit the loop.
    c. Validate Compressed Payload Size against the block size
       ({{block-container}}), then read that many bytes of payload.
    d. Decode the payload according to the Block Type
@@ -1219,14 +1300,18 @@ following procedure:
       ({{per-block-checksum}}), and fold it into the Archive Digest
       ({{archive-digest}}).
 
-3. If HAS_SEEK_TABLE = 1, read the SEK block header, require the
-   Compressed Payload Size that {{sek-block}} derives from the produced
-   output, and skip the table. If HAS_SEEK_TABLE = 0, the footer follows
-   the EOF block directly.
-4. Read the File Footer, 8 bytes or 16 when HAS_CHECKSUM = 1. Verify
-   that the produced output size matches Source Size. If
+3. If HAS_SEEK_TABLE = 1, read the SEK block header, require the one
+   header {{sek-block}} derives from the produced output, and skip the
+   table. If HAS_SEEK_TABLE = 0, the footer follows the EOF block
+   directly.
+4. Compute the File Footer the frame implies from the produced output
+   size and the bytes read so far ({{file-footer}}), read exactly that
+   many bytes, and require them to match, the Archive Digest aside. If
    HAS_CHECKSUM = 1 and checksums are being verified, verify that the
    recomputed digest matches the footer's Archive Digest.
+5. Read the next 4 bytes and follow {{concatenated-frames}}: the end of
+   the input completes decoding, the Magic starts another frame at
+   step 1, anything else is rejected.
 
 A decoder MUST NOT return successfully if any of the validation
 steps above fail. In particular, exhausting the input before reaching
@@ -1272,7 +1357,9 @@ Reserved fields:
   encoders. The decoder tolerates (ignores) non-zero reserved
   values, which are covered by the header checksum; assigning a reserved
   field any meaning is a version bump, never a same-version
-  extension.
+  extension. The EOF and SEK block headers are the exception: a
+  decoder MUST reject one whose Block Flags or Reserved byte is
+  non-zero ({{eof-block}}, {{sek-block}}).
 
 ## Minimum Conforming Decoder {#minimum-conforming-decoder}
 
@@ -1285,7 +1372,8 @@ A minimum conforming decoder for Format Version 9 MUST support:
   PivCo layout) with code lengths up to 11 bits.
 - GHI blocks (type 2): full LZ decoding with extras varints.
 - EOF block (type 255): stream termination.
-- File footer validation (source size check).
+- File footer validation: sizes, lengths and L ({{file-footer}}).
+- Concatenated frames ({{concatenated-frames}}).
 
 Because level-7 archives encode both literals and tokens with the
 Huffman/PivCo layout, support for {{huffman-literal-section}} is
@@ -1310,14 +1398,15 @@ all errors in the table are fatal by default.
 | Unknown block type                     | Block header offset 0x00    | Reject. Type not defined for this version.      |
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
 | Block checksum mismatch                | Trailing checksum, after decoding | Reject block. Wrong decoded bytes: corrupt payload, wrong dictionary, or block out of place. |
-| EOF block with non-zero Compressed Payload Size      | EOF block header            | Reject. Malformed EOF marker.                   |
+| EOF block header not in its one form   | EOF block header            | Reject. Non-zero Compressed Payload Size, Block Flags or Reserved ({{eof-block}}). |
 | Data block payload above the block size | Block header offset 0x03    | Reject. A data block never compresses past its own content. |
 | Block loop ends without an EOF block   | End of the block loop       | Reject. A forged size can step over the EOF marker.         |
-| Seek-table flag disagrees with the tail | Between EOF block and footer | Reject. HAS_SEEK_TABLE = 1 without the SEK block {{sek-block}} derives, or a SEK block with HAS_SEEK_TABLE = 0. |
+| Seek-table flag disagrees with the tail | Between EOF block and footer | Reject. HAS_SEEK_TABLE = 1 without the SEK block header {{sek-block}} derives (Block Flags and Reserved 0), or a SEK block with HAS_SEEK_TABLE = 0. |
 | Seek-table group inconsistent          | SEK payload                 | Reject. A size outside one block, an Anchor outside the data area, or a group not ending where required ({{sek-block}}). |
 | Block disagrees with its seek entry    | Block header, on seek access | Reject. The entry is not the block's header, payload and checksum size ({{sek-block}}). |
-| Footer source-size mismatch            | File footer offset 0x00     | Reject. Output size does not match.             |
-| Archive Digest mismatch                | File footer offset 0x08     | Reject (if verifying). Blocks reordered, dropped, or altered ({{archive-digest}}). |
+| Footer mismatch                        | File footer, after the digest | Reject. Sizes or L are not the ones the frame implies: wrong output size, wrong frame size, a non-minimal length or a reserved bit set ({{file-footer}}). |
+| Archive Digest mismatch                | File footer, first 8 bytes  | Reject (if verifying). Blocks reordered, dropped, or altered ({{archive-digest}}). |
+| Bytes after a footer that open no frame | After the File Footer      | Reject. Not the Magic, or 1 to 3 trailing bytes ({{concatenated-frames}}). |
 | Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
 | Match offset out of bounds             | During LZ copy              | Reject. Offset references data before output.   |
 | Varint exceeds L_MAX (3 bytes)         | Extras stream               | Reject. See {{varint-cap}}. Overflow or corrupt extras data.   |
@@ -1416,7 +1505,8 @@ accident, not against an adversary ({{checksum-strength}}).
 ## Reserved Fields
 
 A decoder that follows {{compatibility-rules}} will tolerate
-non-zero values in RESERVED bytes and flag bits. Encoder authors
+non-zero values in RESERVED bytes and flag bits, except in the EOF and
+SEK block headers. Encoder authors
 MUST NOT rely on this tolerance to smuggle data; future revisions
 of this document MAY assign meaning to any RESERVED field.
 
@@ -1542,15 +1632,15 @@ The following example was produced by the reference encoder from a
 zxc -z -C -1 sample.txt
 ~~~
 
-The resulting archive is 62 bytes.
+The resulting archive is 57 bytes.
 
 ## Hexdump
 
 ~~~
 00000000: F5 2E B0 9C 09 13 80 00 00 00 00 00 00 00 6D 86
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
-00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 0A 00
-00000030: 00 00 00 00 00 00 BD 8A 9E 74 2A A2 9A B6
+00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 BD 8A
+00000030: 9E 74 2A A2 9A B6 0A 39 00
 ~~~
 
 ## File Header (offset 0x00, 16 bytes)
@@ -1600,15 +1690,17 @@ seeded with the block's position, 0.
 FF | 00 | 00 | 00 00 00 00 | 83
 ~~~
 
-## File Footer (offset 0x2E, 16 bytes)
+## File Footer (offset 0x2E, 11 bytes)
 
 ~~~
-0A 00 00 00 00 00 00 00 | BD 8A 9E 74 2A A2 9A B6
+BD 8A 9E 74 2A A2 9A B6 | 0A | 39 | 00
 ~~~
 
-- Source Size = 10, the first 8 footer bytes.
 - Archive Digest = 0xB69AA22A749E8ABD, the fold of the checksum of block
   0 ({{archive-digest}}).
+- Source Size = 0x0A = 10, on 1 byte.
+- Compressed Frame Size = 0x39 = 57, the whole archive, on 1 byte.
+- L = 0x00: both sizes on 1 byte.
 
 ## Structural View
 
@@ -1618,22 +1710,23 @@ FF | 00 | 00 | 00 00 00 00 | 83
 0x18..0x21  RAW Payload                (10 B)
 0x22..0x25  RAW Block Checksum         ( 4 B)
 0x26..0x2D  EOF Block Header           ( 8 B)
-0x2E..0x35  Source Size                ( 8 B)
-0x36..0x3D  Archive Digest             ( 8 B)
+0x2E..0x35  Archive Digest             ( 8 B)
+0x36        Source Size                ( 1 B)
+0x37        Compressed Frame Size      ( 1 B)
+0x38        L                          ( 1 B)
 ~~~
 
 ## Seekable Variant
 
 The same input compressed with the seek table enabled (zxc -z -C -1
--S sample.txt) yields an 82-byte archive:
+-S sample.txt) yields a 77-byte archive:
 
 ~~~
 00000000: F5 2E B0 9C 09 13 A0 00 00 00 00 00 00 00 0D 45
 00000010: 00 00 00 0A 00 00 00 A0 48 65 6C 6C 6F 20 5A 58
 00000020: 43 0A 90 BB A1 75 FF 00 00 00 00 00 00 83 FE 00
 00000030: 00 0C 00 00 00 6F 10 00 00 00 00 00 00 00 16 00
-00000040: 00 00 0A 00 00 00 00 00 00 00 BD 8A 9E 74 2A A2
-00000050: 9A B6
+00000040: 00 00 BD 8A 9E 74 2A A2 9A B6 0A 4D 00
 ~~~
 
 The File Header differs in two fields: the Flags byte A0 sets both
@@ -1655,10 +1748,12 @@ Header. The size 0x16 = 22 is the total on-disk size of that block: 8
 (header) + 10 (payload) + 4 (checksum). Anchor plus size is 0x26, the
 offset of the EOF block, as the group's sum must be.
 
-The File Footer is unchanged and still ends the file, so a decoder
-locating it from the end of the file requires no modification to support
-seekable archives. A sequential decoder learns from HAS_SEEK_TABLE that
-a SEK block precedes the footer.
+The File Footer still ends the frame, so a decoder that parses it from
+the end, starting with L, works unchanged with seekable archives; only
+Compressed Frame Size grows by the 20 bytes of the SEK block: BD 8A 9E
+74 2A A2 9A B6 | 0A | 4D | 00 (Compressed Frame Size 0x4D = 77). A
+sequential decoder learns from HAS_SEEK_TABLE that a SEK block precedes
+the footer.
 
 ## Dictionary File
 
