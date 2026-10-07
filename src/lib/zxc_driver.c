@@ -719,7 +719,7 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const writer_arg
         if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
         ctx->io_error = 1;
     }
-    // What follows the footer is the container's business: see zxc_stream_decompress().
+    // Whatever follows is the next frame's, or an error: see zxc_stream_decompress().
 }
 
 /**
@@ -992,8 +992,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
                                  seekable, cb, ud, dict, dict_size, dict_huf, NULL);
 }
 
-/** @brief Progress across frames: each engine run counts from 0, the caller
- *  sees the bytes of the frames before it added. */
+/** @brief Progress across frames: each run counts from 0, @c base adds the earlier ones. */
 typedef struct {
     zxc_progress_callback_t cb;
     const void* user_data;
@@ -1024,10 +1023,9 @@ static int zxc_stream_read_exact(FILE* f, void* dst, const size_t len, const int
 /**
  * @brief Decompresses a @c FILE* stream to another @c FILE* stream.
  *
- * Public API; full contract in @c zxc_stream.h. Walks the container: before
- * each frame the next 4 bytes are the end of the input, a ZXC magic word
- * (drives @ref zxc_stream_engine_run in decompression mode) or an error. The
- * block size and level are recovered from each frame header, not from @p opts.
+ * Public API; see @c zxc_stream.h. Before each frame, 4 bytes: the end of the
+ * input, a magic word (one @ref zxc_stream_engine_run) or an error. Block size
+ * and level come from each frame header, not from @p opts.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1120,9 +1118,8 @@ static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
 /**
  * @brief Reads the total decompressed size from the footers of a file.
  *
- * Public API; see @c zxc_stream.h. Walks the whole file, from offset 0, through
- * @ref zxc_scan_container, the same walk as @ref zxc_get_decompressed_size, and
- * restores the caller's stream position. Does not decompress any data.
+ * Public API; see @c zxc_stream.h. @ref zxc_scan_container over the whole file,
+ * as @ref zxc_get_decompressed_size; the stream position is restored.
  */
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1152,6 +1149,33 @@ int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, const size_t i
     if (UNLIKELY(!f_in || !info)) return ZXC_ERROR_NULL_INPUT;
     zxc_frame_info_t got;
     const int rc = zxc_stream_read_frame_info(f_in, &got);
+    if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
+    return rc;
+}
+
+/**
+ * @brief Reads the frame that ends at offset @p end of a file, without decoding.
+ *
+ * Public API; see @c zxc_stream.h.
+ */
+// cppcheck-suppress unusedFunction
+int zxc_stream_get_last_frame_info(FILE* f_in, const uint64_t end, zxc_frame_info_t* info,
+                                   const size_t info_size) {
+    if (UNLIKELY(!f_in || !info)) return ZXC_ERROR_NULL_INPUT;
+    const long long saved_pos = ftello(f_in);
+    if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
+    if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
+    const long long file_size = ftello(f_in);
+    zxc_frame_info_t got;
+    int rc = ZXC_ERROR_IO;
+    if (UNLIKELY(file_size >= 0 && end > (uint64_t)file_size)) {
+        rc = ZXC_ERROR_SRC_TOO_SMALL;
+    } else if (LIKELY(file_size >= 0)) {
+        const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, end};
+        uint64_t start = 0;
+        rc = zxc_scan_frame(&src, end, &start, &got);
+    }
+    fseeko(f_in, saved_pos, SEEK_SET);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
     return rc;
 }

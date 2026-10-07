@@ -246,8 +246,7 @@ ZXC_EXPORT void zxc_dstream_free(zxc_dstream* ds);
  * Validating the file footer puts the stream in DONE state; later calls return
  * @c 0 and produce nothing, even with bytes left in @p in. Those trailing bytes
  * are ignored, and @c in->pos tells the caller how much real data was consumed.
- * A push stream decodes one frame: to walk a container of several (FORMAT.md
- * section 2.1), start a new stream at @c in->pos.
+ * A push stream decodes one frame; for the next, start a new stream at @c in->pos.
  *
  * @par Errors
  * Sticky: once a negative code comes back, every later call returns it too.

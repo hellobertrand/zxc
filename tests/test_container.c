@@ -61,10 +61,9 @@ static int64_t file_decode(const uint8_t* arc, const size_t n, uint8_t* out, con
     return r;
 }
 
-/* Decodes @p arc every way; each must return @p want and, on success, produce
- * @p expect. The size queries must report @p want on success, nothing on failure.
- * A frame cut short is an I/O error to the FILE* decoder, which reads it as a
- * short read: @p want_file says what it returns. */
+/* Decodes @p arc every way; each must return @p want (@p want_file for the FILE*
+ * decoder, which sees a cut frame as a short read) and produce @p expect. The size
+ * queries report @p want on success, nothing on failure. */
 static int check2(const char* what, const uint8_t* arc, const size_t n,
                   const zxc_decompress_opts_t* opts, const int64_t want, const int64_t want_file,
                   const uint8_t* expect) {
@@ -179,29 +178,104 @@ int test_container_concat(void) {
     return 1;
 }
 
-/* Two seekable frames back to back are no seekable archive. Open reads only the
- * header, footer and EOF/SEK headers (tables are checked on access), so it may
- * succeed; reading the whole range touches the last group, whose end misses the
- * EOF block, and must fail rather than return the first frame's bytes. */
+/* The last frame's info, walked back to the first, buffer and FILE*: the sizes
+ * each frame was written with, in reverse order. */
+int test_container_frame_walk(void) {
+    printf("=== TEST: Container - walking frames back from the end ===\n");
+    const size_t sizes[] = {3 * 4096 + 17, 0, 70000, 1000};
+    const zxc_compress_opts_t opts[] = {{.level = 3, .block_size = 4096, .checksum_enabled = 1},
+                                        {.level = 1, .block_size = 8192, .seekable = 1},
+                                        {.level = 5, .seekable = 1, .checksum_enabled = 1},
+                                        {.level = 1, .block_size = 8192}};
+    enum { K = 4 };
+    uint8_t* const src = malloc(80000);
+    cbuf_t b = {0};
+    size_t ends[K];
+    int ok = src != NULL;
+    if (ok) gen_lz_data(src, 80000);
+    for (size_t k = 0; ok && k < K; k++) {
+        ok = cb_frame(&b, src, sizes[k], &opts[k]);
+        ends[k] = b.n;
+    }
+
+    FILE* const f = tmpfile();
+    ok = ok && f && fwrite(b.p, 1, b.n, f) == b.n && fseek(f, 7, SEEK_SET) == 0;
+    size_t end = b.n;
+    for (size_t k = K; ok && k-- > 0;) {
+        zxc_frame_info_t a, c;
+        const int ra = zxc_get_last_frame_info(b.p, end, &a, sizeof(a));
+        const int rc = zxc_stream_get_last_frame_info(f, end, &c, sizeof(c));
+        const size_t start = k ? ends[k - 1] : 0;
+        if (ra != ZXC_OK || rc != ZXC_OK || end != ends[k] || a.compressed_size != end - start ||
+            a.decompressed_size != sizes[k] || a.has_checksum != opts[k].checksum_enabled ||
+            a.has_seek_table != opts[k].seekable || memcmp(&a, &c, sizeof(a)) != 0 ||
+            ftell(f) != 7) {
+            printf("  [FAIL] frame %zu: buffer %d, FILE* %d\n", k, ra, rc);
+            ok = 0;
+        }
+        end -= (size_t)a.compressed_size;
+    }
+    ok = ok && end == 0;
+
+    /* Failures: the struct untouched, and the code each input deserves. */
+    zxc_frame_info_t keep;
+    memset(&keep, 0xA5, sizeof(keep));
+    const zxc_frame_info_t before = keep;
+    if (ok) {
+        const struct {
+            const char* what;
+            size_t end;
+            int buffer, file;
+        } bad[] = {
+            {"inside a frame", ends[2] - 1, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA},
+            {"past the input", b.n + 1, ZXC_ERROR_SRC_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL},
+            {"empty", 0, ZXC_ERROR_SRC_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL},
+        };
+        for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
+            /* The buffer API reads within src_size, so past the input is cut short. */
+            const size_t n = bad[k].end > b.n ? 10 : bad[k].end;
+            const int ra = zxc_get_last_frame_info(b.p, n, &keep, sizeof(keep));
+            const int rc = zxc_stream_get_last_frame_info(f, bad[k].end, &keep, sizeof(keep));
+            if (ra != bad[k].buffer || rc != bad[k].file ||
+                memcmp(&keep, &before, sizeof(keep)) != 0) {
+                printf("  [FAIL] %s: buffer %d, FILE* %d\n", bad[k].what, ra, rc);
+                ok = 0;
+            }
+        }
+        if (zxc_get_last_frame_info(NULL, b.n, &keep, sizeof(keep)) != ZXC_ERROR_NULL_INPUT ||
+            zxc_get_last_frame_info(b.p, b.n, NULL, 0) != ZXC_ERROR_NULL_INPUT ||
+            zxc_stream_get_last_frame_info(NULL, b.n, &keep, sizeof(keep)) !=
+                ZXC_ERROR_NULL_INPUT) {
+            printf("  [FAIL] NULL arguments\n");
+            ok = 0;
+        }
+    }
+    if (f) fclose(f);
+    free(b.p);
+    free(src);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* Two seekable frames back to back are no seekable archive: the last frame's
+ * compressed size does not span the input, so open refuses. */
 int test_container_seekable_refused(void) {
     printf("=== TEST: Container - seekable reader refuses concatenated frames ===\n");
     const size_t n = 5 * 4096;
     uint8_t* const src = malloc(n);
-    uint8_t* const out = malloc(n);
-    int ok = src && out;
+    int ok = src != NULL;
     if (ok) gen_lz_data(src, n);
     const zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .seekable = 1};
     cbuf_t b = {0};
     ok = ok && cb_frame(&b, src, n, &co) && cb_frame(&b, src, n, &co);
     zxc_seekable* const s = ok ? zxc_seekable_open(b.p, b.n) : NULL;
-    const int64_t r = s ? zxc_seekable_decompress_range(s, out, n, 0, n) : ZXC_ERROR_CORRUPT_DATA;
-    if (ok && r >= 0) {
-        printf("  [FAIL] seekable read of two frames returned %lld\n", (long long)r);
+    if (ok && s) {
+        printf("  [FAIL] the seekable reader opened two frames\n");
         ok = 0;
     }
     zxc_seekable_free(s);
     free(b.p);
-    free(out);
     free(src);
     if (!ok) return 0;
     printf("PASS\n\n");

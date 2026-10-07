@@ -574,6 +574,27 @@ library was built with, for bindings that mirror the struct by hand.
 **Returns**: `ZXC_OK` with `*info` filled, or a negative `zxc_error_t` with
 `*info` untouched.
 
+### `zxc_get_last_frame_info`
+
+```c
+ZXC_EXPORT int zxc_get_last_frame_info(const void* src, size_t src_size, zxc_frame_info_t* info,
+                                       size_t info_size);
+```
+
+The same checks on the last frame of `src`, which may start anywhere: at
+`src_size - info.compressed_size`. Each footer stores its frame's compressed
+size, so concatenated frames are walked back from the end without decoding:
+
+```c
+size_t n = src_size;
+while (n > 0) {
+    if (zxc_get_last_frame_info(src, n, &info, sizeof(info)) != ZXC_OK) break;
+    n -= info.compressed_size;  /* the frame before ends here */
+}
+```
+
+**Returns**: as `zxc_get_frame_info()`.
+
 ---
 
 ## 8. Block API
@@ -1128,6 +1149,20 @@ ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, siz
 is restored.
 
 **Returns**: `ZXC_OK`, or a negative `zxc_error_t` (`ZXC_ERROR_IO` included).
+
+### `zxc_stream_get_last_frame_info`
+
+```c
+ZXC_EXPORT int zxc_stream_get_last_frame_info(FILE* f_in, uint64_t end, zxc_frame_info_t* info,
+                                              size_t info_size);
+```
+
+`zxc_get_last_frame_info()` on the first `end` bytes of a seekable `FILE*`:
+pass the file size, then `end - info.compressed_size`, to walk its frames back
+to the first. File position is restored.
+
+**Returns**: `ZXC_OK`, or a negative `zxc_error_t`: `ZXC_ERROR_SRC_TOO_SMALL`
+when `end` is past the end of the file, `ZXC_ERROR_IO` included.
 
 ---
 
@@ -1755,7 +1790,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **72 symbols** (verified with `nm -gU`):
+The shared library exports **74 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1831,6 +1866,8 @@ The shared library exports **72 symbols** (verified with `nm -gU`):
 | 70 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
 | 71 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
 | 72 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
+| 73 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
+| 74 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

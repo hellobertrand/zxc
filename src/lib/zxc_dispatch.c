@@ -1037,9 +1037,8 @@ int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capacity, const
 /**
  * @brief Reads the decompressed size from a ZXC-compressed buffer.
  *
- * Each frame's size sits in its footer and is untrusted, so it goes through
- * @ref zxc_scan_container(): a container that does not hold up returns 0, and
- * callers sizing an allocation inherit the check.
+ * Sums the footers through @ref zxc_scan_container(), which checks each frame:
+ * a container that does not hold up returns 0.
  */
 uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size) {
     if (UNLIKELY(!src)) return 0;
@@ -1076,6 +1075,23 @@ int zxc_get_frame_info(const void* src, const size_t src_size, zxc_frame_info_t*
     if (UNLIKELY(!info)) return ZXC_ERROR_NULL_INPUT;
     zxc_frame_info_t got;
     const int rc = zxc_buffer_frame_info((const uint8_t*)src, src_size, &got, NULL);
+    if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
+    return rc;
+}
+
+/**
+ * @brief Reads the frame that ends @p src, without decoding.
+ *
+ * Public API; see @c zxc_buffer.h.
+ */
+// cppcheck-suppress unusedFunction
+int zxc_get_last_frame_info(const void* src, const size_t src_size, zxc_frame_info_t* info,
+                            const size_t info_size) {
+    if (UNLIKELY(!src || !info)) return ZXC_ERROR_NULL_INPUT;
+    const zxc_scan_src_t scan = zxc_scan_src_mem((const uint8_t*)src, src_size);
+    zxc_frame_info_t got;
+    uint64_t start = 0;
+    const int rc = zxc_scan_frame(&scan, src_size, &start, &got);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
     return rc;
 }
@@ -1611,11 +1627,7 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
     return (int64_t)(op - op_start);
 }
 
-/**
- * @brief The container walk behind zxc_decompress() and zxc_decompress_dctx().
- *
- * Frames decode back to back into @p dst.
- */
+/** @brief The container walk behind zxc_decompress() and zxc_decompress_dctx(). */
 static int64_t zxc_dctx_decode_container(zxc_dctx* dctx, const uint8_t* src, const size_t src_size,
                                          uint8_t* dst, const size_t dst_capacity,
                                          const zxc_decompress_opts_t* opts) {

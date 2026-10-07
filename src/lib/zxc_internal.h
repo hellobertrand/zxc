@@ -2168,10 +2168,8 @@ typedef struct {
 /**
  * @brief Tells whether a frame starts at @p pos.
  *
- * After a frame comes the end of the input, another frame or nothing valid: an
- * unknown magic word on the first frame (@p pos == 0) is
- * @ref ZXC_ERROR_BAD_MAGIC as on a single-frame input, later trailing garbage,
- * @ref ZXC_ERROR_CORRUPT_DATA.
+ * A wrong magic word is @ref ZXC_ERROR_BAD_MAGIC at offset 0, as for a single
+ * frame, and @ref ZXC_ERROR_CORRUPT_DATA after one.
  *
  * @param[in] src  Container source.
  * @param[in] pos  Offset just past the previous frame, 0 for the first.
@@ -2180,8 +2178,8 @@ typedef struct {
 int zxc_container_next(const zxc_scan_src_t* src, uint64_t pos);
 
 /**
- * @brief Measures the frame ending at @p end without decoding: its footer, read
- *        back from @p end, gives its compressed size and so where it starts.
+ * @brief Measures the frame ending at @p end without decoding: its footer's
+ *        compressed size gives where it starts.
  *
  * @param[in]  src   Container source.
  * @param[in]  end   Offset just past the frame.
