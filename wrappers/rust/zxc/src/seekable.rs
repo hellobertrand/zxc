@@ -211,8 +211,9 @@ impl Seekable {
 
     /// Attaches a pre-trained dictionary to this seekable handle.
     ///
-    /// Required to decompress an archive that was produced with a
-    /// dictionary. Pass the same raw dictionary content used at compression
+    /// Required to decompress a frame that was produced with a dictionary; call
+    /// it once per dictionary when concatenated frames use several. Pass the
+    /// same raw dictionary content used at compression
     /// time, plus its shared literal Huffman table (128 bytes) when the
     /// archive was compressed with one — the archive's dict_id binds the
     /// (dict, table) pair. Both are copied internally by the library, so the
@@ -220,8 +221,8 @@ impl Seekable {
     ///
     /// # Errors
     ///
-    /// Returns an [`Error`] if the dictionary is invalid or its ID does not
-    /// match the one the archive requires.
+    /// Returns an [`Error`] if the dictionary is invalid or its ID matches no
+    /// frame of the archive.
     pub fn set_dict(&mut self, dict: &[u8], dict_huf: Option<&[u8]>) -> Result<()> {
         let (dict, huf) = crate::dict_parts(Some(dict), dict_huf)?;
         let rc = unsafe {

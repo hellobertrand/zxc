@@ -930,7 +930,12 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
             const size_t before_out = obuf.pos;
             const int64_t r = zxc_dstream_decompress(ds_, &obuf, cur_in);
             out_len += obuf.pos;
-            if (r < 0) return ThrowZxcError(env, static_cast<int>(r));
+            if (r < 0) {
+                // Output already decoded (a frame before the fault) is handed
+                // over first: the stream keeps the error for the next call.
+                if (out_len == 0) return ThrowZxcError(env, static_cast<int>(r));
+                break;
+            }
             /* Keep draining even after input is exhausted; stop only when
              * no progress was made (no input consumed AND no output produced). */
             if (cur_in->pos == before_in && obuf.pos == before_out) break;

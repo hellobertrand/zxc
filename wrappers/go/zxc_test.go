@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/iotest"
 )
 
 // ============================================================================
@@ -392,7 +393,7 @@ func pstreamRoundtrip(t *testing.T, data []byte, copts, dopts []Option) []byte {
 	var decompressed bytes.Buffer
 	src := compressed.Bytes()
 	cursor = 0
-	for cursor < len(src) && !ds.Finished() {
+	for cursor < len(src) {
 		consumed, produced, err := ds.Decompress(dout, src[cursor:])
 		if err != nil {
 			t.Fatalf("DStream.Decompress: %v", err)
@@ -586,6 +587,68 @@ func TestWriterCloseIsIdempotent(t *testing.T) {
 	}
 	if err := w.Close(); err != nil {
 		t.Fatalf("Close 2: %v", err)
+	}
+}
+
+// Concatenated archives stream as one, whatever the read boundaries; anything
+// else after a footer is an error.
+func TestStreamConcatenated(t *testing.T) {
+	a := bytes.Repeat([]byte("first frame "), 5000)
+	b := bytes.Repeat([]byte("second frame "), 7000)
+	fa, err := Compress(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fb, err := Compress(b, WithChecksum(true))
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := append(append([]byte{}, fa...), fb...)
+	want := append(append([]byte{}, a...), b...)
+
+	r, err := NewReader(iotest.OneByteReader(bytes.NewReader(joined)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := io.ReadAll(r)
+	r.Close()
+	if err != nil || !bytes.Equal(got, want) {
+		t.Fatalf("Reader: %d bytes, err %v (want %d)", len(got), err, len(want))
+	}
+
+	ds, err := NewDStream()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ds.Close()
+	out := make([]byte, len(want)+1024)
+	n := 0
+	for in := joined; len(in) > 0; {
+		chunk := in
+		if len(chunk) > 7 {
+			chunk = chunk[:7]
+		}
+		consumed, produced, err := ds.Decompress(out[n:], chunk)
+		if err != nil {
+			t.Fatal(err)
+		}
+		n += produced
+		in = in[consumed:]
+	}
+	if !ds.Finished() || !bytes.Equal(out[:n], want) {
+		t.Fatalf("DStream: %d bytes, finished %v", n, ds.Finished())
+	}
+
+	// Junk after a frame: the frame comes out first, the error on the next call.
+	junk, _ := NewDStream()
+	defer junk.Close()
+	in := append(append([]byte{}, fa...), "junk"...)
+	consumed, produced, err := junk.Decompress(out, in)
+	if err != nil || produced != len(a) || consumed != len(fa) {
+		t.Fatalf("frame before junk: consumed %d, produced %d, err %v", consumed, produced, err)
+	}
+	if _, _, err := junk.Decompress(out, in[consumed:]); err == nil {
+		t.Fatal("junk after the footer was accepted")
 	}
 }
 

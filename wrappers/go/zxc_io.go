@@ -148,8 +148,8 @@ func (w *Writer) Close() error {
 // Reader
 // ----------------------------------------------------------------------------
 
-// Reader is an [io.ReadCloser] that decompresses a ZXC frame read from an
-// underlying reader.
+// Reader is an [io.ReadCloser] that decompresses the ZXC frames read from an
+// underlying reader: concatenated archives decode as one stream.
 //
 // Reader is not safe for concurrent use.
 type Reader struct {
@@ -177,9 +177,11 @@ func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 	}, nil
 }
 
-// Read decompresses bytes into p. Returns io.EOF after the footer has been
-// validated; returns io.ErrUnexpectedEOF if the underlying reader is drained
-// before the footer is reached.
+// Read decompresses bytes into p. Like gzip and zstd readers, it reads the
+// source until it ends, so concatenated archives decode as one stream: on a
+// source that stays open after one frame, use [DStream] and stop once
+// [DStream.Finished] is true. Returns io.EOF once the source ends on a
+// validated footer, io.ErrUnexpectedEOF if it ends before one.
 func (r *Reader) Read(p []byte) (int, error) {
 	if r.err != nil {
 		return 0, r.err
@@ -191,12 +193,8 @@ func (r *Reader) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 
+	// A finished frame may be followed by another: stop only once src ends.
 	for {
-		if r.ds.Finished() {
-			r.err = io.EOF
-			return 0, io.EOF
-		}
-
 		// Try to decompress whatever is currently buffered (or drain mode
 		// when src is at EOF).
 		if r.inPos < r.inLen || r.eof {

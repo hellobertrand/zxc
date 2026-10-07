@@ -184,8 +184,11 @@ impl<W: Write> Drop for Encoder<W> {
 /// Streaming decompressor implementing [`std::io::Read`].
 ///
 /// Pulls compressed bytes from the inner reader and yields decompressed
-/// bytes. Returns [`io::ErrorKind::UnexpectedEof`] if the underlying reader
-/// is drained before the ZXC footer is reached.
+/// bytes. Like gzip and zstd readers it reads until the inner reader ends, so
+/// concatenated archives decode as one stream; on a source that stays open
+/// after one frame, use [`DStream`] and stop once it is finished. Returns
+/// [`io::ErrorKind::UnexpectedEof`] if the inner reader is drained before the
+/// ZXC footer is reached.
 ///
 /// `Decoder` is single-threaded; one stream per reader.
 ///
@@ -244,7 +247,7 @@ impl<R: Read> Decoder<R> {
         self.inner
     }
 
-    /// Reports whether the decoder has reached and validated the file footer.
+    /// Reports whether the input so far ends on a validated footer.
     pub fn finished(&self) -> bool {
         self.ds.finished()
     }
@@ -255,11 +258,8 @@ impl<R: Read> Read for Decoder<R> {
         if buf.is_empty() {
             return Ok(0);
         }
+        // A finished frame may be followed by another: stop only once src ends.
         loop {
-            if self.ds.finished() {
-                return Ok(0);
-            }
-
             // Try to decompress whatever is currently buffered (or drain mode
             // when src is at EOF).
             if self.in_pos < self.in_len || self.eof {
@@ -398,6 +398,41 @@ mod tests {
         let mut got = Vec::new();
         dec.read_to_end(&mut got).unwrap();
         assert_eq!(got, b"drop-flush");
+    }
+
+    /// Hands out one byte per read, so a read ends on every frame boundary.
+    struct OneByte<'a>(&'a [u8]);
+    impl Read for OneByte<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+            if self.0.is_empty() || buf.is_empty() {
+                return Ok(0);
+            }
+            buf[0] = self.0[0];
+            self.0 = &self.0[1..];
+            Ok(1)
+        }
+    }
+
+    #[test]
+    fn decoder_concatenated_frames() {
+        let a = b"first frame ".repeat(5000);
+        let b = b"second frame ".repeat(7000);
+        let fa = compress(&a, Level::Default, None).unwrap();
+        let joined = [
+            fa.clone(),
+            compress(&b, Level::Default, Some(true)).unwrap(),
+        ]
+        .concat();
+        let mut got = Vec::new();
+        Decoder::new(OneByte(&joined))
+            .unwrap()
+            .read_to_end(&mut got)
+            .unwrap();
+        assert_eq!(got, [a, b].concat());
+
+        let junk = [fa, b"junk".to_vec()].concat();
+        let mut dec = Decoder::new(Cursor::new(junk)).unwrap();
+        assert!(dec.read_to_end(&mut Vec::new()).is_err());
     }
 
     #[test]

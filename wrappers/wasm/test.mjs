@@ -1305,6 +1305,57 @@ async function main() {
     }
   }
 
+  // --- Concatenated archives stream as one ---
+  console.log("\nConcatenated Archives (streaming)");
+  {
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const enc = new TextEncoder();
+    const a = enc.encode("first frame ".repeat(5000));
+    const b = enc.encode("second frame ".repeat(7000));
+    const fa = zxc.compress(a);
+    const fb = zxc.compress(b, { checksum: true });
+    const joined = new Uint8Array(fa.length + fb.length);
+    joined.set(fa);
+    joined.set(fb, fa.length);
+    const want = new Uint8Array(a.length + b.length);
+    want.set(a);
+    want.set(b, a.length);
+
+    const ds = zxc.createDStream();
+    const parts = [];
+    for (let i = 0; i < joined.length; i += 7)
+      parts.push(ds.decompress(joined.subarray(i, i + 7)));
+    const got = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+    let off = 0;
+    for (const p of parts) {
+      got.set(p, off);
+      off += p.length;
+    }
+    assert(
+      ds.finished() && arraysEqual(got, want),
+      "dstream decodes every frame, in 7-byte chunks",
+    );
+    ds.free();
+
+    // Junk after a frame: the frame comes out first, the error on the next call.
+    const junk = zxc.createDStream();
+    const first = junk.decompress(
+      new Uint8Array([...fa, 0x6a, 0x75, 0x6e, 0x6b]),
+    );
+    let threw = false;
+    try {
+      junk.decompress(new Uint8Array(0));
+    } catch (_) {
+      threw = true;
+    }
+    junk.free();
+    assert(
+      arraysEqual(first, a) && threw,
+      "bytes after a footer that start no frame: frame first, then an error",
+    );
+  }
+
   // --- Summary ---
   console.log(`\n${"=".repeat(40)}`);
   console.log(`Results: ${passed} passed, ${failed} failed`);

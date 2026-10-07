@@ -1316,8 +1316,13 @@ ZXC_EXPORT int64_t zxc_dstream_decompress(
 Drives the parser state machine (file header → blocks → EOF → optional
 SEK → footer).  Each call makes as much progress as `in` and `out` allow.
 
-Trailing bytes after the validated footer are silently ignored (the
-caller can inspect `in->pos` to detect how many were consumed).
+Each call stops at the end of a frame, `in->pos` just past it: a caller after
+one frame stops there. A later call with input decodes the next frame
+(concatenated archives) into the same output. Input that does not open with the
+magic word is `ZXC_ERROR_CORRUPT_DATA`, from its first byte; a frame that does is
+checked like the first, so a bad header gets its own code (`ZXC_ERROR_BAD_VERSION`,
+`ZXC_ERROR_DICT_REQUIRED`, ...), and input that stops inside the magic word is
+simply not finished.
 
 **Returns**:
 - `>0` — number of decompressed bytes written into `out` this call;
@@ -1331,7 +1336,8 @@ caller can inspect `in->pos` to detect how many were consumed).
 ZXC_EXPORT int zxc_dstream_finished(const zxc_dstream* ds);
 ```
 
-Returns `1` iff the parser has fully validated the file footer.  Callers
+Returns `1` iff the last call ended on a validated footer, until a call with
+more input starts the next frame.  Callers
 that have finished feeding input should check this to detect truncated
 streams: `zxc_dstream_decompress` returning `0` with no output is
 ambiguous (DONE vs need-more-input) — `_finished` disambiguates.

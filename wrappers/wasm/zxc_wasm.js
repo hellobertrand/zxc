@@ -576,7 +576,8 @@ export default async function createZXC(moduleOverrides, factory) {
   }
 
   /**
-   * Reads the decompressed size from a compressed buffer without decompressing.
+   * Reads the decompressed size from a compressed buffer without decompressing,
+   * summed over concatenated archives.
    * @param {Uint8Array} data - Compressed data.
    * @returns {number} Original uncompressed size, or 0 if invalid.
    */
@@ -591,7 +592,9 @@ export default async function createZXC(moduleOverrides, factory) {
   }
 
   /**
-   * Reads a frame's header and footer, without decoding.
+   * Reads a frame's header and footer, without decoding. The frame must span
+   * all of `data`: concatenated archives throw, getDecompressedSize gives their
+   * total.
    * @param {Uint8Array} data - Compressed data.
    * @returns {{decompressedSize: number, compressedSize: number, digest: bigint,
    *   blockSize: number, dictId: number, formatVersion: number,
@@ -949,7 +952,8 @@ export default async function createZXC(moduleOverrides, factory) {
     }
 
     return {
-      /** Push compressed bytes; return any decompressed bytes produced. */
+      /** Push compressed bytes; return any decompressed bytes produced. An error
+       *  found after a frame's output is thrown by the next call, that output first. */
       decompress(data) {
         const srcPtr = data.length > 0 ? _alloc(data.length) : 0;
         try {
@@ -963,10 +967,24 @@ export default async function createZXC(moduleOverrides, factory) {
             const beforeIn = _readPos(inDescPtr);
             _writeOutbuf(outDescPtr, stagePtr, stageCap);
             const r = _dstream_decompress(ds, outDescPtr, inDescPtr);
+            const produced = _readPos(outDescPtr);
             if (r < 0) {
+              // Output already decoded (a frame before the fault) is handed over
+              // first: the stream keeps the error for the next call.
+              if (total + produced > 0) {
+                if (produced > 0)
+                  chunks.push(
+                    new Uint8Array(
+                      Module.HEAPU8.buffer,
+                      stagePtr,
+                      produced,
+                    ).slice(),
+                  );
+                total += produced;
+                break;
+              }
               throw new Error(`ZXC dstream error: ${_error_name(r)} (${r})`);
             }
-            const produced = _readPos(outDescPtr);
             if (produced > 0) {
               chunks.push(
                 new Uint8Array(
@@ -991,7 +1009,7 @@ export default async function createZXC(moduleOverrides, factory) {
           if (srcPtr) _free(srcPtr);
         }
       },
-      /** True iff the file footer has been consumed and validated. */
+      /** True iff the input so far ends on a validated footer. */
       finished() {
         return _dstream_finished(ds) !== 0;
       },
@@ -1641,7 +1659,8 @@ export default async function createZXC(moduleOverrides, factory) {
   }
 
   /**
-   * Returns a WHATWG TransformStream that decompresses a ZXC frame.
+   * Returns a WHATWG TransformStream that decompresses ZXC frames, concatenated
+   * archives as one stream.
    *
    * Errors the stream with a `'ZXC_TRUNCATED'`-tagged Error if the input
    * ends before the footer is reached.
@@ -1671,6 +1690,8 @@ export default async function createZXC(moduleOverrides, factory) {
       },
       flush(controller) {
         try {
+          // An error kept behind the last output surfaces here, not as truncation.
+          ds.decompress(new Uint8Array(0));
           if (!ds.finished()) {
             const err = new Error(
               "ZXC: input drained before footer (truncated frame)",

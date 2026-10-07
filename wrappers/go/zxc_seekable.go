@@ -318,11 +318,12 @@ func (s *Seekable) SetDictionary(d *Dictionary) error {
 
 // SetDict attaches a pre-trained dictionary to the seekable handle so that
 // subsequent [Seekable.DecompressRange] calls can decode blocks that were
-// compressed with that dictionary. It must be called before decoding any
-// range from a dictionary-compressed archive.
+// compressed with that dictionary. It must be called before decoding a range
+// through a dictionary-compressed frame; call it once per dictionary when
+// concatenated frames use several.
 //
 // The dictionary content must match the one used at compression time; its ID
-// is validated against the archive header. When the archive was compressed
+// must be one a frame of the archive declares. When the archive was compressed
 // with a shared literal Huffman table, pass the same table as hufLengths
 // ([HufTableSize] bytes, see [DictHuf]); pass nil otherwise. Both buffers
 // are copied internally by the library. Passing an empty dict is an error.

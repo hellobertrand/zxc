@@ -38,7 +38,7 @@ pub struct DStreamProgress {
     pub consumed: usize,
     /// Bytes written into `output` this call.
     pub produced: usize,
-    /// `true` once the decoder has reached and validated the file footer.
+    /// `true` when the input so far ends on a validated footer.
     pub finished: bool,
 }
 
@@ -199,7 +199,8 @@ impl Drop for CStream {
 ///
 /// for chunk in compressed_chunks() {
 ///     let mut cursor = 0;
-///     while cursor < chunk.len() && !ds.finished() {
+///     // Each call stops at a frame's end: loop on the input, not on finished().
+///     while cursor < chunk.len() {
 ///         let p = ds.decompress(&chunk[cursor..], &mut out)?;
 ///         cursor += p.consumed;
 ///         sink.extend_from_slice(&out[..p.produced]);
@@ -276,8 +277,9 @@ impl DStream {
         })
     }
 
-    /// Returns `true` iff the decoder reached and validated the file footer.
-    /// Useful to detect truncated streams after the input source is drained.
+    /// Returns `true` iff the input so far ends on a validated footer; more input
+    /// starts the next frame. Useful to detect truncated streams after the input
+    /// source is drained.
     pub fn finished(&self) -> bool {
         unsafe { zxc_sys::zxc_dstream_finished(self.inner) != 0 }
     }
@@ -335,7 +337,7 @@ mod tests {
         let mut decompressed: Vec<u8> = Vec::new();
         let mut dout = vec![0u8; 64 * 1024];
         let mut cursor = 0;
-        while cursor < compressed.len() && !ds.finished() {
+        while cursor < compressed.len() {
             let p = ds.decompress(&compressed[cursor..], &mut dout).unwrap();
             cursor += p.consumed;
             decompressed.extend_from_slice(&dout[..p.produced]);

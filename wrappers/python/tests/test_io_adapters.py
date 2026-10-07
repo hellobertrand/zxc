@@ -82,6 +82,24 @@ def test_reader_buffered_wrapping():
     br.close()
 
 
+def test_reader_and_dstream_concatenated():
+    """Concatenated archives stream as one, whatever the read boundaries."""
+    a, b = b"first frame " * 5000, b"second frame " * 7000
+    fa = zxc.compress(a)
+    joined = fa + zxc.compress(b, checksum=True)
+    # Reads ending exactly on the first footer, then 7-byte reads.
+    for size in (len(fa), 7):
+        assert zxc.ZxcReader(io.BytesIO(joined), buffer_size=size).read() == a + b
+    ds = zxc.DStream()
+    out = b"".join(ds.decompress(joined[i : i + 7]) for i in range(0, len(joined), 7))
+    assert out == a + b and ds.finished
+    # Junk after a frame: the frame comes out first, the error on the next call.
+    ds = zxc.DStream()
+    assert ds.decompress(fa + b"junk") == a
+    with pytest.raises(RuntimeError):
+        ds.decompress(b"")
+
+
 def test_writer_close_idempotent():
     sink = io.BytesIO()
     w = zxc.ZxcWriter(sink)

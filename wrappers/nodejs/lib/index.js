@@ -357,7 +357,9 @@ function getDecompressedSize(data) {
 }
 
 /**
- * Reads a frame's header and footer, without decoding.
+ * Reads a frame's header and footer, without decoding. The frame must span
+ * all of `data`: concatenated archives throw, getDecompressedSize gives their
+ * total.
  *
  * @param {Buffer} data - Compressed data buffer.
  * @returns {FrameInfo} The declared fields; `digest` is a BigInt, 0n without checksums.
@@ -583,7 +585,8 @@ class CompressStream extends Transform {
 }
 
 /**
- * A Node.js `stream.Transform` that decompresses a ZXC frame.
+ * A Node.js `stream.Transform` that decompresses ZXC frames: concatenated
+ * archives decode as one stream.
  *
  * Emits `'error'` with code `'ZXC_TRUNCATED'` if the input ends before the
  * footer is reached.
@@ -620,6 +623,8 @@ class DecompressStream extends Transform {
 
   _flush(callback) {
     try {
+      // An error kept behind the last output surfaces here, not as truncation.
+      this._ds.decompress(Buffer.alloc(0));
       if (!this._ds.finished()) {
         const err = new Error(
           "zxc: input drained before footer (truncated frame)",

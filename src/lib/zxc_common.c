@@ -559,7 +559,7 @@ int zxc_container_next(const zxc_scan_src_t* src, const uint64_t pos) {
     if (src->size - pos >= sizeof(m)) {
         const int rc = zxc_scan_read(src, pos, m, sizeof(m));
         if (UNLIKELY(rc != ZXC_OK)) return rc;
-        if (zxc_le32(m) == ZXC_MAGIC_WORD) return 1;
+        if (zxc_magic_prefix_ok(m, sizeof(m))) return 1;
     }
     return pos == 0 ? ZXC_ERROR_BAD_MAGIC : ZXC_ERROR_CORRUPT_DATA;
 }

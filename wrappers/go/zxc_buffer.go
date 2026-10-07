@@ -113,9 +113,9 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	return int(written), nil
 }
 
-// DecompressedSize returns the original uncompressed size stored in the
-// compressed data footer. Returns 0, ErrInvalidData if the data is too small
-// or invalid.
+// DecompressedSize returns the original uncompressed size the footers store,
+// summed over concatenated archives. Returns 0, ErrInvalidData if the data is
+// too small or invalid.
 func DecompressedSize(data []byte) (uint64, error) {
 	if len(data) == 0 {
 		return 0, ErrInvalidData
@@ -145,7 +145,8 @@ type FrameInfo struct {
 }
 
 // GetFrameInfo reads a frame's header and footer, without decoding. The frame
-// must span all of data.
+// must span all of data: concatenated archives are refused, [DecompressedSize]
+// gives their total.
 func GetFrameInfo(data []byte) (FrameInfo, error) {
 	if len(data) == 0 {
 		return FrameInfo{}, ErrInvalidData

@@ -320,6 +320,17 @@ extern "C" {
 
 /** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
 #define ZXC_MAGIC_WORD 0x9CB02EF5U
+
+/** @brief Whether the first @p n bytes (up to 4) at @p p agree with the magic word, so
+ *  a frame may start there: the check a reader makes as bytes arrive. */
+static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
+    static const uint8_t magic[4] = {(uint8_t)ZXC_MAGIC_WORD, (uint8_t)(ZXC_MAGIC_WORD >> 8),
+                                     (uint8_t)(ZXC_MAGIC_WORD >> 16),
+                                     (uint8_t)(ZXC_MAGIC_WORD >> 24)};
+    for (size_t i = 0; i < n && i < sizeof(magic); i++)
+        if (p[i] != magic[i]) return 0;
+    return 1;
+}
 /** @brief Current on-disk file format version. The decoder accepts only this
  *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
 #define ZXC_FILE_FORMAT_VERSION 9

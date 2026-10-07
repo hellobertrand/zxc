@@ -157,9 +157,10 @@ pub fn compress_to(data: &[u8], output: &mut [u8], options: &CompressOptions) ->
     unsafe { impl_compress(data, output.as_mut_ptr(), output.len(), options) }
 }
 
-/// Returns the original uncompressed size from compressed data.
+/// Returns the original uncompressed size from compressed data, summed over
+/// concatenated archives.
 ///
-/// This reads the footer without performing decompression.
+/// This reads the footers without performing decompression.
 /// Returns `None` if the data is invalid or truncated.
 ///
 /// # Example
@@ -208,8 +209,9 @@ pub struct FrameInfo {
 
 /// Reads a frame's header and footer, without decoding.
 ///
-/// The frame must span all of `compressed`; blocks are not read, so a frame
-/// that passes may still fail to decode.
+/// The frame must span all of `compressed`: concatenated archives are refused,
+/// [`decompressed_size`] gives their total. Blocks are not read, so a frame that
+/// passes may still fail to decode.
 ///
 /// # Example
 ///

@@ -1686,7 +1686,9 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
         const int64_t r = zxc_dstream_decompress(ds, &out, cur_in);
         out_len += out.pos;
         if (r < 0) {
-            err_code = (int)r;
+            /* Output already decoded (a frame before the fault) is handed over
+             * first: the stream keeps the error for the next call. */
+            if (out_len == 0) err_code = (int)r;
             break;
         }
         /* Keep draining even after input is exhausted; stop only when no

@@ -61,35 +61,60 @@ static int64_t file_decode(const uint8_t* arc, const size_t n, uint8_t* out, con
     return r;
 }
 
+/* Push decode of @p arc in 7-byte pieces, so frame boundaries fall anywhere. Input
+ * that stops before a footer is not finished: SRC_TOO_SMALL here. */
+static int64_t push_decode(const uint8_t* arc, const size_t n, uint8_t* out, const size_t cap,
+                           const zxc_decompress_opts_t* opts) {
+    zxc_dstream* const ds = zxc_dstream_create(opts);
+    if (!ds) return ZXC_ERROR_MEMORY;
+    zxc_outbuf_t ob = {out, cap, 0};
+    int64_t r = 0;
+    for (size_t at = 0; at < n && r >= 0;) {
+        zxc_inbuf_t in = {arc + at, n - at < 7 ? n - at : 7, 0};
+        do r = zxc_dstream_decompress(ds, &ob, &in);
+        while (r > 0);
+        at += in.pos;
+        if (r == 0 && in.pos == 0) break;  // no progress
+    }
+    if (r >= 0) r = zxc_dstream_finished(ds) ? (int64_t)ob.pos : ZXC_ERROR_SRC_TOO_SMALL;
+    zxc_dstream_free(ds);
+    return r;
+}
+
 /* Decodes @p arc every way; each must return @p want (@p want_file for the FILE*
- * decoder, which sees a cut frame as a short read) and produce @p expect. The size
- * queries report @p want on success, nothing on failure. */
+ * decoder, which sees a cut frame as a short read; @p want_push for the push one,
+ * which cannot tell input that stopped from input still coming) and produce
+ * @p expect. The size queries report @p want on success, nothing on failure. */
 static int check2(const char* what, const uint8_t* arc, const size_t n,
                   const zxc_decompress_opts_t* opts, const int64_t want, const int64_t want_file,
-                  const uint8_t* expect) {
+                  const int64_t want_push, const uint8_t* expect) {
     // Room for every frame before the fault, so the verdict is the fault's.
     const size_t cap = (want > 0 ? (size_t)want : 0) + n * 8 + (1 << 20);
     uint8_t* const o1 = malloc(cap);
     uint8_t* const o2 = malloc(cap);
     uint8_t* const o3 = malloc(cap);
+    uint8_t* const o4 = malloc(cap);
     zxc_dctx* const dctx = zxc_create_dctx();
-    int ok = o1 && o2 && o3 && dctx;
+    int ok = o1 && o2 && o3 && o4 && dctx;
     if (!ok) printf("  [FAIL] %s: allocation\n", what);
 
     const int64_t r1 = ok ? zxc_decompress(arc, n, o1, cap, opts) : -1;
     const int64_t r2 = ok ? zxc_decompress_dctx(dctx, arc, n, o2, cap, opts) : -1;
     int64_t sq = -1;
     const int64_t r3 = ok ? file_decode(arc, n, o3, cap, opts, &sq) : -1;
+    const int64_t r4 = ok ? push_decode(arc, n, o4, cap, opts) : -1;
     const uint64_t bq = zxc_get_decompressed_size(arc, n);
 
-    if (ok && (r1 != want || r2 != want || r3 != want_file)) {
-        printf("  [FAIL] %s: buffer %lld, dctx %lld, FILE* %lld (want %lld, %lld)\n", what,
-               (long long)r1, (long long)r2, (long long)r3, (long long)want, (long long)want_file);
+    if (ok && (r1 != want || r2 != want || r3 != want_file || r4 != want_push)) {
+        printf(
+            "  [FAIL] %s: buffer %lld, dctx %lld, FILE* %lld, push %lld (want %lld, %lld, %lld)\n",
+            what, (long long)r1, (long long)r2, (long long)r3, (long long)r4, (long long)want,
+            (long long)want_file, (long long)want_push);
         ok = 0;
     }
     if (ok && want > 0 &&
         (memcmp(o1, expect, (size_t)want) || memcmp(o2, expect, (size_t)want) ||
-         memcmp(o3, expect, (size_t)want))) {
+         memcmp(o3, expect, (size_t)want) || memcmp(o4, expect, (size_t)want))) {
         printf("  [FAIL] %s: output differs\n", what);
         ok = 0;
     }
@@ -102,12 +127,13 @@ static int check2(const char* what, const uint8_t* arc, const size_t n,
     free(o1);
     free(o2);
     free(o3);
+    free(o4);
     return ok;
 }
 
 static int check(const char* what, const uint8_t* arc, const size_t n,
                  const zxc_decompress_opts_t* opts, const int64_t want, const uint8_t* expect) {
-    return check2(what, arc, n, opts, want, want, expect);
+    return check2(what, arc, n, opts, want, want, want, expect);
 }
 
 int test_container_concat(void) {
@@ -141,13 +167,13 @@ int test_container_concat(void) {
 
     /* A truncated last frame, and 1..3 stray bytes after the last footer. */
     ok = ok && check2("truncated last frame", b.p, b.n - 1, NULL, ZXC_ERROR_SRC_TOO_SMALL,
-                      ZXC_ERROR_IO, NULL);
+                      ZXC_ERROR_IO, ZXC_ERROR_SRC_TOO_SMALL, NULL);
     for (size_t extra = 1; ok && extra <= 3; extra++) {
         const uint8_t z[3] = {0xF5, 0x2E, 0xB0}; /* a cut magic word */
         cbuf_t t = {0};
         ok = cb_put(&t, b.p, b.n) && cb_put(&t, z, extra);
-        ok = ok &&
-             check("cut magic after the last footer", t.p, t.n, NULL, ZXC_ERROR_CORRUPT_DATA, NULL);
+        ok = ok && check2("cut magic after the last footer", t.p, t.n, NULL, ZXC_ERROR_CORRUPT_DATA,
+                          ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_SRC_TOO_SMALL, NULL);
         free(t.p);
     }
 
