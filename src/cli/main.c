@@ -741,6 +741,7 @@ typedef struct {
     zxc_frame_info_t first; /* the first frame */
     uint64_t frames;        /* ZXC frames */
     uint64_t checksummed;   /* frames carrying checksums */
+    uint64_t seekable;      /* frames carrying a seek table */
     uint64_t dsize;         /* their decompressed sizes, summed */
     uint64_t digest;        /* the last frame's digest, when it has one */
 } cli_container_t;
@@ -761,6 +762,7 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
         if (rc != ZXC_OK) break;
         if (c->frames++ == 0) c->digest = fi.digest;
         c->checksummed += fi.has_checksum;
+        c->seekable += fi.has_seek_table;
         if (fi.decompressed_size > UINT64_MAX - c->dsize) {
             rc = ZXC_ERROR_CORRUPT_DATA;
             break;
@@ -773,7 +775,7 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
     return rc;
 }
 
-static int zxc_list_archive(const char* path, int json_output) {
+static int zxc_list_archive(const char* path, int json_output, int show_name) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
         fprintf(stderr, "Error: Invalid input file '%s': %s\n", path, strerror(errno));
@@ -831,7 +833,10 @@ static int zxc_list_archive(const char* path, int json_output) {
     // Checksums when every frame carries them; a digest only describes one frame.
     const int has_checksum = cont.checksummed == cont.frames;
     const int mixed_checksum = cont.checksummed != 0 && !has_checksum;
-    const char* checksum_method = has_checksum ? "RapidHash" : mixed_checksum ? "mixed" : "-";
+    const char* checksum_state = has_checksum ? "enabled" : mixed_checksum ? "mixed" : "disabled";
+    const char* seekable_state = cont.seekable == cont.frames ? "enabled"
+                                 : cont.seekable              ? "mixed"
+                                                              : "disabled";
     char digest_str[24] = "null";
     if (has_checksum && cont.frames == 1)
         snprintf(digest_str, sizeof(digest_str), "\"0x%016llX\"", (unsigned long long)cont.digest);
@@ -862,18 +867,15 @@ static int zxc_list_archive(const char* path, int json_output) {
             "  \"compression_ratio\": %.3f,\n"
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": %zu,\n"
-            "  \"checksum_method\": \"%s\",\n"
+            "  \"checksum\": \"%s\",\n"
+            "  \"seekable\": \"%s\",\n"
             "  \"digest\": %s,\n"
             "  \"dict_id\": %s%s%s,\n"
             "  \"frames\": %llu\n"
             "}\n",
             path, file_size, (unsigned long long)uncompressed_size, ratio, format_version,
-            block_size_kb,
-            has_checksum     ? "RapidHash"
-            : mixed_checksum ? "mixed"
-                             : "none",
-            digest_str, dict_id ? "\"" : "", dict_id ? dict_id_str : "null", dict_id ? "\"" : "",
-            (unsigned long long)cont.frames);
+            block_size_kb, checksum_state, seekable_state, digest_str, dict_id ? "\"" : "",
+            dict_id ? dict_id_str : "null", dict_id ? "\"" : "", (unsigned long long)cont.frames);
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
@@ -881,11 +883,9 @@ static int zxc_list_archive(const char* path, int json_output) {
             "-----------------------\n"
             "Block Format: %u\n"
             "Block Size:   %zu KB\n"
-            "Checksum Method: %s\n",
-            path, format_version, block_size_kb,
-            has_checksum     ? "RapidHash"
-            : mixed_checksum ? "Mixed"
-                             : "None");
+            "Checksum:        %s\n"
+            "Seekable:        %s\n",
+            path, format_version, block_size_kb, checksum_state, seekable_state);
 
         if (has_checksum && cont.frames == 1) printf("Digest:          %s\n", digest_str);
         if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
@@ -898,12 +898,13 @@ static int zxc_list_archive(const char* path, int json_output) {
             "Ratio:        %.2f\n",
             comp_str, uncomp_str, ratio);
     } else {
-        // Normal mode: table format
-        printf("\n  %12s   %12s   %5s   %-10s   %-10s   %s\n", "Compressed", "Uncompressed",
-               "Ratio", "Checksum", "Dict ID", "Filename");
-        printf("  %12s   %12s   %5.2f   %-10s   %-10s   %s\n", comp_str, uncomp_str, ratio,
-               checksum_method, dict_id_str, path);
-        if (cont.frames > 1) printf("  (%llu frames)\n", (unsigned long long)cont.frames);
+        // Normal mode: table format, the file named only when several are listed
+        printf("\n  %12s   %12s   %5s   %-10s   %-10s   %-10s   %6s%s\n", "Compressed",
+               "Uncompressed", "Ratio", "Checksum", "Seekable", "Dict ID", "Frames",
+               show_name ? "   Filename" : "");
+        printf("  %12s   %12s   %5.2f   %-10s   %-10s   %-10s   %6llu%s%s\n", comp_str, uncomp_str,
+               ratio, checksum_state, seekable_state, dict_id_str, (unsigned long long)cont.frames,
+               show_name ? "   " : "", show_name ? path : "");
     }
 
     return 0;
@@ -1200,15 +1201,15 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (bytes >= 0) {
         if (mode == MODE_INTEGRITY) {
             // Test mode: show result
-            // checksum_method uses the same spellings as -l -j
+            // "checksum" uses the same spellings as -l
             const int verified = (archive_has_checksum == 1) && checksum_enabled;
-            const char* method = (archive_has_checksum == 1)   ? "RapidHash"
-                                 : (archive_has_checksum == 2) ? "mixed"
-                                 : (archive_has_checksum == 0) ? "none"
-                                                               : "unknown";
+            const char* state = (archive_has_checksum == 1)   ? "enabled"
+                                : (archive_has_checksum == 2) ? "mixed"
+                                : (archive_has_checksum == 0) ? "disabled"
+                                                              : "unknown";
             const char* summary = (archive_has_checksum == 0)   ? "not verified (archive has none)"
                                   : !checksum_enabled           ? "not verified (skipped by -N)"
-                                  : (archive_has_checksum == 1) ? "verified (RapidHash)"
+                                  : (archive_has_checksum == 1) ? "verified"
                                   : (archive_has_checksum == 2)
                                       ? "partly verified (some frames have none)"
                                   : use_stdin ? "unknown (streamed input)"
@@ -1219,10 +1220,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                     "  \"filename\": \"%s\",\n"
                     "  \"status\": \"ok\",\n"
                     "  \"checksum_verified\": %s,\n"
-                    "  \"checksum_method\": \"%s\",\n"
+                    "  \"checksum\": \"%s\",\n"
                     "  \"time_seconds\": %.6f\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>", verified ? "true" : "false", method, dt);
+                    in_path ? in_path : "<stdin>", verified ? "true" : "false", state, dt);
             } else if (g_verbose) {
                 printf(
                     "%s: OK\n"
@@ -2009,7 +2010,7 @@ int main(int argc, char** argv) {
         if (json_output && num_files > 1) printf("[\n");
 
         for (int i = optind; i < argc; i++) {
-            const int r = zxc_list_archive(argv[i], json_output);
+            const int r = zxc_list_archive(argv[i], json_output, num_files > 1);
             // Keep the JSON array well-formed: a failed entry prints nothing,
             // so emit an error object in its place
             if (r != 0 && json_output)
