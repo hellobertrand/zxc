@@ -2185,10 +2185,11 @@ int zxc_container_next(const zxc_scan_src_t* src, uint64_t pos);
  * @param[in]  end   Offset just past the frame.
  * @param[out] start Offset of the frame's header.
  * @param[out] info  Its header and footer, checked like zxc_get_frame_info().
+ * @param[out] footer_len Footer bytes, digest included; may be NULL.
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
  */
-int zxc_scan_frame(const zxc_scan_src_t* src, uint64_t end, uint64_t* start,
-                   zxc_frame_info_t* info);
+int zxc_scan_frame(const zxc_scan_src_t* src, uint64_t end, uint64_t* start, zxc_frame_info_t* info,
+                   size_t* footer_len);
 
 /**
  * @brief Measures a whole container without decoding: frames from the last back

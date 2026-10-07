@@ -565,7 +565,7 @@ int zxc_container_next(const zxc_scan_src_t* src, const uint64_t pos) {
 }
 
 int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* start,
-                   zxc_frame_info_t* info) {
+                   zxc_frame_info_t* info, size_t* footer_len) {
     uint8_t h[ZXC_FILE_HEADER_SIZE];
     int rc;
     // Too short for a frame: what is left starts the input, its header speaks first.
@@ -590,7 +590,7 @@ int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* star
     rc = zxc_scan_read(src, at, h, sizeof(h));
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     const size_t tl = zxc_frame_tail_len(frame);
-    rc = zxc_read_frame_info(h, tail + sizeof(tail) - tl, tl, frame, info, NULL);
+    rc = zxc_read_frame_info(h, tail + sizeof(tail) - tl, tl, frame, info, footer_len);
     // Past the first frame, a wrong magic word is a broken container.
     if (UNLIKELY(rc == ZXC_ERROR_BAD_MAGIC && at != 0)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(rc != ZXC_OK)) return rc;
@@ -613,7 +613,7 @@ int zxc_scan_container(const zxc_scan_src_t* src, const size_t req_chunk,
     do {
         zxc_frame_info_t fi;
         uint64_t start = 0;
-        const int rc = zxc_scan_frame(src, end, &start, &fi);
+        const int rc = zxc_scan_frame(src, end, &start, &fi, NULL);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
         if (UNLIKELY(req_chunk && fi.block_size != req_chunk)) return ZXC_ERROR_BAD_BLOCK_SIZE;
         if (UNLIKELY(fi.decompressed_size > UINT64_MAX - info->dsize))

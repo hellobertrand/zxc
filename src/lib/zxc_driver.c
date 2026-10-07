@@ -1173,7 +1173,7 @@ int zxc_stream_get_last_frame_info(FILE* f_in, const uint64_t end, zxc_frame_inf
     } else if (LIKELY(file_size >= 0)) {
         const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, end};
         uint64_t start = 0;
-        rc = zxc_scan_frame(&src, end, &start, &got);
+        rc = zxc_scan_frame(&src, end, &start, &got, NULL);
     }
     fseeko(f_in, saved_pos, SEEK_SET);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);

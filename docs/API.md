@@ -1417,7 +1417,9 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open(const void* src, const size_t src_siz
 ```
 
 Opens a seekable archive from a memory buffer.  The buffer must remain
-valid for the lifetime of the handle.
+valid for the lifetime of the handle. Concatenated seekable archives open as one:
+blocks and offsets run across the frames. Every frame must carry a seek table;
+block sizes, checksums and dictionaries may differ.
 
 **Returns**: handle (0 blocks if the archive is empty), or `NULL` if the buffer is not a valid
 seekable archive.
@@ -1473,8 +1475,8 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 ```
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
-to fetch the file header, footer, and the EOF/SEK block headers at open time
-(3 reads, whatever the block count), then one read per seek table group a
+to fetch each frame's footer, file header and EOF/SEK block headers at open time
+(3 reads per frame, whatever the block count), then one read per seek table group a
 range covers and once per block during decompression;
 `zxc_seekable_get_block_comp_size()` reads the block's group per call. No
 `FILE*` is involved — this is the entry point to use for kernel space,
@@ -1727,7 +1729,7 @@ ZXC_EXPORT int zxc_seekable_set_dict(
 );
 ```
 
-Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Must be called before any `zxc_seekable_decompress_range()` call.
+Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Call it once per dictionary the frames use: one no frame uses is `ZXC_ERROR_DICT_MISMATCH`, and a range through a frame whose dictionary is missing returns `ZXC_ERROR_DICT_REQUIRED`.
 
 ### `zxc_seekable_set_checksum`
 

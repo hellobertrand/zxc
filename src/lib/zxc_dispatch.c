@@ -1091,7 +1091,7 @@ int zxc_get_last_frame_info(const void* src, const size_t src_size, zxc_frame_in
     const zxc_scan_src_t scan = zxc_scan_src_mem((const uint8_t*)src, src_size);
     zxc_frame_info_t got;
     uint64_t start = 0;
-    const int rc = zxc_scan_frame(&scan, src_size, &start, &got);
+    const int rc = zxc_scan_frame(&scan, src_size, &start, &got, NULL);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
     return rc;
 }

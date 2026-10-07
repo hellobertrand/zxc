@@ -258,24 +258,145 @@ int test_container_frame_walk(void) {
     return 1;
 }
 
-/* Two seekable frames back to back are no seekable archive: the last frame's
- * compressed size does not span the input, so open refuses. */
-int test_container_seekable_refused(void) {
-    printf("=== TEST: Container - seekable reader refuses concatenated frames ===\n");
-    const size_t n = 5 * 4096;
-    uint8_t* const src = malloc(n);
-    int ok = src != NULL;
-    if (ok) gen_lz_data(src, n);
-    const zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .seekable = 1};
+/* Seekable frames back to back read as one seekable archive: ranges across frame
+ * boundaries; block sizes, checksums and dictionaries that differ per frame; an
+ * empty frame; buffer and FILE*, one thread and several. A frame without a
+ * table refuses the open. */
+int test_container_seekable(void) {
+    printf("=== TEST: Container - seekable reader over concatenated frames ===\n");
+    const size_t sizes[] = {5 * 4096 + 100, 0, 70000, 1000};
+    const zxc_compress_opts_t opts[] = {
+        {.level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1},
+        {.level = 1, .block_size = 8192, .seekable = 1},
+        {.level = 5, .seekable = 1},
+        {.level = 1, .block_size = 4096, .checksum_enabled = 1, .seekable = 1}};
+    enum { K = 4 };
+    size_t total = 0;
+    for (size_t k = 0; k < K; k++) total += sizes[k];
+    uint8_t* const src = malloc(total);
+    uint8_t* const out = malloc(total);
     cbuf_t b = {0};
-    ok = ok && cb_frame(&b, src, n, &co) && cb_frame(&b, src, n, &co);
-    zxc_seekable* const s = ok ? zxc_seekable_open(b.p, b.n) : NULL;
-    if (ok && s) {
-        printf("  [FAIL] the seekable reader opened two frames\n");
+    int ok = src && out;
+    if (ok) gen_lz_data(src, total);
+    uint64_t blocks = 0;
+    for (size_t k = 0, at = 0; ok && k < K; at += sizes[k], k++) {
+        const size_t bs = opts[k].block_size ? opts[k].block_size : ZXC_BLOCK_SIZE_DEFAULT;
+        ok = cb_frame(&b, src + at, sizes[k], &opts[k]);
+        blocks += (sizes[k] + bs - 1) / bs;
+    }
+
+    FILE* const fp = tmpfile();
+    ok = ok && fp && fwrite(b.p, 1, b.n, fp) == b.n && fflush(fp) == 0;
+    zxc_seekable* const sb = ok ? zxc_seekable_open(b.p, b.n) : NULL;
+    zxc_seekable* const sf = ok ? zxc_seekable_open_file(fp) : NULL;
+    if (ok && (!sb || !sf)) {
+        printf("  [FAIL] open: buffer %p, FILE* %p\n", (void*)sb, (void*)sf);
         ok = 0;
     }
-    zxc_seekable_free(s);
+    if (ok) {
+        zxc_seekable_set_checksum(sb, 1);
+        zxc_seekable_set_checksum(sf, 1);
+        uint64_t dsum = 0;
+        for (uint64_t i = 0; i < blocks; i++) dsum += zxc_seekable_get_block_decomp_size(sb, i);
+        if (zxc_seekable_get_num_blocks(sb) != blocks ||
+            zxc_seekable_get_decompressed_size(sb) != total || dsum != total ||
+            zxc_seekable_get_block_comp_size(sb, blocks - 1) == 0 ||
+            zxc_seekable_get_block_comp_size(sb, blocks) != 0) {
+            printf("  [FAIL] geometry: %llu blocks (want %llu), %llu bytes\n",
+                   (unsigned long long)zxc_seekable_get_num_blocks(sb), (unsigned long long)blocks,
+                   (unsigned long long)zxc_seekable_get_decompressed_size(sb));
+            ok = 0;
+        }
+    }
+    /* Ranges inside one frame, across each boundary, and the whole archive. */
+    const size_t b1 = sizes[0], b2 = sizes[0] + sizes[2];
+    const struct {
+        size_t off, len;
+    } ranges[] = {{0, total},     {b1 - 10, 20},  {b2 - 5000, 6000}, {100, b2},
+                  {b1 + 4096, 3}, {total - 1, 1}, {4095, 2}};
+    for (size_t r = 0; ok && r < sizeof(ranges) / sizeof(ranges[0]); r++) {
+        const size_t off = ranges[r].off, len = ranges[r].len;
+        for (int t = 0; ok && t < 3; t++) {
+            zxc_seekable* const s = t == 2 ? sf : sb;
+            memset(out, 0, len);
+            const int64_t got = t == 1 ? zxc_seekable_decompress_range_mt(s, out, len, off, len, 4)
+                                       : zxc_seekable_decompress_range(s, out, len, off, len);
+            if (got != (int64_t)len || memcmp(out, src + off, len) != 0) {
+                printf("  [FAIL] range [%zu, +%zu), path %d: %lld\n", off, len, t, (long long)got);
+                ok = 0;
+            }
+        }
+    }
+    zxc_seekable_free(sb);
+    zxc_seekable_free(sf);
+    if (fp) fclose(fp);
+
+    /* A frame without a table refuses the open. */
+    if (ok) {
+        const zxc_compress_opts_t plain = {.level = 3};
+        cbuf_t m = {0};
+        ok = cb_put(&m, b.p, b.n) && cb_frame(&m, src, 3000, &plain);
+        zxc_seekable* const s = ok ? zxc_seekable_open(m.p, m.n) : NULL;
+        if (ok && s) {
+            printf("  [FAIL] opened with a frame without a table\n");
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+        free(m.p);
+    }
+
+    /* A dictionary per frame, of different sizes, or none; each cut from the data
+     * of a frame using it, so decoding with another fails. */
+    static uint8_t da[4096], db[1500], dc[512];
+    if (ok) {
+        memcpy(da, src + 35000, sizeof(da));
+        memcpy(db, src + 15000, sizeof(db));
+        memset(dc, 's', sizeof(dc));
+    }
+    const zxc_compress_opts_t dopts[] = {
+        {.level = 3, .seekable = 1, .dict = da, .dict_size = sizeof(da), .checksum_enabled = 1},
+        {.level = 3, .block_size = 4096, .seekable = 1},
+        {.level = 5, .block_size = 8192, .seekable = 1, .dict = db, .dict_size = sizeof(db)},
+        {.level = 1, .seekable = 1, .dict = da, .dict_size = sizeof(da)}};
+    const size_t dlen[] = {9000, 6000, 20000, 3000};
+    cbuf_t m = {0};
+    size_t dtotal = 0;
+    for (size_t k = 0; ok && k < 4; dtotal += dlen[k], k++)
+        ok = cb_frame(&m, src + dtotal, dlen[k], &dopts[k]);
+    zxc_seekable* const sd = ok ? zxc_seekable_open(m.p, m.n) : NULL;
+    if (ok && !sd) {
+        printf("  [FAIL] frames on different dictionaries did not open\n");
+        ok = 0;
+    }
+    if (ok) {
+        zxc_seekable_set_checksum(sd, 1);
+        // The plain frame reads without any; the others want theirs.
+        const int64_t plain = zxc_seekable_decompress_range(sd, out, 100, 9000, 100);
+        const int64_t need = zxc_seekable_decompress_range_mt(sd, out, dtotal, 0, dtotal, 4);
+        const int wrong = zxc_seekable_set_dict(sd, dc, sizeof(dc), NULL);
+        if (plain != 100 || memcmp(out, src + 9000, 100) != 0 || need != ZXC_ERROR_DICT_REQUIRED ||
+            wrong != ZXC_ERROR_DICT_MISMATCH ||
+            zxc_seekable_set_dict(sd, da, sizeof(da), NULL) != ZXC_OK ||
+            zxc_seekable_set_dict(sd, db, sizeof(db), NULL) != ZXC_OK) {
+            printf("  [FAIL] dictionaries: plain %lld, none %lld, unused %d\n", (long long)plain,
+                   (long long)need, wrong);
+            ok = 0;
+        }
+        for (int t = 0; ok && t < 2; t++) {
+            memset(out, 0, dtotal);
+            const int64_t got = t ? zxc_seekable_decompress_range_mt(sd, out, dtotal, 0, dtotal, 4)
+                                  : zxc_seekable_decompress_range(sd, out, dtotal, 0, dtotal);
+            if (got != (int64_t)dtotal || memcmp(out, src, dtotal) != 0) {
+                printf("  [FAIL] dictionaries, path %d: %lld\n", t, (long long)got);
+                ok = 0;
+            }
+        }
+    }
+    zxc_seekable_free(sd);
+    free(m.p);
+
     free(b.p);
+    free(out);
     free(src);
     if (!ok) return 0;
     printf("PASS\n\n");

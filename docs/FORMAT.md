@@ -63,8 +63,8 @@ rejects a concatenated file (bytes after the footer) rather than misreading it.
 
 Each footer stores its frame's `compressed_frame_size` (§ 8), so a reader can
 also walk the frames back from the end of the input without decoding them, as
-the size queries do. The seekable reader (§ 5.5) addresses one frame: that size
-must span the whole input, which refuses a concatenated file.
+the size queries and the seekable reader (§ 5.5) do. Seekable frames
+concatenated stay seekable when every frame carries a table.
 
 ---
 
@@ -535,11 +535,11 @@ on-disk size, whose bytes the read returns with no error; any seek index checked
 itself shares this. Only the per-block checksum, seeded with the block's position (§ 7.2),
 binds a block to its index.
 
-**Backward Reading**:
-1. Read the **File Header** (first 16 bytes) -> extract `block_size`; with `HAS_SEEK_TABLE`
-   clear, the archive is not seekable.
-2. Parse the **File Footer** back from the end (§ 8) -> `total_decompressed_size` and
-   `compressed_frame_size`; require it to be the whole input, the frame starting at offset 0.
+**Backward Reading**, from the end of the input, one frame at a time (§ 2.1):
+1. Parse the **File Footer** back from the end (§ 8) -> `total_decompressed_size` and
+   `compressed_frame_size`, which gives where the frame's header starts.
+2. Read that **File Header** -> extract `block_size`; with `HAS_SEEK_TABLE` clear, the
+   input is not seekable.
 3. Derive `num_blocks = ceil(total_decompressed_size / block_size)`, in 64 bits: no field
    holds `N`, so nothing caps it but the footer's 64-bit size.
 4. Calculate `seek_block_size = 8 + ⌈N / 64⌉ × 8 + N × 4`, in 64 bits.
@@ -557,6 +557,10 @@ binds a block to its index.
    moved onto another block of the same size. A block's size is always its own entry, never
    the gap to the next anchor. Checking that anchor is optional, and refuses an intact group
    when it is damaged.
+8. Anchors are offsets from the frame's own header, so a frame's table reads the same once
+   concatenated. The frame before ends where this one starts: repeat from step 1 until the
+   start of the input. Blocks and decompressed offsets then run across the frames in order;
+   a block's checksum seed is still its index within its frame (§ 7.2).
 
 **Sequential Reading**: the file header says what follows the EOF block, so a decoder never
 guesses from those bytes, which is unreliable: the footer opens with the digest or the source

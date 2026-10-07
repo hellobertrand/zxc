@@ -110,7 +110,7 @@ static const test_entry_t g_tests[] = {
     /* --- Containers: concatenated frames --- */
     TEST_CASE(test_container_concat),
     TEST_CASE(test_container_frame_walk),
-    TEST_CASE(test_container_seekable_refused),
+    TEST_CASE(test_container_seekable),
 
     /* --- Push Streaming API --- */
     TEST_CASE(test_pstream_roundtrip_basic),
