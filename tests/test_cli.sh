@@ -290,7 +290,7 @@ else
 fi
 
 LIST_OUT=$("$ZXC_BIN" -l -v "$EMPTY.zxc")
-if [[ "$LIST_OUT" == *"Checksum:        enabled"* ]]; then
+if [[ "$LIST_OUT" == *"Checksum:      enabled"* ]]; then
     log_pass "-l -v reports the checksum of an empty -C archive"
 else
     log_fail "-l -v should report a checksum on an empty -C archive: $LIST_OUT"
@@ -1572,6 +1572,18 @@ else
     echo "$ONE"
     echo "$TWO"
     log_fail "-l columns are wrong"
+fi
+
+# 35.2c Block sizes that differ between frames: listed by -v, an array in JSON
+"$ZXC_BIN" -B 256K -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_c.zxc"
+cat "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_c.zxc" > "$TEST_DIR/cat_bs.zxc"
+VOUT=$("$ZXC_BIN" -l -v "$TEST_DIR/cat_bs.zxc")
+JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/cat_bs.zxc")
+if [[ "$VOUT" == *"Block Size:    256 KB, 512 KB"* ]] && [[ "$JSON_OUT" == *'"block_size_kb": [256, 512]'* ]]; then
+    log_pass "-l reports block sizes that differ between frames"
+else
+    echo "$VOUT"
+    log_fail "-l should report every block size"
 fi
 
 # 35.3 Trailing garbage after the last footer is an error

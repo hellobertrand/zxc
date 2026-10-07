@@ -742,13 +742,18 @@ typedef struct {
     uint64_t frames;        /* ZXC frames */
     uint64_t checksummed;   /* frames carrying checksums */
     uint64_t seekable;      /* frames carrying a seek table */
-    uint64_t dsize;         /* their decompressed sizes, summed */
-    uint64_t digest;        /* the last frame's digest, when it has one */
+    uint32_t block_sizes;   /* OR of every block size, each a power of 2 */
+    uint32_t* dict_ids;     /* distinct dictionary ids in file order, 0 for none */
+    size_t num_dict_ids;
+    size_t cap_dict_ids;
+    uint64_t dsize;  /* their decompressed sizes, summed */
+    uint64_t digest; /* the last frame's digest, when it has one */
 } cli_container_t;
 
 /**
  * @brief Walks the frames concatenated in @p f, from the last back to the first,
- *        through zxc_stream_get_last_frame_info(). Rewinds @p f.
+ *        through zxc_stream_get_last_frame_info(). Rewinds @p f; free
+ *        @c c->dict_ids afterwards, whatever the result.
  *
  * @return @ref ZXC_OK, or the library's verdict on the first frame that fails.
  */
@@ -768,11 +773,62 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
             break;
         }
         c->dsize += fi.decompressed_size;
+        c->block_sizes |= (uint32_t)fi.block_size;
+        // File order of first appearance: walking back, a repeat moves to the end,
+        // and the list is reversed below.
+        size_t k = 0;
+        while (k < c->num_dict_ids && c->dict_ids[k] != fi.dict_id) k++;
+        if (k < c->num_dict_ids) {
+            memmove(c->dict_ids + k, c->dict_ids + k + 1,
+                    (c->num_dict_ids - k - 1) * sizeof(uint32_t));
+            c->dict_ids[c->num_dict_ids - 1] = fi.dict_id;
+        } else {
+            if (c->num_dict_ids == c->cap_dict_ids) {
+                const size_t cap = c->cap_dict_ids ? 2 * c->cap_dict_ids : 4;
+                uint32_t* const grown = (uint32_t*)realloc(c->dict_ids, cap * sizeof(uint32_t));
+                if (!grown) {
+                    rc = ZXC_ERROR_MEMORY;
+                    break;
+                }
+                c->dict_ids = grown;
+                c->cap_dict_ids = cap;
+            }
+            c->dict_ids[c->num_dict_ids++] = fi.dict_id;
+        }
         c->first = fi;  // the first frame's, once the walk is done
         end -= fi.compressed_size;
     } while (end > 0);
+    for (size_t i = 0; i < c->num_dict_ids / 2; i++) {
+        const uint32_t t = c->dict_ids[i];
+        c->dict_ids[i] = c->dict_ids[c->num_dict_ids - 1 - i];
+        c->dict_ids[c->num_dict_ids - 1 - i] = t;
+    }
     if (fseeko(f, 0, SEEK_SET) != 0 && rc == ZXC_OK) rc = ZXC_ERROR_IO;
     return rc;
+}
+
+/** @brief Prints the block sizes, ascending; in JSON an array when they differ. */
+static void cli_print_block_sizes(const cli_container_t* c, const int json) {
+    const int many = (c->block_sizes & (c->block_sizes - 1)) != 0;
+    if (json && many) printf("[");
+    for (uint32_t b = c->block_sizes; b; b &= b - 1)
+        printf(json ? "%s%u" : "%s%u KB", b == c->block_sizes ? "" : ", ", (b & (0U - b)) / 1024);
+    if (json && many) printf("]");
+}
+
+/** @brief Prints the dictionary ids in file order, "none" (JSON null) for frames
+ *  without one; in JSON an array when they differ. */
+static void cli_print_dict_ids(const cli_container_t* c, const int json) {
+    if (json && c->num_dict_ids > 1) printf("[");
+    for (size_t i = 0; i < c->num_dict_ids; i++) {
+        const uint32_t id = c->dict_ids[i];
+        if (i) printf(", ");
+        if (id)
+            printf(json ? "\"0x%08X\"" : "0x%08X", id);
+        else
+            printf(json ? "null" : "none");
+    }
+    if (json && c->num_dict_ids > 1) printf("]");
 }
 
 static int zxc_list_archive(const char* path, int json_output, int show_name) {
@@ -824,12 +880,13 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
     const int walked = zxc_cli_walk(f, (uint64_t)file_size, &cont);
     fclose(f);
     if (walked != ZXC_OK) {
+        free(cont.dict_ids);
         fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(walked));
         return 1;
     }
     const uint64_t uncompressed_size = cont.dsize;
     const unsigned format_version = cont.first.format_version;
-    const size_t block_size_kb = cont.first.block_size / 1024;
+    const int mixed_dict = cont.num_dict_ids > 1;
     // Checksums when every frame carries them; a digest only describes one frame.
     const int has_checksum = cont.checksummed == cont.frames;
     const int mixed_checksum = cont.checksummed != 0 && !has_checksum;
@@ -853,10 +910,13 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
     format_size_decimal((uint64_t)file_size, comp_str, sizeof(comp_str));
     format_size_decimal(uncompressed_size, uncomp_str, sizeof(uncomp_str));
 
-    if (dict_id)
+    if (mixed_dict)
+        snprintf(dict_id_str, sizeof(dict_id_str), "mixed");
+    else if (dict_id)
         snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
     else
         snprintf(dict_id_str, sizeof(dict_id_str), "-");
+    const int show_dict = dict_id || mixed_dict;
 
     if (json_output) {
         printf(
@@ -866,36 +926,50 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
             "  \"uncompressed_size_bytes\": %llu,\n"
             "  \"compression_ratio\": %.3f,\n"
             "  \"format_version\": %u,\n"
-            "  \"block_size_kb\": %zu,\n"
+            "  \"block_size_kb\": ",
+            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version);
+        cli_print_block_sizes(&cont, 1);
+        printf(
+            ",\n"
             "  \"checksum\": \"%s\",\n"
             "  \"seekable\": \"%s\",\n"
             "  \"digest\": %s,\n"
-            "  \"dict_id\": %s%s%s,\n"
+            "  \"dict_id\": ",
+            checksum_state, seekable_state, digest_str);
+        cli_print_dict_ids(&cont, 1);
+        printf(
+            ",\n"
             "  \"frames\": %llu\n"
             "}\n",
-            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version,
-            block_size_kb, checksum_state, seekable_state, digest_str, dict_id ? "\"" : "",
-            dict_id ? dict_id_str : "null", dict_id ? "\"" : "", (unsigned long long)cont.frames);
+            (unsigned long long)cont.frames);
     } else if (g_verbose) {
         // Verbose mode: detailed vertical layout
         printf(
             "\nFile: %s\n"
             "-----------------------\n"
-            "Block Format: %u\n"
-            "Block Size:   %zu KB\n"
-            "Checksum:        %s\n"
-            "Seekable:        %s\n",
-            path, format_version, block_size_kb, checksum_state, seekable_state);
+            "Block Format:  %u\n"
+            "Block Size:    ",
+            path, format_version);
+        cli_print_block_sizes(&cont, 0);
+        printf(
+            "\n"
+            "Checksum:      %s\n"
+            "Seekable:      %s\n",
+            checksum_state, seekable_state);
 
-        if (has_checksum && cont.frames == 1) printf("Digest:          %s\n", digest_str);
-        if (dict_id) printf("Dictionary ID:   %s\n", dict_id_str);
-        if (cont.frames > 1) printf("Frames:          %llu\n", (unsigned long long)cont.frames);
+        if (has_checksum && cont.frames == 1) printf("Digest:        %s\n", digest_str);
+        if (show_dict) {
+            printf("Dictionary ID: ");
+            cli_print_dict_ids(&cont, 0);
+            printf("\n");
+        }
+        if (cont.frames > 1) printf("Frames:        %llu\n", (unsigned long long)cont.frames);
 
         printf(
             "-----------------------\n"
-            "Comp. Size:   %s\n"
-            "Uncomp. Size: %s\n"
-            "Ratio:        %.2f\n",
+            "Comp. Size:    %s\n"
+            "Uncomp. Size:  %s\n"
+            "Ratio:         %.2f\n",
             comp_str, uncomp_str, ratio);
     } else {
         // Normal mode: table format, the file named only when several are listed
@@ -907,6 +981,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
                show_name ? "   " : "", show_name ? path : "");
     }
 
+    free(cont.dict_ids);
     return 0;
 }
 
@@ -924,7 +999,9 @@ static int zxc_archive_has_checksum(FILE* f) {
     cli_container_t c;
     if (fseeko(f, 0, SEEK_END) != 0) return -1;
     const long long size = ftello(f);
-    if (size < 0 || zxc_cli_walk(f, (uint64_t)size, &c) != ZXC_OK) {
+    const int rc = size < 0 ? ZXC_ERROR_IO : zxc_cli_walk(f, (uint64_t)size, &c);
+    if (size >= 0) free(c.dict_ids);
+    if (rc != ZXC_OK) {
         fseeko(f, 0, SEEK_SET);
         return -1;
     }

@@ -113,9 +113,11 @@ Dictionaries are external `.zxd` files referenced from the archive header by a 3
 
 When **--train**'s **-o** targets a directory (or is omitted, defaulting to the current directory), **zxc** names the file `dictionary_<dict_id>.zxd` (the `dict_id` is the lowercase 8-digit hex reported by `zxc -l`). On decompression the dictionary is **not** auto-located: an archive compressed with a dictionary must be decompressed by supplying that dictionary with **-D**, otherwise decompression fails with a dictionary-required error.
 
-Archives can be concatenated (`cat a.zxc b.zxc > ab.zxc`): **-d** decodes them one after the other into one output, **-t** checks every one, and **-l** reports their count.
-
 If no matching dictionary can be found (or supplied), decompression fails with a dictionary-required error rather than producing corrupt output.
+
+## CONCATENATED ARCHIVES
+
+Archives can be concatenated (`cat a.zxc b.zxc > ab.zxc`): **-d** decodes them one after the other into one output, and **-t** checks every one. Each keeps its own block size, checksum, seek table and dictionary; **-l** reports the frame count and `mixed` where they differ; with **-v** or **-j** it lists every block size and dictionary ID instead. **-D** supplies one dictionary: frames compressed with another fail with a dictionary-mismatch error.
 
 ## EXAMPLES
 
