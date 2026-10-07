@@ -373,9 +373,11 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
 int zxc_cctx_alloc_entropy_scratch(zxc_cctx_t* ctx) {
     if (LIKELY(ctx->pivco_scratch)) return ZXC_OK;
 
+    // Sized for the block the context was carved for, not chunk_size: a reader
+    // over frames of several block sizes lowers chunk_size per block.
     size_t sz_tok = 0;
     size_t sz_pivco = 0;
-    zxc_dctx_entropy_sizes(ctx->chunk_size, &sz_tok, &sz_pivco);
+    zxc_dctx_entropy_sizes(ctx->work_buf_cap - ZXC_DECOMPRESS_TAIL_PAD, &sz_tok, &sz_pivco);
     const size_t total = ZXC_ALIGN_CL(sz_tok) + ZXC_ALIGN_CL(sz_pivco);
 
     uint8_t* const mem = (uint8_t*)ZXC_ALIGNED_MALLOC(total, ZXC_CACHE_LINE_SIZE);
@@ -571,10 +573,8 @@ int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* star
     // Too short for a frame: what is left starts the input, its header speaks first.
     if (UNLIKELY(end < ZXC_FRAME_MIN_SIZE)) {
         const size_t n = end < sizeof(h) ? (size_t)end : sizeof(h);
-        size_t chunk = 0;
         rc = zxc_scan_read(src, 0, h, n);
-        if (rc == ZXC_OK) rc = zxc_read_file_header(h, n, &chunk, NULL, NULL, NULL);
-        return rc != ZXC_OK ? rc : ZXC_ERROR_SRC_TOO_SMALL;
+        return rc != ZXC_OK ? rc : zxc_short_input_verdict(h, n);
     }
     uint8_t tail[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];  // end > sizeof(tail)
     rc = zxc_scan_read(src, end - sizeof(tail), tail, sizeof(tail));
@@ -596,6 +596,18 @@ int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* star
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     *start = at;
     return ZXC_OK;
+}
+
+int zxc_scan_whole_frame(const zxc_scan_src_t* src, zxc_frame_info_t* info, size_t* footer_len) {
+    uint8_t h[ZXC_FILE_HEADER_SIZE];
+    const size_t n = src->size < sizeof(h) ? (size_t)src->size : sizeof(h);
+    int rc = zxc_scan_read(src, 0, h, n);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    rc = zxc_short_input_verdict(h, n);  // the header speaks first
+    if (UNLIKELY(rc != ZXC_ERROR_SRC_TOO_SMALL || src->size < ZXC_FRAME_MIN_SIZE)) return rc;
+    uint64_t start = 0;
+    rc = zxc_scan_frame(src, src->size, &start, info, footer_len);
+    return rc == ZXC_OK && start != 0 ? ZXC_ERROR_CORRUPT_DATA : rc;
 }
 
 int zxc_scan_container(const zxc_scan_src_t* src, const size_t req_chunk,
@@ -648,7 +660,8 @@ int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, const size_t
     const int frc = zxc_parse_file_footer(tail + tail_len, tail_len, &stored, &frame, &sizes);
     if (UNLIKELY(frc != ZXC_OK)) return frc;
     const size_t flen = sizes + (cs ? (size_t)ZXC_FILE_DIGEST_SIZE : 0U);
-    if (UNLIKELY(flen > tail_len)) return ZXC_ERROR_SRC_TOO_SMALL;
+    // All the frame's bytes are there: a footer longer than they allow is forged.
+    if (UNLIKELY(flen > tail_len)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(frame != total || !zxc_footer_dsize_plausible(stored, chunk, total)))
         return ZXC_ERROR_CORRUPT_DATA;
 

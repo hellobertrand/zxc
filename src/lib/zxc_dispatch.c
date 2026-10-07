@@ -803,32 +803,8 @@ static int64_t zxc_dctx_decode_container(zxc_dctx* dctx, const uint8_t* src, siz
 static int zxc_buffer_frame_info(const uint8_t* src, const size_t src_size, zxc_frame_info_t* info,
                                  size_t* footer_len) {
     if (UNLIKELY(!src)) return ZXC_ERROR_NULL_INPUT;
-    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE)) {
-        size_t chunk = 0;
-        const int hrc = zxc_read_file_header(src, src_size, &chunk, NULL, NULL, NULL);
-        return hrc != ZXC_OK ? hrc : ZXC_ERROR_SRC_TOO_SMALL;
-    }
-    const size_t tail = zxc_frame_tail_len(src_size);
-    return zxc_read_frame_info(src, src + src_size - tail, tail, (uint64_t)src_size, info,
-                               footer_len);
-}
-
-/**
- * @brief Turns away a no-destination decode that cannot possibly succeed.
- *
- * Only an archive that stores nothing can succeed without a buffer. Refusing
- * the rest here spares the frame walk a workspace carved only to refuse; what
- * survives goes on to that walk, the sole place the EOF payload size, the
- * dictionary binding and the footer size are checked.
- *
- * @return @ref ZXC_OK to keep walking, or the code to hand back.
- */
-static int zxc_probe_reject_payload(const uint8_t* RESTRICT src, const size_t src_size) {
     const zxc_scan_src_t scan = zxc_scan_src_mem(src, src_size);
-    zxc_container_info_t info;
-    const int rc = zxc_scan_container(&scan, 0, &info);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
-    return (info.dsize != 0) ? ZXC_ERROR_DST_TOO_SMALL : ZXC_OK;
+    return zxc_scan_whole_frame(&scan, info, footer_len);
 }
 
 /**
@@ -839,9 +815,17 @@ static int zxc_probe_reject_payload(const uint8_t* RESTRICT src, const size_t sr
  * than by keeping a second copy of the checks in step.
  */
 static int64_t zxc_probe_without_dst(const uint8_t* RESTRICT src, const size_t src_size,
-                                     const zxc_decompress_opts_t* opts) {
-    const int rc = zxc_probe_reject_payload(src, src_size);
-    if (UNLIKELY(rc != ZXC_OK)) return rc;
+                                     const zxc_decompress_opts_t* opts,
+                                     const zxc_container_info_t* scanned) {
+    // Only an empty archive succeeds without a buffer. @p scanned: the caller's walk, if any.
+    zxc_container_info_t info;
+    if (!scanned) {
+        const zxc_scan_src_t scan = zxc_scan_src_mem(src, src_size);
+        const int rc = zxc_scan_container(&scan, 0, &info);
+        if (UNLIKELY(rc != ZXC_OK)) return rc;
+        scanned = &info;
+    }
+    if (scanned->dsize != 0) return ZXC_ERROR_DST_TOO_SMALL;
     uint8_t probe_dst[1];
     return zxc_decompress_oneshot(src, src_size, probe_dst, 0, opts);
 }
@@ -857,9 +841,11 @@ int64_t zxc_decompress(const void* RESTRICT src, const size_t src_size, void* RE
                        const size_t dst_capacity, const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!src || (!dst && dst_capacity != 0))) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE))
+        return zxc_short_input_verdict((const uint8_t*)src, src_size);
 
-    if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_probe_without_dst(src, src_size, opts);
+    if (UNLIKELY(!dst || dst_capacity == 0))
+        return zxc_probe_without_dst(src, src_size, opts, NULL);
 
     return zxc_decompress_oneshot((const uint8_t*)src, src_size, (uint8_t*)dst, dst_capacity, opts);
 }
@@ -1395,7 +1381,7 @@ static int64_t zxc_dctx_probe(const zxc_dctx* dctx, const uint8_t* RESTRICT src,
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     if (UNLIKELY(dctx->owns_workspace && (info.uses_dict || dict_size != 0)))
         return ZXC_ERROR_DICT_UNSUPPORTED;
-    return zxc_probe_without_dst(src, src_size, opts);
+    return zxc_probe_without_dst(src, src_size, opts, &info);
 }
 
 /**
@@ -1410,7 +1396,8 @@ int64_t zxc_decompress_dctx(zxc_dctx* dctx, const void* RESTRICT src, const size
                             const zxc_decompress_opts_t* opts) {
     if (UNLIKELY(!dctx || !src || (!dst && dst_capacity != 0))) return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(ZXC_OPTS_DICT_SIZE(opts) > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(src_size < ZXC_FRAME_MIN_SIZE))
+        return zxc_short_input_verdict((const uint8_t*)src, src_size);
     if (UNLIKELY(!dst || dst_capacity == 0)) return zxc_dctx_probe(dctx, src, src_size, opts);
     return zxc_dctx_decode_container(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                      dst_capacity, opts);

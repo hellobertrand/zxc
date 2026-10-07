@@ -1638,9 +1638,10 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
     (void)self;
     PyObject* capsule;
     Py_buffer view;
-    static char* kwlist[] = {"ds", "data", NULL};
+    int one_frame = 0; /* stop at the end of a frame, leaving the rest unread */
+    static char* kwlist[] = {"ds", "data", "one_frame", NULL};
 
-    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oy*", kwlist, &capsule, &view)) {
+    if (!PyArg_ParseTupleAndKeywords(args, kwargs, "Oy*|p", kwlist, &capsule, &view, &one_frame)) {
         return NULL;
     }
 
@@ -1663,6 +1664,7 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
     int err_code = 0;
     int oom = 0;
     int overflow = 0;
+    size_t validated = 0; /* output up to the last footer this call validated */
 
     Py_BEGIN_ALLOW_THREADS for (;;) {
         size_t want = zxc_dstream_out_size(ds);
@@ -1686,10 +1688,14 @@ static PyObject* pyzxc_dstream_decompress(PyObject* self, PyObject* args, PyObje
         const int64_t r = zxc_dstream_decompress(ds, &out, cur_in);
         out_len += out.pos;
         if (r < 0) {
-            /* Output already decoded (a frame before the fault) is handed over
-             * first: the stream keeps the error for the next call. */
-            if (out_len == 0) err_code = (int)r;
+            /* Hand over validated frames; the stream keeps the error for later. */
+            if (validated == 0) err_code = (int)r;
+            out_len = validated;
             break;
+        }
+        if (zxc_dstream_finished(ds)) {
+            validated = out_len;
+            if (one_frame) break;
         }
         /* Keep draining even after input is exhausted; stop only when no
          * progress was made (no input consumed AND no output produced). */

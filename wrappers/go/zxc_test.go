@@ -616,6 +616,18 @@ func TestStreamConcatenated(t *testing.T) {
 		t.Fatalf("Reader: %d bytes, err %v (want %d)", len(got), err, len(want))
 	}
 
+	// Without multistream, the reader stops after the first frame.
+	one, err := NewReader(iotest.OneByteReader(bytes.NewReader(joined)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	one.Multistream(false)
+	first, err := io.ReadAll(one)
+	one.Close()
+	if err != nil || !bytes.Equal(first, a) {
+		t.Fatalf("Multistream(false): %d bytes, err %v (want %d)", len(first), err, len(a))
+	}
+
 	ds, err := NewDStream()
 	if err != nil {
 		t.Fatal(err)

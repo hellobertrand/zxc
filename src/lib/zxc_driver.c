@@ -1016,7 +1016,9 @@ static void zxc_frame_progress(const uint64_t done, const uint64_t total, const 
 static int zxc_stream_read_exact(FILE* f, void* dst, const size_t len, const int short_code) {
     const size_t got = fread(dst, 1, len, f);
     if (LIKELY(got == len)) return ZXC_OK;
-    if (UNLIKELY(ferror(f))) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+    // A short read without EOF is a read error. Not ferror(): the caller may have
+    // left a stale error indicator on the stream.
+    if (UNLIKELY(!feof(f))) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
     return got == 0 ? 1 : short_code;
 }
 
@@ -1068,6 +1070,21 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     return rc != ZXC_OK ? rc : total;
 }
 
+/** @brief The size of @p f; its position goes to @p saved, for the caller to restore. */
+static int zxc_file_span(FILE* f, long long* saved, uint64_t* size) {
+    *saved = ftello(f);
+    if (UNLIKELY(*saved < 0 || fseeko(f, 0, SEEK_END) != 0)) return ZXC_ERROR_IO;
+    const long long n = ftello(f);
+    if (UNLIKELY(n < 0)) {
+        // LCOV_EXCL_START
+        fseeko(f, *saved, SEEK_SET);
+        return ZXC_ERROR_IO;
+        // LCOV_EXCL_STOP
+    }
+    *size = (uint64_t)n;
+    return ZXC_OK;
+}
+
 /** @brief @ref zxc_scan_src_t over a @c FILE*. */
 static int zxc_file_scan_read(const zxc_scan_src_t* src, const uint64_t off, void* dst,
                               const size_t len) {
@@ -1082,36 +1099,13 @@ static int zxc_file_scan_read(const zxc_scan_src_t* src, const uint64_t off, voi
  *        and validates the frame they describe; restores the stream position.
  */
 static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
-    const long long saved_pos = ftello(f_in);
-    if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
-    if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
-    const long long file_size = ftello(f_in);
-
-    uint8_t header[ZXC_FILE_HEADER_SIZE];
-    int rc = ZXC_OK;
-    if (UNLIKELY(file_size < 0)) {
-        rc = ZXC_ERROR_IO;
-    } else if (UNLIKELY(file_size < (long long)ZXC_FRAME_MIN_SIZE)) {
-        // Too short for a frame, the header still speaks first, as in the buffer API.
-        size_t chunk = 0;
-        const size_t n = file_size < (long long)sizeof(header) ? (size_t)file_size : sizeof(header);
-        if (UNLIKELY(fseeko(f_in, 0, SEEK_SET) != 0 || fread(header, 1, n, f_in) != n))
-            rc = ZXC_ERROR_IO;
-        else
-            rc = zxc_read_file_header(header, n, &chunk, NULL, NULL, NULL);
-        if (rc == ZXC_OK) rc = ZXC_ERROR_SRC_TOO_SMALL;
-    } else {
-        uint8_t tail[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
-        const size_t want = zxc_frame_tail_len((uint64_t)file_size);
-        if (UNLIKELY(fseeko(f_in, 0, SEEK_SET) != 0 ||
-                     fread(header, 1, sizeof(header), f_in) != sizeof(header) ||
-                     fseeko(f_in, file_size - (long long)want, SEEK_SET) != 0 ||
-                     fread(tail, 1, want, f_in) != want))
-            rc = ZXC_ERROR_IO;
-        else
-            rc = zxc_read_frame_info(header, tail, want, (uint64_t)file_size, info, NULL);
-    }
-    fseeko(f_in, saved_pos, SEEK_SET);
+    long long saved = 0;
+    uint64_t size = 0;
+    int rc = zxc_file_span(f_in, &saved, &size);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, size};
+    rc = zxc_scan_whole_frame(&src, info, NULL);
+    fseeko(f_in, saved, SEEK_SET);
     return rc;
 }
 
@@ -1123,17 +1117,14 @@ static int zxc_stream_read_frame_info(FILE* f_in, zxc_frame_info_t* info) {
  */
 int64_t zxc_stream_get_decompressed_size(FILE* f_in) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
-    const long long saved_pos = ftello(f_in);
-    if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
-    if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
-    const long long file_size = ftello(f_in);
+    long long saved = 0;
+    uint64_t size = 0;
+    int rc = zxc_file_span(f_in, &saved, &size);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
     zxc_container_info_t info;
-    int rc = ZXC_ERROR_IO;
-    if (LIKELY(file_size >= 0)) {
-        const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, (uint64_t)file_size};
-        rc = zxc_scan_container(&src, 0, &info);
-    }
-    fseeko(f_in, saved_pos, SEEK_SET);
+    const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, size};
+    rc = zxc_scan_container(&src, 0, &info);
+    fseeko(f_in, saved, SEEK_SET);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     if (UNLIKELY(info.dsize > (uint64_t)INT64_MAX)) return ZXC_ERROR_CORRUPT_DATA;
     return (int64_t)info.dsize;
@@ -1162,20 +1153,19 @@ int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, const size_t i
 int zxc_stream_get_last_frame_info(FILE* f_in, const uint64_t end, zxc_frame_info_t* info,
                                    const size_t info_size) {
     if (UNLIKELY(!f_in || !info)) return ZXC_ERROR_NULL_INPUT;
-    const long long saved_pos = ftello(f_in);
-    if (UNLIKELY(saved_pos < 0)) return ZXC_ERROR_IO;
-    if (fseeko(f_in, 0, SEEK_END) != 0) return ZXC_ERROR_IO;
-    const long long file_size = ftello(f_in);
+    long long saved = 0;
+    uint64_t size = 0;
+    int rc = zxc_file_span(f_in, &saved, &size);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
     zxc_frame_info_t got;
-    int rc = ZXC_ERROR_IO;
-    if (UNLIKELY(file_size >= 0 && end > (uint64_t)file_size)) {
+    if (UNLIKELY(end > size)) {
         rc = ZXC_ERROR_SRC_TOO_SMALL;
-    } else if (LIKELY(file_size >= 0)) {
+    } else {
         const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, end};
         uint64_t start = 0;
         rc = zxc_scan_frame(&src, end, &start, &got, NULL);
     }
-    fseeko(f_in, saved_pos, SEEK_SET);
+    fseeko(f_in, saved, SEEK_SET);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
     return rc;
 }

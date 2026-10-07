@@ -988,8 +988,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
 /**
  * @brief Reports whether an archive's frames declare checksums.
  *
- * Walks the container in @p f and rewinds it to the start, where decoding
- * begins, so the checksum status describes the same file that is decoded.
+ * Walks the container in @p f and rewinds it to the start.
  *
  * @param[in] f Seekable input stream for the archive (not stdin).
  * @return 1 if every frame declares one, 2 if only some do, 0 if none does,
@@ -1164,6 +1163,11 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     uint64_t total_size = 0;
     const int stderr_tty = isatty(fileno(stderr)) != 0;
 
+    // The frame walks seek once per frame: on f_in each would refill its 1 MB buffer.
+    FILE* const f_walk =
+        (!use_stdin && mode != MODE_COMPRESS) ? fopen(resolved_in_path, "rb") : NULL;
+    FILE* const f_meta = f_walk ? f_walk : f_in;
+
     char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
     char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
     if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
@@ -1183,7 +1187,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                 }
             } else {
                 // Decompression: get decompressed size from footer (BEFORE starting decompression)
-                const int64_t decomp_size = zxc_stream_get_decompressed_size(f_in);
+                const int64_t decomp_size = zxc_stream_get_decompressed_size(f_meta);
                 if (decomp_size > 0) total_size = (uint64_t)decomp_size;
             }
         }
@@ -1195,7 +1199,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // -t reports the checksum the archive carries; stdin can't be re-read for it
     int archive_has_checksum = -1;  // -1 unknown, 0 none declared, 1 declared
-    if (mode == MODE_INTEGRITY && !use_stdin) archive_has_checksum = zxc_archive_has_checksum(f_in);
+    if (mode == MODE_INTEGRITY && !use_stdin)
+        archive_has_checksum = zxc_archive_has_checksum(f_meta);
+    if (f_walk) fclose(f_walk);
 
     if (mode == MODE_COMPRESS)
         zxc_log_v("Processing %s... (Compression Level %d)\n", in_path ? in_path : "<stdin>",

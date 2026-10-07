@@ -953,7 +953,8 @@ export default async function createZXC(moduleOverrides, factory) {
 
     return {
       /** Push compressed bytes; return any decompressed bytes produced. An error
-       *  found after a frame's output is thrown by the next call, that output first. */
+       *  that follows a frame validated in the same call is thrown by the next
+       *  call, that frame's output first. */
       decompress(data) {
         const srcPtr = data.length > 0 ? _alloc(data.length) : 0;
         try {
@@ -962,6 +963,9 @@ export default async function createZXC(moduleOverrides, factory) {
 
           const chunks = [];
           let total = 0;
+          // Output up to the last footer this call validated.
+          let validChunks = 0;
+          let validTotal = 0;
           let exhausted = data.length === 0;
           for (;;) {
             const beforeIn = _readPos(inDescPtr);
@@ -969,21 +973,13 @@ export default async function createZXC(moduleOverrides, factory) {
             const r = _dstream_decompress(ds, outDescPtr, inDescPtr);
             const produced = _readPos(outDescPtr);
             if (r < 0) {
-              // Output already decoded (a frame before the fault) is handed over
-              // first: the stream keeps the error for the next call.
-              if (total + produced > 0) {
-                if (produced > 0)
-                  chunks.push(
-                    new Uint8Array(
-                      Module.HEAPU8.buffer,
-                      stagePtr,
-                      produced,
-                    ).slice(),
-                  );
-                total += produced;
-                break;
+              // Hand over validated frames; the stream keeps the error for later.
+              if (validTotal === 0) {
+                throw new Error(`ZXC dstream error: ${_error_name(r)} (${r})`);
               }
-              throw new Error(`ZXC dstream error: ${_error_name(r)} (${r})`);
+              chunks.length = validChunks;
+              total = validTotal;
+              break;
             }
             if (produced > 0) {
               chunks.push(
@@ -994,6 +990,10 @@ export default async function createZXC(moduleOverrides, factory) {
                 ).slice(),
               );
               total += produced;
+            }
+            if (_dstream_finished(ds) !== 0) {
+              validChunks = chunks.length;
+              validTotal = total;
             }
             const afterIn = _readPos(inDescPtr);
             // Stop only when the call made no progress at all

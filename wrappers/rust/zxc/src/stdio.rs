@@ -186,7 +186,7 @@ impl<W: Write> Drop for Encoder<W> {
 /// Pulls compressed bytes from the inner reader and yields decompressed
 /// bytes. Like gzip and zstd readers it reads until the inner reader ends, so
 /// concatenated archives decode as one stream; on a source that stays open
-/// after one frame, use [`DStream`] and stop once it is finished. Returns
+/// after one frame, set [`Decoder::multistream`] to `false`. Returns
 /// [`io::ErrorKind::UnexpectedEof`] if the inner reader is drained before the
 /// ZXC footer is reached.
 ///
@@ -210,6 +210,7 @@ pub struct Decoder<R: Read> {
     in_pos: usize,
     in_len: usize,
     eof: bool,
+    multistream: bool,
 }
 
 impl<R: Read> Decoder<R> {
@@ -229,7 +230,16 @@ impl<R: Read> Decoder<R> {
             in_pos: 0,
             in_len: 0,
             eof: false,
+            multistream: true,
         })
+    }
+
+    /// Decodes concatenated archives as one stream (`true`, the default), or
+    /// stops after the first frame, as on a source that stays open after it.
+    /// Bytes read ahead past that frame are then lost to the caller.
+    pub fn multistream(mut self, enabled: bool) -> Self {
+        self.multistream = enabled;
+        self
     }
 
     /// Returns a reference to the underlying reader.
@@ -258,8 +268,11 @@ impl<R: Read> Read for Decoder<R> {
         if buf.is_empty() {
             return Ok(0);
         }
-        // A finished frame may be followed by another: stop only once src ends.
+        // Stop when src ends, or after the first frame without multistream.
         loop {
+            if !self.multistream && self.ds.finished() {
+                return Ok(0);
+            }
             // Try to decompress whatever is currently buffered (or drain mode
             // when src is at EOF).
             if self.in_pos < self.in_len || self.eof {
@@ -428,7 +441,16 @@ mod tests {
             .unwrap()
             .read_to_end(&mut got)
             .unwrap();
-        assert_eq!(got, [a, b].concat());
+        assert_eq!(got, [a.clone(), b].concat());
+
+        // Without multistream, the decoder stops after the first frame.
+        let mut first = Vec::new();
+        Decoder::new(OneByte(&joined))
+            .unwrap()
+            .multistream(false)
+            .read_to_end(&mut first)
+            .unwrap();
+        assert_eq!(first, a);
 
         let junk = [fa, b"junk".to_vec()].concat();
         let mut dec = Decoder::new(Cursor::new(junk)).unwrap();

@@ -323,7 +323,8 @@ func (s *Seekable) SetDictionary(d *Dictionary) error {
 // concatenated frames use several.
 //
 // The dictionary content must match the one used at compression time; its ID
-// must be one a frame of the archive declares. When the archive was compressed
+// must be one a frame of the archive declares, unless no frame needs one: then
+// it is ignored. When the archive was compressed
 // with a shared literal Huffman table, pass the same table as hufLengths
 // ([HufTableSize] bytes, see [DictHuf]); pass nil otherwise. Both buffers
 // are copied internally by the library. Passing an empty dict is an error.

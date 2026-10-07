@@ -1575,6 +1575,25 @@ int test_stream_size_then_decompress(void) {
         free(buf);
     }
 
+    /* A stale error indicator the caller left on the stream (a write to a read-only
+     * FILE*) is not a read error of the decode. */
+    if (ok) {
+        FILE* const f_arc = fopen(path, "rb");
+        FILE* const f_out = tmpfile();
+        int64_t got = -1;
+        // Where the write does not set the indicator, there is nothing to test.
+        // cppcheck-suppress writeReadOnlyFile ; the failing write is the point
+        const int stale = f_arc && f_out && fputc('x', f_arc) == EOF && ferror(f_arc);
+        if (stale && fseek(f_arc, 0, SEEK_SET) == 0)
+            got = zxc_stream_decompress(f_arc, f_out, NULL);
+        if (stale && got != (int64_t)n) {
+            printf("  [FAIL] stale error indicator: decode %lld, want %zu\n", (long long)got, n);
+            ok = 0;
+        }
+        if (f_out) fclose(f_out);
+        if (f_arc) fclose(f_arc);
+    }
+
     remove(path);
     free(src);
     free(out);

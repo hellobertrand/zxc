@@ -2143,6 +2143,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
                          int* out_has_checksum, uint32_t* out_dict_id, int* out_has_seek);
 
+/** @brief The verdict on @p n bytes too short for a frame: the header speaks first,
+ *  then @ref ZXC_ERROR_SRC_TOO_SMALL. */
+static inline int zxc_short_input_verdict(const uint8_t* p, const size_t n) {
+    size_t chunk = 0;
+    const int rc = zxc_read_file_header(p, n < ZXC_FILE_HEADER_SIZE ? n : ZXC_FILE_HEADER_SIZE,
+                                        &chunk, NULL, NULL, NULL);
+    return rc != ZXC_OK ? rc : ZXC_ERROR_SRC_TOO_SMALL;
+}
+
 // ---------------------------------------------------------------------------
 // Container scan: frames back to back, measured without decoding (FORMAT.md,
 // Sec 2.1).
@@ -2201,6 +2210,13 @@ int zxc_container_next(const zxc_scan_src_t* src, uint64_t pos);
  */
 int zxc_scan_frame(const zxc_scan_src_t* src, uint64_t end, uint64_t* start, zxc_frame_info_t* info,
                    size_t* footer_len);
+
+/**
+ * @brief The frame that must span all of @p src: zxc_get_frame_info() and its
+ *        FILE* twin. The header speaks first, then @ref zxc_scan_frame; a frame
+ *        starting past offset 0 is @ref ZXC_ERROR_CORRUPT_DATA.
+ */
+int zxc_scan_whole_frame(const zxc_scan_src_t* src, zxc_frame_info_t* info, size_t* footer_len);
 
 /**
  * @brief Measures a whole container without decoding: frames from the last back

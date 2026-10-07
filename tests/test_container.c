@@ -357,6 +357,87 @@ int test_container_seekable(void) {
     zxc_seekable_free(sf);
     if (fp) fclose(fp);
 
+    /* Level 7, 4 KB then 512 KB blocks, text so the entropy coder runs: the small
+     * frame read first must not size its scratch (one thread, then several). */
+    static const char* const words[] = {"the ",    "and ",   "of ",   "rabbit ", "said ", "Alice ",
+                                        "little ", "queen ", "very ", "she ",    "a ",    "\n"};
+    uint8_t* const text = malloc(80000);
+    for (size_t i = 0, x = 12345; text && i < 80000;) {
+        x = x * 1103515245u + 12345u;
+        const char* w = words[(x >> 16) % 12];
+        while (*w && i < 80000) text[i++] = (uint8_t)*w++;
+    }
+    for (int t = 0; ok && t < 2; t++) {
+        const zxc_compress_opts_t s7 = {.level = 7, .block_size = 4096, .seekable = 1};
+        const zxc_compress_opts_t l7 = {.level = 7, .seekable = 1};
+        cbuf_t m = {0};
+        ok = text && cb_frame(&m, text, 9000, &s7) && cb_frame(&m, text + 9000, 70000, &l7);
+        zxc_seekable* const s = ok ? zxc_seekable_open(m.p, m.n) : NULL;
+        const int64_t r1 = s ? zxc_seekable_decompress_range(s, out, 4096, 0, 4096) : -1;
+        const int64_t r2 = s ? (t ? zxc_seekable_decompress_range_mt(s, out, 79000, 0, 79000, 2)
+                                  : zxc_seekable_decompress_range(s, out, 70000, 9000, 70000))
+                             : -1;
+        if (ok && (r1 != 4096 || r2 != (t ? 79000 : 70000) ||
+                   memcmp(out, text + (t ? 0 : 9000), (size_t)r2) != 0)) {
+            printf("  [FAIL] level 7, small blocks first, path %d: %lld then %lld\n", t,
+                   (long long)r1, (long long)r2);
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+        free(m.p);
+    }
+    free(text);
+
+    /* A forged SEK header before the last frame: the open succeeds, that frame
+     * refuses its ranges, the other still reads. */
+    if (ok) {
+        const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
+        cbuf_t m = {0};
+        ok = cb_frame(&m, src, 9000, &so);
+        const size_t first = m.n;
+        ok = ok && cb_frame(&m, src + 9000, 9000, &so);
+        // [.. EOF 8][SEK 8][table: 1 group of 3 sizes = 20][footer]
+        const size_t sek = first - test_footer_len(m.p, first) - 20 - ZXC_BLOCK_HEADER_SIZE;
+        if (ok && m.p[sek] == ZXC_BLOCK_SEK) {
+            m.p[sek + 2] = 1;  // reserved byte, header re-signed
+            m.p[sek + 7] = 0;
+            m.p[sek + 7] = zxc_hash8(m.p + sek);
+        } else {
+            ok = 0;
+        }
+        zxc_seekable* const s = ok ? zxc_seekable_open(m.p, m.n) : NULL;
+        const int64_t r1 = s ? zxc_seekable_decompress_range(s, out, 100, 0, 100) : -1;
+        const int64_t r2 = s ? zxc_seekable_decompress_range(s, out, 100, 9000, 100) : -1;
+        if (ok && (!s || r1 != ZXC_ERROR_CORRUPT_DATA || r2 != 100 ||
+                   memcmp(out, src + 9000, 100) != 0)) {
+            printf("  [FAIL] forged SEK header in frame 1: open %p, reads %lld / %lld\n", (void*)s,
+                   (long long)r1, (long long)r2);
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+        free(m.p);
+    }
+
+    /* At most 2^20 frames: one more fails the open. */
+    if (ok) {
+        const zxc_compress_opts_t so = {.level = 1, .seekable = 1};
+        uint8_t one[128];
+        const int64_t fl = zxc_compress("x", 1, one, sizeof(one), &so);
+        const size_t count = ((size_t)1 << 20) + 1;
+        uint8_t* const many = fl > 0 ? malloc(count * (size_t)fl) : NULL;
+        for (size_t i = 0; many && i < count; i++) memcpy(many + i * (size_t)fl, one, (size_t)fl);
+        zxc_seekable* const s = many ? zxc_seekable_open(many, count * (size_t)fl) : NULL;
+        zxc_seekable* const s1 = many ? zxc_seekable_open(many, (size_t)fl) : NULL;
+        if (!many || s || !s1) {
+            printf("  [FAIL] 2^20 + 1 frames: opened %d, one frame opened %d\n", s != NULL,
+                   s1 != NULL);
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+        zxc_seekable_free(s1);
+        free(many);
+    }
+
     /* A frame without a table refuses the open. */
     if (ok) {
         const zxc_compress_opts_t plain = {.level = 3};
@@ -398,6 +479,13 @@ int test_container_seekable(void) {
         zxc_seekable_set_checksum(sd, 1);
         // The plain frame reads without any; the others want theirs.
         const int64_t plain = zxc_seekable_decompress_range(sd, out, 100, 9000, 100);
+        // Attached to an archive that needs none, a dictionary is ignored.
+        zxc_seekable* const sp = zxc_seekable_open(b.p, b.n);
+        if (!sp || zxc_seekable_set_dict(sp, da, sizeof(da), NULL) != ZXC_OK) {
+            printf("  [FAIL] a dictionary on an archive that needs none was refused\n");
+            ok = 0;
+        }
+        zxc_seekable_free(sp);
         const int64_t need = zxc_seekable_decompress_range_mt(sd, out, dtotal, 0, dtotal, 4);
         const int wrong = zxc_seekable_set_dict(sd, dc, sizeof(dc), NULL);
         if (plain != 100 || memcmp(out, src + 9000, 100) != 0 || need != ZXC_ERROR_DICT_REQUIRED ||

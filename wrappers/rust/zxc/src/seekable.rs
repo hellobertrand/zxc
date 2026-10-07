@@ -222,7 +222,7 @@ impl Seekable {
     /// # Errors
     ///
     /// Returns an [`Error`] if the dictionary is invalid or its ID matches no
-    /// frame of the archive.
+    /// frame of the archive (ignored when no frame needs one).
     pub fn set_dict(&mut self, dict: &[u8], dict_huf: Option<&[u8]>) -> Result<()> {
         let (dict, huf) = crate::dict_parts(Some(dict), dict_huf)?;
         let rc = unsafe {

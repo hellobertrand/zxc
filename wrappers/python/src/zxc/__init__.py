@@ -559,7 +559,7 @@ class Seekable:
 
         Required before :meth:`decompress_range` reaches a frame compressed
         with a dictionary. Call it once per dictionary when concatenated frames
-        use several; one no frame uses raises. The content is copied
+        use several; one no frame uses raises (ignored when no frame needs one). The content is copied
         internally, so *dict* may be freed after this call.
         """
         self._ensure_open()
@@ -827,8 +827,8 @@ class DStream:
         """Push *data* and return the decompressed bytes produced.
 
         May return ``b""`` if the parser is still waiting for more input
-        (e.g. mid-header). An error found after a frame's output (bytes that
-        open no other frame) is raised by the next call, that output first.
+        (e.g. mid-header). An error that follows a frame validated in the same
+        call is raised by the next call, that frame's output first.
         """
         if self._handle is None:
             raise ValueError("DStream is closed")
@@ -897,8 +897,9 @@ class ZxcReader(_io.RawIOBase):
     plugged into any code that expects a readable binary stream.
 
     Like gzip and zstd readers it reads the source until it ends, so
-    concatenated archives decode as one stream; on a source that stays open
-    after one frame, use :class:`DStream` and stop once it is finished.
+    concatenated archives decode as one stream. With ``multistream=False`` it
+    stops after the first frame instead, as on a source that stays open after
+    it; bytes read ahead past that frame are then lost to the source.
 
     Raises :class:`OSError` with ``errno=None`` if the underlying source is
     drained before the ZXC footer is reached (truncated frame).
@@ -911,7 +912,14 @@ class ZxcReader(_io.RawIOBase):
     The wrapped reader is **not** closed by :meth:`close`.
     """
 
-    def __init__(self, fileobj, *, checksum: bool = False, buffer_size: int = 0):
+    def __init__(
+        self,
+        fileobj,
+        *,
+        checksum: bool = False,
+        buffer_size: int = 0,
+        multistream: bool = True,
+    ):
         super().__init__()
         if not hasattr(fileobj, "read"):
             raise TypeError("fileobj must have a .read() method")
@@ -922,6 +930,7 @@ class ZxcReader(_io.RawIOBase):
         self._bufsize = buffer_size
         self._pending = b""  # decompressed bytes not yet returned
         self._eof_src = False  # True once src.read() returned empty bytes
+        self._multistream = multistream
 
     def readable(self) -> bool:
         return True
@@ -933,8 +942,11 @@ class ZxcReader(_io.RawIOBase):
         if n_out == 0:
             return 0
 
-        # A finished frame may be followed by another: stop only once the source ends.
+        # A finished frame may be followed by another: stop only once the source
+        # ends, or after the first frame without multistream.
         while not self._pending:
+            if not self._multistream and self._ds.finished:
+                return 0
             inbuf = b""
             if not self._eof_src:
                 chunk = self._src.read(self._bufsize)
@@ -948,7 +960,9 @@ class ZxcReader(_io.RawIOBase):
                 else:
                     inbuf = chunk
 
-            produced = self._ds.decompress(inbuf)
+            produced = pyzxc_dstream_decompress(
+                self._ds._handle, inbuf, one_frame=not self._multistream
+            )
             if produced:
                 self._pending = produced
                 break

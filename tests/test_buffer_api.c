@@ -1635,7 +1635,8 @@ int test_footer_strictness(void) {
             }
     }
 
-    /* 5. Short junk: the header speaks first, from a buffer or a file. */
+    /* 5. Short junk: the header speaks first, from a buffer or a file, and to the
+     *    decoders as to the frame-info readers. */
     for (size_t len = 16; ok && len <= 26; len += 5) {
         const uint8_t junk[26] = {0};
         zxc_frame_info_t fi;
@@ -1644,9 +1645,33 @@ int test_footer_strictness(void) {
         if (f && fwrite(junk, 1, len, f) == len && fseek(f, 0, SEEK_SET) == 0)
             rf = zxc_stream_get_frame_info(f, &fi, sizeof(fi));
         if (f) fclose(f);
+        uint8_t out[64];
+        zxc_dctx* const dctx = zxc_create_dctx();
+        const int64_t rd = zxc_decompress(junk, len, out, sizeof(out), NULL);
+        const int64_t rx = dctx ? zxc_decompress_dctx(dctx, junk, len, out, sizeof(out), NULL) : 0;
+        zxc_free_dctx(dctx);
         if (zxc_get_frame_info(junk, len, &fi, sizeof(fi)) != ZXC_ERROR_BAD_MAGIC ||
-            rf != ZXC_ERROR_BAD_MAGIC) {
-            printf("  [FAIL] %zu junk bytes: FILE* %d, want BAD_MAGIC\n", len, rf);
+            rf != ZXC_ERROR_BAD_MAGIC || rd != ZXC_ERROR_BAD_MAGIC || rx != ZXC_ERROR_BAD_MAGIC) {
+            printf("  [FAIL] %zu junk bytes: FILE* %d, decode %lld / %lld, want BAD_MAGIC\n", len,
+                   rf, (long long)rd, (long long)rx);
+            ok = 0;
+        }
+    }
+
+    /* 6. A footer longer than its own frame is forged, not cut: 3 bytes claiming a
+     *    27-byte frame with checksums leave no room for the digest. */
+    if (ok) {
+        const zxc_compress_opts_t cs = {.level = 1, .checksum_enabled = 1};
+        uint8_t f27[64];
+        zxc_frame_info_t fi;
+        const int64_t m = zxc_compress("", 0, f27, sizeof(f27), &cs);
+        const size_t body = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE;
+        f27[body] = 0;      /* original size 0, 1 byte */
+        f27[body + 1] = 27; /* compressed size 27, 1 byte */
+        f27[body + 2] = 0;  /* L: nd = nf = 1 */
+        const int r = m > 0 ? zxc_get_frame_info(f27, body + 3, &fi, sizeof(fi)) : -1;
+        if (r != ZXC_ERROR_CORRUPT_DATA) {
+            printf("  [FAIL] footer longer than its frame: %d, want CORRUPT_DATA\n", r);
             ok = 0;
         }
     }

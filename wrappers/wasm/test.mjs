@@ -1338,6 +1338,19 @@ async function main() {
     );
     ds.free();
 
+    // A corrupt frame throws in the call that decodes it, even with output so far.
+    const bad = zxc.compress(a, { checksum: true });
+    bad[40] ^= 0xff;
+    const bds = zxc.createDStream({ checksum: true });
+    let badThrew = false;
+    try {
+      bds.decompress(bad);
+    } catch (_) {
+      badThrew = true;
+    }
+    bds.free();
+    assert(badThrew, "a corrupt frame throws in the call that decodes it");
+
     // Junk after a frame: the frame comes out first, the error on the next call.
     const junk = zxc.createDStream();
     const first = junk.decompress(

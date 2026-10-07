@@ -118,6 +118,23 @@ describe("Concatenated archives", () => {
     expect(out.equals(Buffer.concat([a, b]))).toBe(true);
   });
 
+  test("a corrupt frame throws in the call that decodes it", () => {
+    const bad = zxc.compress(a, { checksum: true });
+    bad[40] ^= 0xff;
+    const ds = new zxc.DStream({ checksum: true });
+    expect(() => ds.decompress(bad)).toThrow();
+    ds.close();
+  });
+
+  test("a frame then junk: the frame first, the error on the next call", () => {
+    const ds = new zxc.DStream();
+    expect(
+      ds.decompress(Buffer.concat([fa, Buffer.from("junk")])).equals(a),
+    ).toBe(true);
+    expect(() => ds.decompress(Buffer.alloc(0))).toThrow();
+    ds.close();
+  });
+
   test("bytes after a footer that start no frame are an error", async () => {
     await expect(
       gather(

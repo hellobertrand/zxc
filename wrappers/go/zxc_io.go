@@ -160,7 +160,14 @@ type Reader struct {
 	inLen int
 	err   error
 	eof   bool // src returned io.EOF
+	one   bool // stop after the first frame (Multistream(false))
 }
+
+// Multistream controls whether the reader decodes concatenated archives as one
+// stream (true, the default) or stops after the first frame, returning io.EOF
+// there, as on a source that stays open after it. Bytes read ahead past that
+// frame are then lost to the caller, as with [compress/gzip.Reader.Multistream].
+func (r *Reader) Multistream(ok bool) { r.one = !ok }
 
 // NewReader returns a [Reader] that decompresses from r.
 //
@@ -178,10 +185,10 @@ func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 }
 
 // Read decompresses bytes into p. Like gzip and zstd readers, it reads the
-// source until it ends, so concatenated archives decode as one stream: on a
-// source that stays open after one frame, use [DStream] and stop once
-// [DStream.Finished] is true. Returns io.EOF once the source ends on a
-// validated footer, io.ErrUnexpectedEOF if it ends before one.
+// source until it ends, so concatenated archives decode as one stream; on a
+// source that stays open after one frame, set [Reader.Multistream] to false.
+// Returns io.EOF once the source ends on a validated footer (or the first frame
+// does, without multistream), io.ErrUnexpectedEOF if it ends before one.
 func (r *Reader) Read(p []byte) (int, error) {
 	if r.err != nil {
 		return 0, r.err
@@ -193,8 +200,12 @@ func (r *Reader) Read(p []byte) (int, error) {
 		return 0, nil
 	}
 
-	// A finished frame may be followed by another: stop only once src ends.
+	// Stop when src ends, or after the first frame without multistream.
 	for {
+		if r.one && r.ds.Finished() {
+			r.err = io.EOF
+			return 0, io.EOF
+		}
 		// Try to decompress whatever is currently buffered (or drain mode
 		// when src is at EOF).
 		if r.inPos < r.inLen || r.eof {

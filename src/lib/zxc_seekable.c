@@ -12,7 +12,8 @@
  * The seek table is a standard ZXC block (type = ZXC_BLOCK_SEK) appended
  * between the EOF block and the file footer. It records where every block
  * starts, so a byte range costs one small table read plus the blocks it
- * covers; no table stays resident and opening costs three reads per frame.
+ * covers; no table stays resident and opening costs two reads per frame, plus one
+ * for the last frame's EOF and SEK headers.
  *
  * On-disk layout of a SEK block, for N blocks in G = ceil(N / 64) groups:
  *
@@ -32,8 +33,8 @@
  *   2. The header: block_size, and HAS_SEEK_TABLE, without which the archive
  *      is not seekable
  *   3. Derive num_blocks = ceil(total_decomp / block_size)
- *   4. Read the EOF and SEK block headers in one go, validate both
- *   5. Groups are read and checked on access
+ *   4. Groups are read and checked on access, with the EOF and SEK block
+ *      headers ahead of them
  */
 
 #include "../../include/zxc_seekable.h"
@@ -64,6 +65,12 @@ typedef struct {
     uint32_t dict_id;      /* 0 for none */
     int has_checksums;
 } zxc_seek_frame_t;
+
+/** Most frames a handle indexes: bounds the reads and memory of an open. */
+#define ZXC_SEEK_MAX_FRAMES (1U << 20)
+
+/** EOF and SEK block headers, ahead of a frame's table: checked when it is read. */
+#define ZXC_SEEK_TAIL_HDRS (2 * ZXC_BLOCK_HEADER_SIZE)
 
 /** @brief An installed dictionary, owned copy. */
 typedef struct {
@@ -159,8 +166,9 @@ static int zxc_seek_scan_read(const zxc_scan_src_t* scan, const uint64_t off, vo
 }
 
 /**
- * @brief Validates the seekable frame that ends at @p end, in three reads: header
- *        and footer as zxc_get_last_frame_info() does, then its EOF and SEK headers.
+ * @brief Validates the seekable frame that ends at @p end, in two reads: header and
+ *        footer as zxc_get_last_frame_info() does. Its EOF and SEK headers are
+ *        checked with its table, on access (@ref zxc_seek_load_spans).
  *
  * @param[out] f  The frame; its decompressed and block bases are left to the caller.
  * @return 1 for a seekable frame, 0 otherwise.
@@ -195,14 +203,6 @@ static int zxc_seek_parse_frame(zxc_seek_source_t* src, const uint64_t end, zxc_
         num_blocks > UINT64_MAX / entry_max ? UINT64_MAX : num_blocks * entry_max;
     if (UNLIKELY(data_area < min_span || data_area > max_span)) return 0;
 
-    // One read covers the EOF header and the SEK header behind it.
-    uint8_t tail[2 * ZXC_BLOCK_HEADER_SIZE];
-    if (UNLIKELY(zxc_seek_source_read(src, tail, sizeof(tail), start + eof_off) != ZXC_OK ||
-                 zxc_check_eof_header(tail) != ZXC_OK ||
-                 zxc_check_seek_header(tail + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE,
-                                       fi.decompressed_size, block_size, NULL) != ZXC_OK))
-        return 0;
-
     f->base = start;
     f->num_blocks = num_blocks;
     f->total_decomp = fi.decompressed_size;
@@ -226,6 +226,7 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* source) {
     size_t cap = 0;
     uint64_t end = src.size;
     do {
+        if (UNLIKELY(n == ZXC_SEEK_MAX_FRAMES)) goto fail;
         if (n == cap) {
             cap = cap ? 2 * cap : 4;
             zxc_seek_frame_t* const grown =
@@ -234,6 +235,18 @@ static zxc_seekable* zxc_seekable_parse(const zxc_seek_source_t* source) {
             frames = grown;
         }
         if (UNLIKELY(!zxc_seek_parse_frame(&src, end, &frames[n]))) goto fail;
+        // The last frame's EOF/SEK headers (a plain archive's only frame) now: a
+        // lying seek flag fails the open.
+        if (n == 0) {
+            uint8_t hdrs[ZXC_SEEK_TAIL_HDRS];
+            const zxc_seek_frame_t* const f = &frames[0];
+            if (UNLIKELY(zxc_seek_source_read(&src, hdrs, sizeof(hdrs),
+                                              f->table_off - ZXC_SEEK_TAIL_HDRS) != ZXC_OK ||
+                         zxc_check_eof_header(hdrs) != ZXC_OK ||
+                         zxc_check_seek_header(hdrs + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE,
+                                               f->total_decomp, f->block_size, NULL) != ZXC_OK))
+                goto fail;
+        }
         end = frames[n++].base;
     } while (end > 0);
 
@@ -307,18 +320,20 @@ static uint64_t zxc_seek_block_of_offset(const zxc_seekable* s, const uint64_t o
  *  @p first + @p n) touch. */
 static size_t zxc_seek_spans_raw_max(const uint64_t first, const uint32_t n) {
     const uint64_t groups = (first + n - 1) / ZXC_SEEK_GROUP - first / ZXC_SEEK_GROUP + 1;
-    return (size_t)groups * ZXC_SEEK_GROUP_BYTES;
+    return ZXC_SEEK_TAIL_HDRS + (size_t)groups * ZXC_SEEK_GROUP_BYTES;
 }
 
 /**
  * @brief Loads where each block of [@p first, @p first + @p n) starts and its on-disk
  *        size, both taken from the block's own group.
  *
- * One read of the groups the range touches, each checked alone: anchor in the data
- * area, sizes in [header, entry_max], end within the data area and, for the last
- * group, on the EOF block. The next anchor is not read, so a bad one costs only
- * its own group. A block's size is its own entry, never the gap to the next anchor,
- * so a range spanning groups gets the verdict each group gives alone.
+ * One read of the groups the range touches, plus the frame's EOF/SEK headers: in
+ * the same read from group 0, in a 16-byte read of their own past it. Each group
+ * is checked alone: anchor in the data area, sizes in [header, entry_max], end
+ * within the data area and, for the last group, on the EOF block. The next anchor
+ * is not read, so a bad one costs only its own group. A block's size is its own
+ * entry, never the gap to the next anchor, so a range spanning groups gets the
+ * verdict each group gives alone.
  *
  * @param[in]  s       Handle.
  * @param[in]  f       Frame of the blocks; @p first + @p n must not exceed its block count.
@@ -340,11 +355,23 @@ static int zxc_seek_load_spans(const zxc_seekable* s, const zxc_seek_frame_t* f,
     for (uint64_t g = g0; g <= g1; g++)
         need += ZXC_SEEK_ANCHOR_SIZE +
                 (size_t)zxc_seek_group_len(f->num_blocks, g) * ZXC_SEEK_SIZE_ENTRY;
+    // The EOF/SEK headers, checked on each access rather than kept as state; read
+    // with group 0 when it is wanted.
     const zxc_seek_source_t src = zxc_seek_source_of(s);
-    const int rc = zxc_seek_source_read(&src, raw, need, f->table_off + g0 * ZXC_SEEK_GROUP_BYTES);
+    const uint64_t at = f->table_off + g0 * ZXC_SEEK_GROUP_BYTES;
+    int rc = g0 == 0 ? zxc_seek_source_read(&src, raw, ZXC_SEEK_TAIL_HDRS + need,
+                                            at - ZXC_SEEK_TAIL_HDRS)
+                     : zxc_seek_source_read(&src, raw, ZXC_SEEK_TAIL_HDRS,
+                                            f->table_off - ZXC_SEEK_TAIL_HDRS);
+    if (rc == ZXC_OK && g0 != 0)
+        rc = zxc_seek_source_read(&src, raw + ZXC_SEEK_TAIL_HDRS, need, at);
     if (UNLIKELY(rc != ZXC_OK)) return rc;
+    if (UNLIKELY(zxc_check_eof_header(raw) != ZXC_OK ||
+                 zxc_check_seek_header(raw + ZXC_BLOCK_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE,
+                                       f->total_decomp, f->block_size, NULL) != ZXC_OK))
+        return ZXC_ERROR_CORRUPT_DATA;
 
-    const uint8_t* p = raw;
+    const uint8_t* p = raw + ZXC_SEEK_TAIL_HDRS;
     for (uint64_t g = g0; g <= g1; g++) {
         uint64_t pos = zxc_le64(p);
         p += ZXC_SEEK_ANCHOR_SIZE;
@@ -420,7 +447,7 @@ uint32_t zxc_seekable_get_block_comp_size(const zxc_seekable* s, const uint64_t 
     const zxc_seek_frame_t* const f = zxc_seek_frame_of_block(s, block_idx);
     uint64_t start = 0;
     uint32_t size = 0;
-    uint8_t raw[ZXC_SEEK_GROUP_BYTES];
+    uint8_t raw[ZXC_SEEK_TAIL_HDRS + ZXC_SEEK_GROUP_BYTES];
     if (UNLIKELY(zxc_seek_load_spans(s, f, block_idx - f->block_base, 1, &start, &size, raw) !=
                  ZXC_OK))
         return 0;
@@ -548,7 +575,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
     // One slice, and one read, per table group of a frame.
     uint64_t starts[ZXC_SEEK_GROUP] = {0};
     uint32_t sizes[ZXC_SEEK_GROUP] = {0};
-    uint8_t raw[ZXC_SEEK_GROUP_BYTES];
+    uint8_t raw[ZXC_SEEK_TAIL_HDRS + ZXC_SEEK_GROUP_BYTES];
     uint64_t bi = blk_start;
     while (bi <= blk_end) {
         while (bi >= f->block_base + f->num_blocks) f++;  // past this frame, empty ones too
@@ -960,7 +987,13 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     const uint32_t id = zxc_dict_id(dict, dict_size, (const uint8_t*)dict_huf);
     int used = 0;
-    for (size_t i = 0; i < s->num_frames && !used; i++) used = s->frames[i].dict_id == id;
+    int any = 0;
+    for (size_t i = 0; i < s->num_frames && !used; i++) {
+        used = s->frames[i].dict_id == id;
+        any |= s->frames[i].dict_id != 0;
+    }
+    // No frame needs a dictionary: ignore it, as before. Otherwise one must use it.
+    if (!any) return ZXC_OK;
     if (UNLIKELY(!used)) return ZXC_ERROR_DICT_MISMATCH;
 
     zxc_seek_dict_t* d = NULL;

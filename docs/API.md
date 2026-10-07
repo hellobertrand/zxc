@@ -1481,12 +1481,16 @@ ZXC_EXPORT zxc_seekable* zxc_seekable_open_reader(const zxc_reader_t* r);
 ```
 
 Opens a seekable archive through a user-supplied reader. The reader is invoked
-to fetch each frame's footer, file header and EOF/SEK block headers at open time
-(3 reads per frame, whatever the block count), then one read per seek table group a
-range covers and once per block during decompression;
-`zxc_seekable_get_block_comp_size()` reads the block's group per call. No
-`FILE*` is involved — this is the entry point to use for kernel space,
-networked storage, or any non-POSIX backend.
+to fetch each frame's footer and file header at open time (2 reads per frame,
+whatever the block count, plus one for the last frame's EOF/SEK block headers;
+at most 2^20 frames, past which the open fails). For each frame a range
+touches, one read fetches the seek table groups it covers. When the range starts
+in table group 0, that read also carries the frame's 16 bytes of EOF/SEK block
+headers; when it starts after group 0, those headers take a separate 16-byte
+read in addition to the group read. Decompression reads each block once.
+`zxc_seekable_get_block_comp_size()` reads the block's group, and the frame's
+EOF/SEK headers, per call. No `FILE*` is involved — this is the entry point to
+use for kernel space, networked storage, or any non-POSIX backend.
 
 **Returns**: handle (0 blocks if the archive is empty), or `NULL` if `r`/`r->read_at`
 is `NULL`, `r->size` is `0`, the archive is not seekable, or any `read_at` call fails.
@@ -1735,7 +1739,7 @@ ZXC_EXPORT int zxc_seekable_set_dict(
 );
 ```
 
-Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Call it once per dictionary the frames use: one no frame uses is `ZXC_ERROR_DICT_MISMATCH`, and a range through a frame whose dictionary is missing returns `ZXC_ERROR_DICT_REQUIRED`.
+Attaches a dictionary to a seekable handle for random-access decompression. Pass the shared table as `dict_huf` (the archive's `dict_id` binds the pair); pass NULL for a raw content-only dictionary. Both buffers are copied internally. Call it once per dictionary the frames use: one no frame uses is `ZXC_ERROR_DICT_MISMATCH` (an archive that needs no dictionary ignores it), and a range through a frame whose dictionary is missing returns `ZXC_ERROR_DICT_REQUIRED`.
 
 ### `zxc_seekable_set_checksum`
 

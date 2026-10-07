@@ -90,9 +90,17 @@ def test_reader_and_dstream_concatenated():
     # Reads ending exactly on the first footer, then 7-byte reads.
     for size in (len(fa), 7):
         assert zxc.ZxcReader(io.BytesIO(joined), buffer_size=size).read() == a + b
+        # Without multistream, the reader stops after the first frame.
+        one = zxc.ZxcReader(io.BytesIO(joined), buffer_size=size, multistream=False)
+        assert one.read() == a
     ds = zxc.DStream()
     out = b"".join(ds.decompress(joined[i : i + 7]) for i in range(0, len(joined), 7))
     assert out == a + b and ds.finished
+    # A corrupt frame raises in the call that decodes it, even with output so far.
+    bad = bytearray(zxc.compress(a, checksum=True))
+    bad[40] ^= 0xFF
+    with pytest.raises(RuntimeError):
+        zxc.DStream(checksum=True).decompress(bytes(bad))
     # Junk after a frame: the frame comes out first, the error on the next call.
     ds = zxc.DStream()
     assert ds.decompress(fa + b"junk") == a

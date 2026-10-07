@@ -917,6 +917,7 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
         size_t out_len = 0;
 
         zxc_inbuf_t in = {buf.Data(), buf.Length(), 0};
+        size_t validated = 0;  // output up to the last footer this call validated
         for (;;) {
             size_t want = zxc_dstream_out_size(ds_);
             if (want < 4096) want = 4096;
@@ -931,11 +932,12 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
             const int64_t r = zxc_dstream_decompress(ds_, &obuf, cur_in);
             out_len += obuf.pos;
             if (r < 0) {
-                // Output already decoded (a frame before the fault) is handed
-                // over first: the stream keeps the error for the next call.
-                if (out_len == 0) return ThrowZxcError(env, static_cast<int>(r));
+                // Hand over validated frames; the stream keeps the error for later.
+                if (validated == 0) return ThrowZxcError(env, static_cast<int>(r));
+                out_len = validated;
                 break;
             }
+            if (zxc_dstream_finished(ds_)) validated = out_len;
             /* Keep draining even after input is exhausted; stop only when
              * no progress was made (no input consumed AND no output produced). */
             if (cur_in->pos == before_in && obuf.pos == before_out) break;

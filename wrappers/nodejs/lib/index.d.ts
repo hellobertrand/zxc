@@ -312,7 +312,8 @@ export class DStream {
   constructor(options?: DStreamOptions);
   /**
    * Push compressed bytes and return any decompressed bytes produced. An error
-   * found after a frame's output is thrown by the next call, that output first.
+   * that follows a frame validated in the same call is thrown by the next call,
+   * that frame's output first.
    */
   decompress(data: Buffer): Buffer;
   /** True when the input so far ends on a validated footer. */
@@ -433,7 +434,7 @@ export class Seekable {
    * Attach a pre-trained dictionary to this handle. Required before
    * `decompressRange` reaches a frame compressed with a dictionary; call it
    * once per dictionary when concatenated frames use several. One no frame
-   * uses throws. The content is copied internally.
+   * uses throws, unless no frame needs one. The content is copied internally.
    */
   setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
   /**

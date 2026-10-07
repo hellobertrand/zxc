@@ -56,6 +56,21 @@ the seek table:
 > A v8 build is ZXC **0.14.x**. Keep it until every archive you care about is
 > transcoded — it is the only thing that can read v8 data.
 
+### CLI output (0.15.x)
+
+Concatenated archives (`cat a.zxc b.zxc`) now decode as one stream, so the
+listing describes every frame. Scripts that parse it need these changes:
+
+- `zxc -l -j` and `zxc -t -j`: the `checksum_method` key (`RapidHash`/`none`) is
+  now `checksum`, valued `enabled`, `disabled` or `mixed` (frames that differ);
+  `-l -j` adds `seekable` (same values) and `frames`.
+- `zxc -l -j`: `block_size_kb` and `dict_id` stay a number and a string (or
+  `null`) when every frame agrees, and become arrays when they differ.
+- `zxc -l`: the table gains `Seekable` and `Frames` columns, shows `mixed` where
+  frames differ, and names the file only when several are listed.
+- `zxc -l -v`: `Checksum Method:` is now `Checksum:`, and the block sizes and
+  dictionary IDs of every frame are listed.
+
 ---
 
 ## v7 → v8 (ZXC 0.14.x)
