@@ -619,6 +619,11 @@ static void* zxc_async_writer(void* arg) {
         pthread_mutex_lock(&ctx->lock);
         while (job->status != JOB_STATUS_PROCESSED && !ctx->io_error)
             pthread_cond_wait(&ctx->cond_writer, &ctx->lock);
+        // Woken by an error: the job may still be decoding, so leave it alone.
+        if (UNLIKELY(job->status != JOB_STATUS_PROCESSED)) {
+            pthread_mutex_unlock(&ctx->lock);
+            break;
+        }
 
         const size_t result_sz = job->result_sz;
         const size_t in_sz = job->in_sz;
@@ -1505,6 +1510,7 @@ typedef struct {
  * @param[in]  offset  Absolute byte offset to read from.
  * @return @p len on a full read, otherwise @ref ZXC_ERROR_IO.
  */
+// cppcheck-suppress constParameterCallback ; the reader callback type takes void*
 static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t offset) {
     const zxc_stdio_ctx_t* const ctx = (const zxc_stdio_ctx_t*)vctx;
     return zxc_pread_full(ctx->fd, dst, len, offset) == (int64_t)len ? (int64_t)len : ZXC_ERROR_IO;

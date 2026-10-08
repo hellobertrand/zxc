@@ -1791,11 +1791,14 @@ int test_stream_trailing_bytes(void) {
     return 1;
 }
 
-/* Progress callback: counts the jobs written. */
+/* Progress callback: counts the jobs written, in a global the analysers see change. */
+static int jobs_written;
+
 static void count_jobs(const uint64_t done, const uint64_t total, const void* user_data) {
     (void)done;
     (void)total;
-    (*(int*)(uintptr_t)user_data)++;
+    (void)user_data;
+    jobs_written++;
 }
 
 /* Fills @p src with blocks of @p bs bytes, each periodic and unlike its neighbours. */
@@ -2025,7 +2028,7 @@ int test_stream_input_rewritten(void) {
     // No checksums: the tiny block is valid wherever it lands.
     const zxc_compress_opts_t co = {.level = 1, .block_size = bs};
     int64_t len = 0;
-    zxc_block_header_t bh;
+    zxc_block_header_t bh = {0};
     size_t tiny_sz = 0;
     if (ok) {
         gen_periodic_blocks(src, bs, bs);
@@ -2116,29 +2119,30 @@ int test_stream_block_batches(void) {
 
     // From a file: the right bytes, in fewer jobs than the 201 blocks.
     for (int t = 1; ok && t <= 4; t++) {
-        int jobs = 0;
         const zxc_decompress_opts_t dopts = {
-            .n_threads = t, .checksum_enabled = 1, .progress_cb = count_jobs, .user_data = &jobs};
+            .n_threads = t, .checksum_enabled = 1, .progress_cb = count_jobs};
+        jobs_written = 0;
         rewind(f_reg);
         rewind(f_out);
         const int64_t r = zxc_stream_decompress(f_reg, f_out, &dopts);
         rewind(f_out);
         ok = r == (int64_t)n && fread(out[0], 1, n, f_out) == n && memcmp(out[0], src, n) == 0 &&
-             jobs >= 1 && jobs < 201;
-        if (!ok) printf("Failed: %d threads -> %lld in %d jobs\n", t, (long long)r, jobs);
+             jobs_written >= 1 && jobs_written < 201;
+        if (!ok) printf("Failed: %d threads -> %lld in %d jobs\n", t, (long long)r, jobs_written);
     }
 
 #if !defined(_WIN32)
     const size_t alen = (size_t)len;
     // From a live stream: one job per block, the same bytes.
     if (ok) {
-        int jobs = 0;
         int64_t r = 0;
         const zxc_decompress_opts_t dopts = {
-            .n_threads = 2, .checksum_enabled = 1, .progress_cb = count_jobs, .user_data = &jobs};
+            .n_threads = 2, .checksum_enabled = 1, .progress_cb = count_jobs};
+        jobs_written = 0;
         FILE* const f_live = open_live_stream(arc, alen);
-        ok = f_live && zxc_stream_decompress(f_live, NULL, &dopts) == (int64_t)n && jobs == 201;
-        if (!ok) printf("Failed: %d jobs from the live stream\n", jobs);
+        ok = f_live && zxc_stream_decompress(f_live, NULL, &dopts) == (int64_t)n &&
+             jobs_written == 201;
+        if (!ok) printf("Failed: %d jobs from the live stream\n", jobs_written);
         if (f_live) fclose(f_live);
         for (int t = 1; ok && t <= 4; t++)
             ok = input_kinds_agree(f_reg, f_mid, f_out, arc, alen, out, n, t, 1, &r) &&

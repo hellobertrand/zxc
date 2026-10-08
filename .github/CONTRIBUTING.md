@@ -93,7 +93,7 @@ clang-format -i src/lib/*.c include/*.h
 ## Requirements
 
 - **C17** compiler (GCC, Clang, or MSVC)
-- **CMake** 3.10+
+- **CMake** 3.21+
 - Follow `.clang-format` style (Google)
 - All code must be ASCII-only
 - Pass `ctest` and static analysis
