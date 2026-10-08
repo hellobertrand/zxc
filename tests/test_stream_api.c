@@ -13,7 +13,7 @@
 #endif
 
 // Checks that the stream decompression can accept NULL output (Integrity Check Mode)
-int test_null_output_decompression() {
+int test_null_output_decompression(void) {
     printf("=== TEST: Unit - NULL Output Decompression (Integrity Check) ===\n");
 
     size_t size = 64 * 1024;
@@ -66,7 +66,7 @@ int test_null_output_decompression() {
 }
 
 // Checks API robustness against invalid arguments
-int test_invalid_arguments() {
+int test_invalid_arguments(void) {
     printf("=== TEST: Unit - Invalid Arguments ===\n");
 
     FILE* f = tmpfile();
@@ -155,7 +155,7 @@ int test_invalid_arguments() {
 }
 
 // Checks behavior with truncated compressed input
-int test_truncated_input() {
+int test_truncated_input(void) {
     printf("=== TEST: Unit - Truncated Input (Stream) ===\n");
 
     const size_t SRC_SIZE = 1024;
@@ -219,7 +219,7 @@ int test_truncated_input() {
 }
 
 // Checks behavior if writing fails
-int test_io_failures() {
+int test_io_failures(void) {
     printf("=== TEST: Unit - I/O Failures ===\n");
 
     FILE* f_in = tmpfile();
@@ -330,7 +330,7 @@ int test_io_deferred_write_failure(void) {
 }
 
 // Checks thread selector behavior
-int test_thread_params() {
+int test_thread_params(void) {
     printf("=== TEST: Unit - Thread Parameters ===\n");
 
     FILE* f_in = tmpfile();
@@ -356,7 +356,7 @@ int test_thread_params() {
 }
 
 // Multi-threaded round-trip test for TSan coverage
-int test_multithread_roundtrip() {
+int test_multithread_roundtrip(void) {
     printf("=== TEST: Multi-Thread Round-Trip (TSan Coverage) ===\n");
 
     const size_t SIZE = 4 * 1024 * 1024;  // 4MB to ensure multiple chunks
@@ -446,7 +446,7 @@ static fpos_t tell_fails_after_end(void* cookie, const fpos_t off, const int whe
 }
 #endif
 
-int test_stream_get_decompressed_size_errors() {
+int test_stream_get_decompressed_size_errors(void) {
     printf("=== TEST: Unit - zxc_stream_get_decompressed_size Error Codes ===\n");
 
     // 1. NULL FILE*
@@ -621,7 +621,7 @@ int test_stream_get_decompressed_size_errors() {
     return 1;
 }
 
-int test_stream_engine_errors() {
+int test_stream_engine_errors(void) {
     printf("=== TEST: Unit - Stream Engine Error Codes ===\n");
 
     // 1. zxc_stream_compress with NULL f_in

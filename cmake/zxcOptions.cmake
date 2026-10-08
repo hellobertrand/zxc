@@ -5,14 +5,6 @@
 #
 # Build options.
 
-if(NOT DEFINED PROJECT_IS_TOP_LEVEL)
-    if(CMAKE_CURRENT_SOURCE_DIR STREQUAL CMAKE_SOURCE_DIR)
-        set(PROJECT_IS_TOP_LEVEL ON)
-    else()
-        set(PROJECT_IS_TOP_LEVEL OFF)
-    endif()
-endif()
-
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
 option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ${PROJECT_IS_TOP_LEVEL})

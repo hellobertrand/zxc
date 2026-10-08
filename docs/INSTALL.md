@@ -51,7 +51,7 @@ Key fingerprint and vulnerability reporting: [SECURITY.md](../.github/SECURITY.m
 
 ## Building from source (CMake)
 
-**Requirements:** CMake 3.14+, a C17 compiler (Clang, GCC or MSVC).
+**Requirements:** CMake 3.21+, a C17 compiler (Clang, GCC or MSVC).
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
@@ -132,6 +132,9 @@ cmake -B build -DZXC_ENABLE_COVERAGE=ON
 
 # Disable explicit SIMD code paths (compiler auto-vectorisation is unaffected)
 cmake -B build -DZXC_DISABLE_SIMD=ON
+
+# Warnings as errors, as CI builds (CMake 3.24+)
+cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 ```
 
 ### Profile-Guided Optimization (PGO — Clang and GCC, single-config generators)

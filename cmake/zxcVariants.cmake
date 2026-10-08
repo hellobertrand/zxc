@@ -15,7 +15,7 @@ macro(zxc_add_variant suffix flags)
         add_library(zxc_${_src}${suffix} OBJECT src/lib/zxc_${_src}.c)
         # Common flags first: the ISA flags below must have the last word, since
         # a later -march= would reset the feature set they select.
-        zxc_apply_common_flags(zxc_${_src}${suffix})
+        zxc_apply_lib_flags(zxc_${_src}${suffix})
         target_compile_options(zxc_${_src}${suffix} PRIVATE ${flags})
         target_compile_definitions(zxc_${_src}${suffix} PRIVATE ZXC_FUNCTION_SUFFIX=${suffix})
         # For static builds, define ZXC_STATIC_DEFINE

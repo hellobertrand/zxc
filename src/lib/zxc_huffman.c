@@ -55,6 +55,9 @@
 // suffix value, so every build gets it with no extra flag.
 #ifdef ZXC_FUNCTION_SUFFIX
 #define ZXC_PRIMARY__default 1
+#define ZXC_PRIMARY__avx2 0
+#define ZXC_PRIMARY__avx512 0
+#define ZXC_PRIMARY__neon32 0
 #define ZXC_PRIMARY_CAT_(a, b) a##b
 #define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
 #if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)

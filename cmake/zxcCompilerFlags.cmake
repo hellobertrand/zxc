@@ -79,10 +79,18 @@ macro(zxc_apply_pgo target)
     endif()
 endmacro()
 
-# Warnings and PGO, for every zxc target. Defined once because each target used
-# to repeat its own list, and the variant objects ended up with no warnings at
-# all. Warning level is top-level only: an embedder sets its own.
-macro(zxc_apply_common_flags target)
+# CI turns warnings into errors with CMAKE_COMPILE_WARNING_AS_ERROR, which older
+# CMake ignores silently.
+if(CMAKE_COMPILE_WARNING_AS_ERROR AND CMAKE_VERSION VERSION_LESS 3.24)
+    message(WARNING "CMAKE_COMPILE_WARNING_AS_ERROR needs CMake 3.24+: ignored")
+endif()
+
+# Warnings for every zxc target, top-level only: an embedder sets its own.
+set(ZXC_WARNING_FLAGS
+    -Wall -Wextra -Wshadow -Wformat=2 -Wundef -Wpointer-arith -Wvla -Wcast-qual
+    -Wdouble-promotion -Wimplicit-fallthrough -Wmissing-prototypes -Wstrict-prototypes)
+
+macro(zxc_apply_warnings target)
     if(MSVC)
         # /wd4244: block-bounded uint64->size_t narrowing, lossless.
         target_compile_options(${target} PRIVATE /wd4244)
@@ -90,7 +98,23 @@ macro(zxc_apply_common_flags target)
             target_compile_options(${target} PRIVATE /W3)
         endif()
     elseif(PROJECT_IS_TOP_LEVEL)
-        target_compile_options(${target} PRIVATE -Wall -Wextra)
+        target_compile_options(${target} PRIVATE ${ZXC_WARNING_FLAGS})
     endif()
+endmacro()
+
+# Warnings and PGO, defined once so no target misses them.
+macro(zxc_apply_common_flags target)
+    zxc_apply_warnings(${target})
     zxc_apply_pgo(${target})
+endmacro()
+
+# Library sources also check conversions, on 64-bit targets only: on 32-bit ones
+# every block-bounded uint64 -> size_t narrowing would warn. Not before GCC 10,
+# which flags `u32 += sizeof(x)`.
+macro(zxc_apply_lib_flags target)
+    zxc_apply_common_flags(${target})
+    if(PROJECT_IS_TOP_LEVEL AND NOT MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8
+       AND NOT (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_LESS 10))
+        target_compile_options(${target} PRIVATE -Wconversion -Wsign-conversion)
+    endif()
 endmacro()

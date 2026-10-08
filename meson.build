@@ -23,6 +23,21 @@ is_cl = cc.get_id() == 'msvc'
 # CMake build's per-target /wd4244.
 msvc_narrowing_args = msvc_syntax ? ['/wd4244'] : []
 
+# As CMake's ZXC_WARNING_FLAGS; warning_level=2 gives -Wall -Wextra.
+if not meson.is_subproject() and not msvc_syntax
+  add_project_arguments(cc.get_supported_arguments([
+    '-Wshadow', '-Wformat=2', '-Wundef', '-Wpointer-arith', '-Wvla', '-Wcast-qual',
+    '-Wdouble-promotion', '-Wimplicit-fallthrough', '-Wmissing-prototypes',
+    '-Wstrict-prototypes']), language : 'c')
+endif
+
+# As CMake's zxc_apply_lib_flags: conversions, on 64-bit targets only.
+lib_warning_args = []
+if not meson.is_subproject() and not msvc_syntax and cc.sizeof('void*') == 8 and not (
+    cc.get_id() == 'gcc' and cc.version().version_compare('<10'))
+  lib_warning_args = cc.get_supported_arguments(['-Wconversion', '-Wsign-conversion'])
+endif
+
 # Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
 zxc_soversion = '5'
 
@@ -114,7 +129,7 @@ foreach info : variant_sets
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,
-      c_args : info[1] + msvc_narrowing_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
+      c_args : info[1] + msvc_narrowing_args + lib_warning_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
     )
@@ -141,7 +156,7 @@ thread_dep = dependency('threads')
 libzxc = library('zxc',
   libzxc_sources,
   objects : variant_objects,
-  c_args : lib_export_args + msvc_narrowing_args,
+  c_args : lib_export_args + msvc_narrowing_args + lib_warning_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : libzxc_includes,
   dependencies : [thread_dep],
@@ -165,7 +180,7 @@ else
   libzxc_static = static_library('zxc_static',
     libzxc_sources,
     objects : variant_objects,
-    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args,
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args + lib_warning_args,
     include_directories : libzxc_includes,
     dependencies : [thread_dep],
     build_by_default : false,

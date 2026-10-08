@@ -7,7 +7,7 @@
 
 #include "test_common.h"
 
-int test_error_name() {
+int test_error_name(void) {
     printf("--- Test: zxc_error_name ---\n");
 
     struct {
@@ -64,7 +64,7 @@ int test_error_name() {
     return 1;
 }
 
-int test_library_info_api() {
+int test_library_info_api(void) {
     printf(
         "=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string) ===\n");
 

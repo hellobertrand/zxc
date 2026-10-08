@@ -486,7 +486,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
     return overall_ret;
 }
 
-void print_help(const char* app) {
+static void print_help(const char* app) {
     printf("Usage: %s [<options>] [<argument>]...\n\n", app);
     printf(
         "Standard Modes:\n"
@@ -523,7 +523,7 @@ void print_help(const char* app) {
         "  --progress MODE   Progress display: auto, always, never {auto}\n");
 }
 
-void print_version(void) {
+static void print_version(void) {
     printf("ZXC CLI (%zu-bit) v%s, by Bertrand Lebonnois\nBSD 3-Clause License\n",
            sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
 }

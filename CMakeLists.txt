@@ -3,7 +3,7 @@
 #
 # Copyright (c) Bertrand Lebonnois and contributors.
 
-cmake_minimum_required(VERSION 3.14)
+cmake_minimum_required(VERSION 3.21)
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -108,7 +108,7 @@ if(NOT ZXC_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_C_FLAGS MATCHES "
                     "built unoptimised. Set CMAKE_BUILD_TYPE=Release.")
 endif()
 
-zxc_apply_common_flags(zxc_lib)
+zxc_apply_lib_flags(zxc_lib)
 
 if(NOT MSVC)
     target_compile_options(zxc_lib PRIVATE $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>)

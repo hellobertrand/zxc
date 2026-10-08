@@ -8,7 +8,7 @@
 #include "../include/zxc_stream.h"
 #include "test_common.h"
 
-int test_seekable_table_sizes() {
+int test_seekable_table_sizes(void) {
     printf("=== TEST: Seekable - Table Sizes ===\n");
 
     /* block_header(8) + one group: anchor(8) + 10*4 = 56 */
@@ -31,7 +31,7 @@ int test_seekable_table_sizes() {
     return 1;
 }
 
-int test_seekable_table_write() {
+int test_seekable_table_write(void) {
     printf("=== TEST: Seekable - Table Write/Validate ===\n");
 
     const uint32_t comp[] = {100, 200, 150};
@@ -67,7 +67,7 @@ int test_seekable_table_write() {
     return 1;
 }
 
-int test_seekable_roundtrip() {
+int test_seekable_roundtrip(void) {
     printf("=== TEST: Seekable - Compress/Decompress Roundtrip ===\n");
 
     const size_t SRC_SIZE = 256 * 1024;
@@ -242,7 +242,7 @@ int test_seekable_roundtrip() {
     return 1;
 }
 
-int test_seekable_open_query() {
+int test_seekable_open_query(void) {
     printf("=== TEST: Seekable - Open and Query ===\n");
 
     const size_t SRC_SIZE = 200 * 1024;
@@ -318,7 +318,7 @@ int test_seekable_open_query() {
     return 1;
 }
 
-int test_seekable_random_access() {
+int test_seekable_random_access(void) {
     printf("=== TEST: Seekable - Random Access ===\n");
 
     const size_t SRC_SIZE = 300 * 1024;
@@ -438,7 +438,7 @@ int test_seekable_random_access() {
     return 1;
 }
 
-int test_seekable_non_seekable_reject() {
+int test_seekable_non_seekable_reject(void) {
     printf("=== TEST: Seekable - Non-Seekable Archive Rejected ===\n");
 
     const size_t SRC_SIZE = 10000;
@@ -477,7 +477,7 @@ int test_seekable_non_seekable_reject() {
     return 1;
 }
 
-int test_seekable_single_block() {
+int test_seekable_single_block(void) {
     printf("=== TEST: Seekable - Single Block ===\n");
 
     const size_t SRC_SIZE = 1024;
@@ -533,7 +533,7 @@ int test_seekable_single_block() {
     return 1;
 }
 
-int test_seekable_all_levels() {
+int test_seekable_all_levels(void) {
     printf("=== TEST: Seekable - All Compression Levels ===\n");
 
     const size_t SRC_SIZE = 128 * 1024;
@@ -600,7 +600,7 @@ int test_seekable_all_levels() {
     return 1;
 }
 
-int test_seekable_many_blocks() {
+int test_seekable_many_blocks(void) {
     printf("=== TEST: Seekable - Many Small Blocks ===\n");
 
     /* Use minimum block size (4KB) with 256KB data => 64 blocks.
@@ -698,7 +698,7 @@ int test_seekable_many_blocks() {
     return 1;
 }
 
-int test_seekable_open_file() {
+int test_seekable_open_file(void) {
     printf("=== TEST: Seekable - Open File ===\n");
 
     /* Compress seekable data into a buffer, write to tmpfile, then open via file API */
@@ -816,7 +816,7 @@ int test_seekable_open_file() {
 }
 
 /* Cross-boundary range: decompresses bytes that span exactly two blocks */
-int test_seekable_cross_boundary() {
+int test_seekable_cross_boundary(void) {
     printf("=== TEST: Seekable - Cross-Boundary Range ===\n");
 
     const size_t BLK = 64 * 1024;
@@ -901,7 +901,7 @@ int test_seekable_cross_boundary() {
 }
 
 /* Open with truncated data should return NULL */
-int test_seekable_truncated_input() {
+int test_seekable_truncated_input(void) {
     printf("=== TEST: Seekable - Truncated Input Rejected ===\n");
 
     const size_t SRC_SIZE = 64 * 1024;
@@ -982,7 +982,7 @@ int test_seekable_truncated_input() {
 }
 
 /* Corrupted SEK block: ensure no crash (no UB) */
-int test_seekable_corrupted_sek() {
+int test_seekable_corrupted_sek(void) {
     printf("=== TEST: Seekable - Corrupted SEK Block ===\n");
 
     const size_t SRC_SIZE = 64 * 1024;
@@ -1032,7 +1032,7 @@ int test_seekable_corrupted_sek() {
 }
 
 /* Range beyond file end should return error */
-int test_seekable_range_out_of_bounds() {
+int test_seekable_range_out_of_bounds(void) {
     printf("=== TEST: Seekable - Out-of-Bounds Range ===\n");
 
     const size_t SRC_SIZE = 32 * 1024;
@@ -1093,7 +1093,7 @@ int test_seekable_range_out_of_bounds() {
 }
 
 /* dst_capacity too small for requested range */
-int test_seekable_dst_too_small() {
+int test_seekable_dst_too_small(void) {
     printf("=== TEST: Seekable - Dst Too Small ===\n");
 
     const size_t SRC_SIZE = 32 * 1024;
@@ -1145,7 +1145,7 @@ int test_seekable_dst_too_small() {
 /* Empty file with seekable=1 */
 /* Empty file with seekable=1: buffer API rejects NULL src, verify graceful rejection.
  * Also verify via streaming API (which supports empty files). */
-int test_seekable_empty_file() {
+int test_seekable_empty_file(void) {
     printf("=== TEST: Seekable - Empty File ===\n");
 
     const size_t dst_cap = (size_t)zxc_compress_bound(0) + 256;
@@ -1206,7 +1206,7 @@ int test_seekable_empty_file() {
 }
 
 /* Seekable without checksum (seekable=1, checksum_enabled=0) */
-int test_seekable_no_checksum() {
+int test_seekable_no_checksum(void) {
     printf("=== TEST: Seekable - No Checksum ===\n");
 
     const size_t SRC_SIZE = 256 * 1024;
@@ -1351,7 +1351,7 @@ static int64_t reader_wide_error_read_at(void* ctx, void* dst, size_t len, uint6
 }
 
 /* Open and roundtrip via a user-supplied callback reader (single-threaded). */
-int test_seekable_open_reader() {
+int test_seekable_open_reader(void) {
     printf("=== TEST: Seekable - Open Reader Callback ===\n");
 
     const size_t SRC_SIZE = 256 * 1024;
@@ -1539,7 +1539,7 @@ int test_seekable_open_reader() {
 
 /* Multi-threaded decompression through a reader callback.
  * The callback only does memcpy on const data, so it is naturally thread-safe. */
-int test_seekable_open_reader_mt() {
+int test_seekable_open_reader_mt(void) {
     printf("=== TEST: Seekable - Open Reader Callback (MT) ===\n");
 
     const size_t SRC_SIZE = 1 * 1024 * 1024; /* 1 MB => 16 x 64KB blocks */
@@ -1880,7 +1880,7 @@ int test_seekable_corrupted_block_checksum(void) {
 }
 
 /* Seekable with checksum (seekable=1, checksum_enabled=1) */
-int test_seekable_with_checksum() {
+int test_seekable_with_checksum(void) {
     printf("=== TEST: Seekable - With Checksum ===\n");
 
     const size_t SRC_SIZE = 256 * 1024;
@@ -2344,7 +2344,7 @@ int test_seekable_mt_group_boundary(void) {
     return ok;
 }
 
-int test_seekable_forged_table_entry() {
+int test_seekable_forged_table_entry(void) {
     printf("=== TEST: Seekable - Forged Table Entry ===\n");
 
     /* Three full groups of compressible blocks: a size can grow without crossing the bound. */

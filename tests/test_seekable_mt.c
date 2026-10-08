@@ -7,7 +7,7 @@
 
 #include "test_common.h"
 
-int test_seekable_mt_roundtrip() {
+int test_seekable_mt_roundtrip(void) {
     printf("=== TEST: Seekable MT - Roundtrip (4 threads) ===\n");
 
     const size_t SRC_SIZE = 512 * 1024;
@@ -64,7 +64,7 @@ int test_seekable_mt_roundtrip() {
     return 1;
 }
 
-int test_seekable_mt_single_block() {
+int test_seekable_mt_single_block(void) {
     printf("=== TEST: Seekable MT - Single Block Fallback ===\n");
 
     const size_t SRC_SIZE = 32 * 1024;
@@ -121,7 +121,7 @@ int test_seekable_mt_single_block() {
     return 1;
 }
 
-int test_seekable_mt_random_access() {
+int test_seekable_mt_random_access(void) {
     printf("=== TEST: Seekable MT - Random Access ===\n");
 
     const size_t SRC_SIZE = 512 * 1024;
@@ -182,7 +182,7 @@ int test_seekable_mt_random_access() {
     return 1;
 }
 
-int test_seekable_mt_full_file() {
+int test_seekable_mt_full_file(void) {
     printf("=== TEST: Seekable MT - Full File (auto threads) ===\n");
 
     const size_t SRC_SIZE = 1024 * 1024; /* 1 MB */

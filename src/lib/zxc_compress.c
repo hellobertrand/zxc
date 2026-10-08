@@ -81,7 +81,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_epoch_pos(const uint32_t head, const uint3
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_chain_delta(const uint32_t cur_pos, const uint32_t prev_idx) {
     const uint32_t dist = cur_pos - prev_idx;
-    const uint32_t valid = -((int32_t)((prev_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE)));
+    const uint32_t valid = 0U - (uint32_t)((prev_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE));
     return (uint16_t)(dist & valid);
 }
 
@@ -663,7 +663,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 if (diff == 0)
                     mlen += sizeof(uint64_t);
                 else {
-                    mlen += (zxc_ctz64(diff) >> 3);
+                    mlen += (uint32_t)zxc_ctz64(diff) >> 3;
                     goto _match_len_done;
                 }
             }
@@ -692,7 +692,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 if (mask == 0xFFFFFFFF)
                     mlen += 32;
                 else {
-                    mlen += zxc_ctz32(~mask);
+                    mlen += (uint32_t)zxc_ctz32(~mask);
                     goto _match_len_done;
                 }
             }
@@ -708,7 +708,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 else {
                     // mask != 0xFFFF => a differing byte exists in bits 0..15,
                     // so the lowest set bit of ~mask lies in that range.
-                    mlen += zxc_ctz32(~mask);
+                    mlen += (uint32_t)zxc_ctz32(~mask);
                     goto _match_len_done;
                 }
             }
@@ -788,7 +788,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                 if (diff == 0)
                     mlen += sizeof(uint64_t);
                 else {
-                    mlen += (zxc_ctz64(diff) >> 3);
+                    mlen += (uint32_t)zxc_ctz64(diff) >> 3;
                     goto _match_len_done;
                 }
             }
@@ -1510,7 +1510,7 @@ static int zxc_encode_block_glo(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
     }
 
-    const size_t last_lits = iend - anchor;
+    const size_t last_lits = (size_t)(iend - anchor);
     if (last_lits > 0) {
         ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
         lit_c += last_lits;
@@ -1820,7 +1820,7 @@ parse_done:;
 
     const zxc_gnr_header_t gh = {.n_sequences = seq_c,
                                  .n_literals = (uint32_t)lit_c,
-                                 .enc_lit = enc_lit,
+                                 .enc_lit = (uint8_t)enc_lit,
                                  .enc_tok = enc_tok,
                                  .enc_mlen = 0,
                                  .enc_off = (uint8_t)use_8bit_off};
@@ -1837,7 +1837,7 @@ parse_done:;
     if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
-    rem -= ghs;
+    rem -= (size_t)ghs;
 
     if (UNLIKELY(rem < sz_lit)) return ZXC_ERROR_DST_TOO_SMALL;
 
@@ -2093,7 +2093,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         }
     }
 
-    const size_t last_lits = iend - anchor;
+    const size_t last_lits = (size_t)(iend - anchor);
     if (last_lits > 0) {
         ZXC_MEMCPY(literals + lit_c, anchor, last_lits);
         lit_c += last_lits;
@@ -2114,7 +2114,7 @@ static int zxc_encode_block_ghi(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (UNLIKELY(ghs < 0)) return ghs;
 
     uint8_t* p_curr = p + ghs;
-    rem -= ghs;
+    rem -= (size_t)ghs;
 
     const size_t sz_lit = lit_c;
     const size_t sz_seq = seq_c * sizeof(uint32_t);

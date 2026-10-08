@@ -62,6 +62,9 @@ static void dump_reset(void) {
     g_dump_failed = 0;
 }
 
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((format(printf, 1, 2)))
+#endif
 static void dump_printf(const char* fmt, ...) {
     va_list ap;
     va_start(ap, fmt);

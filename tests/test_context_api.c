@@ -7,7 +7,7 @@
 
 #include "test_common.h"
 
-int test_opaque_context_api() {
+int test_opaque_context_api(void) {
     printf("=== TEST: Opaque Context API (zxc_create_cctx / zxc_create_dctx) ===\n");
 
     /* 1. NULL context -> ZXC_ERROR_NULL_INPUT */
@@ -90,7 +90,7 @@ fail:
  * per-call level raise into the optimal-parser tier must re-init the inner
  * buffers instead of dereferencing the NULL scratch (crash before the fix).
  * Also covers the new out-of-range level validation (ZXC_ERROR_BAD_LEVEL). */
-int test_cctx_level_raise_reinit() {
+int test_cctx_level_raise_reinit(void) {
     printf("=== TEST: Opaque Context API - level raise re-init + level validation ===\n");
 
     const size_t src_sz = 8192;
@@ -187,7 +187,7 @@ fail:
     return 0;
 }
 
-int test_estimate_cctx_size() {
+int test_estimate_cctx_size(void) {
     printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
 
     const int LVL = 3;

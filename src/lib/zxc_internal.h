@@ -366,7 +366,7 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
 /** @brief Assumed CPU cache line size for alignment. */
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
-#define ZXC_ALIGNMENT_MASK (ZXC_CACHE_LINE_SIZE - 1)
+#define ZXC_ALIGNMENT_MASK ((size_t)ZXC_CACHE_LINE_SIZE - 1)
 /** @brief Round @p x up to the next cache-line boundary. */
 #define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
 

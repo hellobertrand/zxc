@@ -1061,7 +1061,7 @@ int64_t zxc_dstream_decompress(zxc_dstream* ds, zxc_outbuf_t* out, zxc_inbuf_t* 
                 if (direct) {
                     out->pos += (size_t)dsz;
                     produced += (size_t)dsz;
-                    ds->total_out += (size_t)dsz;
+                    ds->total_out += (uint64_t)dsz;
                     ds->decoded_size = 0;
                     ds->decoded_pos = 0;
                     ds->state = DS_NEED_BLOCK_HEADER;

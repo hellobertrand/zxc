@@ -7,7 +7,7 @@
 
 #include "test_common.h"
 
-int test_block_api() {
+int test_block_api(void) {
     printf("=== TEST: Unit - Block API (zxc_compress_block/zxc_decompress_block) ===\n");
 
     const size_t src_size = 128 * 1024;  // 128 KB
@@ -166,7 +166,7 @@ static int64_t sbs_compress(const uint8_t* src, size_t src_size, int level, int 
     return csz;
 }
 
-int test_decompress_block_safe() {
+int test_decompress_block_safe(void) {
     printf("=== TEST: Unit - zxc_decompress_block_safe ===\n");
 
     const size_t sizes[] = {4 * 1024, 64 * 1024, 256 * 1024, 2 * 1024 * 1024};
@@ -393,7 +393,7 @@ int test_decompress_block_safe() {
     return 1;
 }
 
-int test_decompress_block_bound() {
+int test_decompress_block_bound(void) {
     printf("=== TEST: Unit - zxc_decompress_block_bound ===\n");
 
     /* 1. Sanity: helper must return more than the input (tail pad > 0). */
@@ -490,7 +490,7 @@ int test_decompress_block_bound() {
  *   - Data patterns that trigger each block type encoder (GLO, GHI, RAW)
  *   - All compression levels
  */
-int test_block_api_boundary_sizes() {
+int test_block_api_boundary_sizes(void) {
     printf("=== TEST: Block API - Boundary Sizes ===\n");
 
     /* Edge-case sizes: near search_limit (iend-8), near page boundaries, odd,
@@ -655,7 +655,7 @@ int test_block_api_boundary_sizes() {
  * or streaming APIs which chunk transparently. The same cap bounds the
  * varint value space, neutralizing wrap-around attacks downstream.
  */
-int test_block_api_large_block_varint() {
+int test_block_api_large_block_varint(void) {
     printf("=== TEST: Block API - Reject blocks > ZXC_BLOCK_SIZE_MAX ===\n");
 
     const struct {

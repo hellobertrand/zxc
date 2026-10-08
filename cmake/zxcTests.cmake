@@ -56,7 +56,7 @@ if(ZXC_BUILD_TESTS)
         )
 
         # Same settings as the main library
-        zxc_apply_common_flags(zxc_lib_static)
+        zxc_apply_lib_flags(zxc_lib_static)
         if(NOT MSVC)
             target_compile_options(zxc_lib_static PRIVATE
                 $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>)
@@ -111,6 +111,7 @@ if(ZXC_BUILD_TESTS)
         ${RAPIDHASH_INCLUDE_DIR})
     target_compile_definitions(zxc_conformance_test PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    zxc_apply_warnings(zxc_conformance_test)
     if(ZXC_ENABLE_COVERAGE)
         target_link_options(zxc_conformance_test PRIVATE --coverage)
     endif()
@@ -132,6 +133,7 @@ if(ZXC_BUILD_TESTS)
         ${RAPIDHASH_INCLUDE_DIR})
     target_compile_definitions(zxc_format_golden_test PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    zxc_apply_warnings(zxc_format_golden_test)
     if(ZXC_ENABLE_COVERAGE)
         target_link_options(zxc_format_golden_test PRIVATE --coverage)
     endif()
@@ -146,6 +148,7 @@ if(ZXC_BUILD_TESTS)
     target_include_directories(zxc_golden_gen PRIVATE ${CMAKE_SOURCE_DIR}/include)
     target_compile_definitions(zxc_golden_gen PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    zxc_apply_warnings(zxc_golden_gen)
     if(ZXC_ENABLE_COVERAGE)
         # Links the coverage-instrumented zxc_lib, so it needs the gcov runtime.
         target_link_options(zxc_golden_gen PRIVATE --coverage)
@@ -160,6 +163,7 @@ if(ZXC_BUILD_TESTS)
         ${RAPIDHASH_INCLUDE_DIR})
     target_compile_definitions(zxc_valid_gen PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    zxc_apply_warnings(zxc_valid_gen)
     if(ZXC_ENABLE_COVERAGE)
         target_link_options(zxc_valid_gen PRIVATE --coverage)
     endif()
@@ -173,6 +177,7 @@ if(ZXC_BUILD_TESTS)
         ${RAPIDHASH_INCLUDE_DIR})
     target_compile_definitions(zxc_invalid_gen PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
+    zxc_apply_warnings(zxc_invalid_gen)
     if(ZXC_ENABLE_COVERAGE)
         target_link_options(zxc_invalid_gen PRIVATE --coverage)
     endif()

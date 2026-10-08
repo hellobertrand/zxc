@@ -226,6 +226,11 @@ typedef struct {
                                   code-lengths header), NULL when absent. */
 } zxc_stream_ctx_t;
 
+/** @brief The ring slot after @p idx. */
+static ZXC_ALWAYS_INLINE int zxc_ring_next(const zxc_stream_ctx_t* ctx, const int idx) {
+    return (int)(((size_t)idx + 1) % ctx->ring_size);
+}
+
 /**
  * @struct writer_args_t
  * @brief Structure containing arguments for the writer callback function.
@@ -339,7 +344,7 @@ static void* zxc_stream_worker(void* arg) {
             break;
         }
         const int jid = ctx->worker_queue[ctx->wq_tail];
-        ctx->wq_tail = (ctx->wq_tail + 1) % ctx->ring_size;
+        ctx->wq_tail = zxc_ring_next(ctx, ctx->wq_tail);
         ctx->wq_count--;
         job = &ctx->jobs[jid];
         pthread_mutex_unlock(&ctx->lock);
@@ -473,7 +478,7 @@ static void* zxc_async_writer(void* arg) {
 
         pthread_mutex_lock(&ctx->lock);
         job->status = JOB_STATUS_FREE;
-        ctx->write_idx = (ctx->write_idx + 1) % ctx->ring_size;
+        ctx->write_idx = zxc_ring_next(ctx, ctx->write_idx);
         pthread_cond_signal(&ctx->cond_reader);
         pthread_mutex_unlock(&ctx->lock);
     }
@@ -610,9 +615,9 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
         pthread_mutex_lock(&ctx->lock);
         job->status = JOB_STATUS_FILLED;
         ctx->worker_queue[ctx->wq_head] = read_idx;
-        ctx->wq_head = (ctx->wq_head + 1) % ctx->ring_size;
+        ctx->wq_head = zxc_ring_next(ctx, ctx->wq_head);
         ctx->wq_count++;
-        read_idx = (read_idx + 1) % ctx->ring_size;
+        read_idx = zxc_ring_next(ctx, read_idx);
         pthread_cond_signal(&ctx->cond_worker);
         pthread_mutex_unlock(&ctx->lock);
 
@@ -657,7 +662,7 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
             if (UNLIKELY(f_out && fwrite(st_buf, 1, bytes, f_out) != bytes))
                 ctx->io_error = 1;  // LCOV_EXCL_LINE
             else
-                w->total_bytes += bytes;
+                w->total_bytes += (int64_t)bytes;
         }
     }
 

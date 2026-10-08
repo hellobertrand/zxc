@@ -72,7 +72,7 @@ done:
     return ok;
 }
 
-int test_huffman_codec() {
+int test_huffman_codec(void) {
     printf("=== TEST: Unit - Huffman Codec (build/encode/decode roundtrip) ===\n");
 
     const size_t N = 8192;
@@ -309,7 +309,7 @@ done:
     return ok;
 }
 
-int test_huffman_nudge() {
+int test_huffman_nudge(void) {
     printf("=== TEST: Unit - Huffman flat/length nudge (model + guard + roundtrip) ===\n");
 
     const size_t N = 16384;
@@ -531,7 +531,7 @@ fail:
     return 0;
 }
 
-int test_huffman_codec_dict() {
+int test_huffman_codec_dict(void) {
     printf("=== TEST: Unit - Huffman Codec, shared dictionary table (enc_lit == 3) ===\n");
 
     const size_t N = 8192;
@@ -603,7 +603,7 @@ int test_huffman_codec_dict() {
 /* Regression: a degenerate single-symbol table must carry code_len == 1
  * (FORMAT.md, decoder validation requirements). The v6 decoder rejected a
  * lone symbol with a longer length; the v7 rewrite briefly accepted it. */
-int test_huffman_single_symbol_validation() {
+int test_huffman_single_symbol_validation(void) {
     printf("=== TEST: Unit - Huffman single-symbol table validation ===\n");
 
     zxc_pivco_tree_t tree;
@@ -639,7 +639,7 @@ int test_huffman_single_symbol_validation() {
 }
 
 // Checks that the EOF block is correctly appended
-int test_eof_block_structure() {
+int test_eof_block_structure(void) {
     printf("=== TEST: Unit - EOF Block Structure ===\n");
 
     const char* input = "test";
@@ -690,7 +690,7 @@ int test_eof_block_structure() {
     return 1;
 }
 
-int test_header_checksum() {
+int test_header_checksum(void) {
     printf("Running test_header_checksum...\n");
 
     uint8_t header_buf[ZXC_BLOCK_HEADER_SIZE];
@@ -747,7 +747,7 @@ int test_header_checksum() {
 }
 
 // 5. Two blocks swapped in a stream-written archive: position-seeded checksums refuse it.
-int test_swapped_blocks_stream() {
+int test_swapped_blocks_stream(void) {
     printf("TEST: Swapped blocks, stream reader... ");
 
     // 1. Create input data withDISTINCT patterns for 2 blocks (so blocks are different)
@@ -1307,7 +1307,7 @@ static int chunk_code_verdict(uint8_t code, size_t* bs) {
     return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL, NULL);
 }
 
-int test_chunk_size_code() {
+int test_chunk_size_code(void) {
     printf("=== TEST: Chunk-size code validation ===\n");
 
     size_t bs = 0;
@@ -1413,7 +1413,7 @@ static int64_t forge_decode_via(const uint8_t* arc, size_t arc_sz, size_t plain_
  * comp_size may not exceed the file's block size, and the walk may not report
  * success without having reached the EOF block - a forged size can span it.
  */
-int test_forged_block_comp_size() {
+int test_forged_block_comp_size(void) {
     printf("TEST: Forged block comp_size... ");
     const size_t block_sz = 4096;
     int ok = 1;
@@ -1530,7 +1530,7 @@ int test_forged_block_comp_size() {
  * flip's sign, so the guarantee is re-derived here from the constants and a
  * constant that opens a hole fails the suite. Block header: every bit. File
  * header: every bit and every pair. */
-int test_header_checksum_single_bit() {
+int test_header_checksum_single_bit(void) {
     printf("=== TEST: every header bit moves its checksum ===\n");
 
     const int rounds = 4000;

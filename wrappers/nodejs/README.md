@@ -21,7 +21,7 @@ npm install
 ### Prerequisites
 
 - Node.js >= 16.0.0
-- CMake >= 3.14
+- CMake >= 3.21
 - A C17/C++17 compiler (GCC, Clang, or MSVC)
 
 ## Usage

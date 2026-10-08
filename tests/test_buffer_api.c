@@ -8,7 +8,7 @@
 #include "test_common.h"
 
 // Checks that the utility function calculates a sufficient size
-int test_max_compressed_size_logic() {
+int test_max_compressed_size_logic(void) {
     printf("=== TEST: Unit - zxc_compress_bound ===\n");
 
     // Case 1: 0 bytes (must at least contain the header)
@@ -37,7 +37,7 @@ int test_max_compressed_size_logic() {
 }
 
 // Checks the buffer-based API (zxc_compress / zxc_decompress)
-int test_buffer_api() {
+int test_buffer_api(void) {
     printf("=== TEST: Unit - Buffer API (zxc_compress/zxc_decompress) ===\n");
 
     size_t src_size = 128 * 1024;
@@ -105,7 +105,7 @@ int test_buffer_api() {
 }
 
 // Test zxc_get_decompressed_size
-int test_get_decompressed_size() {
+int test_get_decompressed_size(void) {
     printf("=== TEST: Unit - zxc_get_decompressed_size ===\n");
 
     // 1. Compress some data, then check decompressed size
@@ -176,7 +176,7 @@ int test_get_decompressed_size() {
     return 1;
 }
 
-int test_buffer_error_codes() {
+int test_buffer_error_codes(void) {
     printf("=== TEST: Unit - Buffer API Error Codes ===\n");
 
     /* ------------------------------------------------------------------ */
@@ -502,7 +502,7 @@ int test_buffer_error_codes() {
 
 // Tests the dst=NULL / dst_capacity=0 short-circuit in zxc_decompress:
 // allowed only when the compressed frame's stored size is 0.
-int test_decompress_empty_frame_null_dst() {
+int test_decompress_empty_frame_null_dst(void) {
     printf("=== TEST: Unit - Decompress empty frame with NULL/zero dst ===\n");
 
     /* 1. Produce a valid empty frame via zxc_compress(NULL, 0, ...). */
@@ -575,7 +575,7 @@ int test_decompress_empty_frame_null_dst() {
 
 // Tests the buffer API scratch buffer (work_buf) used to safely absorb
 // zxc_copy32 wild-copy overshoot during decompression.
-int test_buffer_api_scratch_buf() {
+int test_buffer_api_scratch_buf(void) {
     printf("=== TEST: Unit - Buffer API Scratch Buffer (work_buf) ===\n");
 
     // 1. Small data roundtrip (177 bytes)
@@ -720,7 +720,7 @@ int test_buffer_api_scratch_buf() {
 //   - Safe path: rem_cap < runtime_chunk_size + ZXC_PAD_SIZE
 //     -> decompress into bounce buffer (work_buf), then memcpy exact result.
 //
-int test_decompress_fast_vs_safe_path() {
+int test_decompress_fast_vs_safe_path(void) {
     printf("=== TEST: Unit - Decompress Fast Path vs Safe Path ===\n");
 
     // Use a multi-block input: ZXC_BLOCK_SIZE_DEFAULT + extra so we get at least 2 blocks.
