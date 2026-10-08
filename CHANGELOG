@@ -1,6 +1,57 @@
-# Changelog
+[v0.15.0] - 2026-10-XX
+api: Implement variable-length file footer and frame info API (#489)
+api: Enable seekable archives in compression context API (#487)
+api: Add support for zero-allocation in-place decompression (#461)
+api: Introduces kernel zxc support (#454)
+api: Introduce format v9 and .zxd dictionary v2 (#452)
+api: Announce the seek table with a HAS_SEEK_TABLE header flag (#448)
+api: Support 64-bit block counts for seekable archives (#438)
+api: Validate the seek table per group of 64 blocks and load it lazily (#436)
+api: Checksum decompressed blocks, seeded by position, and add an archive digest (#434)
+api: Replace xor/shift header checksums with multiplication-based hashing (#432)
+perf: Optimizes parallel stream decompression I/O (#495)
+perf: Optimizes LZ77 compression performance (#466)
+perf: Reduce register pressure in GHI batch decompression (#460)
+perf: Optimizes wild copy decompression loops (#439)
+perf: Simplify the PivCo Huffman tree representation (#451)
+perf: Split long GLO matches into inline sequences at L3-L5 (#441)
+cli: Address frame validation and dictionary handling edge cases
+fix: Recover reader panics in the Go seekable trampoline (#486)
+fix: Make the stream processor callback type-safe (#449)
+fix: Enforce strict read/write separation in in-place decompression (#450)
+fix: Work around an MSVC 19.51 ARM64 miscompile of the SEK size fold (#458)
+fix: Throw on failed WASM heap allocation (#459)
+fix: Honour --progress and tty detection in benchmark mode (#464)
+build: Enable compiler warnings as errors in CI (#497)
+build: Bump source-map-js in /wrappers/nodejs (#496)
+build: Standardizes SPDX headers and copyright notices (#483)
+build: Bump scikit-build-core in /wrappers/python (#475)
+build: Bump setuptools-scm in /wrappers/python (#473)
+build: Bump cibuildwheel from 4.2.0 to 4.2.1 in /wrappers/python (#474)
+build: Bump vitest from 4.1.11 to 5.0.2 in /wrappers/nodejs (#472)
+build: Bump build from 1.6.0 to 1.6.1 in /wrappers/python (#477)
+build: Bump cc from 1.4.4 to 1.5.1 in /wrappers/rust (#470)
+build: Bump thiserror from 2.0.20 to 2.0.21 in /wrappers/rust (#471)
+build: Implement apt package caching for multiarch workflows (#482)
+build: Rename lzbench directory to reflect lz+entropy integration
+build: Refresh toolchains, add Clang 21-22 and a glibc floor check (#465)
+build: Remove temporary Docker downgrade workaround (#462)
+build: Add Linux kernel module support and its CI workflow (#454)
+build: Flush stream output and report write errors (#453)
+build: Prevent auxv header inclusion when ZXC_ONLY_DEFAULT is defined (#447)
+doc: Update documentation structure and content (#485)
+misc: Supports multi-frame ZXC archives (#490)
+misc: Bump github/codeql-action/init from 4.37.9 to 4.38.2 (#476)
+misc: Bump actions-rust-lang/setup-rust-toolchain (#467)
+misc: Bump github/codeql-action/upload-sarif (#478)
+misc: Bump oss-fuzz-base/base-builder in /.clusterfuzzlite (#479)
+misc: Bump meson from 1.12.0 to 1.12.1 in /.github/requirements (#480)
+misc: Bump ninja from 1.13.0 to 1.13.2 in /.github/requirements (#481)
+misc: Bump orhun/git-cliff-action from 4.8.0 to 4.9.1 (#468)
+misc: Bump actions/cache from 5.0.5 to 6.1.0 (#469)
+misc: Add block API fuzzer and dictionary huffman table coverage (#463)
 
-## [0.14.1] - 2026-09-19
+[v0.14.1] - 2026-09-19
 api: Enforces strict block size and EOF validation (#428)
 api: Implements reusable compression contexts (#424)
 api: Enhances seekable API with checksum control and robust range validation (#425)
@@ -27,7 +78,7 @@ misc: Consolidates checksums (#423)
 misc: Formalizes dictionary ID calculation and enhances fuzzer (#ossf-557281704) (#413)
 misc: Tidy the nudge tuning macros (#412)
 
-## [0.14.0] - 2026-09-03
+[v0.14.0] - 2026-09-03
 api: Pin the glibc floor at 2.34, make libzxc.pc relocatable (#385)
 api: Wire format v8, faster overlap copies, stricter block validation (#374)
 perf: Optimizes PivCo Huffman with advanced SIMD (#373)
@@ -57,7 +108,7 @@ misc: Formalize Developer Certificate of Origin requirements (#388)
 misc: Enforce 10-minute timeout for CI jobs (#387)
 misc: Drop the tag's "v" from the SBOM file name
 
-## [0.13.3] - 2026-08-17
+[v0.13.3] - 2026-08-17
 api: Refine comments for improved clarity (#366)
 perf: Optimizes decode offset validation and clarifies GHI format (#368)
 cli: Add MSVC CLI build configuration and unzxc alias (#348)
@@ -87,7 +138,7 @@ misc: Bump actions/checkout from 6.0.2 to 7.0.1 (#356)
 misc: Bump softprops/action-gh-release from 3.0.1 to 3.0.2 (#353)
 misc: Bump actions/setup-python from 6.3.0 to 7.0.0 (#352)
 
-## [0.13.2] - 2026-07-30
+[v0.13.2] - 2026-07-30
 fix: Fix typos
 fix: Fix MSVC /arch + /wd4244 flags (wrapdb CI warnings) (#326)
 perf: Extend code length nudging to level 6 (#343)
@@ -104,12 +155,12 @@ misc: Remove duplicate SSE2/NEON FMV variants, drop -mfma, harden x86 dispatch g
 misc: Compile ISA-independent dict tree setup once, not per-variant (#327)
 misc: Test the AVX-512 tier under Intel SDE instead of QEMU (#325)
 
-## [0.13.1] - 2026-07-15
+[v0.13.1] - 2026-07-15
 api: Define zxc_lib_EXPORTS in Meson so the Windows DLL exports its API
 misc: Require Meson >= 0.63.0 so c_std applies in subproject builds
 doc: Update Option 6 to specify 'Winget' for installation
 
-## [0.13.0] - 2026-07-14
+[v0.13.0] - 2026-07-14
 api: Refines code coverage reporting (#322)
 api: Adds Level 7 (Ultra) compression to wrappers (#317)
 api: ZXC format v7: PivCo Huffman, level 7 (ULTRA), space-speed selection, in-place decode (#315)
@@ -146,7 +197,7 @@ misc: Refines code quality and addresses warnings (#295)
 misc: Update bash conditional expressions to '[[ ... ]]' (#293)
 misc: Statically define Meson project version and SOVERSION (#290)
 
-## [0.12.0] - 2026-06-18
+[v0.12.0] - 2026-06-18
 api: Implements shared dictionary Huffman table (#275)
 api: Enhances format validation (#271)
 api: Overhauls dictionary fuzzer for robust testing (#270)
@@ -216,7 +267,7 @@ misc: Bump actions/attest-build-provenance from 3.0.0 to 4.1.0 (#232)
 misc: Bump codecov/codecov-action from 6.0.0 to 6.0.1 (#231)
 misc: Update ClusterFuzzLite base image and enable Dependabot (#230)
 
-## [0.11.0] - 2026-05-13
+[v0.11.0] - 2026-05-13
 api: Increases default block size to 512 KB (#216)
 api: Introduces Level 6 compression with Huffman literals (#208)
 api: Add WHATWG TransformStream adapters and `detectZxc` utility (#211)
@@ -266,7 +317,7 @@ misc: Remove PPA requirement for GCC on Ubuntu 22.04 in CI (#207)
 misc: Harden decompression logic against integer overflows on 32-bits platforms (#202)
 misc: Split monolithic tests (#200)
 
-## [0.10.0] - 2026-04-16
+[v0.10.0] - 2026-04-16
 api: Adds Seekable API documentation and bumps SOVERSION to 3
 api: Simplifies checksum selection and standardizes on RapidHash
 api: Adds seekable archives for random access (#188)
@@ -334,11 +385,11 @@ misc: Exclude hard-to-test error paths from code coverage
 misc: Rename pkg-config module from zxc to libzxc (#144)
 misc: Cache context variables locally in encoder blocks (#141)
 
-## [0.9.1] - 2026-03-16
+[v0.9.1] - 2026-03-16
 fix: Fix CLI parsing and adds block size option (#140)
 doc: Add tar integration instructions to README
 
-## [0.9.0] - 2026-03-15
+[v0.9.0] - 2026-03-15
 api: Add flexible block sizes options and reusable contexts (#138)
 cli: Update license headers and add SPDX identifier
 build: Use upstream lzbench and shallow clone in benchmark workflow
@@ -352,10 +403,10 @@ misc: Update benchmark images for 0.9.0
 misc: Configures corpus storage for fuzzing CI (#139)
 misc: Implement direct decompression fast path (#135)
 
-## [0.8.3] - 2026-03-06
+[v0.8.3] - 2026-03-06
 build: Add compiler compatibility CI workflow (#134)
 
-## [0.8.2] - 2026-03-05
+[v0.8.2] - 2026-03-05
 api: Optimizes fuzzers for buffer API and memory reuse (#126)
 fix: Fix file handle leak in CLI benchmark (#132)
 cli: Resource management and enforces thread limits (#131)
@@ -363,11 +414,11 @@ cli: CLI: enhances robustness and resource handling (#130)
 misc: Refine output file closing logic to avoid closing stdout (#133)
 misc: Prevents out-of-bounds memory access (#129)
 
-## [0.8.1] - 2026-03-01
+[v0.8.1] - 2026-03-01
 build: Updates wrapper versions and refactors ABI versioning
 build: Adds Node.js wrapper badge
 
-## [0.8.0] - 2026-03-01
+[v0.8.0] - 2026-03-01
 api: Adds Node.js wrapper for zxc compression (#107)
 api: Refactors error handling with errors codes, improves docs and benchmark CLI (#103)
 fix: Fixes CLI benchmark deadline calculation (#116)
@@ -401,28 +452,28 @@ misc: Adds file format specification
 misc: Refine introduction wording.
 misc: Add comprehensive ZXC file format spec with byte-level structures and worked hexdump example
 
-## [0.7.3] - 2026-02-18
+[v0.7.3] - 2026-02-18
 fix: Fix workfows builds
 build: Moves rapidhash.h to vendor directory
 misc: Finds rapidhash via system or vendored fallback
 misc: Use lzbench master branch
 
-## [0.7.2] - 2026-02-16
+[v0.7.2] - 2026-02-16
 fix: Fix warning for AVX2/AVX512 macro redefinition in native mode build (#94)
 
-## [0.7.1] - 2026-02-14
+[v0.7.1] - 2026-02-14
 fix: Fixes potential out-of-bounds read in decompression (#92)
 doc: Updates documentation
 misc: Specifies Release config for /O2 flag (#93)
 misc: Uses zxc-add-0.7.x branch of lzbench fork
 
-## [0.7.0] - 2026-02-13
+[v0.7.0] - 2026-02-13
 fix: Fix potential out-of-bounds read (static analysis) (#89)
 cli: Adds JSON output option for CLI (#88)
 build: Refactors multiarch CI to use Debian containers (#91)
 build: Enables big-endian architecture support (#86)
 
-## [0.6.3] - 2026-02-11
+[v0.6.3] - 2026-02-11
 api: Add shared library support with BUILD_SHARED_LIBS option (#81)
 fix: Fix rust version test
 fix: Fix whitepaper links to graphs
@@ -433,7 +484,7 @@ doc: Update bindings docs
 misc: Add edge case tests (#83)
 misc: Add Rust support to CodeQL security analysis and fix config path filtering. (#82)
 
-## [0.6.2] - 2026-02-09
+[v0.6.2] - 2026-02-09
 fix: Fixes Rust wrapper build for cargo publish (#69)
 cli: Addresses vulnerabilities and input validation into CLI (#77)
 cli: Enables code coverage and configures thresholds
@@ -447,11 +498,11 @@ misc: Updates license headers and contributing guidelines (#76)
 misc: Updates contribution guidelines
 misc: Adds TODO list for future development
 
-## [0.6.1] - 2026-02-06
+[v0.6.1] - 2026-02-06
 api: Adds Rust wrapper for ZXC compression (#68)
 misc: Corrects bit reader initialization (#67)
 
-## [0.6.0] - 2026-02-05
+[v0.6.0] - 2026-02-05
 api: Improves compression, ratio and data integrity (#65)
 build: Update vendors workflow
 build: Automatic update of rapidhash.h (#59)
@@ -461,14 +512,14 @@ doc: Adds brotli to lzbench benchmark (#58)
 misc: Bump peter-evans/create-pull-request from 7 to 8 (#64)
 misc: Adds funding file
 
-## [0.5.1] - 2026-01-22
+[v0.5.1] - 2026-01-22
 fix: Fixes ARM32 compilation (#55)
 cli: Enhances CLI input/output security (#52)
 cli: I/O security, Bit Packing improving and code cleanup (#51)
 misc: Enables NEON32 support (#54)
 misc: Bump softprops/action-gh-release from 1 to 2 (#53)
 
-## [0.5.0] - 2026-01-20
+[v0.5.0] - 2026-01-20
 fix: Fix benchmark graph to reflect v0.5.0
 perf: Improves compression with rapidhash  integration and new GHI block format (#43)
 build: Implements runtime CPU feature dispatch (#50)
@@ -482,14 +533,14 @@ misc: Refactors RLE token handling for clarity
 misc: Removes release template file
 misc: Updates copyright year
 
-## [0.4.0] - 2026-01-07
+[v0.4.0] - 2026-01-07
 perf: Variable offsets, optimized parsing & layout (#23)
 
-## [0.3.3] - 2026-01-06
+[v0.3.3] - 2026-01-06
 fix: Fixes buffering issues with stdin and stdout (#37)
 portability: Set binary mode for standard streams (#39)
 
-## [0.3.2] - 2026-01-05
+[v0.3.2] - 2026-01-05
 cli: Updates build system and CI configuration (#24)
 build: Add CI with multi-arch builds + dependabot (#30)
 build: Improves file handling and code robustness (#28)
@@ -502,18 +553,18 @@ misc: Bump actions/cache from 4 to 5 (#33)
 misc: Bump github/codeql-action from 3 to 4 (#34)
 misc: Replaces not operator for branchless evaluation. (#29)
 
-## [0.3.1] - 2025-12-27
+[v0.3.1] - 2025-12-27
 doc: Add community bindings to readme (#21)
 doc: Update documentation
 misc: Flush stdout buffer before exit when using -c flag (#22)
 
-## [0.3.0] - 2025-12-26
+[v0.3.0] - 2025-12-26
 perf: Improves compression and decompression (#18)
 build: Configures fuzzing workflows for multiple targets
 misc: Use -1..-5 as compression levels (#16)
 misc: Add short options to help, version (#15)
 
-## [0.2.0] - 2025-12-19
+[v0.2.0] - 2025-12-19
 api: Updates include path in fuzz test
 api: Restructure public headers to provide a "sans-IO" API (#9)
 fix: Fixes potential buffer overflow in decompression
@@ -544,14 +595,14 @@ misc: Updates I/O error flag to atomic type
 misc: Refactors fuzzing tests for better coverage
 misc: Format code
 
-## [0.1.2] - 2025-12-17
+[v0.1.2] - 2025-12-17
 fix: Fixes potential null pointer dereference
 doc: Adds parameter documentation
 misc: Adds more unit tests
 misc: Removes redundant file pointer check
 misc: Adds input validation to prevent crashes
 
-## [0.1.1] - 2025-12-17
+[v0.1.1] - 2025-12-17
 build: Adds name to fuzzing job for clarity
 build: Enhances fuzzing workflow with manual control
 build: Updates fuzzing workflow concurrency group
@@ -562,7 +613,7 @@ misc: Prevents potential buffer overruns
 misc: Adds zstd_fast to benchmark
 misc: Use official lzbench repo for benchmarks
 
-## [0.1.0] - 2025-12-15
+[v0.1.0] - 2025-12-15
 api: Update API documentation
 api: Enhances C/C++ integration with examples
 fix: Fixes CRC32 detection for SSE4.2 (#6)

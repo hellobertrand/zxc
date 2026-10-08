@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   generate:
-    name: Generate CHANGELOG.md
+    name: Generate CHANGELOG
     runs-on: ubuntu-slim
     timeout-minutes: 5
     steps:
@@ -44,11 +44,11 @@ jobs:
           config: cliff.toml
           args: --verbose ${{ steps.ver.outputs.tag_arg }}
         env:
-          OUTPUT: CHANGELOG.md
+          OUTPUT: CHANGELOG
           GITHUB_REPO: ${{ github.repository }}
 
       - name: Upload CHANGELOG artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: CHANGELOG
-          path: CHANGELOG.md
+          path: CHANGELOG

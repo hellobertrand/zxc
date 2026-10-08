@@ -48,12 +48,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Recursively process directories. When specified, any directory listed as an argument will be traversed, and all regular files within it will be processed (compressed or decompressed). This option implicitly enables `--multiple` mode.
 
 **-1**..**-7**
-: Set the compression level from 1 (fastest compression) to 7 (maximum density).
-- **-1, -2 (Fast):** Optimized for real-time assets or when compression speed is a priority.
-- **-3 (Default):** Balanced middle-ground offering efficient compression and superior ratio to fast codecs.
-- **-4, -5 (Compact):** Better ratio than LZ4 with faster decoding than Zstd. Suited for embedded systems and firmware.
-- **-6 (Max):** Beats LZ4-HC on both axes — better ratio *and* faster decode — while staying in the multi-GB/s decode class. Best for archival and write-once / read-many workloads where compression time is amortized over many reads.
-- **-7 (Ultra):** Maximum density. A deep optimal parse plus Huffman-coded literals *and* tokens (11-bit codes, decoded via the SIMD-merge PivCo layout) push the ratio past `zstd -1` while still decoding several times faster than it. Choose it when storage or bandwidth dominates but decode must stay fast; compression is the slowest tier.
+: Set the compression level, from 1 (fastest compression) to 7 (smallest output). Default: 3. Higher levels trade compression speed for ratio; decompression stays fast at every level. Levels 6 (max) and 7 (ultra) compress far more slowly and suit data written once and read many times.
 
 **-T**, **--threads** *N*
 : Set the number of threads to use for compression and decompression. A value of `0` means auto-detection based on the number of available CPU cores.

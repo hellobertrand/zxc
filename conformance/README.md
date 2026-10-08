@@ -9,7 +9,6 @@ v9/                 Corpus for format version 9 (FORMAT_VERSION declares it)
   valid/            17 *.zxc archives, *.expected outputs, *.zxd dictionaries
   invalid/          34 *.zxc archives that must be rejected
   vectors.sha256    Byte-stability manifest
-v8/                 Corpus for format version 8, kept until 0.15.x ships
 valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
 invalid_cases.h     Recipe for the 28 generated invalid ones; gen_invalid.c likewise
 ```

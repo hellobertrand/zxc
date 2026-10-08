@@ -8,9 +8,9 @@
 
 <!-- [![Latest release](https://img.shields.io/github/v/release/hellobertrand/zxc)](https://github.com/hellobertrand/zxc/releases/latest) -->
 
-ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.6x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio.
+ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.4x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio.
 
-Seven compression levels trade compression speed for ratio, and the decoder stays fast at every one of them: the densest level compresses better than `zstd -1` while decoding about twice as fast. ZXC also provides seekable archives for O(1) random access, in-place decompression, and dictionary compression for small data.
+Seven compression levels trade compression speed for ratio, and the decoder stays fast at every one of them: the densest level compresses better than `zstd -1` while decoding more than twice as fast. ZXC also provides seekable archives for O(1) random access, in-place decompression, and dictionary compression for small data.
 
 The ZXC format is fully specified in [FORMAT.md](docs/FORMAT.md) and guarded by public conformance vectors. This repository is the reference implementation, provided as an open-source BSD 3-Clause licensed C library and a command line utility producing and decoding `.zxc` files, with official bindings for Rust, Python, Node.js, Go and WASM. The design is described in the [whitepaper](docs/WHITEPAPER.md).
 
@@ -20,12 +20,12 @@ The ZXC format is fully specified in [FORMAT.md](docs/FORMAT.md) and guarded by 
 
 | Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
 | :--- | ---: | ---: | ---: | ---: |
-| Apple M2 | **2.62x** | **1.75x** | **1.50x** | **2.60x** |
-| Axion (Neoverse-V2) | **1.92x** | **1.41x** | **1.25x** | **1.94x** |
-| EPYC 9B45 (Zen 5) | **2.20x** | **1.36x** | **1.19x** | **2.21x** |
-| EPYC 7B13 (Zen 3) | **1.81x** | **1.22x** | **1.10x** | **2.13x** |
+| Apple M2 | **2.41x** | **2.03x** | **1.52x** | **2.80x** |
+| Axion (Neoverse-V2) | **1.93x** | **1.54x** | **1.29x** | **2.17x** |
+| EPYC 9B45 (Zen 5) | **2.19x** | **1.65x** | **1.24x** | **2.49x** |
+| EPYC 7B13 (Zen 3) | **1.82x** | **1.35x** | **1.15x** | **2.38x** |
 
-ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.09 % vs 47.60 %, 36.28 % vs
+ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.65 % vs 47.60 %, 36.28 % vs
 36.75 % and 33.09 % vs 34.53 % of the original size.
 
 <p align="center">
@@ -34,7 +34,7 @@ ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.09 % vs 47.6
   </a>
 </p>
 
-Measured with [lzbench](https://github.com/inikep/lzbench) 2.3.1 (from
+Measured with [lzbench](https://github.com/inikep/lzbench) 2.4.1 (from
 [@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
 machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
 / Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
@@ -49,45 +49,47 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 
 ### All codecs
 
+Apple M2 (ARM64)
+
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.14.1 -1** | 875 MB/s | **13524 MB/s** | **61.76 %** |
-| **zxc 0.14.1 -2** | 581 MB/s | **11338 MB/s** | **53.86 %** |
-| **zxc 0.14.1 -3** | 244 MB/s | **8356 MB/s** | **46.09 %** |
-| **zxc 0.14.1 -4** | 156 MB/s | **7906 MB/s** | **42.99 %** |
-| **zxc 0.14.1 -5** | 92.0 MB/s | **7394 MB/s** | **40.43 %** |
-| **zxc 0.14.1 -6** | 12.6 MB/s | **6740 MB/s** | **36.28 %** |
-| **zxc 0.14.1 -7** | 8.36 MB/s | **4628 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1347 MB/s | 5166 MB/s | 62.15 % |
-| lz4 1.10.0 | 796 MB/s | 4770 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 42.2 MB/s | 4503 MB/s | 36.75 % |
-| lzav 5.16 -1 | 681 MB/s | 3860 MB/s | 39.91 % |
-| snappy 1.2.2 | 877 MB/s | 3253 MB/s | 47.85 % |
-| zstd 1.5.7 --fast --1 | 690 MB/s | 2513 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 572 MB/s | 1777 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 392 MB/s | 1695 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 148 MB/s | 410 MB/s | 36.45 % |
+| **zxc 0.15.0 -1** | 886 MB/s | **13513 MB/s** | **61.76 %** |
+| **zxc 0.15.0 -2** | 588 MB/s | **11320 MB/s** | **53.86 %** |
+| **zxc 0.15.0 -3** | 267 MB/s | **9707 MB/s** | **46.65 %** |
+| **zxc 0.15.0 -4** | 194 MB/s | **8790 MB/s** | **43.43 %** |
+| **zxc 0.15.0 -5** | 114 MB/s | **8118 MB/s** | **40.83 %** |
+| **zxc 0.15.0 -6** | 14.5 MB/s | **6884 MB/s** | **36.28 %** |
+| **zxc 0.15.0 -7** | 9.71 MB/s | **5054 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1347 MB/s | 5609 MB/s | 62.15 % |
+| lz4 1.10.0 | 814 MB/s | 4774 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 48.4 MB/s | 4522 MB/s | 36.75 % |
+| lzav 5.17 -1 | 686 MB/s | 3876 MB/s | 39.91 % |
+| snappy 1.3.1 | 661 MB/s | 3258 MB/s | 47.85 % |
+| zstd 1.5.7 --fast --1 | 723 MB/s | 2538 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 645 MB/s | 1803 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 375 MB/s | 1680 MB/s | 31.20 % |
+| zlib 1.3.2 -1 | 135 MB/s | 378 MB/s | 36.45 % |
 
 <details>
 <summary>Google Axion (Neoverse-V2, ARM64)</summary>
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.14.1 -1** | 878 MB/s | **9487 MB/s** | **61.76 %** |
-| **zxc 0.14.1 -2** | 589 MB/s | **7834 MB/s** | **53.86 %** |
-| **zxc 0.14.1 -3** | 237 MB/s | **5980 MB/s** | **46.09 %** |
-| **zxc 0.14.1 -4** | 163 MB/s | **5675 MB/s** | **42.99 %** |
-| **zxc 0.14.1 -5** | 95.7 MB/s | **5310 MB/s** | **40.43 %** |
-| **zxc 0.14.1 -6** | 11.5 MB/s | **4787 MB/s** | **36.28 %** |
-| **zxc 0.14.1 -7** | 7.81 MB/s | **3186 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1272 MB/s | 4940 MB/s | 62.15 % |
-| lz4 1.10.0 | 728 MB/s | 4256 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 44.2 MB/s | 3843 MB/s | 36.75 % |
-| lzav 5.16 -1 | 649 MB/s | 2916 MB/s | 39.91 % |
-| snappy 1.2.2 | 755 MB/s | 2289 MB/s | 47.85 % |
-| zstd 1.5.7 --fast --1 | 605 MB/s | 2291 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 522 MB/s | 1643 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 324 MB/s | 1518 MB/s | 31.20 % |
+| **zxc 0.15.0 -1** | 885 MB/s | **9564 MB/s** | **61.76 %** |
+| **zxc 0.15.0 -2** | 593 MB/s | **7895 MB/s** | **53.86 %** |
+| **zxc 0.15.0 -3** | 256 MB/s | **6571 MB/s** | **46.65 %** |
+| **zxc 0.15.0 -4** | 186 MB/s | **6105 MB/s** | **43.43 %** |
+| **zxc 0.15.0 -5** | 109 MB/s | **5683 MB/s** | **40.83 %** |
+| **zxc 0.15.0 -6** | 13.5 MB/s | **4950 MB/s** | **36.28 %** |
+| **zxc 0.15.0 -7** | 8.82 MB/s | **3563 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1278 MB/s | 4954 MB/s | 62.15 % |
+| lz4 1.10.0 | 730 MB/s | 4258 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 43.2 MB/s | 3850 MB/s | 36.75 % |
+| lzav 5.17 -1 | 576 MB/s | 2949 MB/s | 39.91 % |
+| snappy 1.3.1 | 566 MB/s | 2295 MB/s | 47.85 % |
+| zstd 1.5.7 --fast --1 | 302 MB/s | 2291 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 523 MB/s | 1642 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 329 MB/s | 1525 MB/s | 31.20 % |
 | zlib 1.3.2 -1 | 115 MB/s | 389 MB/s | 36.45 % |
 
 </details>
@@ -97,22 +99,22 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.14.1 -1** | 848 MB/s | **11377 MB/s** | **61.76 %** |
-| **zxc 0.14.1 -2** | 570 MB/s | **10243 MB/s** | **53.86 %** |
-| **zxc 0.14.1 -3** | 240 MB/s | **6730 MB/s** | **46.09 %** |
-| **zxc 0.14.1 -4** | 164 MB/s | **6357 MB/s** | **42.99 %** |
-| **zxc 0.14.1 -5** | 97.7 MB/s | **5970 MB/s** | **40.43 %** |
-| **zxc 0.14.1 -6** | 12.4 MB/s | **5675 MB/s** | **36.28 %** |
-| **zxc 0.14.1 -7** | 7.32 MB/s | **4149 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1284 MB/s | 5179 MB/s | 62.15 % |
-| lz4 1.10.0 | 767 MB/s | 4938 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 45.0 MB/s | 4766 MB/s | 36.75 % |
-| lzav 5.16 -1 | 683 MB/s | 3483 MB/s | 39.91 % |
-| snappy 1.2.2 | 741 MB/s | 2073 MB/s | 47.89 % |
-| zstd 1.5.7 --fast --1 | 657 MB/s | 2423 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 599 MB/s | 1877 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 363 MB/s | 1709 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 135 MB/s | 392 MB/s | 36.45 % |
+| **zxc 0.15.0 -1** | 868 MB/s | **11609 MB/s** | **61.76 %** |
+| **zxc 0.15.0 -2** | 585 MB/s | **10332 MB/s** | **53.86 %** |
+| **zxc 0.15.0 -3** | 253 MB/s | **8335 MB/s** | **46.65 %** |
+| **zxc 0.15.0 -4** | 183 MB/s | **7508 MB/s** | **43.43 %** |
+| **zxc 0.15.0 -5** | 110 MB/s | **7014 MB/s** | **40.83 %** |
+| **zxc 0.15.0 -6** | 15.3 MB/s | **6045 MB/s** | **36.28 %** |
+| **zxc 0.15.0 -7** | 10.2 MB/s | **4724 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1284 MB/s | 5305 MB/s | 62.15 % |
+| lz4 1.10.0 | 766 MB/s | 5052 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 45.4 MB/s | 4861 MB/s | 36.75 % |
+| lzav 5.17 -1 | 699 MB/s | 3603 MB/s | 39.91 % |
+| snappy 1.3.1 | 564 MB/s | 2420 MB/s | 47.89 % |
+| zstd 1.5.7 --fast --1 | 664 MB/s | 2451 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 606 MB/s | 1898 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 369 MB/s | 1733 MB/s | 31.20 % |
+| zlib 1.3.2 -1 | 134 MB/s | 392 MB/s | 36.45 % |
 
 </details>
 
@@ -121,22 +123,22 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.14.1 -1** | 712 MB/s | **8106 MB/s** | **61.76 %** |
-| **zxc 0.14.1 -2** | 470 MB/s | **6746 MB/s** | **53.86 %** |
-| **zxc 0.14.1 -3** | 198 MB/s | **4752 MB/s** | **46.09 %** |
-| **zxc 0.14.1 -4** | 139 MB/s | **4562 MB/s** | **42.99 %** |
-| **zxc 0.14.1 -5** | 83.3 MB/s | **4403 MB/s** | **40.43 %** |
-| **zxc 0.14.1 -6** | 10.2 MB/s | **4101 MB/s** | **36.28 %** |
-| **zxc 0.14.1 -7** | 6.89 MB/s | **2840 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1113 MB/s | 4486 MB/s | 62.15 % |
-| lz4 1.10.0 | 640 MB/s | 3882 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 37.0 MB/s | 3725 MB/s | 36.75 % |
-| lzav 5.16 -1 | 491 MB/s | 2958 MB/s | 39.91 % |
-| snappy 1.2.2 | 663 MB/s | 1737 MB/s | 47.89 % |
-| zstd 1.5.7 --fast --1 | 482 MB/s | 1766 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 439 MB/s | 1332 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 231 MB/s | 1194 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 106 MB/s | 356 MB/s | 36.45 % |
+| **zxc 0.15.0 -1** | 724 MB/s | **8155 MB/s** | **61.76 %** |
+| **zxc 0.15.0 -2** | 481 MB/s | **6807 MB/s** | **53.86 %** |
+| **zxc 0.15.0 -3** | 214 MB/s | **5252 MB/s** | **46.65 %** |
+| **zxc 0.15.0 -4** | 157 MB/s | **4952 MB/s** | **43.43 %** |
+| **zxc 0.15.0 -5** | 93.3 MB/s | **4779 MB/s** | **40.83 %** |
+| **zxc 0.15.0 -6** | 11.9 MB/s | **4290 MB/s** | **36.28 %** |
+| **zxc 0.15.0 -7** | 7.97 MB/s | **3188 MB/s** | **33.09 %** |
+| lz4 1.10.0 --fast -17 | 1108 MB/s | 4485 MB/s | 62.15 % |
+| lz4 1.10.0 | 638 MB/s | 3883 MB/s | 47.60 % |
+| lz4hc 1.10.0 -9 | 37.1 MB/s | 3731 MB/s | 36.75 % |
+| lzav 5.17 -1 | 459 MB/s | 2955 MB/s | 39.91 % |
+| snappy 1.3.1 | 507 MB/s | 1837 MB/s | 47.89 % |
+| zstd 1.5.7 --fast --1 | 486 MB/s | 1784 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 444 MB/s | 1339 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 232 MB/s | 1178 MB/s | 31.20 % |
+| zlib 1.3.2 -1 | 106 MB/s | 358 MB/s | 36.45 % |
 
 </details>
 
@@ -148,11 +150,11 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 >
 > Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
 >
-> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.19x on Apple Silicon** and ranging **1.26x–1.83x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 now clears LZ4 as well (**1.05x–1.40x**), at a 33.09% ratio.
+> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.18x on Apple Silicon** and ranging **1.38x–1.81x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 clears LZ4 as well (**1.18x–1.52x**), at a 33.09% ratio.
 
 ## Features
 
-- **1.1–2.6× faster decode than LZ4** at levels -1 to -6, at an equal or better ratio. Level -7 trades that lead for density: it decodes 1.9–2.6× faster than `zstd -1`, at a better ratio ([benchmarks](#benchmarks)).
+- **1.1–2.4× faster decode than LZ4** at levels -1 to -6, at an equal or better ratio. Level -7 trades that lead for density: it decodes 2.2–2.8× faster than `zstd -1`, at a better ratio ([benchmarks](#benchmarks)).
 - **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern ARM cores (Apple Silicon, Graviton, Axion).
 - **O(1) random access.** A built-in seek table decompresses any block without reading the rest.
 - **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
@@ -168,7 +170,7 @@ ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures liv
 *   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
 *   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstd.
 *   **Level 6 (Density):** Beats LZ4HC on both axes — better ratio *and* faster decode on every measured platform — while staying in the multi-GB/s decode class. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
-*   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding several times faster than it. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
+*   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding more than twice as fast. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
 
 ## Usage
 
@@ -404,8 +406,8 @@ The default block size is **512 KB**, tuned for bulk/archival workloads where ra
 
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
-| 256 KB | ~1.03 MB | ~256 KB | 46.68% | — |
-| 512 KB *(default)* | ~1.78 MB | ~512 KB | 46.09% *(−0.59 pp)* | +1% to +8% depending on CPU |
+| 256 KB | ~1.03 MB | ~256 KB | 47.21% | — |
+| 512 KB *(default)* | ~1.78 MB | ~512 KB | 46.65% *(−0.56 pp)* | +1% to +8% depending on CPU |
 
 ```bash
 # CLI — fall back to 256 KB blocks (e.g. embedded / streaming)
@@ -435,7 +437,7 @@ The distinction: conformance freezes decoder *behaviour* (`decode(x) == expected
 
 ## Safety & Quality
 * **Unit Tests**: Comprehensive test suite with CTest integration.
-* **Continuous Fuzzing**: Enrolled in Google [OSS-Fuzz](https://github.com/google/oss-fuzz), which fuzzes five harnesses (roundtrip, decompress, streaming, seekable, dictionary) around the clock. The same harnesses run under ClusterFuzzLite (ASan + UBSan) on every pull request touching the library.
+* **Continuous Fuzzing**: Enrolled in Google [OSS-Fuzz](https://github.com/google/oss-fuzz), which fuzzes eight harnesses (roundtrip, decompress, block, in-place, push streaming, multi-threaded FILE* streaming, seekable, dictionary) around the clock, covering over 80 % of the library's lines ([coverage history](https://introspector.oss-fuzz.com/project-profile?project=zxc)). The same harnesses run under ClusterFuzzLite (ASan + UBSan) on every pull request touching the library.
 * **Static Analysis**: Checked with Cppcheck & Clang Static Analyzer.
 * **CodeQL Analysis**: GitHub Advanced Security scanning for vulnerabilities.
 * **Snyk**: Continuous security and code analysis for dependencies and source.
