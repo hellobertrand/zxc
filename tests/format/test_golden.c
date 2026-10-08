@@ -62,7 +62,9 @@ static void dump_reset(void) {
     g_dump_failed = 0;
 }
 
-#if defined(__GNUC__) || defined(__clang__)
+#if defined(__MINGW32__)
+__attribute__((format(__MINGW_PRINTF_FORMAT, 1, 2)))
+#elif defined(__GNUC__) || defined(__clang__)
 __attribute__((format(printf, 1, 2)))
 #endif
 static void dump_printf(const char* fmt, ...) {

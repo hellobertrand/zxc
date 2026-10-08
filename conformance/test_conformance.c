@@ -37,11 +37,13 @@ static int file_exists(const char* path) {
 #endif
 }
 
+#ifndef _WIN32
 static int has_suffix(const char* s, const char* suffix) {
     size_t slen = strlen(s), xlen = strlen(suffix);
     if (slen < xlen) return 0;
     return memcmp(s + slen - xlen, suffix, xlen) == 0;
 }
+#endif
 
 /* ---------- valid vector test -------------------------------------------- */
 
@@ -116,7 +118,7 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
         snprintf(dir, sizeof(dir), "./");
 
 #ifdef _WIN32
-    char pattern[512];
+    char pattern[sizeof(dir) + sizeof("*.zxd")];
     snprintf(pattern, sizeof(pattern), "%s*.zxd", dir);
     WIN32_FIND_DATAA fd;
     HANDLE hf = FindFirstFileA(pattern, &fd);
