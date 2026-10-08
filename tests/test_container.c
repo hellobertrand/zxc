@@ -204,6 +204,78 @@ int test_container_concat(void) {
     return 1;
 }
 
+/* Largest progress count seen. */
+static void max_progress(const uint64_t done, const uint64_t total, const void* user_data) {
+    (void)total;
+    uint64_t* const seen = (uint64_t*)(uintptr_t)user_data;
+    if (done > *seen) *seen = done;
+}
+
+/* Runs of frames with one geometry: the FILE* decoder keeps its threads across a
+ * run and restarts them between runs. A fault deep in a run, and progress that
+ * counts across frames. */
+int test_container_engine_reuse(void) {
+    printf("=== TEST: Container - FILE* engine reused across frames ===\n");
+    const size_t n = 3 * 4096 + 17, nbig = 300000;
+    uint8_t* const src = malloc(5 * n + 2 * nbig);
+    cbuf_t b = {0};
+    size_t ends[7] = {0};
+    int ok = src != NULL;
+    if (ok) gen_lz_data(src, 5 * n + 2 * nbig);
+
+    // Three small frames, two with large blocks (positioned reads), two small again.
+    const zxc_compress_opts_t small = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
+    const zxc_compress_opts_t big = {.level = 2, .block_size = 65536, .checksum_enabled = 1};
+    size_t at = 0;
+    for (int i = 0; ok && i < 7; i++) {
+        const int is_big = i == 3 || i == 4;
+        const size_t len = is_big ? nbig : n;
+        ok = cb_frame(&b, src + at, len, is_big ? &big : &small);
+        at += len;
+        ends[i] = b.n;
+    }
+    const zxc_decompress_opts_t verify = {.checksum_enabled = 1, .n_threads = 4};
+    ok = ok && check("seven frames, three runs", b.p, b.n, &verify, (int64_t)at, src);
+
+    // Progress reaches the total across frames and engine restarts.
+    if (ok) {
+        uint64_t seen = 0;
+        const zxc_decompress_opts_t po = {
+            .n_threads = 4, .progress_cb = max_progress, .user_data = &seen};
+        uint8_t* const out = malloc(at);
+        int64_t sq = 0;
+        const int64_t r = out ? file_decode(b.p, b.n, out, at, &po, &sq) : -1;
+        if (r != (int64_t)at || seen != (uint64_t)at) {
+            printf("  [FAIL] progress: decoded %lld, last progress %llu (want %zu)\n", (long long)r,
+                   (unsigned long long)seen, at);
+            ok = 0;
+        }
+        free(out);
+    }
+
+    // Faults in the third frame, decoded by a reused engine: a payload byte, then
+    // the archive digest, checked once the frame is drained.
+    for (int k = 0; ok && k < 2; k++) {
+        cbuf_t t = {0};
+        ok = cb_put(&t, b.p, b.n);
+        if (ok && k == 0) t.p[ends[1] + ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 4] ^= 0x40;
+        if (ok && k == 1) {
+            const uint8_t l = t.p[ends[2] - 1];
+            t.p[ends[2] - 1 - ((l & 7) + 1) - ((l >> 4) + 1) - 8] ^= 0x01;
+        }
+        ok = ok &&
+             check(k ? "digest fault in a reused engine" : "payload fault in a reused engine", t.p,
+                   t.n, &verify, k ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA, NULL);
+        free(t.p);
+    }
+
+    free(b.p);
+    free(src);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
 /* The last frame's info, walked back to the first, buffer and FILE*: the sizes
  * each frame was written with, in reverse order. */
 int test_container_frame_walk(void) {
