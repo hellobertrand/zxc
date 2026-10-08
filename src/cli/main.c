@@ -999,11 +999,11 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
  *         -1 if the layout could not be read.
  */
 static int zxc_archive_has_checksum(FILE* f) {
-    cli_container_t c;
+    cli_container_t c = {0};
     if (fseeko(f, 0, SEEK_END) != 0) return -1;
     const long long size = ftello(f);
     const int rc = size < 0 ? ZXC_ERROR_IO : zxc_cli_walk(f, (uint64_t)size, &c);
-    if (size >= 0) free(c.dict_ids);
+    free(c.dict_ids);
     if (rc != ZXC_OK) {
         fseeko(f, 0, SEEK_SET);
         return -1;
