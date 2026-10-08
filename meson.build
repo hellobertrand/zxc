@@ -4,7 +4,7 @@
 # Copyright (c) Bertrand Lebonnois and contributors.
 
 project('zxc', 'c',
-  version : '0.14.1',
+  version : '0.15.0',
   license : 'BSD-3-Clause',
   default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2',
                      'pkgconfig.relocatable=true'],
