@@ -211,9 +211,8 @@ static void max_progress(const uint64_t done, const uint64_t total, const void* 
     if (done > *seen) *seen = done;
 }
 
-/* Runs of frames with one geometry: the FILE* decoder keeps its threads across a
- * run and restarts them between runs. A fault deep in a run, and progress that
- * counts across frames. */
+/* The FILE* decoder keeps its engine across a run of one geometry, restarts it
+ * between runs: output, input position, progress and faults. */
 int test_container_engine_reuse(void) {
     printf("=== TEST: Container - FILE* engine reused across frames ===\n");
     const size_t n = 3 * 4096 + 17, nbig = 300000;
@@ -237,6 +236,23 @@ int test_container_engine_reuse(void) {
     const zxc_decompress_opts_t verify = {.checksum_enabled = 1, .n_threads = 4};
     ok = ok && check("seven frames, three runs", b.p, b.n, &verify, (int64_t)at, src);
 
+    // Positioned reads leave the FILE* where the input ends.
+    if (ok) {
+        FILE* const fi = tmpfile();
+        int64_t r = -1;
+        long pos = -1;
+        if (fi && fwrite(b.p, 1, b.n, fi) == b.n && fseek(fi, 0, SEEK_SET) == 0) {
+            r = zxc_stream_decompress(fi, NULL, &verify);
+            pos = ftell(fi);
+        }
+        if (r != (int64_t)at || pos != (long)b.n) {
+            printf("  [FAIL] input position: decoded %lld, at %ld (want %zu)\n", (long long)r, pos,
+                   b.n);
+            ok = 0;
+        }
+        if (fi) fclose(fi);
+    }
+
     // Progress reaches the total across frames and engine restarts.
     if (ok) {
         uint64_t seen = 0;
@@ -253,8 +269,7 @@ int test_container_engine_reuse(void) {
         free(out);
     }
 
-    // Faults in the third frame, decoded by a reused engine: a payload byte, then
-    // the archive digest, checked once the frame is drained.
+    // Faults in the third frame (reused engine): a payload byte, then the digest.
     for (int k = 0; ok && k < 2; k++) {
         cbuf_t t = {0};
         ok = cb_put(&t, b.p, b.n);

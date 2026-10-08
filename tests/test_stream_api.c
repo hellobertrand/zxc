@@ -1990,8 +1990,9 @@ int test_stream_input_shrinks(void) {
                                                  .progress_cb = shrink_input,
                                                  .user_data = f_arc};
             rewind(f_arc);
+            // A read sees the cut (I/O error), or the reader meets the end (truncation).
             const int64_t r = zxc_stream_decompress(f_arc, NULL, &dopts);
-            ok = r == ZXC_ERROR_IO;
+            ok = r == ZXC_ERROR_IO || r == ZXC_ERROR_SRC_TOO_SMALL;
             if (!ok) printf("Failed: %d threads -> %lld\n", n_threads, (long long)r);
         }
         if (f_arc) fclose(f_arc);

@@ -54,6 +54,7 @@
 #define fseeko _fseeki64
 #define ftello _ftelli64
 #else
+#include <errno.h>
 #include <sys/stat.h>
 #endif
 
@@ -63,6 +64,9 @@
 // Output per regular-file job: the thread handoff is paid once per batch. Not for
 // a pipe, whose output would wait for a full batch.
 #define ZXC_STREAM_BATCH_BYTES ((size_t)256 * 1024)
+
+// Jobs per worker when they carry several blocks each.
+#define ZXC_STREAM_RING_BATCHED 2U
 
 // ============================================================================
 // STREAMING ENGINE (Producer / Worker / Consumer)
@@ -95,8 +99,7 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  * lines to prevent false sharing in a multi-threaded environment.
  *
  * @var zxc_stream_job_t::in_buf
- *      Pointer to the buffer containing raw input data. Unused with positioned
- *      reads.
+ *      Raw input; NULL with positioned reads.
  * @var zxc_stream_job_t::in_cap
  *      The total allocated capacity of the input buffer.
  * @var zxc_stream_job_t::in_sz
@@ -215,6 +218,14 @@ typedef struct {
  *     Positioned reads: size of each worker's input buffer.
  * @var zxc_stream_ctx_t::batch
  *     Most blocks a decompression job carries (@c ZXC_STREAM_BATCH_BYTES).
+ * @var zxc_stream_ctx_t::ahead
+ *     Positioned reads: the next block header, read with the previous checksum.
+ * @var zxc_stream_ctx_t::ahead_len
+ *     Bytes of @c ahead read (short at the end of the file), -1 when none.
+ * @var zxc_stream_ctx_t::src_total
+ *     Compression: source bytes read.
+ * @var zxc_stream_ctx_t::digest
+ *     Decompression: the frame's archive digest, folded by the reader.
  */
 typedef struct {
     zxc_stream_job_t* jobs;
@@ -249,6 +260,10 @@ typedef struct {
     uint64_t in_pos;
     size_t in_alloc;
     int batch;
+    uint8_t ahead[ZXC_BLOCK_HEADER_SIZE];
+    int ahead_len;
+    uint64_t src_total;
+    uint64_t digest;
 } zxc_stream_ctx_t;
 
 /** @brief The ring slot after @p idx. */
@@ -298,10 +313,8 @@ typedef struct {
 } writer_args_t;
 
 /**
- * @brief A started engine: the job ring, its workers and the writer thread.
- *
- * Decompression keeps one across frames while their block size and checksum flag
- * match, so a run of small frames pays the threads and buffers once.
+ * @brief A started engine: job ring, workers, writer. Decompression keeps it
+ *        across frames of one block size and checksum flag.
  */
 typedef struct {
     zxc_stream_ctx_t ctx;
@@ -312,6 +325,30 @@ typedef struct {
     uint8_t* mem_block;
     int read_idx;  // Next ring slot the reader fills
 } zxc_stream_engine_t;
+
+#if !defined(_WIN32)
+/**
+ * @brief Thread-safe @c pread of @p len bytes, retrying @c EINTR and partial
+ *        transfers. A 32-bit @c off_t rejects offsets past 2 GiB.
+ *
+ * @return Bytes read, short only at the end of the file, or -1 on error.
+ */
+static int64_t zxc_pread_full(const int fd, void* dst, const size_t len, const uint64_t offset) {
+    if (sizeof(off_t) < sizeof(uint64_t) && (offset > INT32_MAX || len > INT32_MAX - offset))
+        return -1;  // LCOV_EXCL_LINE
+    size_t done = 0;
+    while (done < len) {
+        const ssize_t r = pread(fd, (uint8_t*)dst + done, len - done, (off_t)(offset + done));
+        if (r > 0)
+            done += (size_t)r;
+        else if (r == 0)
+            break;
+        else if (errno != EINTR)
+            return -1;  // LCOV_EXCL_LINE
+    }
+    return (int64_t)done;
+}
+#endif
 
 /** @brief Descriptor of a regular-file stream, -1 for anything else (may be live). */
 static int zxc_stream_regular_fd(FILE* f) {
@@ -329,36 +366,67 @@ static int zxc_stream_regular_fd(FILE* f) {
 #endif
 }
 
-/**
- * @brief Switches a regular file to positioned reads, from its current position.
- *        No-op on Windows: unmeasured there.
- */
+/** @brief Switches a regular file to positioned reads from its current position. */
 static void zxc_stream_open_positioned(zxc_stream_ctx_t* ctx, FILE* f_in, const int fd) {
 #if defined(_WIN32)
     (void)ctx;
     (void)f_in;
     (void)fd;
 #else
+    if (sizeof(off_t) < sizeof(uint64_t)) return;  // LCOV_EXCL_LINE
     const long long pos = ftello(f_in);
     if (UNLIKELY(pos < 0)) return;  // LCOV_EXCL_LINE
     ctx->in_fd = fd;
     ctx->in_pos = (uint64_t)pos;
+    ctx->ahead_len = -1;
 #endif
 }
 
-/** @brief Positioned fread, safe from any thread. Returns the bytes read, 0 on error. */
-static size_t zxc_stream_read_at(const zxc_stream_ctx_t* ctx, uint8_t* dst, const size_t len,
-                                 const uint64_t offset) {
+/**
+ * @brief Positioned read of the input, safe from any thread.
+ *
+ * @return Bytes read, short only at the end of the file, or @ref ZXC_ERROR_IO.
+ */
+static int64_t zxc_stream_read_at(const zxc_stream_ctx_t* ctx, void* dst, const size_t len,
+                                  const uint64_t offset) {
 #if defined(_WIN32)
     (void)ctx;
     (void)dst;
     (void)len;
     (void)offset;
-    return 0;
+    return ZXC_ERROR_IO;
 #else
-    const ssize_t r = pread(ctx->in_fd, dst, len, (off_t)offset);
-    return r > 0 ? (size_t)r : 0;
+    const int64_t r = zxc_pread_full(ctx->in_fd, dst, len, offset);
+    return r < 0 ? ZXC_ERROR_IO : r;
 #endif
+}
+
+/**
+ * @brief Reads up to @p len input bytes on the reader thread: by position while
+ *        the engine reads positioned, through stdio otherwise.
+ *
+ * @param[in] ctx Started engine, or NULL to read through stdio.
+ * @return Bytes read, short only at the end of the input, or @ref ZXC_ERROR_IO.
+ */
+static int64_t zxc_stream_in_read(zxc_stream_ctx_t* ctx, FILE* f, void* dst, const size_t len) {
+    if (ctx && ctx->in_fd >= 0) {
+        const int64_t r = zxc_stream_read_at(ctx, dst, len, ctx->in_pos);
+        if (LIKELY(r > 0)) ctx->in_pos += (uint64_t)r;
+        return r;
+    }
+    const size_t got = fread(dst, 1, len, f);
+    // A short read without EOF is a read error. Not ferror(): the caller may have
+    // left a stale error indicator on the stream.
+    if (UNLIKELY(got < len && !feof(f))) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+    return (int64_t)got;
+}
+
+/** @brief Records a reader failure; workers write @c fail_code under the same lock. */
+static void zxc_stream_reader_fail(zxc_stream_ctx_t* ctx, const int code) {
+    pthread_mutex_lock(&ctx->lock);
+    if (code && !ctx->fail_code) ctx->fail_code = code;
+    ctx->io_error = 1;
+    pthread_mutex_unlock(&ctx->lock);
 }
 
 /**
@@ -485,8 +553,8 @@ static void* zxc_stream_worker(void* arg) {
         // A short read (the file shrank) is an I/O error.
         const uint8_t* const in = in_work ? in_work : job->in_buf;
         int res;
-        if (in_work &&
-            UNLIKELY(zxc_stream_read_at(ctx, in_work, job->in_sz, job->in_off) != job->in_sz)) {
+        if (in_work && UNLIKELY(zxc_stream_read_at(ctx, in_work, job->in_sz, job->in_off) !=
+                                (int64_t)job->in_sz)) {
             res = ZXC_ERROR_IO;
         } else if (ctx->compression_mode == 0) {
             res = zxc_stream_decode_job(ctx, &cctx, job, in, dict_work);
@@ -697,10 +765,10 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
         (in_fd >= 0 && chunk < ZXC_STREAM_BATCH_BYTES) ? (int)(ZXC_STREAM_BATCH_BYTES / chunk) : 1;
     if (in_fd >= 0 && num_threads > 1 && chunk >= ZXC_STREAM_PREAD_MIN_BLOCK)
         zxc_stream_open_positioned(ctx, f_in, in_fd);
-    // Reserve 1 thread for Writer/Reader overhead if possible (none with
-    // positioned reads: the reader copies nothing).
+    // One thread for the reader and writer, none with positioned reads.
     const int num_workers = ctx->in_fd >= 0 ? num_threads : (num_threads > 1) ? num_threads - 1 : 1;
-    ctx->ring_size = (size_t)num_workers * 4U;
+    // Batched jobs hold several blocks: fewer keep the workers fed.
+    ctx->ring_size = (size_t)num_workers * (ctx->batch > 1 ? ZXC_STREAM_RING_BATCHED : 4U);
 
     const uint64_t max_out = zxc_compress_bound(chunk);
     const size_t raw_alloc_in =
@@ -713,7 +781,9 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
                  ZXC_PAD_SIZE);
     const size_t alloc_out = (raw_alloc_out + ZXC_ALIGNMENT_MASK) & ~ZXC_ALIGNMENT_MASK;
 
-    const size_t per_job_sz = sizeof(zxc_stream_job_t) + sizeof(int) + alloc_in + alloc_out;
+    // Positioned reads use per-worker input buffers.
+    const size_t ring_in = ctx->in_fd >= 0 ? 0 : alloc_in;
+    const size_t per_job_sz = sizeof(zxc_stream_job_t) + sizeof(int) + ring_in + alloc_out;
     if (UNLIKELY(per_job_sz > SIZE_MAX / ctx->ring_size))
         return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
 
@@ -727,7 +797,7 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
     ctx->worker_queue = (int*)ptr;
     ptr += ctx->ring_size * sizeof(int);
     uint8_t* buf_in = ptr;
-    ptr += ctx->ring_size * alloc_in;
+    ptr += ctx->ring_size * ring_in;
     uint8_t* buf_out = ptr;
 
     ZXC_MEMSET(mem_block, 0, ctx->ring_size * (sizeof(zxc_stream_job_t) + sizeof(int)));
@@ -735,7 +805,7 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
     for (size_t i = 0; i < ctx->ring_size; i++) {
         ctx->jobs[i].job_id = (int)i;
         ctx->jobs[i].status = JOB_STATUS_FREE;
-        ctx->jobs[i].in_buf = buf_in + (i * alloc_in);
+        ctx->jobs[i].in_buf = ring_in ? buf_in + (i * ring_in) : NULL;
         ctx->jobs[i].in_cap = alloc_in - ZXC_PAD_SIZE;
         ctx->jobs[i].in_sz = 0;
         ctx->jobs[i].out_buf = buf_out + (i * alloc_out);
@@ -763,6 +833,14 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
     return ZXC_OK;
 }
 
+/** @brief Stops a decompression engine; moves the @c FILE* to where positioned reads ended. */
+static int zxc_stream_engine_close(zxc_stream_engine_t* e, FILE* f_in) {
+    zxc_stream_engine_stop(e, 1);
+    if (e->ctx.in_fd < 0) return ZXC_OK;
+    e->ctx.in_fd = -1;
+    return fseeko(f_in, (long long)e->ctx.in_pos, SEEK_SET) == 0 ? ZXC_OK : ZXC_ERROR_IO;
+}
+
 /** @brief Waits until the writer has written every job queued so far. */
 static void zxc_stream_engine_drain(zxc_stream_engine_t* e) {
     zxc_stream_ctx_t* const ctx = &e->ctx;
@@ -783,22 +861,30 @@ static void zxc_stream_engine_drain(zxc_stream_engine_t* e) {
  * @return Bytes the job holds, 0 when there is nothing to queue.
  */
 static size_t zxc_stream_read_blocks(zxc_stream_ctx_t* ctx, FILE* f_in, zxc_stream_job_t* job,
-                                     uint64_t* d_digest, int* n_blocks, int* eof) {
+                                     int* n_blocks, int* eof) {
     const int positioned = ctx->in_fd >= 0;
-    const int has_checksum = ctx->file_has_checksum;
-    const size_t checksum_sz = (has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0);
+    const size_t checksum_sz = ctx->file_has_checksum ? ZXC_BLOCK_CHECKSUM_SIZE : 0;
     // Folded only when finish_decompress will compare it: like the block
     // checksums, the file flag and the caller's switch both.
-    const int fold = has_checksum && ctx->checksum_enabled;
+    const int fold = ctx->file_has_checksum && ctx->checksum_enabled;
     size_t fill = 0;
+    int code = 0;  // 0: a read error
 
     for (*n_blocks = 0; *n_blocks < ctx->batch; (*n_blocks)++) {
         uint8_t bh_buf[ZXC_BLOCK_HEADER_SIZE];
-        const size_t h_read =
-            positioned ? zxc_stream_read_at(ctx, bh_buf, ZXC_BLOCK_HEADER_SIZE, ctx->in_pos)
-                       : fread(bh_buf, 1, ZXC_BLOCK_HEADER_SIZE, f_in);
         const uint64_t block_off = ctx->in_pos;
-        if (positioned) ctx->in_pos += h_read;
+        int64_t h_read;
+        if (positioned && ctx->ahead_len >= 0) {
+            h_read = ctx->ahead_len;
+            ZXC_MEMCPY(bh_buf, ctx->ahead, (size_t)h_read);
+            ctx->ahead_len = -1;
+        } else if (positioned) {
+            h_read = zxc_stream_read_at(ctx, bh_buf, sizeof(bh_buf), ctx->in_pos);
+        } else {
+            h_read = zxc_stream_in_read(NULL, f_in, bh_buf, sizeof(bh_buf));
+        }
+        if (UNLIKELY(h_read < 0)) goto _failed;  // LCOV_EXCL_LINE
+        if (positioned) ctx->in_pos += (uint64_t)h_read;
         if (UNLIKELY(h_read < ZXC_BLOCK_HEADER_SIZE)) {
             *eof = 1;
             return fill;
@@ -806,15 +892,13 @@ static size_t zxc_stream_read_blocks(zxc_stream_ctx_t* ctx, FILE* f_in, zxc_stre
 
         zxc_block_header_t bh;
         if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK)) {
-            // LCOV_EXCL_START
-            if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_CORRUPT_DATA;
-            goto _failed;
-            // LCOV_EXCL_STOP
+            code = ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
+            goto _failed;                   // LCOV_EXCL_LINE
         }
 
         if (bh.block_type == ZXC_BLOCK_EOF) {
             if (UNLIKELY(zxc_check_eof_header(bh_buf) != ZXC_OK)) {
-                if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_HEADER;
+                code = ZXC_ERROR_BAD_HEADER;
                 goto _failed;
             }
             ctx->frame_in += ZXC_BLOCK_HEADER_SIZE;
@@ -823,46 +907,61 @@ static size_t zxc_stream_read_blocks(zxc_stream_ctx_t* ctx, FILE* f_in, zxc_stre
         }
 
         if (UNLIKELY((uint64_t)bh.comp_size > (uint64_t)ctx->chunk_size)) {
-            // LCOV_EXCL_START
-            if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_BLOCK_SIZE;
-            goto _failed;
-            // LCOV_EXCL_STOP
+            code = ZXC_ERROR_BAD_BLOCK_SIZE;  // LCOV_EXCL_LINE
+            goto _failed;                     // LCOV_EXCL_LINE
         }
 
         const size_t body_total = (size_t)bh.comp_size + checksum_sz;
         const uint64_t total_len = (uint64_t)body_total + ZXC_BLOCK_HEADER_SIZE;
         if (UNLIKELY(total_len > (uint64_t)(job->in_cap - fill))) goto _failed;
 
-        uint8_t chk_buf[ZXC_BLOCK_CHECKSUM_SIZE];
-        uint8_t* const block = job->in_buf + fill;
-        const uint8_t* stored = block + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
-        int got;
+        uint8_t tail[ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_HEADER_SIZE];
+        const uint8_t* stored = tail;
+        int got = 1;
 
         if (positioned) {
-            // The worker reads the bodies; the digest needs only the stored checksums.
+            // The worker reads the bodies; the digest needs only the checksum,
+            // read with the next header.
             if (fill == 0) job->in_off = block_off;
             ctx->in_pos += body_total;
-            stored = chk_buf;
-            got = !fold || zxc_stream_read_at(ctx, chk_buf, sizeof(chk_buf),
-                                              ctx->in_pos - sizeof(chk_buf)) == sizeof(chk_buf);
+            if (fold) {
+                const int64_t r = zxc_stream_read_at(ctx, tail, sizeof(tail),
+                                                     ctx->in_pos - ZXC_BLOCK_CHECKSUM_SIZE);
+                got = r >= ZXC_BLOCK_CHECKSUM_SIZE;
+                if (LIKELY(got)) {
+                    ctx->ahead_len = (int)(r - ZXC_BLOCK_CHECKSUM_SIZE);
+                    ZXC_MEMCPY(ctx->ahead, tail + ZXC_BLOCK_CHECKSUM_SIZE, (size_t)ctx->ahead_len);
+                }
+            }
         } else {
+            uint8_t* const block = job->in_buf + fill;
             ZXC_MEMCPY(block, bh_buf, ZXC_BLOCK_HEADER_SIZE);
+            stored = block + ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
 
             // Single fread for body + checksum (reduces syscalls)
             got = fread(block + ZXC_BLOCK_HEADER_SIZE, 1, body_total, f_in) == body_total;
         }
 
         if (UNLIKELY(!got)) goto _failed;
-        if (fold) *d_digest = zxc_digest_combine(*d_digest, zxc_le32(stored));
+        if (fold) ctx->digest = zxc_digest_combine(ctx->digest, zxc_le32(stored));
         fill += (size_t)total_len;
         ctx->frame_in += total_len;
     }
     return fill;
 
 _failed:
-    ctx->io_error = 1;
+    zxc_stream_reader_fail(ctx, code);
     *eof = 1;
     return 0;
+}
+
+/** @brief Fills a compression job with the next chunk of the source. */
+static size_t zxc_stream_read_chunk(zxc_stream_ctx_t* ctx, FILE* f_in, zxc_stream_job_t* job,
+                                    int* eof) {
+    const size_t got = fread(job->in_buf, 1, ctx->chunk_size, f_in);
+    ctx->src_total += got;
+    if (got < ctx->chunk_size) *eof = 1;
+    return got;
 }
 
 /**
@@ -870,9 +969,7 @@ _failed:
  *
  * Fills the ring from slot @p read_idx on; returns the slot after the last job.
  */
-static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mode,
-                                const size_t chunk_sz, int read_idx, uint64_t* total_src_bytes,
-                                uint64_t* d_digest) {
+static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, int read_idx) {
     int read_eof = 0;
     uint64_t block_index = 0;
 
@@ -885,15 +982,10 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
 
         if (UNLIKELY(ctx->io_error)) break;
 
-        size_t read_sz;
         int n_blocks = 1;
-        if (mode == 1) {
-            read_sz = fread(job->in_buf, 1, chunk_sz, f_in);
-            *total_src_bytes += read_sz;
-            if (UNLIKELY(read_sz == 0)) read_eof = 1;
-        } else {
-            read_sz = zxc_stream_read_blocks(ctx, f_in, job, d_digest, &n_blocks, &read_eof);
-        }
+        const size_t read_sz = ctx->compression_mode
+                                   ? zxc_stream_read_chunk(ctx, f_in, job, &read_eof)
+                                   : zxc_stream_read_blocks(ctx, f_in, job, &n_blocks, &read_eof);
         if (UNLIKELY(read_eof && read_sz == 0)) break;
 
         job->in_sz = read_sz;
@@ -907,8 +999,6 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
         read_idx = zxc_ring_next(ctx, read_idx);
         pthread_cond_signal(&ctx->cond_worker);
         pthread_mutex_unlock(&ctx->lock);
-
-        if (UNLIKELY(read_sz < chunk_sz && mode == 1)) read_eof = 1;
     }
     return read_idx;
 }
@@ -918,8 +1008,7 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, const int mod
  *
  * Runs once the writer thread has drained, so it appends straight to the file.
  */
-static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, FILE* f_out,
-                                       const uint64_t total_src_bytes) {
+static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, FILE* f_out) {
     // EOF block
     uint8_t eof_buf[ZXC_BLOCK_HEADER_SIZE];
     const zxc_block_header_t eof_bh = {
@@ -957,7 +1046,7 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
     uint8_t footer_buf[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
     const size_t footer_len =
         (size_t)zxc_write_file_footer(footer_buf, sizeof(footer_buf), (uint64_t)w->total_bytes,
-                                      total_src_bytes, w->digest, ctx->checksum_enabled);
+                                      ctx->src_total, w->digest, ctx->checksum_enabled);
     if (UNLIKELY(f_out && fwrite(footer_buf, 1, footer_len, f_out) != footer_len))
         ctx->io_error = 1;
     else
@@ -968,29 +1057,29 @@ static void zxc_stream_finish_compress(zxc_stream_ctx_t* ctx, writer_args_t* w, 
  * @brief Consumes and validates the trailer of a decompressed stream.
  */
 static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t frame_out,
-                                         FILE* f_in, const uint64_t d_digest) {
+                                         FILE* f_in) {
     // After the EOF block: the SEK block when the header announced one, then the
     // footer, whose length follows from the bytes read and the bytes produced.
-
-    // Positioned reads never moved the stream: seek it to where the blocks ended.
-    if (ctx->in_fd >= 0 && UNLIKELY(fseeko(f_in, (long long)ctx->in_pos, SEEK_SET) != 0)) {
-        ctx->io_error = 1;  // LCOV_EXCL_LINE
-        return;             // LCOV_EXCL_LINE
-    }
 
     if (ctx->file_has_seek) {
         uint8_t sek[ZXC_BLOCK_HEADER_SIZE];
         uint64_t remaining = 0;
         uint64_t sek_bytes = 0;
         // A short read is a truncation, unless the bytes read already disagree.
-        const size_t got = fread(sek, 1, sizeof(sek), f_in);
-        const int src_rc = zxc_check_seek_header(sek, got, frame_out, ctx->chunk_size, &remaining);
+        const int64_t got = zxc_stream_in_read(ctx, f_in, sek, sizeof(sek));
+        const int src_rc = got < 0 ? ZXC_ERROR_IO
+                                   : zxc_check_seek_header(sek, (size_t)got, frame_out,
+                                                           ctx->chunk_size, &remaining);
         if (UNLIKELY(src_rc != ZXC_OK)) {
             if (src_rc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = src_rc;
             ctx->io_error = 1;
         }
         sek_bytes = remaining;
-        // Drain the SEK payload.
+        // Skip the SEK payload; positioned, a cut table shows at the footer read.
+        if (ctx->in_fd >= 0) {
+            ctx->in_pos += remaining;
+            remaining = 0;
+        }
         uint8_t discard[512];
         while (remaining > 0 && !ctx->io_error) {
             const size_t chunk = remaining < sizeof(discard) ? (size_t)remaining : sizeof(discard);
@@ -1004,15 +1093,17 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
     uint64_t stored_digest = 0;
     if (!ctx->io_error) {
         uint8_t footer[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
-        const size_t got = fread(footer, 1, fl.len, f_in);
-        const int frc = zxc_check_file_footer(footer, got, &fl, frame_out, &stored_digest);
+        const int64_t got = zxc_stream_in_read(ctx, f_in, footer, fl.len);
+        const int frc =
+            got < 0 ? ZXC_ERROR_IO
+                    : zxc_check_file_footer(footer, (size_t)got, &fl, frame_out, &stored_digest);
         if (UNLIKELY(frc != ZXC_OK)) {
             if (frc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = frc;
             ctx->io_error = 1;
         }
     }
     if (!ctx->io_error && ctx->file_has_checksum && ctx->checksum_enabled &&
-        UNLIKELY(stored_digest != d_digest)) {
+        UNLIKELY(stored_digest != ctx->digest)) {
         if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
         ctx->io_error = 1;
     }
@@ -1020,18 +1111,36 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
 }
 
 /**
+ * @brief Reads exactly @p len bytes, telling a clean end from a short read.
+ *
+ * @param[in] ctx Started engine, or NULL before the first frame.
+ * @return @ref ZXC_OK; 1 when the input ended before the first byte;
+ *         @p short_code when it ended inside the range; @ref ZXC_ERROR_IO on
+ *         a read error.
+ */
+static int zxc_stream_read_exact(zxc_stream_ctx_t* ctx, FILE* f, void* dst, const size_t len,
+                                 const int short_code) {
+    const int64_t got = zxc_stream_in_read(ctx, f, dst, len);
+    if (LIKELY(got == (int64_t)len)) return ZXC_OK;
+    if (UNLIKELY(got < 0)) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
+    return got == 0 ? 1 : short_code;
+}
+
+/**
  * @brief Reads and checks a frame header whose magic word is already read.
  *
  * @param[in] dict_id Id of the caller's dictionary, 0 without one.
  */
-static int zxc_stream_read_frame_header(FILE* f_in, const uint8_t* magic, const uint32_t dict_id,
-                                        size_t* chunk, int* has_checksum, int* has_seek) {
+static int zxc_stream_read_frame_header(zxc_stream_ctx_t* ctx, FILE* f_in, const uint8_t* magic,
+                                        const uint32_t dict_id, size_t* chunk, int* has_checksum,
+                                        int* has_seek) {
     uint8_t h[ZXC_FILE_HEADER_SIZE];
     uint32_t header_dict_id = 0;
     ZXC_MEMCPY(h, magic, sizeof(uint32_t));
-    if (UNLIKELY(fread(h + sizeof(uint32_t), 1, ZXC_FILE_HEADER_SIZE - sizeof(uint32_t), f_in) !=
-                 ZXC_FILE_HEADER_SIZE - sizeof(uint32_t)))
-        return ZXC_ERROR_SRC_TOO_SMALL;
+    const int rrc =
+        zxc_stream_read_exact(ctx, f_in, h + sizeof(uint32_t),
+                              ZXC_FILE_HEADER_SIZE - sizeof(uint32_t), ZXC_ERROR_SRC_TOO_SMALL);
+    if (UNLIKELY(rrc != ZXC_OK)) return rrc == 1 ? ZXC_ERROR_SRC_TOO_SMALL : rrc;
 
     const int hrc = zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, chunk, has_checksum,
                                          &header_dict_id, has_seek);
@@ -1053,24 +1162,37 @@ static int64_t zxc_stream_decode_frame(zxc_stream_engine_t* e, FILE* f_in, const
     const int64_t base = e->w.total_bytes;
     ctx->file_has_seek = has_seek;
     ctx->frame_in = ZXC_FILE_HEADER_SIZE;
-    if (ctx->in_fd >= 0) {
-        const long long pos = ftello(f_in);
-        if (UNLIKELY(pos < 0)) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
-        ctx->in_pos = (uint64_t)pos;
-    }
+    ctx->digest = 0;
+    ctx->ahead_len = -1;
 
-    uint64_t unused = 0;
-    uint64_t d_digest = 0;
-    e->read_idx =
-        zxc_stream_read_loop(ctx, f_in, 0, ctx->chunk_size, e->read_idx, &unused, &d_digest);
+    e->read_idx = zxc_stream_read_loop(ctx, f_in, e->read_idx);
     zxc_stream_engine_drain(e);
     if (!ctx->io_error)
-        zxc_stream_finish_decompress(ctx, (uint64_t)(e->w.total_bytes - base), f_in, d_digest);
+        zxc_stream_finish_decompress(ctx, (uint64_t)(e->w.total_bytes - base), f_in);
 
-    // fail_code carries the real cause when there is one; a bare io_error flag
-    // means the failure really was a read/write.
-    if (UNLIKELY(ctx->io_error)) return ctx->fail_code ? ctx->fail_code : ZXC_ERROR_IO;
+    // fail_code holds the cause, else a read/write failed; a worker may still set it.
+    if (UNLIKELY(ctx->io_error)) {
+        pthread_mutex_lock(&ctx->lock);
+        const int code = ctx->fail_code;
+        pthread_mutex_unlock(&ctx->lock);
+        return code ? code : ZXC_ERROR_IO;
+    }
     return e->w.total_bytes - base;
+}
+
+/** @brief The size of @p f; its position goes to @p saved, for the caller to restore. */
+static int zxc_file_span(FILE* f, long long* saved, uint64_t* size) {
+    *saved = ftello(f);
+    if (UNLIKELY(*saved < 0 || fseeko(f, 0, SEEK_END) != 0)) return ZXC_ERROR_IO;
+    const long long n = ftello(f);
+    if (UNLIKELY(n < 0)) {
+        // LCOV_EXCL_START
+        fseeko(f, *saved, SEEK_SET);
+        return ZXC_ERROR_IO;
+        // LCOV_EXCL_STOP
+    }
+    *size = (uint64_t)n;
+    return ZXC_OK;
 }
 
 /**
@@ -1113,15 +1235,11 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     ctx->dict_huf = dict_huf;
 
     // Input size for progress tracking; for decompression the CLI passes it.
-    if (cb) {
-        // LCOV_EXCL_START
-        const long long saved_pos = ftello(f_in);
-        if (saved_pos >= 0 && fseeko(f_in, 0, SEEK_END) == 0) {
-            const long long size = ftello(f_in);
-            if (size > 0) ctx->total_input_bytes = (uint64_t)size;
-            fseeko(f_in, saved_pos, SEEK_SET);
-        }
-        // LCOV_EXCL_STOP
+    long long saved_pos = 0;
+    uint64_t in_size = 0;
+    if (cb && zxc_file_span(f_in, &saved_pos, &in_size) == ZXC_OK) {
+        ctx->total_input_bytes = in_size;   // LCOV_EXCL_LINE
+        fseeko(f_in, saved_pos, SEEK_SET);  // LCOV_EXCL_LINE
     }
 
     // Seekable: initial block-size tracking array
@@ -1147,13 +1265,10 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     }
     e.w.total_bytes = ZXC_FILE_HEADER_SIZE;
 
-    uint64_t total_src_bytes = 0;
-    uint64_t unused = 0;
-    e.read_idx = zxc_stream_read_loop(ctx, f_in, 1, block_size, 0, &total_src_bytes, &unused);
+    e.read_idx = zxc_stream_read_loop(ctx, f_in, 0);
     zxc_stream_engine_stop(&e, 1);
 
-    if (!ctx->io_error && e.w.total_bytes >= 0)
-        zxc_stream_finish_compress(ctx, &e.w, f_out, total_src_bytes);
+    if (!ctx->io_error && e.w.total_bytes >= 0) zxc_stream_finish_compress(ctx, &e.w, f_out);
     // stdio defers write errors to flush time: push the last buffer to the OS
     // so a failure (ENOSPC, EFBIG, EPIPE) is reported here instead of being
     // left to the caller's fclose, after a success count was returned.
@@ -1162,22 +1277,6 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
 
     if (UNLIKELY(ctx->io_error)) return ctx->fail_code ? ctx->fail_code : ZXC_ERROR_IO;
     return e.w.total_bytes;
-}
-
-/**
- * @brief Reads exactly @p len bytes, telling a clean end from a short read.
- *
- * @return @ref ZXC_OK; 1 when the input ended before the first byte;
- *         @p short_code when it ended inside the range; @ref ZXC_ERROR_IO on
- *         a read error.
- */
-static int zxc_stream_read_exact(FILE* f, void* dst, const size_t len, const int short_code) {
-    const size_t got = fread(dst, 1, len, f);
-    if (LIKELY(got == len)) return ZXC_OK;
-    // A short read without EOF is a read error. Not ferror(): the caller may have
-    // left a stale error indicator on the stream.
-    if (UNLIKELY(!feof(f))) return ZXC_ERROR_IO;  // LCOV_EXCL_LINE
-    return got == 0 ? 1 : short_code;
 }
 
 /**
@@ -1202,7 +1301,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     zxc_stream_engine_t e;
     int running = 0;
     uint8_t magic[sizeof(uint32_t)];
-    int rc = zxc_stream_read_exact(f_in, magic, sizeof(magic), ZXC_ERROR_SRC_TOO_SMALL);
+    int rc = zxc_stream_read_exact(NULL, f_in, magic, sizeof(magic), ZXC_ERROR_SRC_TOO_SMALL);
 
     int64_t total = 0;
     for (int frames = 0;; frames++) {
@@ -1219,13 +1318,15 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
         size_t chunk = 0;
         int has_checksum = 0;
         int has_seek = 0;
-        rc = zxc_stream_read_frame_header(f_in, magic, dict_id, &chunk, &has_checksum, &has_seek);
+        rc = zxc_stream_read_frame_header(running ? &e.ctx : NULL, f_in, magic, dict_id, &chunk,
+                                          &has_checksum, &has_seek);
         if (UNLIKELY(rc != ZXC_OK)) break;
 
         // The workers are set up for one block size and checksum flag.
         if (running && (e.ctx.chunk_size != chunk || e.ctx.file_has_checksum != has_checksum)) {
-            zxc_stream_engine_stop(&e, 1);
             running = 0;
+            rc = zxc_stream_engine_close(&e, f_in);
+            if (UNLIKELY(rc != ZXC_OK)) break;  // LCOV_EXCL_LINE
         }
         if (!running) {
             ZXC_MEMSET(&e, 0, sizeof(e));
@@ -1250,27 +1351,15 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
             break;
         }
         total += r;
-        rc = zxc_stream_read_exact(f_in, magic, sizeof(magic), ZXC_ERROR_CORRUPT_DATA);
+        rc = zxc_stream_read_exact(&e.ctx, f_in, magic, sizeof(magic), ZXC_ERROR_CORRUPT_DATA);
     }
-    if (running) zxc_stream_engine_stop(&e, 1);
+    if (running) {
+        const int crc = zxc_stream_engine_close(&e, f_in);
+        if (rc == ZXC_OK) rc = crc;
+    }
     // stdio defers write errors to flush time (see zxc_stream_compress).
     if (rc == ZXC_OK && f_out && UNLIKELY(fflush(f_out) != 0)) rc = ZXC_ERROR_IO;
     return rc != ZXC_OK ? rc : total;
-}
-
-/** @brief The size of @p f; its position goes to @p saved, for the caller to restore. */
-static int zxc_file_span(FILE* f, long long* saved, uint64_t* size) {
-    *saved = ftello(f);
-    if (UNLIKELY(*saved < 0 || fseeko(f, 0, SEEK_END) != 0)) return ZXC_ERROR_IO;
-    const long long n = ftello(f);
-    if (UNLIKELY(n < 0)) {
-        // LCOV_EXCL_START
-        fseeko(f, *saved, SEEK_SET);
-        return ZXC_ERROR_IO;
-        // LCOV_EXCL_STOP
-    }
-    *size = (uint64_t)n;
-    return ZXC_OK;
 }
 
 /** @brief @ref zxc_scan_src_t over a @c FILE*. */
@@ -1407,8 +1496,8 @@ typedef struct {
 /**
  * @brief Thread-safe positioned read backing the seekable @c FILE* reader.
  *
- * POSIX implementation: a single @c pread, which carries its own offset and so
- * is safe to call concurrently from multiple worker threads on one descriptor.
+ * POSIX implementation: @ref zxc_pread_full, which carries its own offset and
+ * so is safe to call concurrently from multiple worker threads on one descriptor.
  *
  * @param[in]  vctx    `zxc_stdio_ctx_t` carrying the file descriptor.
  * @param[out] dst     Destination buffer (at least @p len bytes).
@@ -1417,9 +1506,8 @@ typedef struct {
  * @return @p len on a full read, otherwise @ref ZXC_ERROR_IO.
  */
 static int64_t zxc_stdio_read_at(void* vctx, void* dst, size_t len, uint64_t offset) {
-    zxc_stdio_ctx_t* const ctx = (zxc_stdio_ctx_t*)vctx;
-    const ssize_t r = pread(ctx->fd, dst, len, (off_t)offset);
-    return (r == (ssize_t)len) ? (int64_t)len : ZXC_ERROR_IO;
+    const zxc_stdio_ctx_t* const ctx = (const zxc_stdio_ctx_t*)vctx;
+    return zxc_pread_full(ctx->fd, dst, len, offset) == (int64_t)len ? (int64_t)len : ZXC_ERROR_IO;
 }
 #endif /* _WIN32 */
 
