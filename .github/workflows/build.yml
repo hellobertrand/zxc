@@ -48,12 +48,12 @@ jobs:
             os: windows-latest
             artifact_name: zxc.exe
             platform: windows-x86_64
-            cmake_flags: "-A x64 -DZXC_NATIVE_ARCH=OFF"
+            cmake_flags: "-A x64 -DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=OFF"
           - name: Windows ARM64
             os: windows-11-arm
             artifact_name: zxc.exe
             platform: windows-arm64
-            cmake_flags: "-A ARM64 -DZXC_NATIVE_ARCH=OFF"
+            cmake_flags: "-A ARM64 -DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=OFF"
 
 
     steps:
@@ -115,6 +115,23 @@ jobs:
           chmod +x tests/test_cli.sh
           ./tests/test_cli.sh "$ZXC_BIN"
 
+      # zxc.exe links the C runtime statically (/MT): a clean Windows lacks
+      # VCRUNTIME140.dll. The library stays /MD and without /GL, whose objects link
+      # only with the MSVC that built them.
+      - name: Build CLI with the static C runtime (Windows)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          cmake -S . -B build-cli ${{ matrix.cmake_flags }} -DZXC_ENABLE_LTO=ON \
+              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
+              -DZXC_BUILD_TESTS=OFF -DZXC_INSTALL=OFF
+          cmake --build build-cli --config Release --target zxc --parallel
+          if grep -aqi 'vcruntime140' build-cli/Release/zxc.exe; then
+            echo "::error::zxc.exe still imports VCRUNTIME140.dll"
+            exit 1
+          fi
+          ./tests/test_cli.sh build-cli/Release/zxc.exe
+
       - name: Package Release (Archive)
         if: github.event_name == 'release'
         shell: bash
@@ -131,6 +148,9 @@ jobs:
           STAGE="release_staging/${ARCHIVE_BASE}"
 
           cmake --install build --prefix "$STAGE" --config Release
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            cp build-cli/Release/zxc.exe "$STAGE/bin/zxc.exe"
+          fi
 
           cp LICENSE "$STAGE/LICENSE.txt"
           cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
