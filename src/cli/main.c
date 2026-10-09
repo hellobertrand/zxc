@@ -36,6 +36,10 @@
 #include <io.h>
 #include <windows.h>
 
+#ifdef __MINGW32__
+int _dowildcard = -1;  // MinGW-w64 globs argv, as setargv.obj does for MSVC
+#endif
+
 // Map POSIX macros to MSVC equivalents
 #define F_OK 0
 #define access _access

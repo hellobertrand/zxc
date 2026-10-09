@@ -154,8 +154,8 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
-  # Windows releases use MinGW-w64, like zstd and lz4: zxc.exe needs no Visual C++
-  # runtime, and zxc.dll exposes a plain C ABI that MSVC programs link too.
+  # MinGW-w64, as zstd and lz4: no Visual C++ runtime needed; the DLL's C ABI
+  # links from MSVC.
   build-test-windows:
     name: Build Windows ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -171,7 +171,7 @@ jobs:
             pkg_prefix: mingw-w64-x86_64
             cc: gcc
             platform: windows-x86_64
-          # GCC has no Windows ARM64 target: the same MinGW-w64 runtime, with Clang.
+          # No GCC for Windows ARM64: Clang on the same MinGW-w64 runtime.
           - name: ARM64
             os: windows-11-arm
             msystem: CLANGARM64
@@ -189,17 +189,17 @@ jobs:
         with:
           msystem: ${{ matrix.msystem }}
           update: true
+          path-type: inherit
           install: >-
             ${{ matrix.pkg_prefix }}-${{ matrix.cc }}
-            ${{ matrix.pkg_prefix }}-cmake
-            ${{ matrix.pkg_prefix }}-ninja
+            diffutils
             zip
 
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # No LTO in the shipped static library: its objects would link only with this
-      # exact compiler. -static folds libgcc/libwinpthread into zxc.exe and zxc.dll.
+      # Shipped static library without LTO (its objects would need this exact
+      # compiler); -static embeds libgcc and libwinpthread.
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
@@ -378,7 +378,7 @@ jobs:
             -o -name '*.spdx.json' \) -exec mv {} release/ \;
           ls -la release
 
-      # One GitHub attestation per asset: platform archives, source tarballs and SBOM.
+      # One attestation per asset: archives, sources, SBOM.
       - name: Attest build provenance (SLSA)
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:

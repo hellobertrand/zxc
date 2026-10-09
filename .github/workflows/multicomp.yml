@@ -190,22 +190,32 @@ jobs:
           done
 
   # ===========================================================================
-  # MinGW on Windows (32-bit & 64-bit)
+  # MinGW on Windows (x86, x86_64, ARM64)
   # ===========================================================================
   mingw:
     name: "MinGW ${{ matrix.name }}"
-    runs-on: windows-latest
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: "x86 32-bit"
+            runner: windows-latest
             msystem: MINGW32
             pkg_prefix: mingw-w64-i686
+            cc: gcc
           - name: "x86_64 64-bit"
+            runner: windows-latest
             msystem: MINGW64
             pkg_prefix: mingw-w64-x86_64
+            cc: gcc
+          # No GCC for Windows ARM64: Clang on the same MinGW-w64 runtime.
+          - name: "ARM64"
+            runner: windows-11-arm
+            msystem: CLANGARM64
+            pkg_prefix: mingw-w64-clang-aarch64
+            cc: clang
 
     defaults:
       run:
@@ -217,10 +227,8 @@ jobs:
         with:
           msystem: ${{ matrix.msystem }}
           update: true
-          install: >-
-            ${{ matrix.pkg_prefix }}-gcc
-            ${{ matrix.pkg_prefix }}-cmake
-            make
+          path-type: inherit
+          install: ${{ matrix.pkg_prefix }}-${{ matrix.cc }}
 
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -235,7 +243,8 @@ jobs:
               if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
 
               cmake -S . -B $BUILD_DIR \
-                  -G "MSYS Makefiles" \
+                  -G Ninja \
+                  -DCMAKE_C_COMPILER=${{ matrix.cc }} \
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
                   -DCMAKE_C_STANDARD=17 \
