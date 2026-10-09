@@ -30,6 +30,12 @@
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
 
 #ifdef _WIN32
+#define ZXC_PATH_SEP '\\'
+#else
+#define ZXC_PATH_SEP '/'
+#endif
+
+#ifdef _WIN32
 // Windows Implementation
 #include <direct.h>
 #include <fcntl.h>
@@ -381,6 +387,18 @@ typedef enum {
 
 enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS };
 
+// dir + separator + name in a malloc'd string, so no fixed limit; NULL if out of memory.
+static char* zxc_path_join(const char* dir, const char* name) {
+    const size_t dir_len = strlen(dir);
+    const size_t name_len = strlen(name);
+    char* const path = malloc(dir_len + 1 + name_len + 1);
+    if (!path) return NULL;
+    memcpy(path, dir, dir_len);
+    path[dir_len] = ZXC_PATH_SEP;
+    memcpy(path + dir_len + 1, name, name_len + 1);
+    return path;
+}
+
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
@@ -398,15 +416,15 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                              int json_output, int seekable, const void* dict, size_t dict_size) {
     int overall_ret = 0;
 #ifdef _WIN32
-    char search_path[MAX_PATH];
-    const int sn = snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
-    if (sn < 0 || (size_t)sn >= sizeof(search_path)) {
-        zxc_log("Error: path too long '%s'\n", dir_path);
+    char* const search_path = zxc_path_join(dir_path, "*");
+    if (!search_path) {
+        zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
         return 1;
     }
 
     WIN32_FIND_DATAA find_data;
     HANDLE hFind = FindFirstFileA(search_path, &find_data);
+    free(search_path);
 
     if (hFind == INVALID_HANDLE_VALUE) {
         zxc_log("Error opening directory '%s'\n", dir_path);
@@ -418,11 +436,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             continue;
         }
 
-        char full_path[MAX_PATH];
-        const int n =
-            snprintf(full_path, sizeof(full_path), "%s\\%s", dir_path, find_data.cFileName);
-        if (n < 0 || (size_t)n >= sizeof(full_path)) {
-            zxc_log("Error: path too long in directory '%s'\n", dir_path);
+        char* const full_path = zxc_path_join(dir_path, find_data.cFileName);
+        if (!full_path) {
+            zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
             overall_ret = 1;
             continue;
         }
@@ -433,25 +449,20 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             (find_data.dwReserved0 == IO_REPARSE_TAG_SYMLINK ||
              find_data.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT)) {
             zxc_log("Warning: '%s' is a link, ignored\n", full_path);
-            continue;
-        }
-
-        if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        } else if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
         } else {
-            // Check if it ends with .zxc to skip if compressing to avoid double compression
-            if (mode == MODE_COMPRESS) {
-                const size_t len = strlen(full_path);
-                if (len >= 4 && strcmp(full_path + len - 4, ".zxc") == 0) {
-                    continue;  // Skip already compressed files in recursive compression
-                }
+            // Skip .zxc files when compressing, to avoid double compression
+            const size_t len = strlen(full_path);
+            if (mode != MODE_COMPRESS || len < 4 || strcmp(full_path + len - 4, ".zxc") != 0) {
+                overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
+                                                   force, to_stdout, checksum, level, block_size,
+                                                   json_output, seekable, dict, dict_size);
             }
-            overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
-                                               force, to_stdout, checksum, level, block_size,
-                                               json_output, seekable, dict, dict_size);
         }
+        free(full_path);
     } while (FindNextFileA(hFind, &find_data) != 0);
     const DWORD walk_err = GetLastError();
     if (walk_err != ERROR_NO_MORE_FILES) {
@@ -481,18 +492,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             continue;
         }
 
-        const size_t path_len = strlen(dir_path) + 1 + strlen(entry->d_name) + 1;
-        char* const full_path = malloc(path_len);
+        char* const full_path = zxc_path_join(dir_path, entry->d_name);
         if (!full_path) {
             zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
-            overall_ret = 1;
-            continue;
-        }
-
-        const int n = snprintf(full_path, path_len, "%s/%s", dir_path, entry->d_name);
-        if (n < 0 || (size_t)n >= path_len) {
-            zxc_log("Error: path too long in directory '%s'\n", dir_path);
-            free(full_path);
             overall_ret = 1;
             continue;
         }
