@@ -186,6 +186,9 @@ zxc -z -S assets.tar assets.tar.zxc   # seekable: O(1) random-access decompressi
 zxc -d assets.tar.zxc assets.tar
 unzxc assets.tar.zxc assets.tar
 
+# Decompress to stdout. "zxccat" is installed as an alias for "zxc -dc"
+zxccat logs-1.zxc logs-2.zxc | grep ERROR
+
 # Benchmark mode (testing speed on your machine)
 zxc -b assets.tar
 ```

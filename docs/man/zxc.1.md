@@ -1,12 +1,14 @@
 # zxc(1)
 
 ## NAME
-**zxc**, **unzxc** - Compress or decompress .zxc files
+**zxc**, **unzxc**, **zxccat** - Compress or decompress .zxc files
 
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
 
 **unzxc** is equivalent to **zxc -d**.
+
+**zxccat** is equivalent to **zxc -dc**, and decompresses every *INPUT-FILE* to standard output, one after the other.
 
 ## DESCRIPTION
 **zxc** is a command-line interface for the ZXC compression library, a high-performance lossless compression algorithm optimized for maximum decompression throughput.
@@ -135,6 +137,9 @@ Archives can be concatenated (`cat a.zxc b.zxc > ab.zxc`): **-d** decodes them o
 
 **Decompress a file using the unzxc alias:**
   unzxc data.txt.zxc
+
+**Print the contents of several archives, one after the other:**
+  zxccat part1.zxc part2.zxc | grep ERROR
 
 **Compress multiple files independently:**
   zxc -m file1.txt file2.txt file3.txt

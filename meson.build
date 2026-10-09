@@ -244,13 +244,14 @@ if not meson.is_subproject() and get_option('build_cli')
     install : true,
   )
 
-  # "unzxc" alias: a symlink to zxc that defaults to decompression. Mirrors the
-  # CMake install rule. Symbolic links are POSIX-only; skipped on Windows.
+  # "unzxc" (zxc -d) and "zxccat" (zxc -dc): symlinks to zxc, POSIX only, as in CMake.
   if host_machine.system() != 'windows'
-    install_symlink('unzxc',
-      pointing_to : 'zxc',
-      install_dir : get_option('bindir'),
-    )
+    foreach alias : ['unzxc', 'zxccat']
+      install_symlink(alias,
+        pointing_to : 'zxc',
+        install_dir : get_option('bindir'),
+      )
+    endforeach
   endif
 endif
 

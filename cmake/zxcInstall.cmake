@@ -63,18 +63,19 @@ if(ZXC_INSTALL)
         install(TARGETS zxc
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
-        # "unzxc" alias: a symlink to zxc that defaults to decompression.
-        # Symbolic links are POSIX-only; skipped on Windows.
+        # "unzxc" (zxc -d) and "zxccat" (zxc -dc): symlinks to zxc, POSIX only.
         if(NOT WIN32)
             if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
                 set(ZXC_SYMLINK_BINDIR "${CMAKE_INSTALL_BINDIR}")
             else()
                 set(ZXC_SYMLINK_BINDIR "\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
             endif()
-            install(CODE "
-                execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
-                    zxc \"\$ENV{DESTDIR}${ZXC_SYMLINK_BINDIR}/unzxc\")
-            ")
+            foreach(alias unzxc zxccat)
+                install(CODE "
+                    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                        zxc \"\$ENV{DESTDIR}${ZXC_SYMLINK_BINDIR}/${alias}\")
+                ")
+            endforeach()
         endif()
     endif()
 

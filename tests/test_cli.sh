@@ -1178,8 +1178,8 @@ else
     log_fail "Decompress with -D failed to recreate original"
 fi
 
-# 26. unzxc Alias (argv[0]-based mode detection)
-echo "Testing unzxc alias..."
+# 26. unzxc and zxccat Aliases (argv[0]-based mode detection)
+echo "Testing unzxc and zxccat aliases..."
 
 # "unzxc" is a symlink to zxc that defaults to decompression.
 # Create a local symlink to the binary under test and exercise it.
@@ -1211,11 +1211,30 @@ if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [[ -L "$UNZXC_BIN" ]]; then
     else
         log_fail "unzxc -z should compress (explicit flag must win)"
     fi
+
+    # 26.3 zxccat: every argument in order, or stdin; the second must not truncate the first.
+    ZXCCAT_BIN="$TEST_DIR/zxccat"
+    ln -sf "$ZXC_ABS" "$ZXCCAT_BIN"
+    printf 'second archive\n' > "$TEST_DIR/cat_second.txt"
+    "$ZXC_BIN" -c "$TEST_DIR/cat_second.txt" > "$TEST_DIR/cat_second.zxc"
+    cat "$TEST_FILE" "$TEST_DIR/cat_second.txt" > "$TEST_DIR/cat_expected"
+    set +e
+    "$ZXCCAT_BIN" "$TEST_DIR/alias.zxc" "$TEST_DIR/cat_second.zxc" > "$TEST_DIR/cat_out" 2>/dev/null
+    CAT_RC=$?
+    "$ZXCCAT_BIN" < "$TEST_DIR/alias.zxc" > "$TEST_DIR/cat_stdin" 2>/dev/null
+    CAT_STDIN_RC=$?
+    set -e
+    if [[ $CAT_RC -eq 0 ]] && cmp -s "$TEST_DIR/cat_expected" "$TEST_DIR/cat_out" && \
+       [[ $CAT_STDIN_RC -eq 0 ]] && cmp -s "$TEST_FILE" "$TEST_DIR/cat_stdin"; then
+        log_pass "zxccat decompresses every argument, or stdin, to stdout"
+    else
+        log_fail "zxccat output differs from the concatenated inputs (rc=$CAT_RC/$CAT_STDIN_RC)"
+    fi
 else
-    echo "  [SKIP] symlinks unsupported here, skipping unzxc alias test"
+    echo "  [SKIP] symlinks unsupported here, skipping unzxc and zxccat alias tests"
 fi
 
-# 26.3 -c appends to a >> redirect
+# 26.4 -c appends to a >> redirect
 "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/append.zxc"
 printf 'kept line\n' > "$TEST_DIR/append_out"
 "$ZXC_BIN" -d -c "$TEST_DIR/append.zxc" >> "$TEST_DIR/append_out"
