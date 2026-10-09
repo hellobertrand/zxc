@@ -80,6 +80,12 @@ if(ZXC_INSTALL)
                 install(CODE "
                     execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
                         zxc \"\$ENV{DESTDIR}${ZXC_SYMLINK_BINDIR}/${alias}\")
+                ")
+            endforeach()
+            # "zxcless": less(1) on .zxc files, a shell script.
+            install(PROGRAMS src/cli/zxcless DESTINATION ${CMAKE_INSTALL_BINDIR})
+            foreach(alias unzxc zxccat zxcless)
+                install(CODE "
                     execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
                         zxc.1 \"\$ENV{DESTDIR}${ZXC_SYMLINK_MANDIR}/man1/${alias}.1\")
                 ")

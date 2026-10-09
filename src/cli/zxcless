@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# ZXC - High-performance lossless compression
+#
+# Copyright (c) Bertrand Lebonnois and contributors.
+#
+# zxcless: less(1) on .zxc files, decompressed on the fly. "|-" filters stdin
+# too, and -f copies what is not an archive unchanged, as zstdless does.
+
+zxc=${ZXC:-zxc}
+
+export LESSOPEN="|-\"$zxc\" -dcfq %s"
+exec less "$@"

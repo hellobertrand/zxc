@@ -2,8 +2,8 @@
 .\"
 .TH "zxc" "1" "" "zxc" "User Commands"
 .SH NAME
-\f[B]zxc\f[R], \f[B]unzxc\f[R], \f[B]zxccat\f[R] \- Compress or
-decompress .zxc files
+\f[B]zxc\f[R], \f[B]unzxc\f[R], \f[B]zxccat\f[R], \f[B]zxcless\f[R] \-
+Compress or decompress .zxc files
 .SH SYNOPSIS
 \f[B]zxc\f[R] [\f[I]OPTIONS\f[R]] [\f[I]INPUT\-FILE\f[R]]
 [\f[I]OUTPUT\-FILE\f[R]]
@@ -13,8 +13,15 @@ decompress .zxc files
 \f[B]zxccat\f[R] is equivalent to \f[B]zxc \-dc\f[R] applied to every
 \f[I]INPUT\-FILE\f[R] in turn, writing them all to standard output.
 .PP
-\f[B]unzxc\f[R] and \f[B]zxccat\f[R] are symlinks to \f[B]zxc\f[R],
-installed on POSIX systems only.
+\f[B]zxcless\f[R] [\f[I]LESS\-OPTIONS\f[R]] [\f[I]FILE\f[R]...]
+shows files, or standard input, in \f[B]less\f[R](1), decompressing ZXC
+archives on the fly; other input displays unchanged.
+The \f[B]ZXC\f[R] environment variable names the \f[B]zxc\f[R] binary to
+use.
+.PP
+\f[B]unzxc\f[R] and \f[B]zxccat\f[R] are symlinks to \f[B]zxc\f[R], and
+\f[B]zxcless\f[R] is a shell script; all three are installed on POSIX
+systems only.
 .SH DESCRIPTION
 \f[B]zxc\f[R] is a command\-line interface for the ZXC compression
 library, a high\-performance lossless compression algorithm optimized
@@ -181,6 +188,13 @@ flag is only needed for the in\-place case.
 .TP
 \f[B]\-f\f[R], \f[B]\-\-force\f[R]
 Force overwrite of the \f[I]OUTPUT\-FILE\f[R] if it already exists.
+When decompressing to standard output (\f[B]\-dc\f[R],
+\f[B]zxccat\f[R]), also copy input that is not a ZXC archive unchanged,
+as \f[B]zcat \-f\f[R] does.
+Only the first byte is checked, since standard input can\(aqt be
+rewound: input that starts with \f[CR]0xF5\f[R], the first byte of the
+magic word and never the first byte of UTF\-8 text, is decoded as an
+archive.
 .TP
 \f[B]\-c\f[R], \f[B]\-\-stdout\f[R]
 Force writing to standard output (\f[CR]stdout\f[R]), even if it is the
@@ -265,6 +279,8 @@ data.bin
 .PP
 \f[B]Print the contents of several archives, one after the other:\f[R]
 zxccat part1.zxc part2.zxc | grep ERROR
+.PP
+\f[B]Read a compressed log page by page:\f[R] zxcless app.log.zxc
 .PP
 \f[B]Compress multiple files independently:\f[R] zxc \-m file1.txt
 file2.txt file3.txt

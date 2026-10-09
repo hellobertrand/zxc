@@ -1,7 +1,7 @@
 # zxc(1)
 
 ## NAME
-**zxc**, **unzxc**, **zxccat** - Compress or decompress .zxc files
+**zxc**, **unzxc**, **zxccat**, **zxcless** - Compress or decompress .zxc files
 
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
@@ -10,7 +10,9 @@
 
 **zxccat** is equivalent to **zxc -dc** applied to every *INPUT-FILE* in turn, writing them all to standard output.
 
-**unzxc** and **zxccat** are symlinks to **zxc**, installed on POSIX systems only.
+**zxcless** [*LESS-OPTIONS*] [*FILE*...] shows files, or standard input, in **less**(1), decompressing ZXC archives on the fly; other input displays unchanged. The **ZXC** environment variable names the **zxc** binary to use.
+
+**unzxc** and **zxccat** are symlinks to **zxc**, and **zxcless** is a shell script; all three are installed on POSIX systems only.
 
 ## DESCRIPTION
 **zxc** is a command-line interface for the ZXC compression library, a high-performance lossless compression algorithm optimized for maximum decompression throughput.
@@ -79,7 +81,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.
 
 **-f**, **--force**
-: Force overwrite of the *OUTPUT-FILE* if it already exists.
+: Force overwrite of the *OUTPUT-FILE* if it already exists. When decompressing to standard output (**-dc**, **zxccat**), also copy input that is not a ZXC archive unchanged, as **zcat -f** does. Only the first byte is checked, since standard input can't be rewound: input that starts with `0xF5`, the first byte of the magic word and never the first byte of UTF-8 text, is decoded as an archive.
 
 **-c**, **--stdout**
 : Force writing to standard output (`stdout`), even if it is the console.
@@ -137,6 +139,9 @@ Archives can be concatenated (`cat a.zxc b.zxc > ab.zxc`): **-d** decodes them o
 
 **Print the contents of several archives, one after the other:**
   zxccat part1.zxc part2.zxc | grep ERROR
+
+**Read a compressed log page by page:**
+  zxcless app.log.zxc
 
 **Compress multiple files independently:**
   zxc -m file1.txt file2.txt file3.txt

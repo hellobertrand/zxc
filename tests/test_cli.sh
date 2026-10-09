@@ -1245,6 +1245,43 @@ else
     log_fail "-c truncated the file it should append to"
 fi
 
+# 26.5 zxcless pages .zxc files through less, and other files unchanged (POSIX
+#      only: not installed on Windows). Off a terminal, less copies to stdout.
+ZXCLESS="$(dirname "$0")/../src/cli/zxcless"
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] zxcless is not installed on Windows" ;;
+    *)
+        if command -v less >/dev/null 2>&1; then
+            "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/less.zxc"
+            printf 'plain text\n' > "$TEST_DIR/less_plain.txt"
+            { cat "$TEST_FILE"; cat "$TEST_DIR/less_plain.txt"; } > "$TEST_DIR/less_expected"
+            set +e
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" "$TEST_DIR/less.zxc" "$TEST_DIR/less_plain.txt" \
+                > "$TEST_DIR/less_out" 2>/dev/null
+            set -e
+            if cmp -s "$TEST_DIR/less_expected" "$TEST_DIR/less_out"; then
+                log_pass "zxcless decompresses .zxc files and shows others unchanged"
+            else
+                log_fail "zxcless output differs from the decompressed file"
+            fi
+
+            # Standard input: an archive is decompressed, plain text shown unchanged
+            set +e
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" < "$TEST_DIR/less.zxc" > "$TEST_DIR/less_stdin_zxc" 2>/dev/null
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" < "$TEST_DIR/less_plain.txt" > "$TEST_DIR/less_stdin_plain" 2>/dev/null
+            set -e
+            if cmp -s "$TEST_FILE" "$TEST_DIR/less_stdin_zxc" &&
+               cmp -s "$TEST_DIR/less_plain.txt" "$TEST_DIR/less_stdin_plain"; then
+                log_pass "zxcless decompresses an archive on stdin and shows plain stdin unchanged"
+            else
+                log_fail "zxcless on stdin: archive not decompressed or plain text lost"
+            fi
+        else
+            echo "  [SKIP] less is not installed"
+        fi
+        ;;
+esac
+
 # 27. Multiple input files (-m) and native Windows wildcard expansion (setargv.obj)
 echo "Testing multiple-file mode (-m) and wildcard expansion..."
 
@@ -1670,6 +1707,58 @@ for w in z d l list t test b; do
     fi
 done
 log_pass "Files named like modes compress and decompress"
+
+# 37. -dcf passes through input that is not an archive, as zcat -f does
+echo "Testing -dcf pass-through..."
+printf 'plain text, not an archive\n' > "$TEST_DIR/pass_plain.txt"
+"$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/pass.zxc"
+
+# 37.1 Plain input comes out unchanged, from a file and from stdin; -dc alone still refuses it
+set +e
+"$ZXC_BIN" -dcf "$TEST_DIR/pass_plain.txt" > "$TEST_DIR/pass_file_out" 2>/dev/null
+RC_FILE=$?
+"$ZXC_BIN" -dcf < "$TEST_DIR/pass_plain.txt" > "$TEST_DIR/pass_stdin_out" 2>/dev/null
+RC_STDIN=$?
+"$ZXC_BIN" -dc < "$TEST_DIR/pass_plain.txt" > /dev/null 2>&1
+RC_NOF=$?
+set -e
+if [[ $RC_FILE -eq 0 && $RC_STDIN -eq 0 && $RC_NOF -ne 0 ]] &&
+   cmp -s "$TEST_DIR/pass_plain.txt" "$TEST_DIR/pass_file_out" &&
+   cmp -s "$TEST_DIR/pass_plain.txt" "$TEST_DIR/pass_stdin_out"; then
+    log_pass "-dcf copies plain input unchanged; -dc without -f rejects it"
+else
+    log_fail "-dcf pass-through failed (rc=$RC_FILE/$RC_STDIN, without -f: $RC_NOF)"
+fi
+
+# 37.2 An archive on stdin still decodes: the peeked byte is not lost
+if "$ZXC_BIN" -dcf < "$TEST_DIR/pass.zxc" 2>/dev/null | cmp -s - "$TEST_FILE"; then
+    log_pass "-dcf decodes an archive read from stdin"
+else
+    log_fail "-dcf lost the start of an archive read from stdin"
+fi
+
+# 37.3 Empty stdin gives empty output and success
+set +e
+"$ZXC_BIN" -dcf < /dev/null > "$TEST_DIR/pass_empty_out" 2>/dev/null
+RC=$?
+set -e
+if [[ $RC -eq 0 && ! -s "$TEST_DIR/pass_empty_out" ]]; then
+    log_pass "-dcf on empty stdin writes nothing and succeeds"
+else
+    log_fail "-dcf on empty stdin must write nothing and succeed (rc=$RC)"
+fi
+
+# 37.4 Only the first byte is checked: input starting with 0xF5 is decoded, so it fails
+printf '\365not an archive\n' > "$TEST_DIR/pass_f5.bin"
+set +e
+"$ZXC_BIN" -dcf < "$TEST_DIR/pass_f5.bin" > /dev/null 2>&1
+RC=$?
+set -e
+if [[ $RC -ne 0 ]]; then
+    log_pass "-dcf decodes input that starts with the magic's first byte"
+else
+    log_fail "-dcf must treat input starting with 0xF5 as an archive"
+fi
 
 echo "All tests passed!"
 exit 0

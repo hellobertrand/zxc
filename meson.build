@@ -253,6 +253,13 @@ if not meson.is_subproject() and get_option('build_cli')
         pointing_to : 'zxc',
         install_dir : get_option('bindir'),
       )
+    endforeach
+    # "zxcless": less(1) on .zxc files, a shell script.
+    install_data('src/cli/zxcless',
+      install_dir : get_option('bindir'),
+      install_mode : 'rwxr-xr-x',
+    )
+    foreach alias : ['unzxc', 'zxccat', 'zxcless']
       install_symlink(alias + '.1',
         pointing_to : 'zxc.1',
         install_dir : get_option('mandir') / 'man1',

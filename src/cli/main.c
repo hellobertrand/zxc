@@ -399,6 +399,30 @@ static char* zxc_path_join(const char* dir, const char* name) {
     return path;
 }
 
+// First byte of the magic word 0x9CB02EF5, stored little-endian (docs/FORMAT.md).
+// No UTF-8 text starts with it, so it tells an archive from plain text.
+#define ZXC_MAGIC_FIRST_BYTE 0xF5
+
+// Peeks one byte, the most ungetc() can push back, since stdin can't be rewound.
+static int zxc_starts_like_archive(FILE* f) {
+    const int c = getc(f);
+    if (c == EOF) return 0;
+    ungetc(c, f);
+    return c == ZXC_MAGIC_FIRST_BYTE;
+}
+
+// Copies in to out unchanged: -dcf passes through what is not an archive, as zcat -f does.
+static int64_t zxc_copy_stream(FILE* in, FILE* out) {
+    char buf[64 * 1024];
+    int64_t total = 0;
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) return ZXC_ERROR_IO;
+        total += (int64_t)n;
+    }
+    return ferror(in) ? ZXC_ERROR_IO : total;
+}
+
 // Forward declaration for recursive mode
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
@@ -561,7 +585,7 @@ static void print_help(const char* app) {
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
-        "  -f, --force       Force overwrite\n"
+        "  -f, --force       Force overwrite; with -dc, copy non-ZXC input as is\n"
         "  -c, --stdout      Write to stdout\n"
         "  -v, --verbose     Verbose mode\n"
         "  -q, --quiet       Quiet mode\n"
@@ -1284,6 +1308,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .user_data = &pctx,
         };
         bytes = zxc_stream_compress(f_in, f_out, &copts);
+    } else if (mode == MODE_DECOMPRESS && force && use_stdout && !zxc_starts_like_archive(f_in)) {
+        bytes = zxc_copy_stream(f_in, f_out);
     } else {
         zxc_decompress_opts_t dopts = {
             .n_threads = num_threads,
