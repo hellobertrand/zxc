@@ -18,13 +18,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
-  build-and-test:
+  build-test-unix:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     strategy:
       fail-fast: false
       matrix:
@@ -44,16 +42,6 @@ jobs:
             artifact_name: zxc
             platform: macos-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
-          - name: Windows x86_64
-            os: windows-latest
-            artifact_name: zxc.exe
-            platform: windows-x86_64
-            cmake_flags: "-A x64 -DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=OFF"
-          - name: Windows ARM64
-            os: windows-11-arm
-            artifact_name: zxc.exe
-            platform: windows-arm64
-            cmake_flags: "-A ARM64 -DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=OFF"
 
 
     steps:
@@ -115,42 +103,18 @@ jobs:
           chmod +x tests/test_cli.sh
           ./tests/test_cli.sh "$ZXC_BIN"
 
-      # zxc.exe links the C runtime statically (/MT): a clean Windows lacks
-      # VCRUNTIME140.dll. The library stays /MD and without /GL, whose objects link
-      # only with the MSVC that built them.
-      - name: Build CLI with the static C runtime (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          cmake -S . -B build-cli ${{ matrix.cmake_flags }} -DZXC_ENABLE_LTO=ON \
-              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded \
-              -DZXC_BUILD_TESTS=OFF -DZXC_INSTALL=OFF
-          cmake --build build-cli --config Release --target zxc --parallel
-          if grep -aqi 'vcruntime140' build-cli/Release/zxc.exe; then
-            echo "::error::zxc.exe still imports VCRUNTIME140.dll"
-            exit 1
-          fi
-          ./tests/test_cli.sh build-cli/Release/zxc.exe
-
       - name: Package Release (Archive)
         if: github.event_name == 'release'
         shell: bash
         run: |
           VERSION="${GITHUB_REF_NAME#v}"
           ARCHIVE_BASE="zxc-${VERSION}-${{ matrix.platform }}"
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            ARCHIVE="${ARCHIVE_BASE}.zip"
-          else
-            ARCHIVE="${ARCHIVE_BASE}.tar.gz"
-          fi
+          ARCHIVE="${ARCHIVE_BASE}.tar.gz"
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
           STAGE="release_staging/${ARCHIVE_BASE}"
 
           cmake --install build --prefix "$STAGE" --config Release
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            cp build-cli/Release/zxc.exe "$STAGE/bin/zxc.exe"
-          fi
 
           cp LICENSE "$STAGE/LICENSE.txt"
           cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
@@ -181,17 +145,129 @@ jobs:
 
           # Create archive with versioned top-level directory
           cd release_staging
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            7z a "../${ARCHIVE}" "${ARCHIVE_BASE}"
-          else
-            tar -czvf "../${ARCHIVE}" "${ARCHIVE_BASE}"
-          fi
+          tar -czvf "../${ARCHIVE}" "${ARCHIVE_BASE}"
 
-      - name: Attest build provenance (SLSA)
+      - name: Upload Artifacts
         if: github.event_name == 'release'
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          subject-path: ${{ env.ARCHIVE }}
+          name: zxc-${{ matrix.platform }}
+          path: ${{ env.ARCHIVE }}
+
+  # Windows releases use MinGW-w64, like zstd and lz4: zxc.exe needs no Visual C++
+  # runtime, and zxc.dll exposes a plain C ABI that MSVC programs link too.
+  build-test-windows:
+    name: Build Windows ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: x86_64
+            os: windows-latest
+            msystem: MINGW64
+            pkg_prefix: mingw-w64-x86_64
+            cc: gcc
+            platform: windows-x86_64
+          # GCC has no Windows ARM64 target: the same MinGW-w64 runtime, with Clang.
+          - name: ARM64
+            os: windows-11-arm
+            msystem: CLANGARM64
+            pkg_prefix: mingw-w64-clang-aarch64
+            cc: clang
+            platform: windows-arm64
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          install: >-
+            ${{ matrix.pkg_prefix }}-${{ matrix.cc }}
+            ${{ matrix.pkg_prefix }}-cmake
+            ${{ matrix.pkg_prefix }}-ninja
+            zip
+
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # No LTO in the shipped static library: its objects would link only with this
+      # exact compiler. -static folds libgcc/libwinpthread into zxc.exe and zxc.dll.
+      - name: Build
+        run: |
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=OFF \
+              -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build build --parallel
+          cmake -S . -B build-dll -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF -DBUILD_SHARED_LIBS=ON \
+              -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF -DZXC_INSTALL=OFF \
+              -DCMAKE_SHARED_LINKER_FLAGS=-static
+          cmake --build build-dll --parallel
+
+      - name: Check runtime dependencies
+        run: |
+          for f in build/zxc.exe build-dll/*.dll; do
+            if grep -aqiE 'libgcc_s|libwinpthread|libc\+\+|libunwind|vcruntime' "$f"; then
+              echo "::error::$f depends on a runtime DLL Windows does not ship"
+              exit 1
+            fi
+          done
+
+      - name: Test
+        run: |
+          ctest --test-dir build --output-on-failure
+          ./tests/test_cli.sh build/zxc.exe
+
+      - name: Package Release (Archive)
+        if: github.event_name == 'release'
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ARCHIVE_BASE="zxc-${VERSION}-${{ matrix.platform }}"
+          ARCHIVE="${ARCHIVE_BASE}.zip"
+          echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
+
+          STAGE="release_staging/${ARCHIVE_BASE}"
+          cmake --install build --prefix "$STAGE"
+          cp build-dll/*.dll "$STAGE/bin/"
+          cp build-dll/*.dll.a "$STAGE/lib/"
+          cp LICENSE "$STAGE/LICENSE.txt"
+          cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
+
+          cat > "$STAGE/README.md" <<EOF
+          # ZXC ${VERSION}
+
+          Asymmetric Lossless Compression Built for Ultra-Fast Decode
+
+          **Contents** (built with MinGW-w64; no Visual C++ runtime needed):
+          - \`bin/zxc.exe\` — CLI compressor/decompressor
+          - \`bin/libzxc.dll\`, \`lib/libzxc.dll.a\` — shared library and its import library (C ABI, usable from MSVC)
+          - \`lib/libzxc.a\` — static library for MinGW toolchains, with pkg-config and CMake files
+          - \`include/\` — C headers
+
+          **CLI usage:** See [MANUAL.md](MANUAL.md) for the full reference (synopsis, options, examples).
+
+          **Release history:** https://github.com/${GITHUB_REPOSITORY}/releases
+
+          **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
+
+          **Verify build provenance (SLSA):** every archive is signed via [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). Verify with:
+          \`\`\`
+          gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}
+          \`\`\`
+
+          License: BSD-3-Clause (see LICENSE.txt)
+          EOF
+
+          cd release_staging
+          zip -r "../${ARCHIVE}" "${ARCHIVE_BASE}"
 
       - name: Upload Artifacts
         if: github.event_name == 'release'
@@ -206,8 +282,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -232,13 +306,6 @@ jobs:
           test -n "$ZXC" || { echo "::error::no zxc binary under build/"; find build -name 'zxc*'; exit 1; }
           "$ZXC" -7 "zxc-${VERSION}.tar" -o "zxc-${VERSION}.tar.zxc"   # 7 = ULTRA, the densest level
 
-      - name: Attest source tarball provenance (SLSA)
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
-        with:
-          subject-path: |
-            zxc-${{ env.VERSION }}.tar.gz
-            zxc-${{ env.VERSION }}.tar.zxc
-
       - name: Upload source artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -253,8 +320,6 @@ jobs:
     runs-on: ubuntu-slim
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -282,11 +347,6 @@ jobs:
           # Validate JSON syntax
           jq empty "$SBOM_FILE"
 
-      - name: Attest SBOM provenance (SLSA)
-        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
-        with:
-          subject-path: zxc-${{ steps.ref.outputs.version }}-sbom.spdx.json
-
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -295,7 +355,7 @@ jobs:
 
   release:
     name: Upload the release assets
-    needs: [build-and-test, source-tarball, sbom]
+    needs: [build-test-unix, build-test-windows, source-tarball, sbom]
     outputs:
       digests: ${{ steps.sums.outputs.digests }}
     runs-on: ubuntu-latest
@@ -303,6 +363,8 @@ jobs:
     environment: release-signing
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - name: Download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -315,6 +377,12 @@ jobs:
           find artifacts -type f \( -name '*.tar.gz' -o -name '*.tar.zxc' -o -name '*.zip' \
             -o -name '*.spdx.json' \) -exec mv {} release/ \;
           ls -la release
+
+      # One GitHub attestation per asset: platform archives, source tarballs and SBOM.
+      - name: Attest build provenance (SLSA)
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-path: release/*
 
       - name: Generate checksums.sha256
         id: sums
