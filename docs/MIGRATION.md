@@ -56,15 +56,16 @@ the seek table:
 > A v8 build is ZXC **0.14.x**. Keep it until every archive you care about is
 > transcoded — it is the only thing that can read v8 data.
 
-### Windows library names (0.15.x)
+### Windows archives (0.15.x)
 
-The DLL is `libzxc.dll` now, as on every other platform, where 0.14.x built
-`zxc.dll`; its import library keeps the name `zxc.lib`, so projects that link it
-need no change, but those that ship the DLL do. `find_package(zxc)` and
-`pkg-config` consumers need no change either. The release archive's static
-library is `lib/libzxc_static.lib`, replacing the `lib/zxc.lib` of 0.14.x,
-which was static; MSVC programs that linked that one statically must switch,
-or they now link the DLL's import library.
+The Windows archives are now built with MinGW-w64 (UCRT) and ship the shared
+library, `bin/libzxc.dll`, with its MinGW import library and its export list
+`lib/libzxc.def`. The `lib/zxc.lib` of 0.14.x, an MSVC static library, is gone,
+and the archive's CMake package and `libzxc.pc` now target MinGW: MSVC projects
+build an import library from the `.def`
+(`lib /def:lib\libzxc.def /out:zxc.lib /machine:x64`, or `arm64`) and link the
+DLL, or build zxc from source for a static library. A CMake MSVC build names the
+DLL `libzxc.dll` (0.14.x: `zxc.dll`) and keeps the import library `zxc.lib`.
 
 ### CLI output (0.15.x)
 

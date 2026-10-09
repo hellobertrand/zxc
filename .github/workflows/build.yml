@@ -113,8 +113,8 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
-  # MSVC: the CLI on the static C runtime (/MT) runs on a clean Windows; the DLL on
-  # the shared one takes MSVC programs' FILE*s; the static library has no LTO.
+  # MinGW-w64 on the UCRT: a static runtime, so nothing to install.
+  # MSVC users build the import library from the shipped libzxc.def.
   build-test-windows:
     name: Build Windows ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -126,59 +126,76 @@ jobs:
         include:
           - name: x86_64
             os: windows-latest
-            arch: x64
+            msystem: UCRT64
+            pkg_prefix: mingw-w64-ucrt-x86_64
+            cc: gcc
+            machine: x64
             platform: windows-x86_64
+          # No GCC for Windows ARM64: Clang on the same runtime.
           - name: ARM64
             os: windows-11-arm
-            arch: ARM64
+            msystem: CLANGARM64
+            pkg_prefix: mingw-w64-clang-aarch64
+            cc: clang
+            machine: arm64
             platform: windows-arm64
 
     defaults:
       run:
-        shell: bash
+        shell: msys2 {0}
 
     steps:
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
+        with:
+          msystem: ${{ matrix.msystem }}
+          update: true
+          path-type: inherit
+          install: >-
+            ${{ matrix.pkg_prefix }}-${{ matrix.cc }}
+            diffutils
+            zip
+
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # -static embeds the compiler runtime; --output-def lists the DLL's exports.
       - name: Build
         run: |
-          cmake -S . -B build-cli -A ${{ matrix.arch }} -DZXC_NATIVE_ARCH=OFF \
-              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DZXC_INSTALL=OFF
-          cmake --build build-cli --config Release --parallel
-          cmake -S . -B build-static -A ${{ matrix.arch }} -DZXC_NATIVE_ARCH=OFF \
-              -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-          cmake --build build-static --config Release --parallel
-          cmake -S . -B build-dll -A ${{ matrix.arch }} -DZXC_NATIVE_ARCH=OFF \
-              -DBUILD_SHARED_LIBS=ON -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-          cmake --build build-dll --config Release --parallel
+          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF \
+              -DCMAKE_EXE_LINKER_FLAGS=-static
+          cmake --build build --parallel
+          cmake -S . -B build-dll -G Ninja -DCMAKE_BUILD_TYPE=Release \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF -DBUILD_SHARED_LIBS=ON \
+              -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF -DZXC_INSTALL=OFF \
+              -DCMAKE_SHARED_LINKER_FLAGS="-static -Wl,--output-def,libzxc.def"
+          cmake --build build-dll --parallel
+          sed -i '/^LIBRARY/d; 1i LIBRARY libzxc.dll' build-dll/libzxc.def
 
+      # The consumer loads the shipped DLL, through its MinGW import library.
       - name: Test
         run: |
-          ctest --test-dir build-cli -C Release --output-on-failure
-          ./tests/test_cli.sh build-cli/Release/zxc.exe
+          ctest --test-dir build --output-on-failure
+          ./tests/test_cli.sh build/zxc.exe
+          ${{ matrix.cc }} -O2 -Iinclude -DZXC_DLL_IMPORT tests/packaging/consumer.c \
+              build-dll/libzxc.dll.a -o build-dll/consumer.exe
+          (cd build-dll && ./consumer.exe)
 
-      # zxc.exe needs only Windows' own DLLs; libzxc.dll (/MD) adds the Visual C++
-      # runtime.
+      # Only Windows' own DLLs: no redistributable, no libgcc or libwinpthread.
       - name: Check runtime dependencies
-        shell: pwsh
         run: |
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
-          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          $arch = '${{ matrix.arch }}'.ToLower()  # VsDevCmd rejects 'ARM64'
-          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=$arch -host_arch=$arch"
-          function Imports($file) {
-            $out = @(dumpbin /nologo /dependents $file)
-            $i = [Array]::FindIndex($out, [Predicate[string]] { param($l) $l -match 'Image has the following dependencies' })
-            if ($i -lt 0) { throw "$file`: dumpbin listed no dependencies" }
-            return @($out[($i + 1)..($out.Count - 1)] | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
-          }
-          foreach ($case in @(@('build-cli\Release\zxc.exe', '^(KERNEL32|api-ms-win-crt-[a-z0-9-]+)\.dll$'),
-                              @('build-dll\Release\libzxc.dll', '^(KERNEL32|VCRUNTIME140|api-ms-win-crt-[a-z0-9-]+)\.dll$'))) {
-            $deps = Imports $case[0]
-            $bad = @($deps | Where-Object { $_ -notmatch $case[1] })
-            if ($deps.Count -eq 0 -or $bad.Count -gt 0) { throw "$($case[0]) imports: $($deps -join ', ')" }
-          }
+          objdump=$(command -v objdump || command -v llvm-objdump) \
+              || { echo "::error::no objdump in this environment"; exit 1; }
+          for f in build/zxc.exe build-dll/libzxc.dll; do
+            deps=$("$objdump" -p "$f" | awk '/DLL Name:/ {print $3}')
+            test -n "$deps" || { echo "::error::$f: no imports listed"; exit 1; }
+            bad=$(printf '%s\n' "$deps" | grep -viE '^(KERNEL32|api-ms-win-crt-[a-z0-9-]+)\.dll$' || true)
+            if [ -n "$bad" ]; then
+              echo "::error::$f imports: $(printf '%s' "$bad" | tr '\n' ' ')"
+              exit 1
+            fi
+          done
 
       - name: Package Release (Archive)
         if: github.event_name == 'release'
@@ -189,23 +206,25 @@ jobs:
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
           STAGE="release_staging/${ARCHIVE_BASE}"
-          cmake --install build-dll --prefix "$STAGE" --config Release
-          cp build-cli/Release/zxc.exe "$STAGE/bin/"
-          cp build-static/Release/libzxc.lib "$STAGE/lib/libzxc_static.lib"
-          for f in bin/zxc.exe bin/libzxc.dll lib/zxc.lib lib/libzxc_static.lib \
+          cmake --install build --prefix "$STAGE"
+          cp build-dll/libzxc.dll "$STAGE/bin/"
+          cp build-dll/libzxc.dll.a build-dll/libzxc.def "$STAGE/lib/"
+          for f in bin/zxc.exe bin/libzxc.dll lib/libzxc.dll.a lib/libzxc.def lib/libzxc.a \
                    lib/cmake/zxc/zxcConfig.cmake lib/pkgconfig/libzxc.pc include/zxc.h; do
             test -f "$STAGE/$f" || { echo "::error::$f missing from the archive"; exit 1; }
           done
           .github/scripts/stage-release-docs.sh "$VERSION" "$STAGE" <<'EOF'
-          - `bin/zxc.exe` — CLI compressor/decompressor (static C runtime)
-          - `bin/libzxc.dll`, `lib/zxc.lib` — shared library (needs the Visual C++ Redistributable) and its import library; define `ZXC_DLL_IMPORT`
-          - `lib/libzxc_static.lib` — static library (`/MD`, define `ZXC_STATIC_DEFINE`)
-          - `lib/cmake/zxc/`, `lib/pkgconfig/` — CMake package and pkg-config files for the DLL
+          Built with MinGW-w64 on the UCRT, which Windows 10 and later include; no Visual C++ runtime needed.
+          - `bin/zxc.exe` — CLI compressor/decompressor
+          - `bin/libzxc.dll` — shared library (C ABI); `lib/libzxc.dll.a` is its MinGW import library
+          - `lib/libzxc.def` — its exports: MSVC users run `lib /def:lib\libzxc.def /out:zxc.lib /machine:${{ matrix.machine }}`, define `ZXC_DLL_IMPORT` and build with `/MD` to pass `FILE*`s
+          - `lib/libzxc.a` — static library for UCRT MinGW toolchains such as MSYS2 ${{ matrix.msystem }}; `-lzxc` picks the DLL, `-static` this one
+          - `lib/pkgconfig/`, `lib/cmake/` — for MinGW toolchains (the CMake package imports the static library)
           - `include/` — C headers
           EOF
 
           cd release_staging
-          7z a "../${ARCHIVE}" "${ARCHIVE_BASE}"
+          zip -r "../${ARCHIVE}" "${ARCHIVE_BASE}"
 
       - name: Upload Artifacts
         if: github.event_name == 'release'

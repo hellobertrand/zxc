@@ -29,11 +29,15 @@ sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
 ```
 
 Linux and macOS archives hold `bin/zxc`, `include/`, `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and
-`lib/cmake/zxc/zxcConfig.cmake`. Windows ZIP archives are built with MSVC: `bin/zxc.exe` carries its C runtime, so it needs no
-Visual C++ Redistributable; `bin/libzxc.dll`, which does need it, with its import library `lib/zxc.lib` (define
-`ZXC_DLL_IMPORT`), described by `lib/pkgconfig/libzxc.pc` and `lib/cmake/zxc/zxcConfig.cmake`;
-`lib/libzxc_static.lib`, a static library built with `/MD` (define `ZXC_STATIC_DEFINE`); and
-`include/`. MinGW users build from source.
+`lib/cmake/zxc/zxcConfig.cmake`. Windows ZIP archives are built with MinGW-w64 on the UCRT, which Windows 10 and later include
+(GCC on x86_64, Clang on ARM64), and need no other runtime: `bin/zxc.exe`; `bin/libzxc.dll` with
+its MinGW import library `lib/libzxc.dll.a`; `lib/libzxc.def`, the DLL's export list; the static
+`lib/libzxc.a` for UCRT MinGW toolchains (MSYS2 UCRT64 or CLANG64 on x86_64, CLANGARM64 on ARM64),
+with `lib/pkgconfig/libzxc.pc` and `lib/cmake/zxc/zxcConfig.cmake`, which also target MinGW; and
+`include/`. As with every MinGW library, `-lzxc` links the DLL and `-static` the static library.
+MSVC users build their own import library (`lib /def:lib\libzxc.def /out:zxc.lib /machine:x64`, or
+`arm64`), define `ZXC_DLL_IMPORT`, and build with the release shared UCRT (`/MD`, not `/MDd`) to
+pass `FILE*`s to the DLL; for a static MSVC library, build zxc from source (vcpkg, Conan, CMake).
 
 Release tags are PGP-signed. Check the key's fingerprint against the one published in
 [SECURITY.md](../.github/SECURITY.md) *before* importing it — otherwise the import is circular, and

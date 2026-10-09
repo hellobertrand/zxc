@@ -151,7 +151,7 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 |----------|-------|
 | Linux | `libzxc.so` -> `libzxc.so.5` -> `libzxc.so.0.14.1` |
 | macOS | `libzxc.dylib` -> `libzxc.5.dylib` -> `libzxc.0.14.1.dylib` |
-| Windows | `libzxc.dll` + `zxc.lib` (import); `libzxc_static.lib` in the release archives |
+| Windows | `libzxc.dll` + `zxc.lib` (MSVC import, built from the shipped `libzxc.def`) or `libzxc.dll.a` (MinGW import) |
 
 ---
 
