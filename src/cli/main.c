@@ -399,7 +399,11 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
     int overall_ret = 0;
 #ifdef _WIN32
     char search_path[MAX_PATH];
-    snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
+    const int sn = snprintf(search_path, sizeof(search_path), "%s\\*", dir_path);
+    if (sn < 0 || (size_t)sn >= sizeof(search_path)) {
+        zxc_log("Error: path too long '%s'\n", dir_path);
+        return 1;
+    }
 
     WIN32_FIND_DATAA find_data;
     HANDLE hFind = FindFirstFileA(search_path, &find_data);
@@ -415,7 +419,13 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         }
 
         char full_path[MAX_PATH];
-        snprintf(full_path, sizeof(full_path), "%s\\%s", dir_path, find_data.cFileName);
+        const int n =
+            snprintf(full_path, sizeof(full_path), "%s\\%s", dir_path, find_data.cFileName);
+        if (n < 0 || (size_t)n >= sizeof(full_path)) {
+            zxc_log("Error: path too long in directory '%s'\n", dir_path);
+            overall_ret = 1;
+            continue;
+        }
 
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
@@ -453,6 +463,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         char* const full_path = malloc(path_len);
         if (!full_path) {
             zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
+            overall_ret = 1;
             continue;
         }
 
@@ -460,6 +471,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         if (n < 0 || (size_t)n >= path_len) {
             zxc_log("Error: path too long in directory '%s'\n", dir_path);
             free(full_path);
+            overall_ret = 1;
             continue;
         }
 
