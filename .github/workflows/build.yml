@@ -154,8 +154,7 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
-  # MinGW-w64, as zstd and lz4: no Visual C++ runtime needed; the DLL's C ABI
-  # links from MSVC.
+  # MinGW-w64: no Visual C++ runtime; MSVC links the DLL's C ABI.
   build-test-windows:
     name: Build Windows ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -171,7 +170,6 @@ jobs:
             pkg_prefix: mingw-w64-x86_64
             cc: gcc
             platform: windows-x86_64
-          # No GCC for Windows ARM64: Clang on the same MinGW-w64 runtime.
           - name: ARM64
             os: windows-11-arm
             msystem: CLANGARM64
@@ -198,12 +196,11 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # Shipped static library without LTO (its objects would need this exact
-      # compiler); -static embeds libgcc and libwinpthread.
+      # -static embeds libgcc and libwinpthread.
       - name: Build
         run: |
           cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=OFF \
+              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF \
               -DCMAKE_EXE_LINKER_FLAGS=-static
           cmake --build build --parallel
           cmake -S . -B build-dll -G Ninja -DCMAKE_BUILD_TYPE=Release \

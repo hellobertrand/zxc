@@ -106,7 +106,7 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 |--------|----------------------|--------------------|-------------|
 | `BUILD_SHARED_LIBS` | OFF | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
 | `ZXC_NATIVE_ARCH` | ON | OFF | Enable `-march=native` for maximum performance |
-| `ZXC_ENABLE_LTO` | ON | OFF | Enable Link-Time Optimization (LTO) |
+| `ZXC_ENABLE_LTO` | OFF | OFF | Enable Link-Time Optimization (LTO) |
 | `ZXC_PGO_MODE` | OFF | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |
 | `ZXC_BUILD_CLI` | ON | OFF | Build command-line interface |
 | `ZXC_BUILD_TESTS` | ON | OFF | Build unit tests |
@@ -204,7 +204,7 @@ switching between a vendored copy and `find_package(zxc)` needs no other
 change.
 
 When zxc is not the top-level project it builds the library only: the CLI, the
-tests, `-march=native`, LTO and the install rules all default to off, so the
+tests, `-march=native` and the install rules all default to off, so the
 embedding project keeps full control of its own CTest registration and install
 set. Any of them can still be turned back on explicitly (`-DZXC_BUILD_CLI=ON`,
 `-DZXC_NATIVE_ARCH=ON`, `-DZXC_INSTALL=ON`, ...). `-march=native` is also

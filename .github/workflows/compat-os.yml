@@ -118,7 +118,6 @@ jobs:
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
                   -DZXC_NATIVE_ARCH=OFF \
-                  -DZXC_ENABLE_LTO=OFF \
                   -DBUILD_SHARED_LIBS="$SHARED_FLAG"
 
               cmake --build "$BUILD_DIR" --parallel

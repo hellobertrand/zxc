@@ -7,7 +7,7 @@
 
 option(BUILD_SHARED_LIBS "Build shared libraries instead of static" OFF)
 option(ZXC_NATIVE_ARCH "Enable -march=native for maximum performance" ${PROJECT_IS_TOP_LEVEL})
-option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" ${PROJECT_IS_TOP_LEVEL})
+option(ZXC_ENABLE_LTO "Enable Interprocedural Optimization (LTO)" OFF)
 set(ZXC_PGO_MODE "OFF" CACHE STRING "Profile-Guided Optimization mode (OFF/GENERATE/USE)")
 set_property(CACHE ZXC_PGO_MODE PROPERTY STRINGS OFF GENERATE USE)
 option(ZXC_BUILD_CLI "Build the command-line interface" ${PROJECT_IS_TOP_LEVEL})

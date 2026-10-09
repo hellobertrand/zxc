@@ -90,7 +90,8 @@ jobs:
         shell: bash
         run: |
           # Initialize variables
-          EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF -DCMAKE_COMPILE_WARNING_AS_ERROR=ON" # Runtime dispatch
+          # LTO is off by default: tested here.
+          EXTRA_ARGS="-DZXC_NATIVE_ARCH=OFF -DZXC_ENABLE_LTO=ON -DCMAKE_COMPILE_WARNING_AS_ERROR=ON"
           
           # Setup Environment for Linux/Mac (Flags & Cross-compilation)
           if [ "${{ matrix.os }}" != "windows" ]; then

@@ -18,8 +18,8 @@ host_cpu = host_machine.cpu_family()
 msvc_syntax = cc.get_argument_syntax() == 'msvc'
 is_cl = cc.get_id() == 'msvc'
 
-# As CMake: /wd4244 for lossless block-bounded uint64 -> size_t narrowing (32-bit
-# MSVC), /wd4310 for constants truncated on purpose by a cast.
+# As CMake: /wd4244 (lossless uint64 -> size_t narrowing), /wd4310 (deliberate
+# constant truncation by a cast).
 msvc_narrowing_args = msvc_syntax ? ['/wd4244', '/wd4310'] : []
 
 # As CMake's ZXC_WARNING_FLAGS; warning_level=2 gives -Wall -Wextra.
