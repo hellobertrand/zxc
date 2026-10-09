@@ -30,10 +30,10 @@ sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
 
 Linux and macOS archives hold `bin/zxc`, `include/`, `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and
 `lib/cmake/zxc/zxcConfig.cmake`. Windows ZIP archives are built with MinGW-w64 (GCC on x86_64,
-Clang on ARM64) and need no Visual C++ runtime: they hold `bin/zxc.exe`, `bin/libzxc.dll` with its
-import library `lib/libzxc.dll.a`, `include/`, the static `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc`
-and `lib/cmake/zxc/zxcConfig.cmake`. MSVC programs link the DLL, which exposes a plain C ABI, or
-build zxc from source (vcpkg, Conan, CMake).
+Clang on ARM64) and need no Visual C++ runtime: they hold `bin/zxc.exe`, `bin/libzxc.dll`, its
+import libraries `lib/zxc.lib` (MSVC) and `lib/libzxc.dll.a` (MinGW), `include/`, the static
+`lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and `lib/cmake/zxc/zxcConfig.cmake`. MSVC programs link
+`zxc.lib` and define `ZXC_DLL_IMPORT`; the static `libzxc.a` is for MinGW.
 
 Release tags are PGP-signed. Check the key's fingerprint against the one published in
 [SECURITY.md](../.github/SECURITY.md) *before* importing it — otherwise the import is circular, and

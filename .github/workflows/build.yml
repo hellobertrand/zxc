@@ -154,7 +154,7 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
-  # MinGW-w64: no Visual C++ runtime; MSVC links the DLL's C ABI.
+  # MinGW-w64: no Visual C++ runtime; MSVC links the DLL through zxc.lib.
   build-test-windows:
     name: Build Windows ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -169,12 +169,14 @@ jobs:
             msystem: MINGW64
             pkg_prefix: mingw-w64-x86_64
             cc: gcc
+            vs_arch: x64
             platform: windows-x86_64
           - name: ARM64
             os: windows-11-arm
             msystem: CLANGARM64
             pkg_prefix: mingw-w64-clang-aarch64
             cc: clang
+            vs_arch: arm64
             platform: windows-arm64
 
     defaults:
@@ -206,7 +208,7 @@ jobs:
           cmake -S . -B build-dll -G Ninja -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF -DBUILD_SHARED_LIBS=ON \
               -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF -DZXC_INSTALL=OFF \
-              -DCMAKE_SHARED_LINKER_FLAGS=-static
+              -DCMAKE_SHARED_LINKER_FLAGS="-static -Wl,--output-def,libzxc.def"
           cmake --build build-dll --parallel
 
       - name: Check runtime dependencies
@@ -223,6 +225,24 @@ jobs:
           ctest --test-dir build --output-on-failure
           ./tests/test_cli.sh build/zxc.exe
 
+      # MS-format zxc.lib from the DLL's exports, checked by a cl-built consumer.
+      - name: MSVC import library and consumer test
+        shell: pwsh
+        run: |
+          $def = 'build-dll\libzxc.def'
+          $exports = Get-Content $def | Where-Object { $_ -notmatch '^\s*LIBRARY' }
+          Set-Content $def (@('LIBRARY libzxc.dll') + $exports)
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
+          Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
+          $arch = if ('${{ matrix.vs_arch }}' -eq 'x64') { 'amd64' } else { 'arm64' }
+          Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=$arch -host_arch=$arch"
+          lib /nologo /def:$def /machine:${{ matrix.vs_arch }} /out:build-dll\zxc.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          cl /nologo /W4 /DZXC_DLL_IMPORT /Iinclude tests\packaging\consumer.c /Fobuild-dll\ /Febuild-dll\consumer_msvc.exe /link build-dll\zxc.lib
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          & .\build-dll\consumer_msvc.exe
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+
       - name: Package Release (Archive)
         if: github.event_name == 'release'
         run: |
@@ -234,7 +254,7 @@ jobs:
           STAGE="release_staging/${ARCHIVE_BASE}"
           cmake --install build --prefix "$STAGE"
           cp build-dll/*.dll "$STAGE/bin/"
-          cp build-dll/*.dll.a "$STAGE/lib/"
+          cp build-dll/*.dll.a build-dll/zxc.lib "$STAGE/lib/"
           cp LICENSE "$STAGE/LICENSE.txt"
           cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
 
@@ -245,7 +265,8 @@ jobs:
 
           **Contents** (built with MinGW-w64; no Visual C++ runtime needed):
           - \`bin/zxc.exe\` — CLI compressor/decompressor
-          - \`bin/libzxc.dll\`, \`lib/libzxc.dll.a\` — shared library and its import library (C ABI, usable from MSVC)
+          - \`bin/libzxc.dll\` — shared library (C ABI)
+          - \`lib/zxc.lib\` — its import library for MSVC (define \`ZXC_DLL_IMPORT\`); \`lib/libzxc.dll.a\` for MinGW
           - \`lib/libzxc.a\` — static library for MinGW toolchains, with pkg-config and CMake files
           - \`include/\` — C headers
 
