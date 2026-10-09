@@ -835,6 +835,30 @@ else
     log_fail "Decompress recursive directory failed (content mismatch or missing files)"
 fi
 
+# 22.3 Links are reported and skipped, never followed; the walk still exits 0
+#      (POSIX only: symlinks need privileges on Windows).
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        mkdir -p "$TEST_DIR/rec_links/d" "$TEST_DIR/rec_outside"
+        cp "$TEST_FILE" "$TEST_DIR/rec_links/d/real.txt"
+        cp "$TEST_FILE" "$TEST_DIR/rec_outside/outside.txt"
+        ln -s "$TEST_DIR/rec_outside" "$TEST_DIR/rec_links/to_outside"
+        ln -s "$TEST_DIR/rec_links/d/real.txt" "$TEST_DIR/rec_links/to_file.txt"
+        ln -s . "$TEST_DIR/rec_links/loop"
+        ln -s /nonexistent "$TEST_DIR/rec_links/dangling"
+        REC_OUT=$("$ZXC_BIN" -r -k -3 "$TEST_DIR/rec_links" 2>&1); REC_RC=$?
+        if [[ $REC_RC -eq 0 ]] && [[ -f "$TEST_DIR/rec_links/d/real.txt.zxc" ]] && \
+           [[ ! -e "$TEST_DIR/rec_links/to_file.txt.zxc" ]] && \
+           [[ ! -e "$TEST_DIR/rec_outside/outside.txt.zxc" ]] && \
+           [[ $(printf '%s\n' "$REC_OUT" | grep -c "is a link, ignored") -eq 4 ]]; then
+            log_pass "Recursive mode skips links (-r)"
+        else
+            log_fail "Recursive mode followed a link or failed (rc=$REC_RC): $REC_OUT"
+        fi
+        ;;
+esac
+
 # 23. Block Size Tests (-B)
 echo "Testing Block Size (-B)..."
 
@@ -1157,8 +1181,8 @@ fi
 # 26. unzxc Alias (argv[0]-based mode detection)
 echo "Testing unzxc alias..."
 
-# "unzxc" is a symlink to zxc that defaults to decompression (like unzstd /
-# gunzip). Create a local symlink to the binary under test and exercise it.
+# "unzxc" is a symlink to zxc that defaults to decompression.
+# Create a local symlink to the binary under test and exercise it.
 # Symlinks are POSIX-only; skip gracefully where they are unsupported.
 ZXC_ABS=$(cd "$(dirname "$ZXC_BIN")" && pwd)/$(basename "$ZXC_BIN")
 UNZXC_BIN="$TEST_DIR/unzxc"

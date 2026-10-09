@@ -104,7 +104,7 @@ libzxc uses an **opt-in** export strategy:
 | `ZXC_NO_EXPORT` | Forces a symbol to be hidden (`visibility("hidden")`). |
 | `ZXC_DEPRECATED` | Emits a compiler warning when a deprecated symbol is used. |
 | `ZXC_STATIC_DEFINE` | Define when building or consuming as a static library. |
-| `ZXC_DLL_IMPORT` | Windows only, optional: define when consuming `zxc.dll` to declare the API `__declspec(dllimport)`. |
+| `ZXC_DLL_IMPORT` | Windows only, optional: define when consuming `libzxc.dll` to declare the API `__declspec(dllimport)`. |
 | `zxc_lib_EXPORTS` | Set automatically by CMake when building the shared library. Do not define manually. |
 
 ### Windows: `dllimport` is opt-in
@@ -151,7 +151,7 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 |----------|-------|
 | Linux | `libzxc.so` -> `libzxc.so.5` -> `libzxc.so.0.14.1` |
 | macOS | `libzxc.dylib` -> `libzxc.5.dylib` -> `libzxc.0.14.1.dylib` |
-| Windows | `zxc.dll` + `zxc.lib` (import) |
+| Windows | `libzxc.dll` + `zxc.lib` (import); `libzxc_static.lib` in the release archives |
 
 ---
 

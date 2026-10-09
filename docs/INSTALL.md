@@ -29,11 +29,11 @@ sudo cp -r zxc-<version>-linux-x86_64/* /usr/local/
 ```
 
 Linux and macOS archives hold `bin/zxc`, `include/`, `lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and
-`lib/cmake/zxc/zxcConfig.cmake`. Windows ZIP archives are built with MinGW-w64 (GCC on x86_64,
-Clang on ARM64) and need no Visual C++ runtime: they hold `bin/zxc.exe`, `bin/libzxc.dll`, its
-import libraries `lib/zxc.lib` (MSVC) and `lib/libzxc.dll.a` (MinGW), `include/`, the static
-`lib/libzxc.a`, `lib/pkgconfig/libzxc.pc` and `lib/cmake/zxc/zxcConfig.cmake`. MSVC programs link
-`zxc.lib` and define `ZXC_DLL_IMPORT`; the static `libzxc.a` is for MinGW.
+`lib/cmake/zxc/zxcConfig.cmake`. Windows ZIP archives are built with MSVC: `bin/zxc.exe` carries its C runtime, so it needs no
+Visual C++ Redistributable; `bin/libzxc.dll`, which does need it, with its import library `lib/zxc.lib` (define
+`ZXC_DLL_IMPORT`), described by `lib/pkgconfig/libzxc.pc` and `lib/cmake/zxc/zxcConfig.cmake`;
+`lib/libzxc_static.lib`, a static library built with `/MD` (define `ZXC_STATIC_DEFINE`); and
+`include/`. MinGW users build from source.
 
 Release tags are PGP-signed. Check the key's fingerprint against the one published in
 [SECURITY.md](../.github/SECURITY.md) *before* importing it — otherwise the import is circular, and
@@ -104,7 +104,7 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 
 | Option | Default (standalone) | Default (vendored) | Description |
 |--------|----------------------|--------------------|-------------|
-| `BUILD_SHARED_LIBS` | OFF | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `zxc.dll`) |
+| `BUILD_SHARED_LIBS` | OFF | OFF | Build shared libraries instead of static (`libzxc.so`, `libzxc.dylib`, `libzxc.dll`) |
 | `ZXC_NATIVE_ARCH` | ON | OFF | Enable `-march=native` for maximum performance |
 | `ZXC_ENABLE_LTO` | OFF | OFF | Enable Link-Time Optimization (LTO) |
 | `ZXC_PGO_MODE` | OFF | OFF | Profile-Guided Optimization mode (`OFF`, `GENERATE`, `USE`) |

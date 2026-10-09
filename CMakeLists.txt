@@ -63,9 +63,9 @@ add_library(zxc::zxc_lib ALIAS zxc_lib)
 # Increment this number ONLY when breaking the ABI.
 set(ZXC_SOVERSION 5)
 
-# Set library output name and version
 set_target_properties(zxc_lib PROPERTIES
     OUTPUT_NAME zxc
+    PREFIX lib
     VERSION ${PROJECT_VERSION}
     SOVERSION ${ZXC_SOVERSION}
 )

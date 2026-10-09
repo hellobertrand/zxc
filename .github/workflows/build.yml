@@ -29,17 +29,14 @@ jobs:
         include:
           - name: Linux x86_64
             os: ubuntu-latest
-            artifact_name: zxc
             platform: linux-x86_64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: Linux ARM64
             os: ubuntu-24.04-arm
-            artifact_name: zxc
             platform: linux-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
           - name: macOS ARM64
             os: macos-26
-            artifact_name: zxc
             platform: macos-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
 
@@ -60,7 +57,7 @@ jobs:
         run: cmake -S . -B build -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }}
 
       - name: Build 
-        run: cmake --build build --config Release --parallel
+        run: cmake --build build --parallel
 
       # The released zxc must start on glibc 2.34 (RHEL 9, Debian 12, Ubuntu 22.04).
       - name: Check glibc floor (Linux)
@@ -82,26 +79,10 @@ jobs:
 
       - name: Test (native)
         working-directory: build
-        run: ctest -C Release --output-on-failure
+        run: ctest --output-on-failure
 
       - name: Test CLI
-        shell: bash
-        run: |
-          BUILD_DIR="build"
-          # Find binary (handle both Ninja and Visual Studio generators)
-          if [ -f "$BUILD_DIR/Release/${{ matrix.artifact_name }}" ]; then
-            ZXC_BIN="$BUILD_DIR/Release/${{ matrix.artifact_name }}"
-          elif [ -f "$BUILD_DIR/${{ matrix.artifact_name }}" ]; then
-            ZXC_BIN="$BUILD_DIR/${{ matrix.artifact_name }}"
-          else
-            echo "Binary not found for CLI test!"
-            find "$BUILD_DIR" -name "${{ matrix.artifact_name }}"
-            exit 1
-          fi
-          
-          echo "Testing with binary: $ZXC_BIN"
-          chmod +x tests/test_cli.sh
-          ./tests/test_cli.sh "$ZXC_BIN"
+        run: ./tests/test_cli.sh build/zxc
 
       - name: Package Release (Archive)
         if: github.event_name == 'release'
@@ -114,33 +95,11 @@ jobs:
 
           STAGE="release_staging/${ARCHIVE_BASE}"
 
-          cmake --install build --prefix "$STAGE" --config Release
-
-          cp LICENSE "$STAGE/LICENSE.txt"
-          cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
-
-          cat > "$STAGE/README.md" <<EOF
-          # ZXC ${VERSION}
-
-          Asymmetric Lossless Compression Built for Ultra-Fast Decode
-
-          **Contents:**
-          - \`bin/\` — \`zxc\` CLI compressor/decompressor
-          - \`lib/\` — \`libzxc.a\` static library, pkg-config and CMake files
-          - \`include/\` — C headers
-
-          **CLI usage:** See [MANUAL.md](MANUAL.md) for the full reference (synopsis, options, examples).
-
-          **Release history:** https://github.com/${GITHUB_REPOSITORY}/releases
-
-          **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
-
-          **Verify build provenance (SLSA):** every archive is signed via [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). Verify with:
-          \`\`\`
-          gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}
-          \`\`\`
-
-          License: BSD-3-Clause (see LICENSE.txt)
+          cmake --install build --prefix "$STAGE"
+          .github/scripts/stage-release-docs.sh "$VERSION" "$STAGE" <<'EOF'
+          - `bin/zxc` — CLI compressor/decompressor
+          - `lib/libzxc.a` — static library, with pkg-config and CMake files
+          - `include/` — C headers
           EOF
 
           # Create archive with versioned top-level directory
@@ -154,7 +113,8 @@ jobs:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
 
-  # MinGW-w64: no Visual C++ runtime; MSVC links the DLL through zxc.lib.
+  # MSVC: the CLI on the static C runtime (/MT) runs on a clean Windows; the DLL on
+  # the shared one takes MSVC programs' FILE*s; the static library has no LTO.
   build-test-windows:
     name: Build Windows ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -166,82 +126,59 @@ jobs:
         include:
           - name: x86_64
             os: windows-latest
-            msystem: MINGW64
-            pkg_prefix: mingw-w64-x86_64
-            cc: gcc
-            vs_arch: x64
+            arch: x64
             platform: windows-x86_64
           - name: ARM64
             os: windows-11-arm
-            msystem: CLANGARM64
-            pkg_prefix: mingw-w64-clang-aarch64
-            cc: clang
-            vs_arch: arm64
+            arch: ARM64
             platform: windows-arm64
 
     defaults:
       run:
-        shell: msys2 {0}
+        shell: bash
 
     steps:
-      - name: Setup MSYS2
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2.32.0
-        with:
-          msystem: ${{ matrix.msystem }}
-          update: true
-          path-type: inherit
-          install: >-
-            ${{ matrix.pkg_prefix }}-${{ matrix.cc }}
-            diffutils
-            zip
-
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # -static embeds libgcc and libwinpthread.
       - name: Build
         run: |
-          cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF \
-              -DCMAKE_EXE_LINKER_FLAGS=-static
-          cmake --build build --parallel
-          cmake -S . -B build-dll -G Ninja -DCMAKE_BUILD_TYPE=Release \
-              -DCMAKE_C_COMPILER=${{ matrix.cc }} -DZXC_NATIVE_ARCH=OFF -DBUILD_SHARED_LIBS=ON \
-              -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF -DZXC_INSTALL=OFF \
-              -DCMAKE_SHARED_LINKER_FLAGS="-static -Wl,--output-def,libzxc.def"
-          cmake --build build-dll --parallel
-
-      - name: Check runtime dependencies
-        run: |
-          for f in build/zxc.exe build-dll/*.dll; do
-            if grep -aqiE 'libgcc_s|libwinpthread|libc\+\+|libunwind|vcruntime' "$f"; then
-              echo "::error::$f depends on a runtime DLL Windows does not ship"
-              exit 1
-            fi
-          done
+          cmake -S . -B build-cli -A ${{ matrix.arch }} -DZXC_NATIVE_ARCH=OFF \
+              -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DZXC_INSTALL=OFF
+          cmake --build build-cli --config Release --parallel
+          cmake -S . -B build-static -A ${{ matrix.arch }} -DZXC_NATIVE_ARCH=OFF \
+              -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
+          cmake --build build-static --config Release --parallel
+          cmake -S . -B build-dll -A ${{ matrix.arch }} -DZXC_NATIVE_ARCH=OFF \
+              -DBUILD_SHARED_LIBS=ON -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
+          cmake --build build-dll --config Release --parallel
 
       - name: Test
         run: |
-          ctest --test-dir build --output-on-failure
-          ./tests/test_cli.sh build/zxc.exe
+          ctest --test-dir build-cli -C Release --output-on-failure
+          ./tests/test_cli.sh build-cli/Release/zxc.exe
 
-      # MS-format zxc.lib from the DLL's exports, checked by a cl-built consumer.
-      - name: MSVC import library and consumer test
+      # zxc.exe needs only Windows' own DLLs; libzxc.dll (/MD) adds the Visual C++
+      # runtime.
+      - name: Check runtime dependencies
         shell: pwsh
         run: |
-          $def = 'build-dll\libzxc.def'
-          $exports = Get-Content $def | Where-Object { $_ -notmatch '^\s*LIBRARY' }
-          Set-Content $def (@('LIBRARY libzxc.dll') + $exports)
           $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -property installationPath
           Import-Module "$vs\Common7\Tools\Microsoft.VisualStudio.DevShell.dll"
-          $arch = if ('${{ matrix.vs_arch }}' -eq 'x64') { 'amd64' } else { 'arm64' }
+          $arch = '${{ matrix.arch }}'.ToLower()  # VsDevCmd rejects 'ARM64'
           Enter-VsDevShell -VsInstallPath $vs -SkipAutomaticLocation -DevCmdArguments "-arch=$arch -host_arch=$arch"
-          lib /nologo /def:$def /machine:${{ matrix.vs_arch }} /out:build-dll\zxc.lib
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          cl /nologo /W4 /DZXC_DLL_IMPORT /Iinclude tests\packaging\consumer.c /Fobuild-dll\ /Febuild-dll\consumer_msvc.exe /link build-dll\zxc.lib
-          if ($LASTEXITCODE -ne 0) { exit 1 }
-          & .\build-dll\consumer_msvc.exe
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          function Imports($file) {
+            $out = @(dumpbin /nologo /dependents $file)
+            $i = [Array]::FindIndex($out, [Predicate[string]] { param($l) $l -match 'Image has the following dependencies' })
+            if ($i -lt 0) { throw "$file`: dumpbin listed no dependencies" }
+            return @($out[($i + 1)..($out.Count - 1)] | ForEach-Object { $_.Trim() } | Where-Object { $_ -match '\.dll$' })
+          }
+          foreach ($case in @(@('build-cli\Release\zxc.exe', '^(KERNEL32|api-ms-win-crt-[a-z0-9-]+)\.dll$'),
+                              @('build-dll\Release\libzxc.dll', '^(KERNEL32|VCRUNTIME140|api-ms-win-crt-[a-z0-9-]+)\.dll$'))) {
+            $deps = Imports $case[0]
+            $bad = @($deps | Where-Object { $_ -notmatch $case[1] })
+            if ($deps.Count -eq 0 -or $bad.Count -gt 0) { throw "$($case[0]) imports: $($deps -join ', ')" }
+          }
 
       - name: Package Release (Archive)
         if: github.event_name == 'release'
@@ -252,40 +189,23 @@ jobs:
           echo "ARCHIVE=$ARCHIVE" >> "$GITHUB_ENV"
 
           STAGE="release_staging/${ARCHIVE_BASE}"
-          cmake --install build --prefix "$STAGE"
-          cp build-dll/*.dll "$STAGE/bin/"
-          cp build-dll/*.dll.a build-dll/zxc.lib "$STAGE/lib/"
-          cp LICENSE "$STAGE/LICENSE.txt"
-          cp docs/man/zxc.1.md "$STAGE/MANUAL.md"
-
-          cat > "$STAGE/README.md" <<EOF
-          # ZXC ${VERSION}
-
-          Asymmetric Lossless Compression Built for Ultra-Fast Decode
-
-          **Contents** (built with MinGW-w64; no Visual C++ runtime needed):
-          - \`bin/zxc.exe\` — CLI compressor/decompressor
-          - \`bin/libzxc.dll\` — shared library (C ABI)
-          - \`lib/zxc.lib\` — its import library for MSVC (define \`ZXC_DLL_IMPORT\`); \`lib/libzxc.dll.a\` for MinGW
-          - \`lib/libzxc.a\` — static library for MinGW toolchains, with pkg-config and CMake files
-          - \`include/\` — C headers
-
-          **CLI usage:** See [MANUAL.md](MANUAL.md) for the full reference (synopsis, options, examples).
-
-          **Release history:** https://github.com/${GITHUB_REPOSITORY}/releases
-
-          **Documentation, benchmarks & source:** https://github.com/${GITHUB_REPOSITORY}
-
-          **Verify build provenance (SLSA):** every archive is signed via [GitHub Artifact Attestations](https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds). Verify with:
-          \`\`\`
-          gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}
-          \`\`\`
-
-          License: BSD-3-Clause (see LICENSE.txt)
+          cmake --install build-dll --prefix "$STAGE" --config Release
+          cp build-cli/Release/zxc.exe "$STAGE/bin/"
+          cp build-static/Release/libzxc.lib "$STAGE/lib/libzxc_static.lib"
+          for f in bin/zxc.exe bin/libzxc.dll lib/zxc.lib lib/libzxc_static.lib \
+                   lib/cmake/zxc/zxcConfig.cmake lib/pkgconfig/libzxc.pc include/zxc.h; do
+            test -f "$STAGE/$f" || { echo "::error::$f missing from the archive"; exit 1; }
+          done
+          .github/scripts/stage-release-docs.sh "$VERSION" "$STAGE" <<'EOF'
+          - `bin/zxc.exe` — CLI compressor/decompressor (static C runtime)
+          - `bin/libzxc.dll`, `lib/zxc.lib` — shared library (needs the Visual C++ Redistributable) and its import library; define `ZXC_DLL_IMPORT`
+          - `lib/libzxc_static.lib` — static library (`/MD`, define `ZXC_STATIC_DEFINE`)
+          - `lib/cmake/zxc/`, `lib/pkgconfig/` — CMake package and pkg-config files for the DLL
+          - `include/` — C headers
           EOF
 
           cd release_staging
-          zip -r "../${ARCHIVE}" "${ARCHIVE_BASE}"
+          7z a "../${ARCHIVE}" "${ARCHIVE_BASE}"
 
       - name: Upload Artifacts
         if: github.event_name == 'release'

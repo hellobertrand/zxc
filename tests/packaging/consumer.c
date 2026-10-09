@@ -9,12 +9,18 @@
  * Downstream consumer smoke test for an *installed* ZXC, built by
  * .github/workflows/packaging.yml via find_package, pkg-config and raw -I/-l.
  * Touches enough of the API to make the link step meaningful: a mismatched
- * zxc_export.h shows up here as unresolved __imp_zxc_* on Windows.
+ * zxc_export.h shows up here as unresolved __imp_zxc_* on Windows. The FILE*
+ * roundtrip checks that, on Windows, both sides share one C runtime.
  */
+
+#ifdef _MSC_VER
+#define _CRT_SECURE_NO_WARNINGS
+#endif
 
 #include <stdio.h>
 #include <string.h>
 #include <zxc.h>
+#include <zxc_stream.h>
 
 int main(void) {
     static char input[64 * 1024];
@@ -50,6 +56,35 @@ int main(void) {
 
     if (memcmp(input, output, sizeof(input)) != 0) {
         fprintf(stderr, "consumer: roundtrip mismatch\n");
+        return 1;
+    }
+
+    // FILE* roundtrip on streams opened here; the failing step is named, so an
+    // unwritable directory is not taken for a C runtime mismatch.
+    const char* failed = NULL;
+    FILE* const f_in = fopen("consumer_in.tmp", "w+b");
+    FILE* const f_arc = fopen("consumer_arc.tmp", "w+b");
+    FILE* const f_out = fopen("consumer_out.tmp", "w+b");
+    if (!f_in || !f_arc || !f_out)
+        failed = "creating temporary files in the working directory";
+    else if (fwrite(input, 1, sizeof(input), f_in) != sizeof(input) || fseek(f_in, 0, SEEK_SET))
+        failed = "writing the input file";
+    else if (zxc_stream_compress(f_in, f_arc, NULL) <= 0 || fseek(f_arc, 0, SEEK_SET))
+        failed = "zxc_stream_compress";
+    else if (zxc_stream_decompress(f_arc, f_out, NULL) != (int64_t)sizeof(input) ||
+             fseek(f_out, 0, SEEK_SET))
+        failed = "zxc_stream_decompress";
+    else if (fread(output, 1, sizeof(output), f_out) != sizeof(output) ||
+             memcmp(input, output, sizeof(input)) != 0)
+        failed = "comparing the FILE* roundtrip output";
+    if (f_in) fclose(f_in);
+    if (f_arc) fclose(f_arc);
+    if (f_out) fclose(f_out);
+    remove("consumer_in.tmp");
+    remove("consumer_arc.tmp");
+    remove("consumer_out.tmp");
+    if (failed) {
+        fprintf(stderr, "consumer: FILE* roundtrip failed: %s\n", failed);
         return 1;
     }
 

@@ -184,9 +184,9 @@ func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 	}, nil
 }
 
-// Read decompresses bytes into p. Like gzip and zstd readers, it reads the
-// source until it ends, so concatenated archives decode as one stream; on a
-// source that stays open after one frame, set [Reader.Multistream] to false.
+// Read decompresses bytes into p. It reads the source until it ends, so
+// concatenated archives decode as one stream; on a source that stays open
+// after one frame, set [Reader.Multistream] to false.
 // Returns io.EOF once the source ends on a validated footer (or the first frame
 // does, without multistream), io.ErrUnexpectedEOF if it ends before one.
 func (r *Reader) Read(p []byte) (int, error) {

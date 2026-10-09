@@ -146,6 +146,10 @@ jobs:
               if [ -z "${{ matrix.cross_compiler_c }}" ]; then
                   echo "Running Tests for $LIB_TYPE..."
                   ctest --test-dir $BUILD_DIR -C Release --output-on-failure
+                  # The 32-bit and the /MD (shared UCRT) MSVC CLIs are only tested here.
+                  if [ "${{ matrix.os }}" = "windows" ]; then
+                      ./tests/test_cli.sh "$BUILD_DIR/Release/zxc.exe"
+                  fi
               else
                   echo "Skipping tests for $LIB_TYPE (Cross-compilation)"
               fi

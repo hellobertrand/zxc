@@ -56,7 +56,21 @@ the seek table:
 > A v8 build is ZXC **0.14.x**. Keep it until every archive you care about is
 > transcoded — it is the only thing that can read v8 data.
 
+### Windows library names (0.15.x)
+
+The DLL is `libzxc.dll` now, as on every other platform, where 0.14.x built
+`zxc.dll`; its import library keeps the name `zxc.lib`, so projects that link it
+need no change, but those that ship the DLL do. `find_package(zxc)` and
+`pkg-config` consumers need no change either. The release archive's static
+library is `lib/libzxc_static.lib`, replacing the `lib/zxc.lib` of 0.14.x,
+which was static; MSVC programs that linked that one statically must switch,
+or they now link the DLL's import library.
+
 ### CLI output (0.15.x)
+
+`zxc -r` no longer follows symbolic links, junctions or mount points: each is
+reported and skipped, and the exit status is non-zero when a directory or an
+entry cannot be read.
 
 Concatenated archives (`cat a.zxc b.zxc`) now decode as one stream, so the
 listing describes every frame. Scripts that parse it need these changes:

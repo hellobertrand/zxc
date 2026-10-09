@@ -96,6 +96,11 @@ jobs:
               -DZXC_CONSUME_MODE=find_package \
               -DCMAKE_PREFIX_PATH="$PWD/inst_$LIB_TYPE"
             cmake --build "cm_$LIB_TYPE" --config Release
+            # Run it: the FILE* roundtrip needs the DLL loaded, not just linked.
+            exe=$(find "cm_$LIB_TYPE" -type f \( -name 'consumer' -o -name 'consumer.exe' \) | head -1)
+            test -n "$exe" || { echo "::error::no consumer executable in cm_$LIB_TYPE"; exit 1; }
+            PATH="$PWD/inst_$LIB_TYPE/bin:$PATH" LD_LIBRARY_PATH="$PWD/inst_$LIB_TYPE/lib" \
+              DYLD_LIBRARY_PATH="$PWD/inst_$LIB_TYPE/lib" "$exe"
           done
 
       # No defines, no usage requirements: only zxc_export.h's own default keeps
@@ -104,7 +109,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          lib=$(find inst_static -name 'libzxc.a' -o -name 'zxc.lib' -o -name 'libzxc.lib' | head -1)
+          lib=$(find inst_static -name 'libzxc.a' -o -name 'libzxc.lib' | head -1)
           test -n "$lib" || { echo "::error::no static library found in inst_static"; exit 1; }
           cmake -S tests/packaging -B cm_direct \
             -DCMAKE_BUILD_TYPE=Release \
@@ -112,6 +117,9 @@ jobs:
             -DZXC_INCLUDE_DIR="$PWD/inst_static/include" \
             -DZXC_LIBRARY="$PWD/$lib"
           cmake --build cm_direct --config Release
+          exe=$(find cm_direct -type f \( -name 'consumer' -o -name 'consumer.exe' \) | head -1)
+          test -n "$exe" || { echo "::error::no consumer executable in cm_direct"; exit 1; }
+          "$exe"
 
       # The path that was broken: the .pc file is the whole contract. POSIX only;
       # the .pc content check above covers Windows.

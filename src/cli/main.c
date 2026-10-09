@@ -427,6 +427,15 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             continue;
         }
 
+        // Links stay out of the walk; other reparse points
+        // (OneDrive placeholders) are files.
+        if ((find_data.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) &&
+            (find_data.dwReserved0 == IO_REPARSE_TAG_SYMLINK ||
+             find_data.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT)) {
+            zxc_log("Warning: '%s' is a link, ignored\n", full_path);
+            continue;
+        }
+
         if (find_data.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
@@ -444,6 +453,11 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                                                json_output, seekable, dict, dict_size);
         }
     } while (FindNextFileA(hFind, &find_data) != 0);
+    const DWORD walk_err = GetLastError();
+    if (walk_err != ERROR_NO_MORE_FILES) {
+        zxc_log("Error reading directory '%s' (error %lu)\n", dir_path, (unsigned long)walk_err);
+        overall_ret = 1;
+    }
 
     FindClose(hFind);
 #else
@@ -453,8 +467,16 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         return 1;
     }
 
-    const struct dirent* entry;
-    while ((entry = readdir(dir)) != NULL) {
+    for (;;) {
+        errno = 0;  // readdir signals an error only through errno
+        const struct dirent* const entry = readdir(dir);
+        if (!entry) {
+            if (errno != 0) {
+                zxc_log("Error reading directory '%s': %s\n", dir_path, strerror(errno));
+                overall_ret = 1;
+            }
+            break;
+        }
         if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) {
             continue;
         }
@@ -475,9 +497,12 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             continue;
         }
 
+        // lstat: links stay out of the walk.
         struct stat st;
-        if (stat(full_path, &st) == 0) {
-            if (S_ISDIR(st.st_mode)) {
+        if (lstat(full_path, &st) == 0) {
+            if (S_ISLNK(st.st_mode)) {
+                zxc_log("Warning: '%s' is a link, ignored\n", full_path);
+            } else if (S_ISDIR(st.st_mode)) {
                 overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                                  to_stdout, checksum, level, block_size,
                                                  json_output, seekable, dict, dict_size);
@@ -494,6 +519,9 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                                                    force, to_stdout, checksum, level, block_size,
                                                    json_output, seekable, dict, dict_size);
             }
+        } else if (errno != ENOENT) {  // ENOENT: removed during the walk
+            zxc_log("Error accessing '%s': %s\n", full_path, strerror(errno));
+            overall_ret = 1;
         }
         free(full_path);
     }
@@ -1381,7 +1409,7 @@ int main(int argc, char** argv) {
     zxc_mode_t mode = MODE_COMPRESS;
 
     /* When invoked as "unzxc" (typically a symlink to zxc), default to
-     * decompression -- like unzstd / gunzip. An explicit -z/-d/-l/-t/-b below
+     * decompression. An explicit -z/-d/-l/-t/-b below
      * still overrides this default. */
     {
         const char* prog = (argc > 0 && argv[0]) ? argv[0] : "zxc";

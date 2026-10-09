@@ -21,6 +21,8 @@ is_cl = cc.get_id() == 'msvc'
 # As CMake: /wd4244 (lossless uint64 -> size_t narrowing), /wd4310 (deliberate
 # constant truncation by a cast).
 msvc_narrowing_args = msvc_syntax ? ['/wd4244', '/wd4310'] : []
+# As CMake: /W4 for MSVC, top-level only (warning_level=3 is /W4 there).
+msvc_w4 = msvc_syntax and not meson.is_subproject() ? ['warning_level=3'] : []
 
 # As CMake's ZXC_WARNING_FLAGS; warning_level=2 gives -Wall -Wextra.
 if not meson.is_subproject() and not msvc_syntax
@@ -28,6 +30,13 @@ if not meson.is_subproject() and not msvc_syntax
     '-Wshadow', '-Wformat=2', '-Wundef', '-Wpointer-arith', '-Wvla', '-Wcast-qual',
     '-Wdouble-promotion', '-Wimplicit-fallthrough', '-Wmissing-prototypes',
     '-Wstrict-prototypes']), language : 'c')
+endif
+
+# As CMake: GCC on Win64 may spill AVX vectors with aligned moves (PR54412).
+if cc.get_id() == 'gcc' and host_machine.system() == 'windows' and host_cpu == 'x86_64'
+  uvm_args = cc.get_supported_arguments(['-Wa,-muse-unaligned-vector-move'])
+  add_project_arguments(uvm_args, language : 'c')
+  add_project_link_arguments(uvm_args, language : 'c')
 endif
 
 # As CMake's zxc_apply_lib_flags: conversions, on 64-bit targets only.
@@ -128,6 +137,7 @@ foreach info : variant_sets
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,
+      override_options : msvc_w4,
       c_args : info[1] + msvc_narrowing_args + lib_warning_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
@@ -154,6 +164,8 @@ thread_dep = dependency('threads')
 
 libzxc = library('zxc',
   libzxc_sources,
+  name_prefix : 'lib',
+  override_options : msvc_w4,
   objects : variant_objects,
   c_args : lib_export_args + msvc_narrowing_args + lib_warning_args,
   gnu_symbol_visibility : 'hidden',
@@ -171,13 +183,13 @@ libzxc_dep = declare_dependency(
 )
 meson.override_dependency('libzxc', libzxc_dep)
 
-# Static link target for tests that access internal symbols (same pattern as
-# CMake's zxc_lib_static and zstd's libzstd_internal_dep).
+# Static link target for tests that access internal symbols.
 if get_option('default_library') == 'static'
   libzxc_static = libzxc
 else
   libzxc_static = static_library('zxc_static',
     libzxc_sources,
+    override_options : msvc_w4,
     objects : variant_objects,
     c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args + lib_warning_args,
     include_directories : libzxc_includes,
@@ -225,6 +237,7 @@ if not meson.is_subproject() and get_option('build_cli')
 
   executable('zxc',
     'src/cli/main.c',
+    override_options : msvc_w4,
     c_args : cli_c_args,
     link_args : cli_link_args,
     dependencies : [libzxc_dep, math_dep],
@@ -264,7 +277,9 @@ if not meson.is_subproject()
       'tests/test_misc.c',
       'tests/test_dict.c',
     ),
-    c_args : ['-DZXC_STATIC_DEFINE'],
+    override_options : msvc_w4,
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args +
+             (is_cl ? ['-D_CRT_SECURE_NO_WARNINGS'] : []),
     include_directories : libzxc_includes,
     link_with : libzxc_static,
     dependencies : [thread_dep],
