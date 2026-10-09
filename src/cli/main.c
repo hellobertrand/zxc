@@ -1194,15 +1194,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (use_stdout) _setmode(_fileno(stdout), _O_BINARY);
 
 #else
-    // On POSIX systems, there's no text/binary distinction, but we ensure
-    // no buffering issues occur by using freopen if needed
+    // POSIX has no binary mode. Never reopen stdout: "wb" truncates a >> target.
     if (use_stdin) {
         if (!freopen(NULL, "rb", stdin))
             zxc_log("Warning: Failed to reopen stdin in binary mode\n");
-    }
-    if (use_stdout) {
-        if (!freopen(NULL, "wb", stdout))
-            zxc_log("Warning: Failed to reopen stdout in binary mode\n");
     }
 #endif
 

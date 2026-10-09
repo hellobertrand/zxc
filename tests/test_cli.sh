@@ -1215,6 +1215,17 @@ else
     echo "  [SKIP] symlinks unsupported here, skipping unzxc alias test"
 fi
 
+# 26.3 -c appends to a >> redirect
+"$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/append.zxc"
+printf 'kept line\n' > "$TEST_DIR/append_out"
+"$ZXC_BIN" -d -c "$TEST_DIR/append.zxc" >> "$TEST_DIR/append_out"
+{ printf 'kept line\n'; cat "$TEST_FILE"; } > "$TEST_DIR/append_expected"
+if cmp -s "$TEST_DIR/append_expected" "$TEST_DIR/append_out"; then
+    log_pass "-c appends to a >> redirect"
+else
+    log_fail "-c truncated the file it should append to"
+fi
+
 # 27. Multiple input files (-m) and native Windows wildcard expansion (setargv.obj)
 echo "Testing multiple-file mode (-m) and wildcard expansion..."
 
