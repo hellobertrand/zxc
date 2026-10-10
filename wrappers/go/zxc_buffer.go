@@ -27,23 +27,42 @@ func CompressBound(inputSize int) uint64 {
 
 // Compress compresses data using the ZXC algorithm.
 //
-// Options: [WithLevel], [WithChecksum].
+// Options: [WithLevel], [WithChecksum], [WithSeekable], [WithDict].
 //
 //	out, err := zxc.Compress(data, zxc.WithLevel(zxc.LevelCompact))
 func Compress(data []byte, opts ...Option) ([]byte, error) {
+	dst := make([]byte, CompressBound(len(data)))
+	n, err := CompressTo(data, dst, opts...)
+	if err != nil {
+		return nil, err
+	}
+	return dst[:n], nil
+}
+
+// CompressTo compresses data into a pre-allocated output buffer.
+// Returns the number of bytes written. Empty input yields a minimal frame,
+// as with [Compress].
+//
+// Options: same as [Compress].
+func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
+	if len(output) == 0 {
+		return 0, ErrDstTooSmall
+	}
+
 	o := applyOptions(opts)
-	bound := CompressBound(len(data))
-	dst := make([]byte, bound)
 
 	var copts C.zxc_compress_opts_t
 	copts.level = C.int(o.level)
 	if o.checksum {
 		copts.checksum_enabled = 1
 	}
+	if o.seekable {
+		copts.seekable = 1
+	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
 	if err := setCompressDict(&copts, o, &pinner); err != nil {
-		return nil, err
+		return 0, err
 	}
 
 	// &data[0] panics on an empty slice; pass a valid non-nil pointer instead
@@ -56,47 +75,6 @@ func Compress(data []byte, opts ...Option) ([]byte, error) {
 
 	written := C.zxc_compress(
 		srcPtr,
-		C.size_t(len(data)),
-		unsafe.Pointer(&dst[0]),
-		C.size_t(bound),
-		&copts,
-	)
-
-	if written < 0 {
-		return nil, errorFromCode(written)
-	}
-	if written == 0 {
-		return nil, ErrInvalidData
-	}
-
-	return dst[:int(written)], nil
-}
-
-// CompressTo compresses data into a pre-allocated output buffer.
-// Returns the number of bytes written.
-func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
-	if len(data) == 0 {
-		return 0, ErrSrcTooSmall
-	}
-	if len(output) == 0 {
-		return 0, ErrDstTooSmall
-	}
-
-	o := applyOptions(opts)
-
-	var copts C.zxc_compress_opts_t
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
-	}
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	if err := setCompressDict(&copts, o, &pinner); err != nil {
-		return 0, err
-	}
-
-	written := C.zxc_compress(
-		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
 		unsafe.Pointer(&output[0]),
 		C.size_t(len(output)),

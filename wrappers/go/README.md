@@ -72,6 +72,11 @@ func main() {
 }
 ```
 
+`CompressTo` writes into a caller-supplied buffer (size it with `CompressBound`).
+Both `Compress` and `CompressTo` accept empty input and emit a minimal valid frame;
+`CompressTo` used to return `ErrSrcTooSmall` instead. Pass `zxc.WithSeekable(true)`
+to append a seek table for random access via `zxc.OpenBytes`.
+
 ## Streaming Files
 
 ```go

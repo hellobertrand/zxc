@@ -173,6 +173,87 @@ func TestCompressTo(t *testing.T) {
 	}
 }
 
+func TestCompressToEmpty(t *testing.T) {
+	want, err := Compress(nil)
+	if err != nil {
+		t.Fatalf("Compress: %v", err)
+	}
+	output := make([]byte, CompressBound(0))
+	n, err := CompressTo(nil, output)
+	if err != nil {
+		t.Fatalf("CompressTo: %v", err)
+	}
+	if !bytes.Equal(output[:n], want) {
+		t.Fatal("CompressTo(empty) differs from Compress(empty)")
+	}
+	got, err := Decompress(output[:n])
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Decompress: %v, %d bytes", err, len(got))
+	}
+}
+
+// Compress and CompressTo used to drop WithSeekable.
+func TestBufferSeekable(t *testing.T) {
+	data := bytes.Repeat([]byte("seekable buffer payload "), 50000)
+	for _, seekable := range []bool{false, true} {
+		out, err := Compress(data, WithSeekable(seekable))
+		if err != nil {
+			t.Fatalf("Compress: %v", err)
+		}
+		buf := make([]byte, CompressBound(len(data)))
+		n, err := CompressTo(data, buf, WithSeekable(seekable))
+		if err != nil {
+			t.Fatalf("CompressTo: %v", err)
+		}
+		for name, frame := range map[string][]byte{"Compress": out, "CompressTo": buf[:n]} {
+			fi, err := GetFrameInfo(frame)
+			if err != nil {
+				t.Fatalf("%s: GetFrameInfo: %v", name, err)
+			}
+			if fi.HasSeekTable != seekable {
+				t.Fatalf("%s: HasSeekTable = %v, want %v", name, fi.HasSeekTable, seekable)
+			}
+		}
+		if !seekable {
+			continue
+		}
+		for name, frame := range map[string][]byte{"Compress": out, "CompressTo": buf[:n]} {
+			s, err := OpenBytes(frame)
+			if err != nil {
+				t.Fatalf("%s: OpenBytes: %v", name, err)
+			}
+			got := make([]byte, 100)
+			_, err = s.DecompressRange(got, 12345, len(got))
+			s.Close()
+			if err != nil {
+				t.Fatalf("%s: DecompressRange: %v", name, err)
+			}
+			if !bytes.Equal(got, data[12345:12345+100]) {
+				t.Fatalf("%s: DecompressRange mismatch", name)
+			}
+		}
+	}
+}
+
+func TestBufferSeekableEmpty(t *testing.T) {
+	output := make([]byte, CompressBound(0))
+	n, err := CompressTo(nil, output, WithSeekable(true))
+	if err != nil {
+		t.Fatalf("CompressTo: %v", err)
+	}
+	fi, err := GetFrameInfo(output[:n])
+	if err != nil {
+		t.Fatalf("GetFrameInfo: %v", err)
+	}
+	if !fi.HasSeekTable || fi.DecompressedSize != 0 {
+		t.Fatalf("HasSeekTable = %v, DecompressedSize = %d", fi.HasSeekTable, fi.DecompressedSize)
+	}
+	got, err := Decompress(output[:n])
+	if err != nil || len(got) != 0 {
+		t.Fatalf("Decompress: %v, %d bytes", err, len(got))
+	}
+}
+
 func TestVersion(t *testing.T) {
 	major, minor, patch := Version()
 	s := VersionString()
