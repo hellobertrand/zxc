@@ -8,7 +8,9 @@
 
 **unzxc** is equivalent to **zxc -d**.
 
-**zxccat** is equivalent to **zxc -dc**, and decompresses every *INPUT-FILE* to standard output, one after the other.
+**zxccat** is equivalent to **zxc -dc** applied to every *INPUT-FILE* in turn, writing them all to standard output.
+
+**unzxc** and **zxccat** are symlinks to **zxc**, installed on POSIX systems only.
 
 ## DESCRIPTION
 **zxc** is a command-line interface for the ZXC compression library, a high-performance lossless compression algorithm optimized for maximum decompression throughput.

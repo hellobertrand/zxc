@@ -182,11 +182,11 @@ zxc assets.tar                        # level 3 (default) -> assets.tar.zxc
 zxc -z -5 assets.tar assets.tar.zxc   # level 5
 zxc -z -S assets.tar assets.tar.zxc   # seekable: O(1) random-access decompression
 
-# Decompress. "unzxc" is installed as an alias for "zxc -d"
+# Decompress. "unzxc" (POSIX installs) is an alias for "zxc -d"
 zxc -d assets.tar.zxc assets.tar
 unzxc assets.tar.zxc assets.tar
 
-# Decompress to stdout. "zxccat" is installed as an alias for "zxc -dc"
+# Decompress to stdout. "zxccat" (POSIX installs) runs "zxc -dc" on each file
 zxccat logs-1.zxc logs-2.zxc | grep ERROR
 
 # Benchmark mode (testing speed on your machine)
