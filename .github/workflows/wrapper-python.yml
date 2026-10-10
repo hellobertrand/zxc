@@ -1,10 +1,28 @@
 name: Wrapper Python
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # also how build.yml's release-wrappers publishes, at the tag
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'wrappers/python/**'
+      - '.github/workflows/wrapper-python.yml'
+  pull_request:
+    branches: [ main, candidate ]
+    paths:
+      - 'include/**'
+      - 'wrappers/python/**'
+      - '.github/workflows/wrapper-python.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
   build_wheels:

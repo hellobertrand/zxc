@@ -1,10 +1,28 @@
 name: Wrapper Rust
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # also how build.yml's release-wrappers publishes, at the tag
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'wrappers/rust/**'
+      - '.github/workflows/wrapper-rust.yml'
+  pull_request:
+    branches: [ main, candidate ]
+    paths:
+      - 'include/**'
+      - 'wrappers/rust/**'
+      - '.github/workflows/wrapper-rust.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
   test:

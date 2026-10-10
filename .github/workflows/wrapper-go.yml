@@ -2,9 +2,27 @@ name: Wrapper Go
 
 on:
   workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/**'
+      - 'include/**'
+      - 'CMakeLists.txt'
+      - 'wrappers/go/**'
+      - '.github/workflows/wrapper-go.yml'
+  pull_request:
+    branches: [ main, candidate ]
+    paths:
+      - 'include/**'
+      - 'wrappers/go/**'
+      - '.github/workflows/wrapper-go.yml'
 
 permissions:
   contents: read
+
+concurrency:
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
   test:
@@ -69,12 +87,12 @@ jobs:
         run: go test -v -count=1 ./...
 
       - name: Run Go Benchmarks (Unix)
-        if: runner.os != 'Windows'
+        if: runner.os != 'Windows' && github.event_name != 'pull_request'
         working-directory: ./wrappers/go
         run: CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem -count=1 ./...
 
       - name: Run Go Benchmarks (Windows)
-        if: runner.os == 'Windows'
+        if: runner.os == 'Windows' && github.event_name != 'pull_request'
         working-directory: ./wrappers/go
         env:
           CGO_ENABLED: "1"
