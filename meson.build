@@ -256,6 +256,7 @@ if not meson.is_subproject() and get_option('build_cli')
       install_symlink(alias + '.1',
         pointing_to : 'zxc.1',
         install_dir : get_option('mandir') / 'man1',
+        install_tag : 'man',
       )
     endforeach
   endif

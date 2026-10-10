@@ -52,7 +52,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Recursively process directories. When specified, any directory listed as an argument will be traversed, and all regular files within it will be processed (compressed or decompressed). This option implicitly enables `--multiple` mode.
 
 **-1**..**-7**
-: Set the compression level, from 1 (fastest compression) to 7 (smallest output). Default: 3. Higher levels trade compression speed for ratio; decompression stays fast at every level. Levels 6 (max) and 7 (ultra) compress far more slowly and suit data written once and read many times.
+: Set the compression level, from 1 (fastest compression) to 7 (smallest output). Default: 3. Higher levels trade compression speed for ratio; decompression stays fast at every level. Levels 6 (density) and 7 (ultra) compress far more slowly and suit data written once and read many times.
 
 **-T**, **--threads** *N*
 : Set the number of threads to use for compression and decompression. A value of `0` means auto-detection based on the number of available CPU cores.

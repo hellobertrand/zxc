@@ -896,10 +896,10 @@ class ZxcReader(_io.RawIOBase):
     Implements the standard :class:`io.RawIOBase` interface so it can be
     plugged into any code that expects a readable binary stream.
 
-    Like gzip and zstd readers it reads the source until it ends, so
-    concatenated archives decode as one stream. With ``multistream=False`` it
-    stops after the first frame instead, as on a source that stays open after
-    it; bytes read ahead past that frame are then lost to the source.
+    Reads the source until it ends, so concatenated archives decode as one stream.
+    With ``multistream=False`` it stops after the first frame instead, as on a
+    source that stays open after it; bytes read ahead past that frame are then
+    lost to the source.
 
     Raises :class:`OSError` with ``errno=None`` if the underlying source is
     drained before the ZXC footer is reached (truncated frame).

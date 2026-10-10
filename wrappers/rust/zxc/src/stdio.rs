@@ -184,9 +184,9 @@ impl<W: Write> Drop for Encoder<W> {
 /// Streaming decompressor implementing [`std::io::Read`].
 ///
 /// Pulls compressed bytes from the inner reader and yields decompressed
-/// bytes. Like gzip and zstd readers it reads until the inner reader ends, so
-/// concatenated archives decode as one stream; on a source that stays open
-/// after one frame, set [`Decoder::multistream`] to `false`. Returns
+/// bytes. Reads until the inner reader ends, so concatenated archives
+/// decode as one stream; on a source that stays open after one frame,
+/// set [`Decoder::multistream`] to `false`. Returns
 /// [`io::ErrorKind::UnexpectedEof`] if the inner reader is drained before the
 /// ZXC footer is reached.
 ///
