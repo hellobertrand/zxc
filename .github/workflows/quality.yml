@@ -107,6 +107,25 @@ jobs:
             "wrappers/wasm/*.mjs" \
             "wrappers/wasm/zxc_wasm.js"
 
+  man-page:
+    name: Code Quality - Man page
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # Pinned: another pandoc version may render src/cli/zxc.1 differently.
+      - name: Install pandoc 3.9
+        run: |
+          curl -fsSLo pandoc.tar.gz https://github.com/jgm/pandoc/releases/download/3.9/pandoc-3.9-linux-amd64.tar.gz
+          echo "872a10c7ec29d5278831d855b11bd4ade0df4d5ec9a089a3197bc63a37eb4003  pandoc.tar.gz" | sha256sum -c -
+          tar xzf pandoc.tar.gz
+          echo "$PWD/pandoc-3.9/bin" >> "$GITHUB_PATH"
+
+      - name: Check src/cli/zxc.1 matches src/cli/zxc.1.md
+        run: make man-check
+
   cppcheck:
     name: Code Quality - Cppcheck
     runs-on: ubuntu-latest

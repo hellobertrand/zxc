@@ -12,6 +12,8 @@
 #   make format       Format source code with clang-format
 #   make format-check Check formatting (CI mode)
 #   make lint         Scan source files for non-ASCII characters (CI mirror)
+#   make man          Regenerate src/cli/zxc.1 from src/cli/zxc.1.md (pandoc)
+#   make man-check    Check that src/cli/zxc.1 is up to date (CI mode)
 #   make doc          Generate Doxygen documentation
 #   make clean        Remove build directory
 #
@@ -26,7 +28,7 @@ CMAKE_EXTRA ?=
 FORMAT_VERSION := $(shell sed -n 's/^\#define ZXC_FILE_FORMAT_VERSION \([0-9]*\).*/\1/p' src/lib/zxc_internal.h)
 JOBS        ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
-.PHONY: all test conformance golden vectors format format-check lint doc clean
+.PHONY: all test conformance golden vectors format format-check lint man man-check doc clean
 
 # ── Build ────────────────────────────────────────────────────
 all:
@@ -99,6 +101,20 @@ lint:
 	|| { echo "ERROR: Non-ASCII characters found in source files."; exit 1; }
 
 # ── Documentation ────────────────────────────────────────────
+# ── Man page ─────────────────────────────────────────────────
+# src/cli/zxc.1 is committed, so building never needs pandoc.
+# CI pins the pandoc version: another one may render differently.
+# -smart keeps "--option" as two hyphens instead of an en dash.
+PANDOC    ?= pandoc
+MAN_FLAGS := --standalone --from markdown-smart --to man --shift-heading-level-by=-1 \
+             -M header="User Commands" -M footer=zxc
+man:
+	@$(PANDOC) $(MAN_FLAGS) src/cli/zxc.1.md -o src/cli/zxc.1
+
+man-check:
+	@$(PANDOC) $(MAN_FLAGS) src/cli/zxc.1.md | diff -u src/cli/zxc.1 - \
+	    || { echo "src/cli/zxc.1 is stale: run 'make man'"; exit 1; }
+
 doc:
 	@$(CMAKE) -S . -B $(BUILD) -DCMAKE_BUILD_TYPE=Release $(CMAKE_EXTRA)
 	@$(CMAKE) --build $(BUILD) --target doc

@@ -193,7 +193,7 @@ zxccat logs-1.zxc logs-2.zxc | grep ERROR
 zxc -b assets.tar
 ```
 
-Every option is in `zxc --help` and the [man page](docs/man/zxc.1.md).
+Every option is in `zxc --help` and the [man page](src/cli/zxc.1.md).
 
 #### Using with `tar`
 

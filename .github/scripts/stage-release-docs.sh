@@ -5,7 +5,7 @@
 set -eu
 contents=$(cat)
 cp LICENSE "$2/LICENSE.txt"
-cp docs/man/zxc.1.md "$2/MANUAL.md"
+cp src/cli/zxc.1.md "$2/MANUAL.md"
 cat > "$2/README.md" <<README
 # ZXC $1
 

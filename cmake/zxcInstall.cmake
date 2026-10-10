@@ -63,17 +63,25 @@ if(ZXC_INSTALL)
         install(TARGETS zxc
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
-        # "unzxc" (zxc -d) and "zxccat" (zxc -dc): symlinks to zxc, POSIX only.
+        # "unzxc" (zxc -d) and "zxccat" (zxc -dc): symlinks to zxc and to its
+        # man page. Symbolic links and man pages are POSIX-only; skipped on Windows.
         if(NOT WIN32)
-            if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
-                set(ZXC_SYMLINK_BINDIR "${CMAKE_INSTALL_BINDIR}")
-            else()
-                set(ZXC_SYMLINK_BINDIR "\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_BINDIR}")
-            endif()
+            install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/zxc.1
+                DESTINATION ${CMAKE_INSTALL_MANDIR}/man1
+            )
+            foreach(dir BINDIR MANDIR)
+                if(IS_ABSOLUTE "${CMAKE_INSTALL_${dir}}")
+                    set(ZXC_SYMLINK_${dir} "${CMAKE_INSTALL_${dir}}")
+                else()
+                    set(ZXC_SYMLINK_${dir} "\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_${dir}}")
+                endif()
+            endforeach()
             foreach(alias unzxc zxccat)
                 install(CODE "
                     execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
                         zxc \"\$ENV{DESTDIR}${ZXC_SYMLINK_BINDIR}/${alias}\")
+                    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
+                        zxc.1 \"\$ENV{DESTDIR}${ZXC_SYMLINK_MANDIR}/man1/${alias}.1\")
                 ")
             endforeach()
         endif()
