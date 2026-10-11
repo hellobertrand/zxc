@@ -399,25 +399,37 @@ static char* zxc_path_join(const char* dir, const char* name) {
     return path;
 }
 
-// Peeks one byte, the most ungetc() can push back, since stdin can't be rewound. The
-// magic word is stored little-endian, so its low byte (0xF5) comes first: no UTF-8
-// text starts with it, so it tells an archive from plain text.
-static int zxc_starts_like_archive(FILE* f) {
+// Whether f starts with the magic word, position kept. A file checks all 4 bytes; stdin
+// only the first, 0xF5 (ungetc() pushes back one), which starts no UTF-8 text.
+static int zxc_starts_like_archive(FILE* f, const int seekable) {
+    const long long pos = seekable ? ftello(f) : -1;
+    if (pos >= 0) {
+        uint8_t m[4];
+        const size_t n = fread(m, 1, sizeof(m), f);
+        if (fseeko(f, pos, SEEK_SET) != 0) return 1;  // let the decoder report it
+        return n == sizeof(m) && ((uint32_t)m[0] | (uint32_t)m[1] << 8 | (uint32_t)m[2] << 16 |
+                                  (uint32_t)m[3] << 24) == ZXC_MAGIC_WORD;
+    }
     const int c = getc(f);
     if (c == EOF) return 0;
     ungetc(c, f);
     return c == (int)(ZXC_MAGIC_WORD & 0xFFU);
 }
 
-// Copies in to out unchanged: -dcf passes through what is not an archive, as zcat -f does.
+// -dcf on a non-archive: copy as is, like zcat -f. Buffer-sized chunks skip stdio's copy.
 static int64_t zxc_copy_stream(FILE* in, FILE* out) {
-    char buf[64 * 1024];
+    char* const buf = malloc(ZXC_STDIO_BUFFER_SIZE);
+    if (!buf) return ZXC_ERROR_MEMORY;
     int64_t total = 0;
     size_t n;
-    while ((n = fread(buf, 1, sizeof(buf), in)) > 0) {
-        if (fwrite(buf, 1, n, out) != n) return ZXC_ERROR_IO;
+    while ((n = fread(buf, 1, ZXC_STDIO_BUFFER_SIZE, in)) > 0) {
+        if (fwrite(buf, 1, n, out) != n) {
+            free(buf);
+            return ZXC_ERROR_IO;
+        }
         total += (int64_t)n;
     }
+    free(buf);
     return ferror(in) ? ZXC_ERROR_IO : total;
 }
 
@@ -583,7 +595,8 @@ static void print_help(const char* app) {
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
-        "  -f, --force       Force overwrite; with -dc, copy non-ZXC input as is\n"
+        "  -f, --force       Force overwrite; when decompressing to stdout, copy\n"
+        "                    non-ZXC input as is\n"
         "  -c, --stdout      Write to stdout\n"
         "  -v, --verbose     Verbose mode\n"
         "  -q, --quiet       Quiet mode\n"
@@ -1230,20 +1243,25 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     uint64_t total_size = 0;
     const int stderr_tty = isatty(fileno(stderr)) != 0;
 
-    // The frame walks seek once per frame: on f_in each would refill its 1 MB buffer.
-    FILE* const f_walk =
-        (!use_stdin && mode != MODE_COMPRESS) ? fopen(resolved_in_path, "rb") : NULL;
-    FILE* const f_meta = f_walk ? f_walk : f_in;
-
     char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
     char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
     if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
     if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
+    // Like zcat -f: to stdout, -f passes non-archives through
+    const int pass_through = mode == MODE_DECOMPRESS && force && use_stdout &&
+                             !zxc_starts_like_archive(f_in, !use_stdin);
+
+    // The frame walks seek once per frame: on f_in each would refill its 1 MB buffer.
+    FILE* const f_walk = (!use_stdin && mode != MODE_COMPRESS && !pass_through)
+                             ? fopen(resolved_in_path, "rb")
+                             : NULL;
+    FILE* const f_meta = f_walk ? f_walk : f_in;
+
     if (!g_quiet && g_progress_mode != ZXC_PROGRESS_NEVER &&
         (g_progress_mode == ZXC_PROGRESS_ALWAYS || (!use_stdout && !use_stdin && stderr_tty))) {
         // Get the total size based on mode (only knowable for seekable file input)
-        if (!use_stdin) {
+        if (!use_stdin && !pass_through) {
             if (mode == MODE_COMPRESS) {
                 // Compression: get input file size
                 const long long saved_pos = ftello(f_in);
@@ -1306,7 +1324,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .user_data = &pctx,
         };
         bytes = zxc_stream_compress(f_in, f_out, &copts);
-    } else if (mode == MODE_DECOMPRESS && force && use_stdout && !zxc_starts_like_archive(f_in)) {
+    } else if (pass_through) {
         bytes = zxc_copy_stream(f_in, f_out);
     } else {
         zxc_decompress_opts_t dopts = {

@@ -188,13 +188,14 @@ flag is only needed for the in\-place case.
 .TP
 \f[B]\-f\f[R], \f[B]\-\-force\f[R]
 Force overwrite of the \f[I]OUTPUT\-FILE\f[R] if it already exists.
-When decompressing to standard output (\f[B]\-dc\f[R],
-\f[B]zxccat\f[R]), also copy input that is not a ZXC archive unchanged,
-as \f[B]zcat \-f\f[R] does.
-Only the first byte is checked, since standard input can\(aqt be
-rewound: input that starts with \f[CR]0xF5\f[R], the first byte of the
-magic word and never the first byte of UTF\-8 text, is decoded as an
-archive.
+When decompressing to standard output (with \f[B]\-c\f[R], from standard
+input without an \f[I]OUTPUT\-FILE\f[R], or as \f[B]zxccat\f[R]), also
+copy input that is not a ZXC archive unchanged, as \f[B]zcat \-f\f[R]
+does.
+A named file is decoded only if it starts with the 4\-byte magic word.
+Standard input can\(aqt be rewound, so there only its first byte counts:
+input that starts with \f[CR]0xF5\f[R], which never starts UTF\-8 text,
+is decoded as an archive.
 .TP
 \f[B]\-c\f[R], \f[B]\-\-stdout\f[R]
 Force writing to standard output (\f[CR]stdout\f[R]), even if it is the

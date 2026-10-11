@@ -81,7 +81,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.
 
 **-f**, **--force**
-: Force overwrite of the *OUTPUT-FILE* if it already exists. When decompressing to standard output (**-dc**, **zxccat**), also copy input that is not a ZXC archive unchanged, as **zcat -f** does. Only the first byte is checked, since standard input can't be rewound: input that starts with `0xF5`, the first byte of the magic word and never the first byte of UTF-8 text, is decoded as an archive.
+: Force overwrite of the *OUTPUT-FILE* if it already exists. When decompressing to standard output (with **-c**, from standard input without an *OUTPUT-FILE*, or as **zxccat**), also copy input that is not a ZXC archive unchanged, as **zcat -f** does. A named file is decoded only if it starts with the 4-byte magic word. Standard input can't be rewound, so there only its first byte counts: input that starts with `0xF5`, which never starts UTF-8 text, is decoded as an archive.
 
 **-c**, **--stdout**
 : Force writing to standard output (`stdout`), even if it is the console.

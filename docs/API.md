@@ -1057,7 +1057,7 @@ must know it *before* calling `init`. Four patterns cover every use case:
 
    const uint32_t magic = (uint32_t)hdr[0]       | ((uint32_t)hdr[1] << 8)
                         | ((uint32_t)hdr[2] << 16) | ((uint32_t)hdr[3] << 24);
-   if (magic != 0x9CB02EF5U) { /* not a ZXC archive */ }
+   if (magic != ZXC_MAGIC_WORD) { /* not a ZXC archive */ }
 
    const uint8_t code = hdr[5];
    size_t block_size;

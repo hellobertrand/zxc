@@ -4,10 +4,20 @@
 #
 # Copyright (c) Bertrand Lebonnois and contributors.
 #
-# zxcless: less(1) on .zxc files, decompressed on the fly. "|-" filters stdin
-# too, and -f copies what is not an archive unchanged, as zstdless does.
+# zxcless: less(1) on .zxc files, decompressed on the fly by this script rerun as
+# the LESSOPEN filter. Needs less 451+.
 
 zxc=${ZXC:-zxc}
 
-export LESSOPEN="|-\"$zxc\" -dcfq %s"
+if [ "$#" -eq 2 ] && [ "$1" = --zxcless-filter ]; then
+    # -f for stdin only: a named file zxc can't decode, less opens itself.
+    if [ "$2" = - ]; then
+        exec "$zxc" -dcfq -
+    fi
+    exec "$zxc" -dcq -- "$2"
+fi
+
+# "||": empty output with status 0 (an empty archive) shows empty; "-": stdin too.
+export LESSOPEN="||-sh \"$0\" --zxcless-filter %s"
+unset LESSCLOSE
 exec less "$@"

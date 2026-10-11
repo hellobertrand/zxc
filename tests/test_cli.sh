@@ -1276,6 +1276,45 @@ case "$(uname -s 2>/dev/null)" in
             else
                 log_fail "zxcless on stdin: archive not decompressed or plain text lost"
             fi
+
+            # The filter: -f for stdin only, a named plain file is left to less
+            set +e
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" --zxcless-filter - < "$TEST_DIR/less_plain.txt" \
+                > "$TEST_DIR/less_filter_stdin" 2>/dev/null
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" --zxcless-filter "$TEST_DIR/less_plain.txt" \
+                > "$TEST_DIR/less_filter_named" 2>/dev/null < /dev/null
+            set -e
+            if cmp -s "$TEST_DIR/less_plain.txt" "$TEST_DIR/less_filter_stdin" &&
+               [[ ! -s "$TEST_DIR/less_filter_named" ]]; then
+                log_pass "zxcless passes plain stdin through and leaves named files to less"
+            else
+                log_fail "zxcless filter: plain stdin not copied, or a named plain file piped"
+            fi
+
+            # An empty archive shows empty, not as its raw bytes
+            printf '' | "$ZXC_BIN" -z -c > "$TEST_DIR/less_empty.zxc"
+            set +e
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" "$TEST_DIR/less_empty.zxc" \
+                > "$TEST_DIR/less_empty_out" 2>/dev/null < /dev/null
+            set -e
+            if [[ -s "$TEST_DIR/less_empty.zxc" && ! -s "$TEST_DIR/less_empty_out" ]]; then
+                log_pass "zxcless shows an empty archive as empty"
+            else
+                log_fail "zxcless showed the raw bytes of an empty archive"
+            fi
+
+            # A file named like an option is still a file
+            cp "$TEST_DIR/less.zxc" "$TEST_DIR/-k.zxc"
+            ZXCLESS_ABS="$(cd "$(dirname "$ZXCLESS")" && pwd)/zxcless"
+            set +e
+            (cd "$TEST_DIR" && ZXC="$ZXC_ABS" sh "$ZXCLESS_ABS" -- -k.zxc) \
+                > "$TEST_DIR/less_dash_out" 2>/dev/null < /dev/null
+            set -e
+            if cmp -s "$TEST_FILE" "$TEST_DIR/less_dash_out"; then
+                log_pass "zxcless shows a file whose name starts with '-'"
+            else
+                log_fail "zxcless passed a file named '-k.zxc' to zxc as an option"
+            fi
         else
             echo "  [SKIP] less is not installed"
         fi
@@ -1713,7 +1752,7 @@ echo "Testing -dcf pass-through..."
 printf 'plain text, not an archive\n' > "$TEST_DIR/pass_plain.txt"
 "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/pass.zxc"
 
-# 37.1 Plain input comes out unchanged, from a file and from stdin; -dc alone still refuses it
+# 37.1 Plain input, from a file or stdin, comes out as is; without -f it is refused
 set +e
 "$ZXC_BIN" -dcf "$TEST_DIR/pass_plain.txt" > "$TEST_DIR/pass_file_out" 2>/dev/null
 RC_FILE=$?
@@ -1730,7 +1769,7 @@ else
     log_fail "-dcf pass-through failed (rc=$RC_FILE/$RC_STDIN, without -f: $RC_NOF)"
 fi
 
-# 37.2 An archive on stdin still decodes: the peeked byte is not lost
+# 37.2 An archive on stdin still decodes after the peek
 if "$ZXC_BIN" -dcf < "$TEST_DIR/pass.zxc" 2>/dev/null | cmp -s - "$TEST_FILE"; then
     log_pass "-dcf decodes an archive read from stdin"
 else
@@ -1748,16 +1787,18 @@ else
     log_fail "-dcf on empty stdin must write nothing and succeed (rc=$RC)"
 fi
 
-# 37.4 Only the first byte is checked: input starting with 0xF5 is decoded, so it fails
+# 37.4 A named file needs the whole magic word; stdin only its first byte (0xF5)
 printf '\365not an archive\n' > "$TEST_DIR/pass_f5.bin"
 set +e
+"$ZXC_BIN" -dcf "$TEST_DIR/pass_f5.bin" > "$TEST_DIR/pass_f5_out" 2>/dev/null
+RC_FILE=$?
 "$ZXC_BIN" -dcf < "$TEST_DIR/pass_f5.bin" > /dev/null 2>&1
-RC=$?
+RC_STDIN=$?
 set -e
-if [[ $RC -ne 0 ]]; then
-    log_pass "-dcf decodes input that starts with the magic's first byte"
+if [[ $RC_FILE -eq 0 && $RC_STDIN -ne 0 ]] && cmp -s "$TEST_DIR/pass_f5.bin" "$TEST_DIR/pass_f5_out"; then
+    log_pass "-dcf checks the whole magic word in a file, its first byte on stdin"
 else
-    log_fail "-dcf must treat input starting with 0xF5 as an archive"
+    log_fail "-dcf on input starting with 0xF5: file rc=$RC_FILE (want 0), stdin rc=$RC_STDIN (want != 0)"
 fi
 
 echo "All tests passed!"
