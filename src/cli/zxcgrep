@@ -1,0 +1,124 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# ZXC - High-performance lossless compression
+#
+# Copyright (c) Bertrand Lebonnois and contributors.
+#
+# zxcgrep: grep(1) on .zxc files, decompressed on the fly, other files as is.
+# grep's options go before the pattern; those that pick files are refused.
+
+zxc=${ZXC:-zxc}
+grep=${GREP:-grep}
+
+usage() {
+    echo "Usage: zxcgrep [GREP-OPTIONS] [-e] PATTERN [FILE...]"
+}
+
+die() {
+    echo "zxcgrep: $1" >&2
+    exit 2
+}
+
+# qv = $1 quoted for eval
+q() {
+    qs=$1 qv=''
+    while :; do
+        case $qs in
+        *\'*) qv="$qv${qs%%\'*}'\\''"; qs=${qs#*\'} ;;
+        *) qv="'$qv$qs'"; return ;;
+        esac
+    done
+}
+
+add() {
+    q "$1"
+    opts="$opts $qv"
+}
+
+# grep's stdin is the data
+nostdin='-f -: patterns from standard input not supported'
+
+opts='' pat='' no_name='' quiet='' silent=''
+while [ "$#" -gt 0 ]; do
+    case $1 in
+    --) shift; break ;;
+    --help) usage; exit 0 ;;
+    --recursive | --dereference-recursive | --directories* | --devices* | \
+    --include* | --exclude*) die "${1%%=*}: not supported" ;;
+    --file=-) die "$nostdin" ;;
+    --regexp=* | --file=*) pat=1 ;;
+    --regexp | --file)
+        pat=1
+        [ "$#" -ge 2 ] || die "$1: missing argument"
+        [ "$1 $2" != "--file -" ] || die "$nostdin"
+        add "$1"; shift ;;
+    --after-context | --before-context | --context | --max-count | --label | \
+    --binary-files | --group-separator)
+        [ "$#" -ge 2 ] || die "$1: missing argument"
+        add "$1"; shift ;;
+    --quiet | --silent) quiet=1 ;;
+    --no-messages) silent=1 ;;
+    --no-filename) no_name=1 ;;
+    --*) ;;
+    -?*)
+        # -inA 3, -ie PAT: a letter taking a value ends the cluster
+        o=${1#-}
+        while [ -n "$o" ]; do
+            c=${o%"${o#?}"}; o=${o#?}
+            case $c in
+            [rRdD]) die "-$c: not supported" ;;
+            [ef]) pat=1 ;;
+            h) no_name=1 ;;
+            q) quiet=1 ;;
+            s) silent=1 ;;
+            esac
+            case $c in
+            [ABCefm])
+                if [ -z "$o" ]; then
+                    [ "$#" -ge 2 ] || die "-$c: missing argument"
+                    o=$2; add "$1"; shift
+                fi
+                [ "$c$o" != f- ] || die "$nostdin"
+                break ;;
+            esac
+        done ;;
+    *) break ;;
+    esac
+    add "$1"; shift
+done
+
+if [ -z "$pat" ]; then
+    [ "$#" -gt 0 ] || { usage >&2; exit 2; }
+    add -e; add "$1"; shift
+fi
+[ "$#" -gt 0 ] || set -- -
+[ "$#" -gt 1 ] && [ -z "$no_name" ] && opts="-H$opts"
+
+sigpipe() { [ "$1" -gt 128 ] && [ "$(kill -l "$1" 2>/dev/null)" = PIPE ]; }
+
+# Status as grep: 0 match, 1 none, 2 error. -s silences zxc too.
+if [ -n "$silent" ]; then exec 5>/dev/null; else exec 5>&2; fi
+exec 3>&1
+st=1
+for f do
+    label=''
+    if [ "$f" != - ]; then q "--label=$f"; label=$qv; fi
+    # Status: grep's from the pipeline, zxc's on fd 4
+    z=$(
+        exec 4>&1
+        eval "set -- $label $opts -"
+        { "$zxc" -dcf -- "$f" 2>&5 4>&-; echo "$?" >&4; } | "$grep" "$@" 4>&- >&3
+    )
+    g=$?
+    # grep's errors (bad pattern, output closed) hold for every file
+    [ "$g" -gt 1 ] && exit "$g"
+    # -q: the first match settles it
+    [ "$g" -eq 0 ] && [ -n "$quiet" ] && exit 0
+    # SIGPIPE on zxc: grep stopped reading (-l, -m...)
+    if [ "$z" -ne 0 ] && ! sigpipe "$z"; then
+        st=2
+    elif [ "$g" -eq 0 ] && [ "$st" -eq 1 ]; then
+        st=0
+    fi
+done
+exit "$st"

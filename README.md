@@ -192,6 +192,9 @@ zxccat logs-1.zxc logs-2.zxc | grep ERROR
 # Read a compressed file page by page in less (POSIX installs)
 zxcless app.log.zxc
 
+# Search compressed files with grep's options (POSIX installs)
+zxcgrep -n ERROR logs-*.zxc
+
 # Benchmark mode (testing speed on your machine)
 zxc -b assets.tar
 ```

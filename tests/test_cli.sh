@@ -1337,6 +1337,99 @@ case "$(uname -s 2>/dev/null)" in
         ;;
 esac
 
+# 26.6 zxcgrep searches .zxc files and other files unchanged (POSIX only)
+ZXCGREP="$(dirname "$0")/../src/cli/zxcgrep"
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] zxcgrep is not installed on Windows" ;;
+    *)
+        zxcgrep() { ZXC="$ZXC_ABS" sh "$ZXCGREP" "$@"; }
+        printf 'alpha\nERROR one\nbeta\n' > "$TEST_DIR/grep.log"
+        "$ZXC_BIN" -z -c -k "$TEST_DIR/grep.log" > "$TEST_DIR/grep.log.zxc"
+        printf "ERROR it's\n" > "$TEST_DIR/grep it's.txt"
+        printf '%s:ERROR one\n%s:ERROR it'"'"'s\n' "$TEST_DIR/grep.log.zxc" \
+            "$TEST_DIR/grep it's.txt" > "$TEST_DIR/grep_expected"
+        set +e
+        zxcgrep ERROR "$TEST_DIR/grep.log.zxc" "$TEST_DIR/grep it's.txt" > "$TEST_DIR/grep_out" 2>/dev/null
+        GREP_RC=$?
+        zxcgrep -c -i -e error -e beta < "$TEST_DIR/grep.log.zxc" > "$TEST_DIR/grep_stdin" 2>/dev/null
+        GREP_STDIN_RC=$?
+        zxcgrep nomatch "$TEST_DIR/grep.log.zxc" > /dev/null 2>&1
+        GREP_NONE_RC=$?
+        set -e
+        if [[ $GREP_RC -eq 0 && $GREP_STDIN_RC -eq 0 && $GREP_NONE_RC -eq 1 ]] &&
+           cmp -s "$TEST_DIR/grep_expected" "$TEST_DIR/grep_out" &&
+           [[ "$(cat "$TEST_DIR/grep_stdin")" == 2 ]]; then
+            log_pass "zxcgrep searches archives, plain files and stdin, with grep's status"
+        else
+            log_fail "zxcgrep output or status wrong (rc=$GREP_RC/$GREP_STDIN_RC/$GREP_NONE_RC)"
+        fi
+
+        # A damaged archive is 2 despite a match elsewhere; -s silences zxc
+        head -c 30 "$TEST_DIR/grep.log.zxc" > "$TEST_DIR/grep_trunc.zxc"
+        set +e
+        zxcgrep ERROR "$TEST_DIR/grep_trunc.zxc" "$TEST_DIR/grep.log.zxc" > /dev/null 2>&1
+        GREP_BAD_RC=$?
+        zxcgrep -s ERROR "$TEST_DIR/grep_missing.zxc" > /dev/null 2> "$TEST_DIR/grep_s_err"
+        GREP_S_RC=$?
+        set -e
+        if [[ $GREP_BAD_RC -eq 2 && $GREP_S_RC -eq 2 && ! -s "$TEST_DIR/grep_s_err" ]]; then
+            log_pass "zxcgrep reports a damaged archive, and -s silences zxc"
+        else
+            log_fail "zxcgrep: damaged archive not an error, or -s let zxc talk (rc=$GREP_BAD_RC/$GREP_S_RC)"
+        fi
+
+        # Options that pick files, and -f -, are refused
+        GREP_REFUSED=0
+        for opt in -ir --exclude=x -d --include; do
+            set +e
+            zxcgrep "$opt" skip ERROR "$TEST_DIR/grep.log.zxc" > /dev/null 2> "$TEST_DIR/grep_opt_err"
+            GREP_OPT_RC=$?
+            set -e
+            if [[ $GREP_OPT_RC -eq 2 ]] && grep -q "not supported" "$TEST_DIR/grep_opt_err"; then
+                GREP_REFUSED=$((GREP_REFUSED + 1))
+            fi
+        done
+        set +e
+        echo ERROR | zxcgrep -f - "$TEST_DIR/grep.log.zxc" > /dev/null 2> "$TEST_DIR/grep_opt_err"
+        GREP_OPT_RC=$?
+        set -e
+        if [[ $GREP_REFUSED -eq 4 && $GREP_OPT_RC -eq 2 ]] && grep -q "not supported" "$TEST_DIR/grep_opt_err"; then
+            log_pass "zxcgrep refuses -r, -d, --include, --exclude and -f -"
+        else
+            log_fail "zxcgrep accepted an option it can't honor ($GREP_REFUSED/4, -f - rc=$GREP_OPT_RC)"
+        fi
+
+        # grep stopping early is no error, even with SIGPIPE ignored (CI); -q stops at a match
+        "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/grep_big.zxc"
+        set +e
+        zxcgrep -l Lorem "$TEST_DIR/grep_big.zxc" > /dev/null 2> "$TEST_DIR/grep_l_err"
+        GREP_EARLY_RC=$?
+        zxcgrep -q ERROR "$TEST_DIR/grep.log.zxc" "$TEST_DIR/grep_missing.zxc" > /dev/null 2>&1
+        GREP_Q_RC=$?
+        set -e
+        if [[ $GREP_EARLY_RC -eq 0 && $GREP_Q_RC -eq 0 && ! -s "$TEST_DIR/grep_l_err" ]]; then
+            log_pass "zxcgrep ignores SIGPIPE when grep stops early, and -q stops at a match"
+        else
+            log_fail "zxcgrep failed when grep stopped reading (rc=$GREP_EARLY_RC/$GREP_Q_RC)"
+        fi
+
+        # Output closed: stop with grep's status (SIGPIPE, or 2 if ignored)
+        cp "$TEST_DIR/grep_big.zxc" "$TEST_DIR/grep_big_next.zxc"
+        set +e
+        zxcgrep -v nomatch "$TEST_DIR/grep_big.zxc" "$TEST_DIR/grep_big_next.zxc" \
+            2> "$TEST_DIR/grep_head_err" | head -n 1 > /dev/null
+        GREP_HEAD_RC=${PIPESTATUS[0]}
+        set -e
+        if [[ $GREP_HEAD_RC -gt 128 || $GREP_HEAD_RC -eq 2 ]] &&
+           ! grep -q grep_big_next "$TEST_DIR/grep_head_err"; then
+            log_pass "zxcgrep stops when its output is closed"
+        else
+            log_fail "zxcgrep kept going after its output closed (rc=$GREP_HEAD_RC)"
+        fi
+        unset -f zxcgrep
+        ;;
+esac
+
 # 27. Multiple input files (-m) and native Windows wildcard expansion (setargv.obj)
 echo "Testing multiple-file mode (-m) and wildcard expansion..."
 

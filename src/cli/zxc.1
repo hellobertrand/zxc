@@ -2,8 +2,8 @@
 .\"
 .TH "zxc" "1" "" "zxc" "User Commands"
 .SH NAME
-\f[B]zxc\f[R], \f[B]unzxc\f[R], \f[B]zxccat\f[R], \f[B]zxcless\f[R] \-
-Compress or decompress .zxc files
+\f[B]zxc\f[R], \f[B]unzxc\f[R], \f[B]zxccat\f[R], \f[B]zxcless\f[R],
+\f[B]zxcgrep\f[R] \- Compress or decompress .zxc files
 .SH SYNOPSIS
 \f[B]zxc\f[R] [\f[I]OPTIONS\f[R]] [\f[I]INPUT\-FILE\f[R]]
 [\f[I]OUTPUT\-FILE\f[R]]
@@ -21,9 +21,21 @@ archives on the fly; other input displays unchanged.
 The \f[B]ZXC\f[R] environment variable names the \f[B]zxc\f[R] binary to
 use.
 .PP
+\f[B]zxcgrep\f[R] [\f[I]GREP\-OPTIONS\f[R]] [\f[B]\-e\f[R]]
+\f[I]PATTERN\f[R] [\f[I]FILE\f[R]...]
+runs \f[B]grep\f[R](1) on files, or standard input, decompressing ZXC
+archives on the fly; other input is searched unchanged.
+Options go before the pattern; those that select files (\f[B]\-r\f[R],
+\f[B]\-d\f[R], \f[B]\-D\f[R], \f[B]\-\-include\f[R],
+\f[B]\-\-exclude\f[R]) and \f[B]\-f \-\f[R] are not supported.
+The exit status is grep\(aqs: 0 if a line matched, 1 if none did, 2 on
+any error, including a damaged archive.
+\f[B]ZXC\f[R] and \f[B]GREP\f[R] name the binaries to use; grep must
+support \f[B]\-\-label\f[R] (GNU and BSD grep do).
+.PP
 \f[B]unzxc\f[R] and \f[B]zxccat\f[R] are symlinks to \f[B]zxc\f[R], and
-\f[B]zxcless\f[R] is a shell script; all three are installed on POSIX
-systems only.
+\f[B]zxcless\f[R] and \f[B]zxcgrep\f[R] are shell scripts; all four are
+installed on POSIX systems only.
 .SH DESCRIPTION
 \f[B]zxc\f[R] is a command\-line interface for the ZXC compression
 library, a high\-performance lossless compression algorithm optimized
@@ -283,6 +295,9 @@ data.bin
 zxccat part1.zxc part2.zxc | grep ERROR
 .PP
 \f[B]Read a compressed log page by page:\f[R] zxcless app.log.zxc
+.PP
+\f[B]Search compressed logs, with file names and line numbers:\f[R]
+zxcgrep \-n ERROR logs\-*.zxc
 .PP
 \f[B]Compress multiple files independently:\f[R] zxc \-m file1.txt
 file2.txt file3.txt

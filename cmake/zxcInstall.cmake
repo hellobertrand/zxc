@@ -82,9 +82,9 @@ if(ZXC_INSTALL)
                         zxc \"\$ENV{DESTDIR}${ZXC_SYMLINK_BINDIR}/${alias}\")
                 ")
             endforeach()
-            # "zxcless": less(1) on .zxc files, a shell script.
-            install(PROGRAMS src/cli/zxcless DESTINATION ${CMAKE_INSTALL_BINDIR})
-            foreach(alias unzxc zxccat zxcless)
+            # "zxcless" and "zxcgrep": less(1) and grep(1) on .zxc files, shell scripts.
+            install(PROGRAMS src/cli/zxcless src/cli/zxcgrep DESTINATION ${CMAKE_INSTALL_BINDIR})
+            foreach(alias unzxc zxccat zxcless zxcgrep)
                 install(CODE "
                     execute_process(COMMAND \"${CMAKE_COMMAND}\" -E create_symlink
                         zxc.1 \"\$ENV{DESTDIR}${ZXC_SYMLINK_MANDIR}/man1/${alias}.1\")

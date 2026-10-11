@@ -16,6 +16,7 @@
 
 #include <errno.h>
 #include <limits.h>
+#include <signal.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1448,6 +1449,11 @@ int main(int argc, char** argv) {
     zxc_mode_t mode = MODE_COMPRESS;
     int to_stdout = 0;
     int cat_mode = 0;
+
+#ifndef _WIN32
+    // Reader gone (zxc -dc f | head): die quietly, even if the parent ignored SIGPIPE
+    signal(SIGPIPE, SIG_DFL);
+#endif
 
     /* As "unzxc", default to decompression; as "zxccat", to zxc -dcf on every
      * argument. An explicit mode flag below still wins. */

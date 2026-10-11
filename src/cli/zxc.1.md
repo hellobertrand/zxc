@@ -1,7 +1,7 @@
 # zxc(1)
 
 ## NAME
-**zxc**, **unzxc**, **zxccat**, **zxcless** - Compress or decompress .zxc files
+**zxc**, **unzxc**, **zxccat**, **zxcless**, **zxcgrep** - Compress or decompress .zxc files
 
 ## SYNOPSIS
 **zxc** [*OPTIONS*] [*INPUT-FILE*] [*OUTPUT-FILE*]
@@ -12,7 +12,9 @@
 
 **zxcless** [*LESS-OPTIONS*] [*FILE*...] shows files, or standard input, in **less**(1), decompressing ZXC archives on the fly; other input displays unchanged. The **ZXC** environment variable names the **zxc** binary to use.
 
-**unzxc** and **zxccat** are symlinks to **zxc**, and **zxcless** is a shell script; all three are installed on POSIX systems only.
+**zxcgrep** [*GREP-OPTIONS*] [**-e**] *PATTERN* [*FILE*...] runs **grep**(1) on files, or standard input, decompressing ZXC archives on the fly; other input is searched unchanged. Options go before the pattern; those that select files (**-r**, **-d**, **-D**, **--include**, **--exclude**) and **-f -** are not supported. The exit status is grep's: 0 if a line matched, 1 if none did, 2 on any error, including a damaged archive. **ZXC** and **GREP** name the binaries to use; grep must support **--label** (GNU and BSD grep do).
+
+**unzxc** and **zxccat** are symlinks to **zxc**, and **zxcless** and **zxcgrep** are shell scripts; all four are installed on POSIX systems only.
 
 ## DESCRIPTION
 **zxc** is a command-line interface for the ZXC compression library, a high-performance lossless compression algorithm optimized for maximum decompression throughput.
@@ -142,6 +144,9 @@ Archives can be concatenated (`cat a.zxc b.zxc > ab.zxc`): **-d** decodes them o
 
 **Read a compressed log page by page:**
   zxcless app.log.zxc
+
+**Search compressed logs, with file names and line numbers:**
+  zxcgrep -n ERROR logs-*.zxc
 
 **Compress multiple files independently:**
   zxc -m file1.txt file2.txt file3.txt
