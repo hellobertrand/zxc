@@ -75,6 +75,8 @@
  * header stores the content size in a 16-bit field, and LZ77 match offsets are
  * 16-bit (max distance 65535). */
 #define ZXC_DICT_SIZE_MAX ((1U << 16) - 1U)
+/** @brief Magic word opening a .zxd dictionary file, stored little-endian (C7 D1 B0 9C). */
+#define ZXC_DICT_MAGIC 0x9CB0D1C7U
 /** @brief Size of the .zxd dictionary file header in bytes. */
 #define ZXC_DICT_HEADER_SIZE 16
 /** @brief Size of a packed literal Huffman code-lengths table (256 symbols,
@@ -99,6 +101,8 @@
  *
  * @{
  */
+/** @brief Magic word opening every frame, stored little-endian (F5 2E B0 9C). */
+#define ZXC_MAGIC_WORD 0x9CB02EF5U
 /** @brief File header size: Magic(4) + Version(1) + Chunk(1) + Flags(1) + Reserved(7) +
  * Checksum(2). */
 #define ZXC_FILE_HEADER_SIZE 16

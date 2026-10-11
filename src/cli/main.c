@@ -399,16 +399,14 @@ static char* zxc_path_join(const char* dir, const char* name) {
     return path;
 }
 
-// First byte of the magic word 0x9CB02EF5, stored little-endian (docs/FORMAT.md).
-// No UTF-8 text starts with it, so it tells an archive from plain text.
-#define ZXC_MAGIC_FIRST_BYTE 0xF5
-
-// Peeks one byte, the most ungetc() can push back, since stdin can't be rewound.
+// Peeks one byte, the most ungetc() can push back, since stdin can't be rewound. The
+// magic word is stored little-endian, so its low byte (0xF5) comes first: no UTF-8
+// text starts with it, so it tells an archive from plain text.
 static int zxc_starts_like_archive(FILE* f) {
     const int c = getc(f);
     if (c == EOF) return 0;
     ungetc(c, f);
-    return c == ZXC_MAGIC_FIRST_BYTE;
+    return c == (int)(ZXC_MAGIC_WORD & 0xFFU);
 }
 
 // Copies in to out unchanged: -dcf passes through what is not an archive, as zcat -f does.

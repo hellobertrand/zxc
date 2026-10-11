@@ -314,12 +314,10 @@ extern "C" {
 
 /**
  * @name File Format Constants
- * @brief Magic words, header sizes, block sizes, and related constants.
+ * @brief Header fields, block sizes, and related constants. The magic words are
+ *        public, in zxc_constants.h.
  * @{
  */
-
-/** @brief Magic word identifying ZXC files (little-endian 0x9CB02EF5). */
-#define ZXC_MAGIC_WORD 0x9CB02EF5U
 
 /** @brief Whether the first @p n bytes (up to 4) at @p p agree with the magic word, so
  *  a frame may start there: the check a reader makes as bytes arrive. */
@@ -387,8 +385,6 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
 
-/** @brief Magic word identifying ZXC dictionary files (.zxd). */
-#define ZXC_DICT_MAGIC 0x9CB0D1C7U
 /** @brief Current dictionary file format version. A 128-byte packed Huffman
  *         code-lengths table (shared literal table) always follows the
  *         dictionary content. Version 2 re-signs the header with the
