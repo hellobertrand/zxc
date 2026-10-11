@@ -416,7 +416,7 @@ static int zxc_starts_like_archive(FILE* f, const int seekable) {
     return c == (int)(ZXC_MAGIC_WORD & 0xFFU);
 }
 
-// -dcf on a non-archive: copy as is, like zcat -f. Buffer-sized chunks skip stdio's copy.
+// -dcf on a non-archive: copy as is, in buffer-sized chunks that skip stdio's copy.
 static int64_t zxc_copy_stream(FILE* in, FILE* out) {
     char* const buf = malloc(ZXC_STDIO_BUFFER_SIZE);
     if (!buf) return ZXC_ERROR_MEMORY;
@@ -1248,7 +1248,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
     if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
-    // Like zcat -f: to stdout, -f passes non-archives through
+    // To stdout, -f passes non-archives through
     const int pass_through = mode == MODE_DECOMPRESS && force && use_stdout &&
                              !zxc_starts_like_archive(f_in, !use_stdin);
 
@@ -1449,7 +1449,7 @@ int main(int argc, char** argv) {
     int to_stdout = 0;
     int cat_mode = 0;
 
-    /* As "unzxc", default to decompression; as "zxccat", to zxc -dc on every
+    /* As "unzxc", default to decompression; as "zxccat", to zxc -dcf on every
      * argument. An explicit mode flag below still wins. */
     {
         const char* prog = (argc > 0 && argv[0]) ? argv[0] : "zxc";
@@ -1676,6 +1676,9 @@ int main(int argc, char** argv) {
     if (checksum == -1) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
+
+    // -f only if no mode flag took over
+    if (cat_mode && mode == MODE_DECOMPRESS) force = 1;
 
     /* Load dictionary file (.zxd) if requested */
     void* dict = NULL;

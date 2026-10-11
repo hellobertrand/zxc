@@ -1230,6 +1230,22 @@ if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [[ -L "$UNZXC_BIN" ]]; then
     else
         log_fail "zxccat output differs from the concatenated inputs (rc=$CAT_RC/$CAT_STDIN_RC)"
     fi
+
+    # 26.3b zxccat implies -f: plain files and stdin come out as is
+    cat "$TEST_FILE" "$TEST_DIR/cat_second.txt" > "$TEST_DIR/cat_mixed_expected"
+    set +e
+    "$ZXCCAT_BIN" "$TEST_DIR/alias.zxc" "$TEST_DIR/cat_second.txt" > "$TEST_DIR/cat_mixed" 2>/dev/null
+    CAT_RC=$?
+    "$ZXCCAT_BIN" < "$TEST_DIR/cat_second.txt" > "$TEST_DIR/cat_plain_stdin" 2>/dev/null
+    CAT_STDIN_RC=$?
+    set -e
+    if [[ $CAT_RC -eq 0 && $CAT_STDIN_RC -eq 0 ]] &&
+       cmp -s "$TEST_DIR/cat_mixed_expected" "$TEST_DIR/cat_mixed" &&
+       cmp -s "$TEST_DIR/cat_second.txt" "$TEST_DIR/cat_plain_stdin"; then
+        log_pass "zxccat passes plain files and stdin through"
+    else
+        log_fail "zxccat must pass non-archives through (rc=$CAT_RC/$CAT_STDIN_RC)"
+    fi
 else
     echo "  [SKIP] symlinks unsupported here, skipping unzxc and zxccat alias tests"
 fi
@@ -1747,7 +1763,7 @@ for w in z d l list t test b; do
 done
 log_pass "Files named like modes compress and decompress"
 
-# 37. -dcf passes through input that is not an archive, as zcat -f does
+# 37. -dcf passes through input that is not an archive
 echo "Testing -dcf pass-through..."
 printf 'plain text, not an archive\n' > "$TEST_DIR/pass_plain.txt"
 "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/pass.zxc"

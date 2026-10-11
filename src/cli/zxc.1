@@ -10,8 +10,10 @@ Compress or decompress .zxc files
 .PP
 \f[B]unzxc\f[R] is equivalent to \f[B]zxc \-d\f[R].
 .PP
-\f[B]zxccat\f[R] is equivalent to \f[B]zxc \-dc\f[R] applied to every
-\f[I]INPUT\-FILE\f[R] in turn, writing them all to standard output.
+\f[B]zxccat\f[R] is equivalent to \f[B]zxc \-dcf\f[R] applied to every
+\f[I]INPUT\-FILE\f[R] in turn, writing them all to standard output;
+input that does not start like a ZXC archive (see \f[B]\-f\f[R]) comes
+out unchanged.
 .PP
 \f[B]zxcless\f[R] [\f[I]LESS\-OPTIONS\f[R]] [\f[I]FILE\f[R]...]
 shows files, or standard input, in \f[B]less\f[R](1), decompressing ZXC
@@ -188,10 +190,9 @@ flag is only needed for the in\-place case.
 .TP
 \f[B]\-f\f[R], \f[B]\-\-force\f[R]
 Force overwrite of the \f[I]OUTPUT\-FILE\f[R] if it already exists.
-When decompressing to standard output (with \f[B]\-c\f[R], from standard
-input without an \f[I]OUTPUT\-FILE\f[R], or as \f[B]zxccat\f[R]), also
-copy input that is not a ZXC archive unchanged, as \f[B]zcat \-f\f[R]
-does.
+When decompressing to standard output (with \f[B]\-c\f[R], or from
+standard input without an \f[I]OUTPUT\-FILE\f[R]), also copy input that
+is not a ZXC archive unchanged.
 A named file is decoded only if it starts with the 4\-byte magic word.
 Standard input can\(aqt be rewound, so there only its first byte counts:
 input that starts with \f[CR]0xF5\f[R], which never starts UTF\-8 text,
