@@ -10,9 +10,9 @@
 
 **zxccat** is equivalent to **zxc -dcf** applied to every *INPUT-FILE* in turn, writing them all to standard output; input that does not start like a ZXC archive (see **-f**) comes out unchanged.
 
-**zxcless** [*LESS-OPTIONS*] [*FILE*...] shows files, or standard input, in **less**(1), decompressing ZXC archives on the fly; other input displays unchanged. The **ZXC** environment variable names the **zxc** binary to use.
+**zxcless** [**--dict=***FILE*] [*LESS-OPTIONS*] [*FILE*...] shows files, or standard input, in **less**(1), decompressing ZXC archives on the fly; other input displays unchanged. **--dict** supplies the dictionary of archives that need one (see **-D**). The **ZXC** environment variable names the **zxc** binary to use.
 
-**zxcgrep** [*GREP-OPTIONS*] [**-e**] *PATTERN* [*FILE*...] runs **grep**(1) on files, or standard input, decompressing ZXC archives on the fly; other input is searched unchanged. Options go before the pattern; those that select files (**-r**, **-d**, **-D**, **--include**, **--exclude**) and **-f -** are not supported. The exit status is grep's: 0 if a line matched, 1 if none did, 2 on any error, including a damaged archive. **ZXC** and **GREP** name the binaries to use; grep must support **--label** (GNU and BSD grep do).
+**zxcgrep** [**--dict=***FILE*] [*GREP-OPTIONS*] [**-e**] *PATTERN* [*FILE*...] runs **grep**(1) on files, or standard input, decompressing ZXC archives on the fly; other input is searched unchanged. **--dict** supplies the dictionary of archives that need one (see **-D**). Options go before the pattern; those that select files (**-r**, **-d**, **-D**, **--include**, **--exclude**) and **-f -** are not supported. The exit status is grep's: 0 if a line matched, 1 if none did, 2 on any error, including a damaged archive. **ZXC** and **GREP** name the binaries to use; grep must support **--label** (GNU and BSD grep do).
 
 **unzxc** and **zxccat** are symlinks to **zxc**, and **zxcless** and **zxcgrep** are shell scripts; all four are installed on POSIX systems only.
 

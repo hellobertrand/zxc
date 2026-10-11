@@ -15,16 +15,22 @@
 input that does not start like a ZXC archive (see \f[B]\-f\f[R]) comes
 out unchanged.
 .PP
-\f[B]zxcless\f[R] [\f[I]LESS\-OPTIONS\f[R]] [\f[I]FILE\f[R]...]
+\f[B]zxcless\f[R] [\f[B]\-\-dict=\f[R]\f[I]FILE\f[R]]
+[\f[I]LESS\-OPTIONS\f[R]] [\f[I]FILE\f[R]...]
 shows files, or standard input, in \f[B]less\f[R](1), decompressing ZXC
 archives on the fly; other input displays unchanged.
+\f[B]\-\-dict\f[R] supplies the dictionary of archives that need one
+(see \f[B]\-D\f[R]).
 The \f[B]ZXC\f[R] environment variable names the \f[B]zxc\f[R] binary to
 use.
 .PP
-\f[B]zxcgrep\f[R] [\f[I]GREP\-OPTIONS\f[R]] [\f[B]\-e\f[R]]
-\f[I]PATTERN\f[R] [\f[I]FILE\f[R]...]
+\f[B]zxcgrep\f[R] [\f[B]\-\-dict=\f[R]\f[I]FILE\f[R]]
+[\f[I]GREP\-OPTIONS\f[R]] [\f[B]\-e\f[R]] \f[I]PATTERN\f[R]
+[\f[I]FILE\f[R]...]
 runs \f[B]grep\f[R](1) on files, or standard input, decompressing ZXC
 archives on the fly; other input is searched unchanged.
+\f[B]\-\-dict\f[R] supplies the dictionary of archives that need one
+(see \f[B]\-D\f[R]).
 Options go before the pattern; those that select files (\f[B]\-r\f[R],
 \f[B]\-d\f[R], \f[B]\-D\f[R], \f[B]\-\-include\f[R],
 \f[B]\-\-exclude\f[R]) and \f[B]\-f \-\f[R] are not supported.

@@ -5,17 +5,34 @@
 # Copyright (c) Bertrand Lebonnois and contributors.
 #
 # zxcless: less(1) on .zxc files, decompressed on the fly by this script rerun as
-# the LESSOPEN filter. Needs less 451+.
+# the LESSOPEN filter. Needs less 451+. --dict=FILE names a zxc dictionary.
 
 zxc=${ZXC:-zxc}
 
 if [ "$#" -eq 2 ] && [ "$1" = --zxcless-filter ]; then
+    f=$2
+    set -- -dcq
+    [ -z "$ZXCLESS_DICT" ] || set -- "$@" -D "$ZXCLESS_DICT"
     # -f for stdin only: a named file zxc can't decode, less opens itself.
-    if [ "$2" = - ]; then
-        exec "$zxc" -dcfq -
+    if [ "$f" = - ]; then
+        exec "$zxc" -f "$@" -
     fi
-    exec "$zxc" -dcq -- "$2"
+    exec "$zxc" "$@" -- "$f"
 fi
+
+# --dict is ours, the rest is less's: the filter reads it from the environment
+want=''
+for a do
+    shift
+    if [ -n "$want" ]; then ZXCLESS_DICT=$a want=''; continue; fi
+    case $a in
+    --dict=*) ZXCLESS_DICT=${a#--dict=}; continue ;;
+    --dict) want=1; continue ;;
+    esac
+    set -- "$@" "$a"
+done
+[ -z "$want" ] || { echo "zxcless: --dict: missing argument" >&2; exit 1; }
+export ZXCLESS_DICT
 
 # "||": empty output with status 0 (an empty archive) shows empty; "-": stdin too.
 export LESSOPEN="||-sh \"$0\" --zxcless-filter %s"

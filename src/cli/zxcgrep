@@ -6,6 +6,7 @@
 #
 # zxcgrep: grep(1) on .zxc files, decompressed on the fly, other files as is.
 # grep's options go before the pattern; those that pick files are refused.
+# --dict=FILE names a zxc dictionary.
 
 zxc=${ZXC:-zxc}
 grep=${GREP:-grep}
@@ -38,7 +39,7 @@ add() {
 # grep's stdin is the data
 nostdin='-f -: patterns from standard input not supported'
 
-opts='' pat='' no_name='' quiet='' silent=''
+opts='' pat='' no_name='' quiet='' silent='' dict=''
 while [ "$#" -gt 0 ]; do
     case $1 in
     --) shift; break ;;
@@ -46,6 +47,10 @@ while [ "$#" -gt 0 ]; do
     --recursive | --dereference-recursive | --directories* | --devices* | \
     --include* | --exclude*) die "${1%%=*}: not supported" ;;
     --file=-) die "$nostdin" ;;
+    --dict=*) dict=${1#--dict=}; shift; continue ;;
+    --dict)
+        [ "$#" -ge 2 ] || die "$1: missing argument"
+        dict=$2; shift 2; continue ;;
     --regexp=* | --file=*) pat=1 ;;
     --regexp | --file)
         pat=1
@@ -96,6 +101,10 @@ fi
 
 sigpipe() { [ "$1" -gt 128 ] && [ "$(kill -l "$1" 2>/dev/null)" = PIPE ]; }
 
+unzxc() {
+    if [ -n "$dict" ]; then "$zxc" -dcf -D "$dict" -- "$1"; else "$zxc" -dcf -- "$1"; fi
+}
+
 # Status as grep: 0 match, 1 none, 2 error. -s silences zxc too.
 if [ -n "$silent" ]; then exec 5>/dev/null; else exec 5>&2; fi
 exec 3>&1
@@ -107,7 +116,7 @@ for f do
     z=$(
         exec 4>&1
         eval "set -- $label $opts -"
-        { "$zxc" -dcf -- "$f" 2>&5 4>&-; echo "$?" >&4; } | "$grep" "$@" 4>&- >&3
+        { unzxc "$f" 2>&5 4>&-; echo "$?" >&4; } | "$grep" "$@" 4>&- >&3
     )
     g=$?
     # grep's errors (bad pattern, output closed) hold for every file

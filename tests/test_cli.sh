@@ -1319,6 +1319,23 @@ case "$(uname -s 2>/dev/null)" in
                 log_fail "zxcless showed the raw bytes of an empty archive"
             fi
 
+            # --dict supplies the dictionary of archives that need one
+            mkdir -p "$TEST_DIR/less_dict"
+            for n in 1 2 3 4 5; do
+                printf 'sample %s: connection to database lost, retrying\n' "$n" > "$TEST_DIR/less_dict/s$n"
+            done
+            "$ZXC_BIN" --train -q -o "$TEST_DIR/less_dict/d.zxd" "$TEST_DIR/less_dict"/s* > /dev/null 2>&1
+            "$ZXC_BIN" -z -c -k -D "$TEST_DIR/less_dict/d.zxd" "$TEST_FILE_ARG" > "$TEST_DIR/less_dict/a.zxc"
+            set +e
+            ZXC="$ZXC_ABS" sh "$ZXCLESS" --dict="$TEST_DIR/less_dict/d.zxd" "$TEST_DIR/less_dict/a.zxc" \
+                > "$TEST_DIR/less_dict_out" 2>/dev/null < /dev/null
+            set -e
+            if cmp -s "$TEST_FILE" "$TEST_DIR/less_dict_out"; then
+                log_pass "zxcless --dict shows an archive compressed with a dictionary"
+            else
+                log_fail "zxcless --dict did not decode the archive"
+            fi
+
             # A file named like an option is still a file
             cp "$TEST_DIR/less.zxc" "$TEST_DIR/-k.zxc"
             ZXCLESS_ABS="$(cd "$(dirname "$ZXCLESS")" && pwd)/zxcless"
@@ -1397,6 +1414,23 @@ case "$(uname -s 2>/dev/null)" in
             log_pass "zxcgrep refuses -r, -d, --include, --exclude and -f -"
         else
             log_fail "zxcgrep accepted an option it can't honor ($GREP_REFUSED/4, -f - rc=$GREP_OPT_RC)"
+        fi
+
+        # --dict supplies the dictionary; without it the archive is an error
+        "$ZXC_BIN" --train -q -o "$TEST_DIR/grep_d.zxd" "$TEST_DIR/grep.log" "$TEST_DIR/grep it's.txt" \
+            "$TEST_DIR/grep.log" "$TEST_DIR/grep it's.txt" "$TEST_DIR/grep.log" > /dev/null 2>&1
+        "$ZXC_BIN" -z -c -k -D "$TEST_DIR/grep_d.zxd" "$TEST_DIR/grep.log" > "$TEST_DIR/grep_dict.zxc"
+        set +e
+        zxcgrep --dict "$TEST_DIR/grep_d.zxd" ERROR "$TEST_DIR/grep_dict.zxc" > "$TEST_DIR/grep_dict_out" 2>/dev/null
+        GREP_DICT_RC=$?
+        zxcgrep ERROR "$TEST_DIR/grep_dict.zxc" > /dev/null 2>&1
+        GREP_NODICT_RC=$?
+        set -e
+        if [[ $GREP_DICT_RC -eq 0 && $GREP_NODICT_RC -eq 2 &&
+              "$(cat "$TEST_DIR/grep_dict_out")" == "ERROR one" ]]; then
+            log_pass "zxcgrep --dict searches an archive compressed with a dictionary"
+        else
+            log_fail "zxcgrep --dict failed (rc=$GREP_DICT_RC, without: $GREP_NODICT_RC)"
         fi
 
         # grep stopping early is no error, even with SIGPIPE ignored (CI); -q stops at a match
