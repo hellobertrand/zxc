@@ -661,6 +661,7 @@ static uint64_t zxc_huf_nudge_dp_run_j(const int lu, const int lc, const int g_l
  * Iteration order and strict-improvement relaxation are fixed, so the result
  * is deterministic.
  *
+ * @param[in]  ws       Workspace for the DP planes.
  * @param[in]  pfg      Group-mass prefix sums in frequency-rank order.
  * @param[in]  m        Number of coarse symbols (groups), >= 2.
  * @param[in]  cap_c    Coarse code-length cap (`real cap - g_log2`).

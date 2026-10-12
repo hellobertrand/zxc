@@ -159,7 +159,7 @@ static zxc_seek_source_t zxc_seek_source_of(const zxc_seekable* s) {
     return src;
 }
 
-/** @brief @ref zxc_scan_src_t over a @ref zxc_seek_source_t. */
+/** @brief @ref zxc_scan_src_t over a @c zxc_seek_source_t. */
 static int zxc_seek_scan_read(const zxc_scan_src_t* scan, const uint64_t off, void* dst,
                               const size_t len) {
     return zxc_seek_source_read((const zxc_seek_source_t*)scan->ctx, dst, len, off);
@@ -170,7 +170,9 @@ static int zxc_seek_scan_read(const zxc_scan_src_t* scan, const uint64_t off, vo
  *        footer as zxc_get_last_frame_info() does. Its EOF and SEK headers are
  *        checked with its table, on access (@ref zxc_seek_load_spans).
  *
- * @param[out] f  The frame; its decompressed and block bases are left to the caller.
+ * @param[in]  src The archive.
+ * @param[in]  end Offset just past the frame.
+ * @param[out] f   The frame; its decompressed and block bases are left to the caller.
  * @return 1 for a seekable frame, 0 otherwise.
  */
 static int zxc_seek_parse_frame(zxc_seek_source_t* src, const uint64_t end, zxc_seek_frame_t* f) {
@@ -681,23 +683,15 @@ typedef struct {
  * Lives on the caller's stack: the caller's output pointer therefore never
  * reaches heap memory (jobs carry offsets into it), and there is no per-thread
  * array to size for @c ZXC_MAX_THREADS.
- *
- * @var zxc_seek_mt_shared_t::s          Handle being read (read-only).
- * @var zxc_seek_mt_shared_t::jobs       Job array; each worker touches only its stripe.
- * @var zxc_seek_mt_shared_t::dst_base   Start of the caller's output buffer.
- * @var zxc_seek_mt_shared_t::num_jobs   Job count (stripe iteration bound).
- * @var zxc_seek_mt_shared_t::stride     Worker count attempted; stripes partition by it.
- * @var zxc_seek_mt_shared_t::next       Next stripe index to hand out, under @c lock.
- * @var zxc_seek_mt_shared_t::lock       Guards @c next.
  */
 typedef struct {
-    const zxc_seekable* s;
-    zxc_seek_mt_job_t* jobs;
-    uint8_t* dst_base;
-    uint32_t num_jobs;
-    uint32_t stride;
-    uint32_t next;
-    pthread_mutex_t lock;
+    const zxc_seekable* s;   /* handle being read (read-only) */
+    zxc_seek_mt_job_t* jobs; /* job array; each worker touches only its stripe */
+    uint8_t* dst_base;       /* start of the caller's output buffer */
+    uint32_t num_jobs;       /* job count (stripe iteration bound) */
+    uint32_t stride;         /* worker count attempted; stripes partition by it */
+    uint32_t next;           /* next stripe index to hand out, under lock */
+    pthread_mutex_t lock;    /* guards next */
 } zxc_seek_mt_shared_t;
 
 /**

@@ -405,7 +405,10 @@ static int64_t zxc_stream_read_at(const zxc_stream_ctx_t* ctx, void* dst, const 
  * @brief Reads up to @p len input bytes on the reader thread: by position while
  *        the engine reads positioned, through stdio otherwise.
  *
- * @param[in] ctx Started engine, or NULL to read through stdio.
+ * @param[in]  ctx Started engine, or NULL to read through stdio.
+ * @param[in]  f   The input stream.
+ * @param[out] dst Destination.
+ * @param[in]  len Bytes wanted.
  * @return Bytes read, short only at the end of the input, or @ref ZXC_ERROR_IO.
  */
 static int64_t zxc_stream_in_read(zxc_stream_ctx_t* ctx, FILE* f, void* dst, const size_t len) {
@@ -753,7 +756,9 @@ static void zxc_stream_engine_stop(zxc_stream_engine_t* e, const int writer_star
  * The caller fills the run's fields of @c e->ctx (mode, level, block size,
  * checksums, dictionary, progress) and of @c e->w (output, seek table, counters).
  *
- * @param[in] n_threads Thread count; 0 or less auto-detects the online processors.
+ * @param[in,out] e         The engine, its run fields filled.
+ * @param[in]     f_in      The input stream.
+ * @param[in]     n_threads Thread count; 0 or less auto-detects the online processors.
  * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY with nothing left to free.
  */
 static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int n_threads) {
@@ -1118,7 +1123,11 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
 /**
  * @brief Reads exactly @p len bytes, telling a clean end from a short read.
  *
- * @param[in] ctx Started engine, or NULL before the first frame.
+ * @param[in]  ctx        Started engine, or NULL before the first frame.
+ * @param[in]  f          The input stream.
+ * @param[out] dst        Destination.
+ * @param[in]  len        Bytes to read.
+ * @param[in]  short_code Returned when the input ends inside the range.
  * @return @ref ZXC_OK; 1 when the input ended before the first byte;
  *         @p short_code when it ended inside the range; @ref ZXC_ERROR_IO on
  *         a read error.
@@ -1134,7 +1143,14 @@ static int zxc_stream_read_exact(zxc_stream_ctx_t* ctx, FILE* f, void* dst, cons
 /**
  * @brief Reads and checks a frame header whose magic word is already read.
  *
- * @param[in] dict_id Id of the caller's dictionary, 0 without one.
+ * @param[in]  ctx          Started engine, or NULL before the first frame.
+ * @param[in]  f_in         The input stream, just past the magic word.
+ * @param[in]  magic        The magic word's 4 bytes.
+ * @param[in]  dict_id      Id of the caller's dictionary, 0 without one.
+ * @param[out] chunk        The frame's block size.
+ * @param[out] has_checksum Whether the frame carries checksums.
+ * @param[out] has_seek     Whether it ends with a seek table.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
  */
 static int zxc_stream_read_frame_header(zxc_stream_ctx_t* ctx, FILE* f_in, const uint8_t* magic,
                                         const uint32_t dict_id, size_t* chunk, int* has_checksum,

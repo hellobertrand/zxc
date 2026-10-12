@@ -798,6 +798,9 @@ static int64_t zxc_dctx_decode_container(zxc_dctx* dctx, const uint8_t* src, siz
  * The footer's compressed size must be the whole input: one frame, starting at
  * offset 0. Each caller adds its own policy on the result.
  *
+ * @param[in]  src        The frame.
+ * @param[in]  src_size   Its size.
+ * @param[out] info       Filled on success.
  * @param[out] footer_len Footer bytes, digest included; may be NULL.
  */
 static int zxc_buffer_frame_info(const uint8_t* src, const size_t src_size, zxc_frame_info_t* info,

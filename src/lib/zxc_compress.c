@@ -242,9 +242,15 @@ static ZXC_ALWAYS_INLINE int zxc_emit_extra(uint8_t* RESTRICT extras, size_t* RE
  * @brief Emits one GLO sequence (token, offset, LL/ML escapes) and updates
  *        @p max_offset, the block's widest biased offset.
  *
- * @param[in] ll         Literal length (raw).
- * @param[in] ml         Match length minus ZXC_LZ_MIN_MATCH_LEN.
- * @param[in] off_biased Offset minus ZXC_LZ_OFFSET_BIAS.
+ * @param[out]    buf_tokens  Token stream; the token goes at index @p *seq_c.
+ * @param[out]    buf_offsets Offset stream, same index.
+ * @param[out]    buf_extras  Extras stream, for the LL/ML excess varints.
+ * @param[in,out] seq_c       Sequence count, advanced on success.
+ * @param[in,out] extras_sz   Bytes used in @p buf_extras.
+ * @param[in,out] max_offset  Widest biased offset so far.
+ * @param[in]     ll          Literal length (raw).
+ * @param[in]     ml          Match length minus ZXC_LZ_MIN_MATCH_LEN.
+ * @param[in]     off_biased  Offset minus ZXC_LZ_OFFSET_BIAS.
  * @return 1, or 0 when a length exceeds ZXC_MAX_VARINT_VALUE. The extras buffer
  *         is sized by the layout, not checked here.
  */
@@ -355,9 +361,14 @@ static int zxc_glo_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t 
  * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, so the count fits the
  * block's sequence buffers.
  *
- * @param[out] side     Scratch, one byte per sequence (zxc_cctx_t::buf_split).
- * @param[out] hist_buf Scratch (zxc_cctx_t::buf_split_hist).
- * @param[in]  cap      zxc_lz77_params_t::split_max.
+ * @param[in,out] tokens    The block's tokens, rewritten in place.
+ * @param[in,out] offsets   Its offsets, rewritten in place.
+ * @param[in,out] extras    Its extras, compacted in place.
+ * @param[in,out] extras_sz Bytes used in @p extras.
+ * @param[out]    side      Scratch, one byte per sequence (zxc_cctx_t::buf_split).
+ * @param[out]    hist_buf  Scratch (zxc_cctx_t::buf_split_hist).
+ * @param[in]     n_seq     Sequence count of the block.
+ * @param[in]     cap       zxc_lz77_params_t::split_max.
  * @return The new sequence count (unchanged when the block is not split).
  */
 static uint32_t zxc_glo_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,

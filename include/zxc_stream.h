@@ -134,8 +134,8 @@ ZXC_EXPORT int zxc_stream_get_frame_info(FILE* f_in, zxc_frame_info_t* info, siz
  * @param[in]  end        Offset just past the frame; at most the file size.
  * @param[out] info       Filled on success, untouched otherwise.
  * @param[in]  info_size  `sizeof(*info)` as the caller compiled it.
- * @return @ref ZXC_OK, or a negative @ref zxc_error_t: @ref ZXC_ERROR_SRC_TOO_SMALL
- *         past the end of the file, @ref ZXC_ERROR_IO included.
+ * @return @ref ZXC_OK, or a negative @ref zxc_error_t (@ref ZXC_ERROR_SRC_TOO_SMALL
+ *         past the end of the file, @ref ZXC_ERROR_IO included).
  */
 ZXC_EXPORT int zxc_stream_get_last_frame_info(FILE* f_in, uint64_t end, zxc_frame_info_t* info,
                                               size_t info_size);

@@ -2324,7 +2324,11 @@ int zxc_write_file_footer(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  * Compares only the bytes present: a mismatch is corruption, a matching but
  * short prefix a truncation.
  *
- * @param[out] digest  The stored digest, 0 without checksums; may be NULL.
+ * @param[in]  footer   The footer bytes read so far.
+ * @param[in]  avail    How many there are.
+ * @param[in]  l        The layout the frame implies.
+ * @param[in]  src_size The decompressed size the footer must store.
+ * @param[out] digest   The stored digest, 0 without checksums; may be NULL.
  * @return @ref ZXC_OK, @ref ZXC_ERROR_CORRUPT_DATA or @ref ZXC_ERROR_SRC_TOO_SMALL.
  */
 int zxc_check_file_footer(const uint8_t* footer, size_t avail, const zxc_footer_layout_t* l,
@@ -2352,8 +2356,8 @@ int zxc_parse_file_footer(const uint8_t* end, size_t avail, uint64_t* src_size,
 /** @brief Smallest frame: header, the EOF block and the shortest footer. */
 #define ZXC_FRAME_MIN_SIZE (ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE)
 
-/** @brief Bytes zxc_read_frame_info() takes from the end of @p total bytes, at
- *  least @ref ZXC_FRAME_MIN_SIZE: all of them past the header and EOF block, up
+/** @brief Bytes zxc_read_frame_info() takes from the end of @p total bytes (at
+ *  least @ref ZXC_FRAME_MIN_SIZE): all of them past the header and EOF block, up
  *  to @ref ZXC_FOOTER_MAX_SIZE_WITH_DIGEST. */
 static inline size_t zxc_frame_tail_len(const uint64_t total) {
     const uint64_t body = total - (ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE);
@@ -2365,8 +2369,8 @@ static inline size_t zxc_frame_tail_len(const uint64_t total) {
  *        check behind zxc_get_frame_info(), its FILE* twin and the size queries.
  *
  * @param[in]  header     The first @ref ZXC_FILE_HEADER_SIZE bytes.
- * @param[in]  tail       The last @p tail_len bytes, @p tail_len being
- *                        @ref zxc_frame_tail_len of @p total.
+ * @param[in]  tail       The last @p tail_len bytes of the input.
+ * @param[in]  tail_len   @ref zxc_frame_tail_len of @p total.
  * @param[in]  total      Bytes of the whole input.
  * @param[out] info       Filled on success.
  * @param[out] footer_len Footer bytes, digest included; may be NULL.
