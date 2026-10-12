@@ -26,6 +26,10 @@
 #ifndef ZXC_INTERNAL_H
 #define ZXC_INTERNAL_H
 
+#if !defined(__cplusplus) && (!defined(__STDC_VERSION__) || __STDC_VERSION__ < 201112L)
+#error "libzxc requires C11 or later (MSVC: /std:c11)"
+#endif
+
 #include "zxc_deps.h" /* libc deps: <assert.h>, <limits.h>, <stdint.h>, <stdlib.h>, <string.h>,
                         and the ZXC_MALLOC / ZXC_ALIGNED_MALLOC macros.
                         Vendor this file to retarget non-libc environments. */
@@ -50,12 +54,11 @@ extern "C" {
  * @name Atomic Qualifier
  * @brief Provides a portable atomic / volatile qualifier.
  *
- * If C11 atomics are available, @c ZXC_ATOMIC expands to @c _Atomic;
- * otherwise it falls back to @c volatile.
+ * @c ZXC_ATOMIC expands to @c _Atomic, or to @c volatile where the compiler
+ * leaves out the optional C11 atomics (@c __STDC_NO_ATOMICS__, as MSVC does).
  * @{
  */
-#if !defined(__cplusplus) && defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L && \
-    !defined(__STDC_NO_ATOMICS__)
+#if !defined(__cplusplus) && !defined(__STDC_NO_ATOMICS__)
 #include <stdatomic.h>
 #define ZXC_ATOMIC _Atomic
 #define ZXC_USE_C11_ATOMICS 1
@@ -247,20 +250,11 @@ extern "C" {
 #define ZXC_NOINLINE
 #define ZXC_COLD
 
-#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 201112L
-#include <stdalign.h>
 /** @def ZXC_ALIGN
  * @brief Specifies memory alignment using C11 _Alignas.
  * @param x Alignment boundary in bytes (must be a power of 2).
  */
 #define ZXC_ALIGN(x) _Alignas(x)
-#else
-/** @def ZXC_ALIGN
- * @brief No-op alignment macro for compilers without alignment support.
- * @param x Ignored (alignment not supported).
- */
-#define ZXC_ALIGN(x)
-#endif
 #endif
 /** @} */ /* end of Compiler Abstractions */
 
@@ -424,17 +418,20 @@ static_assert(((ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_FILE_FLAG_HAS_DICTIONARY |
 #define ZXC_GLO_HEADER_BINARY_SIZE 12
 /** @brief Binary size of a GHI block sub-header. */
 #define ZXC_GHI_HEADER_BINARY_SIZE 12
+/** @brief Widest GLO section descriptors: the literal and token section sizes. */
+#define ZXC_GLO_DESC_MAX_SIZE (2 * sizeof(uint32_t))
 
 /** @brief Worst-case format overhead inside a single block beyond the outer
  *  8-byte block header and the optional 4-byte checksum.
  *
- *  Sub-header (12 B) + widest GLO section descriptors (8 B) + widest slack padding
- *  (@ref ZXC_BLOCK_LIT_SLACK) = 52 B, plus the customary 16 B of margin for
- *  future format evolution. Used by zxc_compress_block_bound() and
- *  zxc_compress_bound().
+ *  Sub-header (12 B) + widest GLO section descriptors (@ref ZXC_GLO_DESC_MAX_SIZE,
+ *  8 B) + widest slack padding (@ref ZXC_BLOCK_LIT_SLACK) = 52 B, plus the
+ *  customary 16 B of margin for future format evolution. Used by
+ *  zxc_compress_block_bound() and zxc_compress_bound().
  */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 68
-static_assert(ZXC_BLOCK_FORMAT_OVERHEAD >= ZXC_GLO_HEADER_BINARY_SIZE + 8 + ZXC_BLOCK_LIT_SLACK,
+static_assert(ZXC_BLOCK_FORMAT_OVERHEAD >=
+                  ZXC_GLO_HEADER_BINARY_SIZE + ZXC_GLO_DESC_MAX_SIZE + ZXC_BLOCK_LIT_SLACK,
               "ZXC_BLOCK_FORMAT_OVERHEAD must cover sub-header, descriptors and slack");
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
@@ -500,7 +497,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
 #define ZXC_TOKEN_LL_MASK ((1U << ZXC_TOKEN_LIT_BITS) - 1)
 /** @brief Mask to extract Match Length from a GLO token. */
 #define ZXC_TOKEN_ML_MASK ((1U << ZXC_TOKEN_ML_BITS) - 1)
-static_assert(ZXC_TOKEN_LIT_BITS + ZXC_TOKEN_ML_BITS == CHAR_BIT, "a GLO token is one byte");
+static_assert(ZXC_TOKEN_LIT_BITS == 4 && ZXC_TOKEN_ML_BITS == 4,
+              "the GLO decoder reads its tokens as two nibbles");
 /** @} */
 
 /** @name GHI Sequence Constants
@@ -568,7 +566,7 @@ static_assert(ZXC_BLOCK_SIZE_MIN <= ZXC_BLOCK_SIZE_DEFAULT &&
 static_assert((ZXC_LZ_WINDOW_SIZE & ZXC_LZ_WINDOW_MASK) == 0,
               "ZXC_LZ_WINDOW_SIZE must be a power of two (ring mask)");
 static_assert(ZXC_LZ_WINDOW_SIZE <= (1U << ZXC_SEQ_OFF_BITS),
-              "offsets are 16-bit on the wire and in chain_table");
+              "chain_table holds window positions in 16 bits");
 
 /**
  * @brief Reads a Prefix Varint encoded integer.
@@ -646,9 +644,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
 static_assert(ZXC_GLO_MAX_INLINE_ML <= ZXC_PAD_SIZE, "an inline GLO match is one 32-byte store");
-static_assert(4 * (ZXC_SEQ_LL_MASK + ZXC_SEQ_ML_MASK + ZXC_LZ_MIN_MATCH_LEN) + ZXC_PAD_SIZE <=
-                  ZXC_DECOMPRESS_TAIL_PAD,
-              "ZXC_DECOMPRESS_TAIL_PAD must hold a 4x GHI batch, or the fast loop is unreachable");
+static_assert(ZXC_LZ_WINDOW_SIZE - ZXC_LZ_OFFSET_BIAS <= ZXC_SEQ_OFF_MASK,
+              "a biased offset must fit the 16-bit wire field");
+static_assert(4 * ZXC_GHI_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE <= ZXC_DECOMPRESS_TAIL_PAD,
+              "ZXC_DECOMPRESS_TAIL_PAD must hold a 4x GHI batch and its wild-copy overshoot");
 static_assert(ZXC_DICT_SIZE_MAX <= ZXC_LZ_MAX_DIST, "a dictionary must stay within offset reach");
 
 /** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to

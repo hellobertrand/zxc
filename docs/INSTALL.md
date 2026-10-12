@@ -58,7 +58,8 @@ Key fingerprint and vulnerability reporting: [SECURITY.md](../.github/SECURITY.m
 
 ## Building from source (CMake)
 
-**Requirements:** CMake 3.21+, a C17 compiler (Clang, GCC or MSVC).
+**Requirements:** CMake 3.21+, a C17 compiler (Clang, GCC or MSVC). Built by
+another build system, the sources need C11 or later (MSVC: `/std:c11`).
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git

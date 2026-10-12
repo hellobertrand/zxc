@@ -110,7 +110,9 @@ fn extract_compression_levels(include_dir: &Path) -> (i32, i32, i32, i32, i32, i
 fn apply_feature_macros(build: &mut cc::Build) {
     let target = env::var("TARGET").unwrap_or_default();
     if target.contains("msvc") {
-        // The MSVC CRT needs none of these; _fseeki64 is already 64-bit.
+        // The MSVC CRT needs none of these; _fseeki64 is already 64-bit. cl
+        // defaults to pre-C11, which the sources refuse: ask for C17 as CMake does.
+        build.std("c17");
     } else if target.contains("android") {
         // Bionic exposes these regardless, and _FILE_OFFSET_BITS=64 is only
         // partially honoured below API 24.

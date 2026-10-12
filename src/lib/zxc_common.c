@@ -920,7 +920,8 @@ static ZXC_ALWAYS_INLINE void zxc_read_gnr_header(const uint8_t* RESTRICT src,
 /**
  * @brief Size of the GLO section descriptors, implied by the encoding fields.
  *
- * 0, 4 or 8 bytes - see @ref zxc_write_glo_header_and_desc for what they hold.
+ * 0, 4 or 8 bytes (@ref ZXC_GLO_DESC_MAX_SIZE) - see @ref zxc_write_glo_header_and_desc
+ * for what they hold.
  */
 static ZXC_ALWAYS_INLINE size_t zxc_glo_desc_size(const uint8_t enc_lit, const uint8_t enc_tok) {
     return ((enc_lit != ZXC_SECTION_ENCODING_RAW) ? sizeof(uint32_t) : 0) +

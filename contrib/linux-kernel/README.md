@@ -146,6 +146,9 @@ What it maps, and why:
   export.
 - `CHAR_BIT`, `UINT16_MAX`, `UINT32_MAX`, `UINT64_MAX`: the kernel spells them
   `U*_MAX`.
+- `static_assert`: from `<linux/build_bug.h>`, which only defines it from 5.1;
+  older kernels get `_Static_assert`. A replacement header must provide it, as
+  `src/lib/zxc_internal.h` checks its constants with it.
 
 The stock `posix_memalign` / `_aligned_malloc` helpers are `static inline` in
 `zxc_deps.h` itself, so a replacement defines `ZXC_ALIGNED_MALLOC` and
