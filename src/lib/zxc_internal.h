@@ -26,7 +26,7 @@
 #ifndef ZXC_INTERNAL_H
 #define ZXC_INTERNAL_H
 
-#include "zxc_deps.h" /* libc deps: <limits.h>, <stdint.h>, <stdlib.h>, <string.h>,
+#include "zxc_deps.h" /* libc deps: <assert.h>, <limits.h>, <stdint.h>, <stdlib.h>, <string.h>,
                         and the ZXC_MALLOC / ZXC_ALIGNED_MALLOC macros.
                         Vendor this file to retarget non-libc environments. */
 
@@ -367,6 +367,8 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
 #define ZXC_ALIGNMENT_MASK ((size_t)ZXC_CACHE_LINE_SIZE - 1)
 /** @brief Round @p x up to the next cache-line boundary. */
 #define ZXC_ALIGN_CL(x) (((x) + ZXC_ALIGNMENT_MASK) & ~(size_t)ZXC_ALIGNMENT_MASK)
+static_assert((ZXC_CACHE_LINE_SIZE & ZXC_ALIGNMENT_MASK) == 0,
+              "ZXC_CACHE_LINE_SIZE must be a power of two");
 
 /**
  * @brief Number of @c uint64_t words needed to hold a bitmap of @p n_bits.
@@ -384,6 +386,10 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
 #define ZXC_FILE_FLAG_HAS_SEEK_TABLE 0x20U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
+static_assert(((ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_FILE_FLAG_HAS_DICTIONARY |
+                ZXC_FILE_FLAG_HAS_SEEK_TABLE) &
+               ZXC_FILE_CHECKSUM_ALGO_MASK) == 0,
+              "a file flag overlaps the checksum algorithm id");
 
 /** @brief Current dictionary file format version. A 128-byte packed Huffman
  *         code-lengths table (shared literal table) always follows the
@@ -428,6 +434,8 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
  *  zxc_compress_bound().
  */
 #define ZXC_BLOCK_FORMAT_OVERHEAD 68
+static_assert(ZXC_BLOCK_FORMAT_OVERHEAD >= ZXC_GLO_HEADER_BINARY_SIZE + 8 + ZXC_BLOCK_LIT_SLACK,
+              "ZXC_BLOCK_FORMAT_OVERHEAD must cover sub-header, descriptors and slack");
 
 /** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
@@ -492,6 +500,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
 #define ZXC_TOKEN_LL_MASK ((1U << ZXC_TOKEN_LIT_BITS) - 1)
 /** @brief Mask to extract Match Length from a GLO token. */
 #define ZXC_TOKEN_ML_MASK ((1U << ZXC_TOKEN_ML_BITS) - 1)
+static_assert(ZXC_TOKEN_LIT_BITS + ZXC_TOKEN_ML_BITS == CHAR_BIT, "a GLO token is one byte");
 /** @} */
 
 /** @name GHI Sequence Constants
@@ -509,6 +518,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
 #define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)
 /** @brief Mask to extract Offset from a GHI sequence. */
 #define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)
+static_assert(ZXC_SEQ_LL_BITS + ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS == 32,
+              "a GHI sequence is one 32-bit word");
 /** @} */
 
 /** @name Literal Stream Encoding
@@ -549,6 +560,15 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_seek_size_field(const uint64_t table_bytes
  * the encoder refuses to emit values above this bound. Together they bound the
  * varint surface to exactly the format-defined block size limit. */
 #define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
+static_assert(ZXC_MAX_VARINT_VALUE < (1U << 21), "varint values must fit the 3-byte form");
+static_assert(ZXC_BLOCK_SIZE_MIN <= ZXC_BLOCK_SIZE_DEFAULT &&
+                  ZXC_BLOCK_SIZE_DEFAULT <= ZXC_BLOCK_SIZE_MAX &&
+                  (ZXC_BLOCK_SIZE_DEFAULT & (ZXC_BLOCK_SIZE_DEFAULT - 1)) == 0,
+              "ZXC_BLOCK_SIZE_DEFAULT must be a power of two within the block size range");
+static_assert((ZXC_LZ_WINDOW_SIZE & ZXC_LZ_WINDOW_MASK) == 0,
+              "ZXC_LZ_WINDOW_SIZE must be a power of two (ring mask)");
+static_assert(ZXC_LZ_WINDOW_SIZE <= (1U << ZXC_SEQ_OFF_BITS),
+              "offsets are 16-bit on the wire and in chain_table");
 
 /**
  * @brief Reads a Prefix Varint encoded integer.
@@ -625,6 +645,11 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 #define ZXC_LZ_OFFSET_BIAS 1
 /** @brief Maximum allowed offset distance. */
 #define ZXC_LZ_MAX_DIST (ZXC_LZ_WINDOW_SIZE - 1)
+static_assert(ZXC_GLO_MAX_INLINE_ML <= ZXC_PAD_SIZE, "an inline GLO match is one 32-byte store");
+static_assert(4 * (ZXC_SEQ_LL_MASK + ZXC_SEQ_ML_MASK + ZXC_LZ_MIN_MATCH_LEN) + ZXC_PAD_SIZE <=
+                  ZXC_DECOMPRESS_TAIL_PAD,
+              "ZXC_DECOMPRESS_TAIL_PAD must hold a 4x GHI batch, or the fast loop is unreachable");
+static_assert(ZXC_DICT_SIZE_MAX <= ZXC_LZ_MAX_DIST, "a dictionary must stay within offset reach");
 
 /** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to
  *         the decoder's widest match-copy arm so the overlap kernel stays off
@@ -666,6 +691,8 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 /** @brief Threshold above which `find_best_match` is skipped at intra-match
  *         positions, keeping the parser O(N) on highly repetitive data. */
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)256)
+static_assert(ZXC_OPT_LONG_MATCH_SKIP <= ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128 * 128,
+              "covered positions relax only the first two match cost classes");
 /** @brief Minimum literal count for the sample-based Huffman cost estimator
  *         used by the optimal parser. Below this, the strided sample is too
  *         small for the resulting code-lengths to be statistically reliable,
@@ -717,6 +744,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 #define ZXC_HUF_MAX_CODE_LEN_DENSITY 8
 /** @brief Alphabet size: one entry per possible byte value. */
 #define ZXC_HUF_NUM_SYMBOLS 256
+static_assert(ZXC_HUF_MAX_CODE_LEN_DENSITY <= ZXC_HUF_MAX_CODE_LEN_ULTRA,
+              "the decoder accepts code lengths up to ZXC_HUF_MAX_CODE_LEN_ULTRA only");
+static_assert(ZXC_HUF_MAX_CODE_LEN_ULTRA <= 0x0F && ZXC_HUF_TABLE_SIZE * 2 == ZXC_HUF_NUM_SYMBOLS,
+              "code lengths are packed one nibble per symbol");
 
 /** @brief Upper bound on PivCo tree nodes (full binary tree over the alphabet). */
 #define ZXC_PIVCO_MAX_NODES (2 * ZXC_HUF_NUM_SYMBOLS - 1)
@@ -924,9 +955,7 @@ static inline int zxc_level_clamp(const int level) {
 /** @brief zxc_glo_split_analyze's escape histograms: four rotating lanes of
  *         [escape][context] counts, carved from the compression workspace. */
 typedef uint32_t zxc_glo_split_hist_t[4][2][1U << ZXC_GLO_SPLIT_CTX_BITS];
-#if ZXC_GLO_SPLIT_CTX_BITS > 8
-#error "a context is recorded in one byte of buf_split"
-#endif
+static_assert(ZXC_GLO_SPLIT_CTX_BITS <= CHAR_BIT, "a context is recorded in one byte of buf_split");
 /** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below

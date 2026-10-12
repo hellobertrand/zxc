@@ -16,8 +16,8 @@
  * allocator, sort, and basic header set.
  *
  * @par Stock (hosted) build
- * Pulls in @c <limits.h>, @c <stdint.h>, @c <stdlib.h>, @c <string.h> and
- * expands the macros to their libc equivalents.
+ * Pulls in @c <assert.h>, @c <limits.h>, @c <stdint.h>, @c <stdlib.h>,
+ * @c <string.h> and expands the macros to their libc equivalents.
  *
  * Per-symbol @c -D overrides are also accepted (each macro is guarded by
  * an @c ifndef, the aligned pair as one), so vendoring is optional for ad-hoc
@@ -34,16 +34,17 @@
 
 /**
  * @name Standard Headers
- * @brief Pulled in by the stock libzxc build to provide @c size_t,
- * @c uintN_t / @c intN_t, @c CHAR_BIT, @c malloc / @c calloc /
+ * @brief Pulled in by the stock libzxc build to provide @c static_assert,
+ * @c size_t, @c uintN_t / @c intN_t, @c CHAR_BIT, @c malloc / @c calloc /
  * @c realloc / @c free, and @c memcpy / @c memset / @c memmove /
  * @c memcmp.
  *
- * Vendored overrides of this file typically substitute @c <linux/limits.h>,
- * @c <linux/types.h>, @c <linux/string.h>, @c <linux/slab.h>,
+ * Vendored overrides of this file typically substitute @c <linux/build_bug.h>,
+ * @c <linux/limits.h>, @c <linux/types.h>, @c <linux/string.h>, @c <linux/slab.h>,
  * @c <linux/sort.h>.
  * @{
  */
+#include <assert.h>
 #include <limits.h>
 #include <stdint.h>
 #include <stdlib.h>

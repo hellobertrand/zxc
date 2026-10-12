@@ -9,6 +9,7 @@
 #define ZXC_DEPS_H
 
 #include <linux/bitops.h>
+#include <linux/build_bug.h>
 #include <linux/kernel.h>
 #include <linux/limits.h>
 #include <linux/mm.h>
