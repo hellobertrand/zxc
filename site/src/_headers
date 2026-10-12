@@ -1,0 +1,11 @@
+# Response headers, applied by Cloudflare to the static assets.
+/*
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Frame-Options: DENY
+
+# Versioned by build.mjs (?v=<hash>)
+/assets/site.css
+  Cache-Control: public, max-age=31536000, immutable
+/assets/site.js
+  Cache-Control: public, max-age=31536000, immutable

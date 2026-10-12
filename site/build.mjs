@@ -596,6 +596,7 @@ async function build() {
 
   // Static assets
   await cp(path.join(SRC, "assets"), path.join(OUT, "assets"), { recursive: true });
+  await cp(path.join(SRC, "_headers"), path.join(OUT, "_headers"));
   if (existsSync(path.join(REPO, "docs/images"))) {
     await cp(path.join(REPO, "docs/images"), path.join(OUT, "docs/images"), { recursive: true });
   }

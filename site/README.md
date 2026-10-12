@@ -29,8 +29,8 @@ locally.
 
 ## Deployment
 
-`.github/workflows/pages.yml` builds the site and deploys it to GitHub Pages
-(no branch, no committed HTML: the built site is uploaded as a Pages artifact):
+`.github/workflows/pages.yml` builds the site and deploys `dist/` to Cloudflare
+as a Worker serving static assets (no branch, no committed HTML):
 
 | Event | What happens |
 | --- | --- |
@@ -41,22 +41,25 @@ locally.
 
 The documentation is taken from the **latest release tag**, not from `main`, so
 the published API reference and format specification always match what users
-can install. Deployment uses OIDC (`pages: write`, `id-token: write`); no
-secret is involved.
+can install.
+
+The site's settings are in this directory: `wrangler.jsonc` (domain, 404 page)
+and `src/_headers` (response headers, cache lifetimes).
 
 ### One-time setup
 
-1. Settings → Pages → Build and deployment → Source: **GitHub Actions**.
-2. Settings → Pages → Custom domain: `libzxc.org`, then **Enforce HTTPS** once
-   the certificate is issued. Verify the domain in your account settings
-   (Settings → Pages → Verified domains) to prevent takeovers.
-3. Settings → Environments → `github-pages` (created by the first run):
-   restrict deployment branches and tags to `main` and `v*`.
-4. DNS at Cloudflare, proxy **off** (grey cloud) so GitHub can issue the
-   certificate:
-   - `libzxc.org` A → 185.199.108.153, 185.199.109.153, 185.199.110.153, 185.199.111.153
-   - `libzxc.org` AAAA → 2606:50c0:8000::153, 2606:50c0:8001::153, 2606:50c0:8002::153, 2606:50c0:8003::153
-   - `www` CNAME → `hellobertrand.github.io`
+1. Cloudflare → My Profile → API Tokens: create a token from the **Edit
+   Cloudflare Workers** template, limited to your account and the `libzxc.org`
+   zone.
+2. GitHub → Settings → Environments → New environment `cloudflare`: restrict
+   deployment branches and tags to `main` and `v*`, then add the secrets
+   `CLOUDFLARE_API_TOKEN` (the token) and `CLOUDFLARE_ACCOUNT_ID` (shown on the
+   Cloudflare dashboard home page).
+3. DNS: delete any existing `libzxc.org` A/AAAA records; the first deploy
+   creates the custom domain and its record.
+4. `www`: a proxied `www` record (AAAA `100::`) and a Redirect Rule
+   (Rules → Redirect Rules → "Redirect from WWW to root") send it to
+   `https://libzxc.org`.
 
 ## Updating content
 

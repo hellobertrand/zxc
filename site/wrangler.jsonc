@@ -1,0 +1,13 @@
+// Cloudflare Worker serving site/dist as static assets, deployed by
+// .github/workflows/pages.yml. Headers live in src/_headers.
+{
+  "name": "libzxc",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "./dist",
+    "not_found_handling": "404-page"
+  },
+  "routes": [{ "pattern": "libzxc.org", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false
+}

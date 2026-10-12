@@ -95,3 +95,4 @@ wrappers/nodejs/zxc-core/
 # site
 site/dist/
 site/node_modules/
+site/.wrangler/
