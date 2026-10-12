@@ -75,6 +75,7 @@ jobs:
           sparse-checkout: |
             docs
             include
+            src/cli
             src/lib
 
       - name: Set up Node.js

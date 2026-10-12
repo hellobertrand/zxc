@@ -7,7 +7,7 @@
 // Inputs read from the zxc repository (the parent folder, or REPO_ROOT), so the
 // site never drifts from the code:
 //   include/zxc_constants.h   library version
-//   docs/*.md, docs/man/*.md  documentation pages
+//   docs/*.md, src/cli/zxc.1.md  documentation pages (docs/man/ in older releases)
 //   docs/images/*             figures referenced by the docs
 //   CHANGELOG (or CHANGELOG.md in releases before the rename)  changelog page
 //   docs/Doxyfile.in, include/, src/lib/
@@ -41,6 +41,8 @@ const BRANCH = process.env.SOURCE_BRANCH || "main";
 // ---------------------------------------------------------------------------
 // CHANGELOG since 0.15.0; older release tags, which CI may build from, have CHANGELOG.md.
 const CHANGELOG = existsSync(path.join(REPO, "CHANGELOG")) ? "CHANGELOG" : "CHANGELOG.md";
+// The man page moved from docs/man/ to src/cli/; older release tags have the former.
+const MANPAGE = existsSync(path.join(REPO, "src/cli/zxc.1.md")) ? "src/cli/zxc.1.md" : "docs/man/zxc.1.md";
 
 const DOCS = [
   { group: "Guides", slug: "whitepaper", file: "docs/WHITEPAPER.md", title: "Whitepaper",
@@ -53,7 +55,7 @@ const DOCS = [
     blurb: "Upgrading between releases and converting archives across format versions." },
   { group: "Reference", slug: "api", file: "docs/API.md", title: "API reference",
     blurb: "Every public function, type, constant and error code, with ABI rules." },
-  { group: "Reference", slug: "cli", file: "docs/man/zxc.1.md", title: "CLI manual",
+  { group: "Reference", slug: "cli", file: MANPAGE, title: "CLI manual",
     blurb: "The zxc(1) manual page: modes, options, exit codes." },
   { group: "Reference", slug: "format", file: "docs/FORMAT.md", title: "Format specification",
     blurb: "The on-disk wire format, precise enough to write an independent decoder." },
@@ -63,6 +65,7 @@ const DOCS = [
 const DOC_BY_FILE = new Map(DOCS.map((d) => [d.file, d]));
 // Links to either name reach the changelog page.
 for (const f of ["CHANGELOG", "CHANGELOG.md"]) DOC_BY_FILE.set(f, DOC_BY_FILE.get(CHANGELOG));
+for (const f of ["src/cli/zxc.1.md", "docs/man/zxc.1.md"]) DOC_BY_FILE.set(f, DOC_BY_FILE.get(MANPAGE));
 
 // The Doxygen reference: generated HTML, listed on /docs/ but outside the page chain.
 // It has no link back to the site, so it opens in a new tab.
