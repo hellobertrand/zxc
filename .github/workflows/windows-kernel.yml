@@ -79,7 +79,18 @@ jobs:
           $dumpbin = if ($vs) { Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName }
           $km = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include\*\km\ntddk.h" -ErrorAction SilentlyContinue | Select-Object -Last 1
           foreach ($pair in @(@("Visual Studio with the WDK extension", $vs), @("MSBuild", $msbuild), @("dumpbin", $dumpbin), @("kernel headers (km\ntddk.h)", $km))) {
-            if (-not $pair[1]) { Write-Host "::error::$($pair[0]) not found on this runner image"; exit 1 }
+            if (-not $pair[1]) {
+              Write-Host "::error::$($pair[0]) not found on this runner image"
+              # What the image does carry, so the next fix is informed.
+              Write-Host "::group::Visual Studio instances"
+              & $vswhere -all -prerelease -products * -format json | ConvertFrom-Json | ForEach-Object { "$($_.installationVersion)  $($_.displayName)  $($_.installationPath)" }
+              "with the WDK extension: " + ((& $vswhere -all -prerelease -products * -requires Component.Microsoft.Windows.DriverKit -property installationPath) -join '; ')
+              Write-Host "::endgroup::"
+              Write-Host "::group::Kit build task assemblies"
+              Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\build\*\bin\Microsoft.DriverKit.Build.Tasks*.dll" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+              Write-Host "::endgroup::"
+              exit 1
+            }
             "$($pair[0]): $($pair[1])"
           }
           "msbuild=$msbuild" >> $env:GITHUB_OUTPUT
