@@ -1,0 +1,128 @@
+name: Windows Kernel Library
+
+# Builds contrib/windows-kernel with the runner's WDK: the kernel-mode static
+# library and the self-test driver that links it, then asserts the image's
+# imports, machine and subsystem. Like kernel.yml, off the PR path unless the
+# tree or the library change. Plan B (the Windows 7 target and x86) needs the
+# 22000 kit, which the runner lacks, so a second job installs it and runs on
+# the schedule and on dispatch only.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 2'
+  push:
+    branches: [ main ]
+    paths:
+      - 'contrib/windows-kernel/**'
+      - 'include/**'
+      - 'src/lib/**'
+      - '.github/workflows/windows-kernel.yml'
+  pull_request:
+    branches: [ main, candidate ]
+    paths:
+      - 'contrib/windows-kernel/**'
+      - 'include/**'
+      - 'src/lib/**'
+      - '.github/workflows/windows-kernel.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  library:
+    name: "Kernel library (${{ matrix.platform }}, Windows 10 2004)"
+    runs-on: windows-2025
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Locate the toolchain
+        id: tools
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          $km = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include\*\km\ntddk.h" -ErrorAction SilentlyContinue | Select-Object -Last 1
+          foreach ($pair in @(@("MSBuild", $msbuild), @("dumpbin", $dumpbin), @("kernel headers (km\ntddk.h)", $km))) {
+            if (-not $pair[1]) { Write-Host "::error::$($pair[0]) not found on this runner image"; exit 1 }
+            "$($pair[0]): $($pair[1])"
+          }
+          "msbuild=$msbuild" >> $env:GITHUB_OUTPUT
+          "dumpbin=$dumpbin" >> $env:GITHUB_OUTPUT
+
+      - name: Build the library and the self-test driver
+        shell: pwsh
+        run: |
+          & "${{ steps.tools.outputs.msbuild }}" contrib\windows-kernel\zxc_selftest.vcxproj /nologo /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:SignMode=Off
+          exit $LASTEXITCODE
+
+      - name: Check the image
+        shell: pwsh
+        run: |
+          .\contrib\windows-kernel\check-image.ps1 -Image contrib\windows-kernel\build\${{ matrix.platform }}\Release\zxc_selftest.sys -Machine ${{ matrix.platform }} -SubsystemVersion 10.00 -Dumpbin "${{ steps.tools.outputs.dumpbin }}"
+
+  plan-b:
+    name: "Kernel library plan B (${{ matrix.platform }}, Windows 7, kit 22000)"
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: windows-2025
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: x64
+            machine: x64
+          - platform: Win32
+            machine: x86
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install the 22000 SDK and WDK
+        shell: pwsh
+        run: |
+          foreach ($id in "Microsoft.WindowsSDK.10.0.22000", "Microsoft.WindowsWDK.10.0.22000") {
+            winget install --id $id --exact --silent --disable-interactivity --accept-package-agreements --accept-source-agreements
+            if ($LASTEXITCODE) { Write-Host "::error::winget could not install $id (exit $LASTEXITCODE)"; exit 1 }
+          }
+          if (-not (Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Include\10.0.22000.0\km\ntddk.h")) {
+            Write-Host "::error::kit 22000 kernel headers missing after the install"; exit 1
+          }
+
+      - name: Locate the toolchain
+        id: tools
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $msbuild = & $vswhere -latest -products * -requires Microsoft.Component.MSBuild -find 'MSBuild\**\Bin\MSBuild.exe' | Select-Object -First 1
+          $dumpbin = & $vswhere -latest -products * -find 'VC\Tools\MSVC\**\bin\Hostx64\x64\dumpbin.exe' | Select-Object -First 1
+          foreach ($pair in @(@("MSBuild", $msbuild), @("dumpbin", $dumpbin))) {
+            if (-not $pair[1]) { Write-Host "::error::$($pair[0]) not found on this runner image"; exit 1 }
+            "$($pair[0]): $($pair[1])"
+          }
+          "msbuild=$msbuild" >> $env:GITHUB_OUTPUT
+          "dumpbin=$dumpbin" >> $env:GITHUB_OUTPUT
+
+      - name: Build for the Windows 7 target
+        shell: pwsh
+        run: |
+          & "${{ steps.tools.outputs.msbuild }}" contrib\windows-kernel\zxc_selftest.vcxproj /nologo /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:TargetVersion=Windows7 /p:SignMode=Off
+          exit $LASTEXITCODE
+
+      - name: Check the image
+        shell: pwsh
+        run: |
+          .\contrib\windows-kernel\check-image.ps1 -Image contrib\windows-kernel\build\${{ matrix.platform }}\Release\zxc_selftest.sys -Machine ${{ matrix.machine }} -SubsystemVersion 6.01 -Dumpbin "${{ steps.tools.outputs.dumpbin }}"
