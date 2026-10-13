@@ -29,8 +29,8 @@ jobs:
         id: ver
         shell: bash
         run: |
-          if [[ "${GITHUB_REF}" =~ ^refs/heads/(bump|release)/(v[0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-            DETECTED="${BASH_REMATCH[2]}"
+          if [[ "${GITHUB_REF}" =~ ^refs/heads/(bump|release)/v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            DETECTED="v${BASH_REMATCH[2]}"
             echo "tag_arg=--tag $DETECTED" >> "$GITHUB_OUTPUT"
             echo "Detected tag from branch name: $DETECTED"
           else

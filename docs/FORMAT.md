@@ -430,8 +430,10 @@ control byte `t`:
 - `t >= 0x80`: a repeat run. One byte `v` follows; it is written
   `(t & 0x7F) + 4` times (4 to 131).
 
-The runs must produce exactly `n_literals` bytes; a run that overshoots it, or a
-section that ends before reaching it, is corrupt data.
+The runs must produce exactly `n_literals` bytes and use the whole section: a
+run that overshoots `n_literals`, a section that ends before reaching it, or
+bytes left over once it is reached are corrupt data. An RLE section for
+`n_literals = 0` is empty.
 
 ## 5.3 GHI block (`type=2`)
 
