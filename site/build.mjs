@@ -85,6 +85,7 @@ const esc = (s) => String(s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const unesc = (s) => String(s)
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
+const attrJson = (o) => esc(JSON.stringify(o));
 const reEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const fmt = (n) => (n >= 100 ? Math.round(n).toLocaleString("en-US") : String(n));
 
@@ -431,8 +432,8 @@ function renderFigure(bench) {
     // Rivals take their family's colour, as in the SVG charts.
     const family = name.startsWith("zstd") ? " zstd" : name.startsWith("lz4") ? " lz4" : "";
     return `<div class="bar ${which === "zxc" ? "zxc" : "rival" + family}">
-          <div class="bar-label"><span class="codec">${esc(name)}</span><span class="val" data-by-cpu='${JSON.stringify(byCpuVal)}'>${v.html}</span></div>
-          <div class="track"><div class="fill" style="--w:${f.w}" data-by-cpu='${JSON.stringify(byCpu)}'></div></div>
+          <div class="bar-label"><span class="codec">${esc(name)}</span><span class="val" data-by-cpu="${attrJson(byCpuVal)}">${v.html}</span></div>
+          <div class="track"><div class="fill" style="--w:${f.w}" data-by-cpu="${attrJson(byCpu)}"></div></div>
         </div>`;
   };
 
@@ -447,7 +448,7 @@ function renderFigure(bench) {
       <div class="bars">
         ${bar(t, "zxc")}
         ${bar(t, "rival")}
-        <div class="gain" data-by-cpu='${JSON.stringify(gains).replace(/'/g, "&#39;")}'>${gains[first.id].html}</div>
+        <div class="gain" data-by-cpu="${attrJson(gains)}">${gains[first.id].html}</div>
       </div>
     </div>`;
   }).join("\n");
@@ -462,7 +463,7 @@ function renderFigure(bench) {
         ${radios}
     </fieldset>
     ${tiers}
-    <figcaption>Figure 1. Single-threaded decompression of <code>${esc(bench.corpus)}</code> (${(bench.corpusBytes / 1e6).toFixed(1)}&nbsp;MB), measured with ${esc(bench.tool)} and zxc ${esc(bench.zxcVersion)}. ZXC levels 1, 3, 6 and 7 are each compared with the codec that produces output of similar size. <span data-cpu-detail='${JSON.stringify(details).replace(/'/g, "&#39;")}'>${esc(first.detail)}</span>. Full results are in the <a href="#benchmarks">benchmark tables</a>.</figcaption>
+    <figcaption>Figure 1. Single-threaded decompression of <code>${esc(bench.corpus)}</code> (${(bench.corpusBytes / 1e6).toFixed(1)}&nbsp;MB), measured with ${esc(bench.tool)} and zxc ${esc(bench.zxcVersion)}. ZXC levels 1, 3, 6 and 7 are each compared with the codec that produces output of similar size. <span data-cpu-detail="${attrJson(details)}">${esc(first.detail)}</span>. Full results are in the <a href="#benchmarks">benchmark tables</a>.</figcaption>
   </figure>`;
 }
 
@@ -715,7 +716,7 @@ function serve(port = Number(process.env.PORT) || 8080) {
     try {
       let p = decodeURIComponent(new URL(req.url, "http://x").pathname);
       let file = path.join(OUT, p);
-      if (!file.startsWith(OUT)) throw new Error("bad path");
+      if (file !== OUT && !file.startsWith(OUT + path.sep)) throw new Error("bad path");
       if (existsSync(file) && (await stat(file)).isDirectory()) file = path.join(file, "index.html");
       if (!existsSync(file)) { res.writeHead(404, { "content-type": TYPES[".html"] }); res.end(await readFile(path.join(OUT, "404.html"))); return; }
       res.writeHead(200, { "content-type": TYPES[path.extname(file)] || "application/octet-stream" });
