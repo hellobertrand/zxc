@@ -399,8 +399,9 @@ Literal Count:
 : The total number of literal bytes the Literals section decodes to.
 
 Literal Encoding:
-: 0 = RAW, 1 = RLE, 2 = Huffman ({{huffman-literal-section}}),
-  3 = shared-table Huffman ({{shared-huffman-literal-section}}).
+: 0 = RAW, 1 = RLE ({{rle-literal-section}}), 2 = Huffman
+  ({{huffman-literal-section}}), 3 = shared-table Huffman
+  ({{shared-huffman-literal-section}}).
 
 Token Encoding:
 : 0 = RAW tokens, 2 = Huffman tokens (level 7 only).
@@ -474,7 +475,8 @@ and Extras sections play the role of Tokens, Offsets, and Extras.
 
 Literals:
 : If Literal Encoding = 0, raw literal bytes. If Literal Encoding = 1,
-  RLE-tokenised literals. If Literal Encoding = 2, Huffman-coded
+  RLE-tokenised literals ({{rle-literal-section}}). If Literal
+  Encoding = 2, Huffman-coded
   literals ({{huffman-literal-section}}). If Literal Encoding = 3,
   Huffman-coded using the dictionary's shared literal table
   ({{shared-huffman-literal-section}}); valid only in
@@ -513,6 +515,22 @@ from the Extras stream and add it to ML. The actual match length is
 then ML + 5.
 
 Otherwise, the actual match length is ML + 5.
+
+## RLE Literal Section {#rle-literal-section}
+
+When Literal Encoding = 1, the Literals section is a sequence of runs,
+each starting with a control byte t:
+
+- t < 0x80: a literal run. The next t + 1 bytes (1 to 128) are copied
+  to the output as is.
+- t >= 0x80: a repeat run. The next byte is written (t & 0x7F) + 4
+  times (4 to 131).
+
+The runs MUST produce exactly Literal Count bytes and MUST use the
+whole section. A decoder MUST reject as corrupt data a run that
+overshoots Literal Count, a section that ends before reaching it, and
+bytes left over once it is reached. When Literal Count is 0, the
+section is empty.
 
 ## Huffman Literal Section {#huffman-literal-section}
 
@@ -660,11 +678,12 @@ packed 32-bit sequence words rather than separated streams.
 ## GHI Header
 
 The GHI header is binary-identical to the GLO header. In a GHI block
-Literal Encoding is always 0 (raw literals), so the Literals section
-occupies Literal Count bytes; Token Encoding and Match-Length Encoding
-are 0. Offset Encoding is written as 0 and MUST be ignored by decoders:
-GHI has no offset stream, and sequence words always store 16-bit
-offsets.
+Literal Encoding and Token Encoding MUST be 0, and a decoder MUST reject
+any other value; the Literals section therefore holds raw literals and
+occupies Literal Count bytes. Match-Length Encoding is written as 0 and
+ignored. Offset Encoding is written as 0 and MUST be ignored by
+decoders: GHI has no offset stream, and sequence words always store
+16-bit offsets.
 
 ## Section Descriptors {#ghi-section-descriptors}
 
@@ -1157,10 +1176,9 @@ content alone:
 Dictionary ID = fold32(rapidhash(content))
 ~~~
 
-A decoder that does not recognise the HAS_DICTIONARY flag ignores it
-per {{compatibility-rules}}. However, blocks compressed against a
-dictionary contain match offsets that reference dictionary content,
-so decoding them without the dictionary produces incorrect output.
+Blocks compressed against a dictionary contain match offsets that
+reference dictionary content, so decoding them without the dictionary
+produces incorrect output.
 When checksums are enabled, the per-block checksums
 ({{per-block-checksum}}) detect this divergence, because they cover the
 decompressed bytes. They also cover the residual risk of a 32-bit
@@ -1359,7 +1377,9 @@ Reserved fields:
   field any meaning is a version bump, never a same-version
   extension. The EOF and SEK block headers are the exception: a
   decoder MUST reject one whose Block Flags or Reserved byte is
-  non-zero ({{eof-block}}, {{sek-block}}).
+  non-zero ({{eof-block}}, {{sek-block}}). So is the File Footer: a
+  decoder MUST reject an L byte with bit 3 or 7 set
+  ({{file-footer}}).
 
 ## Minimum Conforming Decoder {#minimum-conforming-decoder}
 
@@ -1372,6 +1392,8 @@ A minimum conforming decoder for Format Version 9 MUST support:
   PivCo layout) with code lengths up to 11 bits.
 - GHI blocks (type 2): full LZ decoding with extras varints.
 - EOF block (type 255): stream termination.
+- SEK block (type 254): header check and table skip when
+  HAS_SEEK_TABLE = 1 ({{sek-block}}).
 - File footer validation: sizes, lengths and L ({{file-footer}}).
 - Concatenated frames ({{concatenated-frames}}).
 
@@ -1444,8 +1466,8 @@ user uploads) SHOULD additionally:
 - Validate all header checksums before processing any payload.
 - Enforce a maximum allocation limit derived from Compressed Payload
   Size and the chunk size code.
-- Reject files where Compressed Payload Size exceeds the compression
-  upper bound for the configured chunk size.
+- Reject any data block whose Compressed Payload Size exceeds the
+  block size ({{block-container}}).
 - Use bounded memory copies. Decoded lengths MUST NOT be trusted without
   cross-checking against the output buffer capacity.
 
