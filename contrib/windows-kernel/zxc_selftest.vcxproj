@@ -40,15 +40,33 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <!-- Where this tree stages and builds; the rules sheet carries no paths. -->
+  <PropertyGroup>
+    <ZxcStage>$(MSBuildThisFileDirectory)build\stage\</ZxcStage>
+    <OutDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+
   <Import Project="zxc_km.props" />
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ZxcStage)include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
 
   <ItemGroup>
     <ClCompile Include="selftest.c" />
   </ItemGroup>
 
+  <!-- A project property does not cross a ProjectReference: the library would
+       build for its own default target. Forward TargetVersion so the archive
+       matches the driver (plan B), as a consumer must. -->
   <ItemGroup>
     <ProjectReference Include="zxc_km.vcxproj">
       <Project>{6E3C7B1A-2D4F-4C8E-9A0B-5F1D2E3C4B5A}</Project>
+      <AdditionalProperties Condition="'$(TargetVersion)' != ''">TargetVersion=$(TargetVersion)</AdditionalProperties>
     </ProjectReference>
   </ItemGroup>
 

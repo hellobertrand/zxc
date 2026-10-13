@@ -121,8 +121,17 @@ _Use_decl_annotations_ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
                 memcpy(buf + need - (size_t)pn, comp, (size_t)pn);
                 pm = zxc_decompress_inplace_dctx(sdctx, buf, need, (size_t)pn, NULL);
             }
-            if (NT_SUCCESS(status) && (pm != sizeof(msg) || !buf || memcmp(buf, msg, sizeof(msg))))
+            if (need && !buf) {
+                status = STATUS_INSUFFICIENT_RESOURCES;
+            } else if (NT_SUCCESS(status) &&
+                       (pm != sizeof(msg) || !buf || memcmp(buf, msg, sizeof(msg)))) {
                 status = STATUS_DATA_ERROR;
+            }
+            // The library's own lazy allocations surface as ZXC_ERROR_MEMORY: an
+            // allocation failure, not a codec mismatch.
+            if (n == ZXC_ERROR_MEMORY || m == ZXC_ERROR_MEMORY || fn == ZXC_ERROR_MEMORY ||
+                fm == ZXC_ERROR_MEMORY || pn == ZXC_ERROR_MEMORY || pm == ZXC_ERROR_MEMORY)
+                status = STATUS_INSUFFICIENT_RESOURCES;
             st_free(buf);
         }
         DbgPrintEx(DPFLTR_IHVDRIVER_ID, DPFLTR_ERROR_LEVEL,

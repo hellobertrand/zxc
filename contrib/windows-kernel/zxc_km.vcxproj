@@ -38,11 +38,20 @@
   </PropertyGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+
+  <!-- Where this tree stages and builds; the rules sheet carries no paths. -->
+  <PropertyGroup>
+    <ZxcRoot>$(MSBuildThisFileDirectory)..\..\</ZxcRoot>
+    <ZxcStage>$(MSBuildThisFileDirectory)build\stage\</ZxcStage>
+    <OutDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\</OutDir>
+    <IntDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
+  </PropertyGroup>
+
   <Import Project="zxc_km.props" />
 
   <ItemDefinitionGroup>
     <ClCompile>
-      <AdditionalIncludeDirectories>$(ZxcStage)src\lib;$(ZxcStage)src\lib\vendors;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ZxcStage)include;$(ZxcStage)src\lib;$(ZxcStage)src\lib\vendors;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
   </ItemDefinitionGroup>
 

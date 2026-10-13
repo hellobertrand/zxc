@@ -62,6 +62,7 @@ matter, and `zxc_selftest.vcxproj` is the worked example:
 <ItemGroup>
   <ProjectReference Include="path\to\contrib\windows-kernel\zxc_km.vcxproj">
     <Project>{6E3C7B1A-2D4F-4C8E-9A0B-5F1D2E3C4B5A}</Project>
+    <AdditionalProperties Condition="'$(TargetVersion)' != ''">TargetVersion=$(TargetVersion)</AdditionalProperties>
   </ProjectReference>
 </ItemGroup>
 <ItemDefinitionGroup>
@@ -72,8 +73,14 @@ matter, and `zxc_selftest.vcxproj` is the worked example:
 </ItemDefinitionGroup>
 ```
 
-The include order is the rule that matters (see below). The official toolset
-supplies every other link input; a hand-rolled link also needs
+The include order is the rule that matters (see below). The
+`AdditionalProperties` line is the other one: a `TargetVersion` set in the
+driver's project file does not cross a project reference, so without it the
+library builds for its own default, Windows 10 2004, and a plan B driver
+loads on Windows 7 with a missing `ExAllocatePool2` import. A
+`/p:TargetVersion=Windows7` on the command line is global and reaches the
+library either way. The official toolset supplies every other link input; a
+hand-rolled link also needs
 `ntoskrnl.lib`, the `/GS` support library (`BufferOverflowK.lib` for a target
 below Windows 8, `BufferOverflowFastFailK.lib` otherwise), `arm64rt.lib` on
 ARM64, and `memcmp.lib` on x86. The library's externals are `memcpy`,
@@ -85,9 +92,11 @@ Vendoring instead: add the seven units named in `zxc_km.vcxproj` to the
 driver project, import `zxc_km.props` after `Microsoft.Cpp.props`, and keep
 the staging rule: `zxc_internal.h` includes the dependency header with
 quotes, so this tree's `zxc_deps.h` must sit next to the units in place of
-the stock one. Pass `/kernel` yourself if the project is not a driver: the
-toolset adds it to driver configurations only, and the header refuses to
-build without it.
+the stock one. The sheet carries the rules only, no output directories and
+no paths into this tree, so the project's own `OutDir`, `IntDir` and include
+directories for the staged sources stay as they are. The sheet also passes
+`/kernel`, which the toolset gives driver configurations only; the header
+refuses to build without it.
 
 ### Include order
 
@@ -113,7 +122,11 @@ msbuild contrib\windows-kernel\zxc_selftest.vcxproj /p:Configuration=Release /p:
 msbuild contrib\windows-kernel\zxc_selftest.vcxproj /p:Configuration=Release /p:Platform=Win32 /p:TargetVersion=Windows7
 ```
 
-One library built this way runs on every Windows from 7 up. What changes:
+One library built this way runs on every Windows from 7 up. The target
+version must reach `zxc_km.vcxproj`: on the command line as above, or
+forwarded through the project reference as shown under "Consuming the
+library"; a value in the consumer's project file alone does not. What
+changes:
 
 - **The kit.** Kits newer than 22000 refuse both a Windows 7 target and the
   Win32 platform in their MSBuild targets, though their compilers still

@@ -3,8 +3,10 @@
 <!-- ZXC - High-performance lossless compression -->
 <!-- Copyright (c) Bertrand Lebonnois and contributors. -->
 <!--
-  Imported by both projects after Microsoft.Cpp.props. What a kernel-mode
-  build of zxc needs beyond the toolset's defaults, and why:
+  Imported by both projects after Microsoft.Cpp.props, and by a consumer that
+  vendors the units. Rules only: no output directories, no paths into this
+  tree; the projects set those before importing it. What a kernel-mode build
+  of zxc needs beyond the toolset's defaults, and why:
 
   - Include order. The toolset puts the kit's legacy km\crt CRT headers first;
     with them, <stdint.h> cannot be included at all (crtdefs.h and the
@@ -25,17 +27,10 @@
     the compiler switch, and zxc_deps.h refuses to build without it.
 -->
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
-  <PropertyGroup>
-    <ZxcRoot>$(MSBuildThisFileDirectory)..\..\</ZxcRoot>
-    <ZxcStage>$(MSBuildThisFileDirectory)build\stage\</ZxcStage>
-    <OutDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\</OutDir>
-    <IntDir>$(MSBuildThisFileDirectory)build\$(Platform)\$(Configuration)\$(ProjectName)\</IntDir>
-  </PropertyGroup>
-
   <ItemDefinitionGroup>
     <ClCompile>
       <IgnoreStandardIncludePath>true</IgnoreStandardIncludePath>
-      <AdditionalIncludeDirectories>$(ZxcStage)include;$(VC_IncludePath);$(UniversalCRT_IncludePath);$(KM_IncludePath);$(KIT_SHARED_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(UniversalCRT_IncludePath);$(KM_IncludePath);$(KIT_SHARED_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <AdditionalOptions>/kernel /std:c17 /Zc:preprocessor- %(AdditionalOptions)</AdditionalOptions>
       <PreprocessorDefinitions>ZXC_STATIC_DEFINE;ZXC_ONLY_DEFAULT;ZXC_FUNCTION_SUFFIX=_default;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <WarningLevel>Level4</WarningLevel>

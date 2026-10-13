@@ -149,12 +149,22 @@ Out of scope:
 contrib/windows-kernel/
   README.md             the guide, section for section like linux-kernel/README.md
   zxc_deps.h            the kernel replacement for src/lib/zxc_deps.h
-  zxc_km.props          settings both projects import: include order, flags, defines
+  zxc_km_target.props   target version and kit, imported before Microsoft.Cpp.Default.props
+  zxc_km.props          the rules both projects import after Microsoft.Cpp.props
   zxc_km.vcxproj        static library: stages the sources, builds zxc_km.lib
   zxc_selftest.vcxproj  WDM driver: DriverEntry round trips, links zxc_km.lib
   selftest.c            the driver's init
+  check-image.ps1       CI's modinfo: imports, machine, subsystem, no SSE on x86
   .gitignore            build/
 ```
+
+As implemented, the property sheet is two files: the toolset reads the
+target version and the kit when its own sheets are imported, during
+`Microsoft.Cpp.props`, so those must exist before `Microsoft.Cpp.Default.props`,
+while every compile rule must come after `Microsoft.Cpp.props`. The rules
+sheet carries no output directories and no paths into the tree, so a
+vendoring consumer can import it as is; each project sets its own
+`OutDir`, `IntDir` and staged include directories before importing it.
 
 Everything the build produces lands under `contrib/windows-kernel/build/`:
 `build/stage/` for the staged sources, `build/<Platform>/<Configuration>/`
@@ -166,6 +176,12 @@ for objects and outputs.
 
 Replaces `src/lib/zxc_deps.h` in the staged tree. It includes `<ntddk.h>`,
 `<ntintsafe.h>`, `<limits.h>`, `<stddef.h>`, `<stdint.h>` and `<string.h>`.
+It requires `NTDDI_VERSION` to be defined, as the toolset does from
+`TargetVersion`: `<sdkddkver.h>` cannot supply a default ahead of
+`<ntddk.h>` (it defines a deprecation macro in terms of one `ntdef.h`
+defines later, and `wdm.h` then fails), so the header spells its two
+thresholds out as literals for the tests that precede the include and
+cross-checks them against the kit afterwards.
 Unlike the Linux header it needs no shims: the compiler's `<stdint.h>` and
 `<limits.h>` are freestanding, the UCRT `<string.h>` declares the memory
 primitives without import decoration, and `ntoskrnl` exports them.
@@ -330,8 +346,13 @@ The README states it; the self-test project demonstrates it.
   the include order above in the consumer project, because `zxc.h` pulls
   `<stdint.h>`. The README carries the three-line project snippet.
 - **Alternative:** vendor the seven units into the driver project with the
-  same property sheet settings, which is what the Linux tree does. The
-  staging rule applies unchanged.
+  same rules, importing the rules sheet, which is what the Linux tree does.
+  The staging rule applies unchanged.
+- **Target version through a project reference.** A `TargetVersion` in the
+  consumer's project file does not cross a `ProjectReference`; the library
+  would build for its own default. The reference forwards it with
+  `AdditionalProperties`, as the self-test project does, or the build passes
+  it globally with `/p:`.
 - **IRQL.** Build contexts at PASSIVE_LEVEL from non-paged pool at init,
   one per CPU, then decode at up to DISPATCH_LEVEL with no allocation. A
   heap context allocates lazily on the first decode and again on the first
