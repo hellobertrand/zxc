@@ -14,6 +14,10 @@ This mirrors `contrib/linux-kernel`: a replacement dependency header, a build
 recipe on the platform's own driver build system, a self-test, a build-only
 CI job, and a README that states the platform's rules.
 
+The default target is Windows 10 2004. Windows 7 is the floor, supported as
+a documented alternative build, plan B, that one property selects and that
+CI builds on every run.
+
 ## Evidence
 
 A throwaway spike on 2026-10-13 compiled the seven core units under
@@ -178,12 +182,13 @@ Definitions:
 One property sheet, imported by both projects after `Microsoft.Cpp.props`,
 so that the two never disagree on the rules the spike found. Its contents:
 
-- `TargetVersion`, unless the caller set it: `Windows7` on x64, so that one
-  library runs on every Windows from 7 up, and `Windows10` on ARM64, where
-  nothing older exists. The toolset derives `NTDDI_VERSION`, `_WIN32_WINNT`,
-  the subsystem version and the `/GS` support library from it. A consumer
-  who wants the Windows 10 2004 allocator and no runtime opt-in builds with
-  `TargetVersion=Windows10` and the matching `_NT_TARGET_VERSION`.
+- `TargetVersion` `Windows10` with `_NT_TARGET_VERSION` at Windows 10 2004
+  (`0xA000008`) on both platforms, unless the caller set them. The toolset
+  derives `NTDDI_VERSION`, `_WIN32_WINNT`, the subsystem version and the
+  `/GS` support library from them. Plan B: building with
+  `TargetVersion=Windows7`, x64 only, selects the Windows 7 body of the
+  allocation routine and yields one library that runs on every Windows
+  from 7 up.
 - `IgnoreStandardIncludePath` true (`/X`), and `AdditionalIncludeDirectories`
   set to, in order: `$(VC_IncludePath)`, `$(UniversalCRT_IncludePath)`,
   `$(KM_IncludePath)`, `$(KIT_SHARED_IncludePath)`. This is the include-order
@@ -262,7 +267,8 @@ The README states it; the self-test project demonstrates it.
   link also needs `ntoskrnl.lib`, the `/GS` support library
   (`BufferOverflowK.lib` for a target below Windows 8,
   `BufferOverflowFastFailK.lib` otherwise), and `arm64rt.lib` on ARM64.
-- **Target below Windows 10 2004** (the x64 default): define
+- **Target below Windows 10 2004** (plan B, built with
+  `TargetVersion=Windows7`): define
   `POOL_NX_OPTIN` to 1 in the driver and call
   `ExInitializeDriverRuntime(DrvRtPoolNxOptIn)` at the top of `DriverEntry`,
   before any allocation. The library's pool is then non-executable on
@@ -302,8 +308,8 @@ and pull requests to `main` and `candidate` on changes under
 weekly on a different hour; manual dispatch. Same permissions and
 concurrency block, actions pinned by SHA as elsewhere in the repo.
 
-One job, matrix over three legs: `x64` targeting Windows 7, `x64`
-targeting Windows 10 2004, and `ARM64` targeting Windows 10. The two x64
+One job, matrix over three legs: `x64` and `ARM64` at the default
+Windows 10 2004 target, and `x64` at Windows 7, the plan B leg. The two x64
 legs compile both bodies of the allocation routine.
 
 1. Checkout.
@@ -328,8 +334,9 @@ No artifacts are uploaded; the Linux job uploads none either.
   linking and vendoring; the include-order rule and the clash behind it;
   the C-standard flags; contexts and IRQL, with the workspace table reused
   from the Linux README; the stack budget with the measured frames; the SIMD
-  rules, including the inert auto-vectorizer dispatch; the target-version
-  rule, the runtime opt-in call, and which kits build which target; loading
+  rules, including the inert auto-vectorizer dispatch; the default target,
+  the Windows 7 plan B build with its runtime opt-in call, and which kits
+  build which target; loading
   the self-test on a test-signed VM (`bcdedit /set testsigning on`,
   `signtool` with a test certificate, `sc create ... type= kernel`,
   `sc start`, the DebugView or debugger line to expect, `sc stop`,
@@ -372,14 +379,14 @@ No artifacts are uploaded; the Linux job uploads none either.
 - **Spectre on by default.** Matches the toolset and Microsoft's guidance
   for drivers; the lfence cost is the consumer's call through the toolset's
   own switch.
-- **Windows 7 floor, one x64 binary.** The user asked for Windows 7 even
-  though it is not ideal. The cost is one more body in the allocation
-  routine, a deprecated-but-present pool routine behind the kit's wrapper,
-  and a runtime opt-in call in the consumer's `DriverEntry`, which is
-  Microsoft's own mechanism for drivers that span Windows 7 and later. The
-  x64 library targets Windows 7 by default so a consumer gets a single
-  binary for every supported Windows; the Windows 10 2004 allocator is one
-  property away for consumers who do not need older systems.
+- **Windows 10 2004 by default, Windows 7 as plan B.** The default build
+  uses the current allocator, is non-executable by construction, and asks
+  nothing of the consumer's `DriverEntry`. Windows 7 is the floor the user
+  asked for, accepted as not ideal: one property selects it, at the cost of
+  a deprecated-but-present pool routine behind the kit's wrapper and a
+  runtime opt-in call in the consumer's `DriverEntry`, which is Microsoft's
+  own mechanism for drivers that span Windows 7 and later. CI builds plan B
+  on every run, so it cannot rot.
 - **x64 and ARM64 only.**
 - **Signing off by default.** A loadable binary needs a test certificate in
   the developer's store, a side effect a library repo should not cause on a
@@ -409,6 +416,6 @@ Each has a fallback; none changes the design.
   MSBuild on 26100. Fallback: the Windows 7 leg sets `_NT_TARGET_VERSION`
   and the `/GS` library by hand, or CI restores the 22621 kit from NuGet
   for that leg.
-- Per-platform `TargetVersion` defaults in one property sheet, with ARM64
-  refusing Windows 7. Fallback: a condition on `$(Platform)` in each
-  project instead.
+- The toolset refusing `TargetVersion=Windows7` on ARM64 with a readable
+  error, so the README can say "x64 only" and leave it there. Fallback: a
+  guard in the property sheet that fails the build with its own message.
