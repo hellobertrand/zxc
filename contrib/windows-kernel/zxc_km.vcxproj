@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!-- ZXC - High-performance lossless compression -->
+<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!--
+  zxc_km.lib: the seven core units compiled in kernel mode. The ZxcStage
+  target copies them, the internal headers, the vendored hash and the public
+  headers into build\stage\, with contrib/windows-kernel/zxc_deps.h in place
+  of src/lib/zxc_deps.h. The copy is the point: zxc_internal.h includes the
+  dependency header with quotes, so the file next to it always wins.
+-->
+<Project DefaultTargets="Build" ToolsVersion="17.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup Label="ProjectConfigurations">
+    <ProjectConfiguration Include="Debug|x64"><Configuration>Debug</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|ARM64"><Configuration>Debug</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|ARM64"><Configuration>Release</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
+  </ItemGroup>
+
+  <PropertyGroup Label="Globals">
+    <ProjectGuid>{6E3C7B1A-2D4F-4C8E-9A0B-5F1D2E3C4B5A}</ProjectGuid>
+    <RootNamespace>zxc_km</RootNamespace>
+    <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
+    <Platform Condition="'$(Platform)' == ''">x64</Platform>
+  </PropertyGroup>
+
+  <Import Project="zxc_km_target.props" />
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
+
+  <PropertyGroup Label="Configuration">
+    <ConfigurationType>StaticLibrary</ConfigurationType>
+    <PlatformToolset>WindowsKernelModeDriver10.0</PlatformToolset>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Debug'">true</UseDebugLibraries>
+    <UseDebugLibraries Condition="'$(Configuration)' == 'Release'">false</UseDebugLibraries>
+    <TargetName>zxc_km</TargetName>
+  </PropertyGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
+  <Import Project="zxc_km.props" />
+
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <AdditionalIncludeDirectories>$(ZxcStage)src\lib;$(ZxcStage)src\lib\vendors;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <!-- What ZxcStage copies. The stock dependency header is excluded; ours goes
+       in its place. -->
+  <ItemGroup>
+    <ZxcPublicHeader Include="$(ZxcRoot)include\*.h" />
+    <ZxcLibHeader Include="$(ZxcRoot)src\lib\*.h" Exclude="$(ZxcRoot)src\lib\zxc_deps.h" />
+    <ZxcVendor Include="$(ZxcRoot)src\lib\vendors\*" />
+    <ZxcUnit Include="$(ZxcRoot)src\lib\zxc_common.c;$(ZxcRoot)src\lib\zxc_pivco_tables.c;$(ZxcRoot)src\lib\zxc_dispatch.c;$(ZxcRoot)src\lib\zxc_dict.c;$(ZxcRoot)src\lib\zxc_compress.c;$(ZxcRoot)src\lib\zxc_decompress.c;$(ZxcRoot)src\lib\zxc_huffman.c" />
+    <ZxcKernelDeps Include="$(MSBuildThisFileDirectory)zxc_deps.h" />
+  </ItemGroup>
+
+  <Target Name="ZxcStage" BeforeTargets="ClCompile">
+    <Copy SourceFiles="@(ZxcPublicHeader)" DestinationFolder="$(ZxcStage)include" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ZxcLibHeader);@(ZxcUnit);@(ZxcKernelDeps)" DestinationFolder="$(ZxcStage)src\lib" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(ZxcVendor)" DestinationFolder="$(ZxcStage)src\lib\vendors" SkipUnchangedFiles="true" />
+  </Target>
+
+  <ItemGroup>
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_common.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_pivco_tables.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_dispatch.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_dict.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_compress.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_decompress.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_huffman.c" />
+  </ItemGroup>
+
+  <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+</Project>
