@@ -43,6 +43,9 @@
       <DisableSpecificWarnings>4244;4310;%(DisableSpecificWarnings)</DisableSpecificWarnings>
       <DebugInformationFormat>OldStyle</DebugInformationFormat>
       <OmitDefaultLibName>true</OmitDefaultLibName>
+      <!-- No /GL: the toolset turns whole-program optimization on for ARM64,
+           and an LTCG archive links only with the compiler that built it. -->
+      <WholeProgramOptimization>false</WholeProgramOptimization>
     </ClCompile>
   </ItemDefinitionGroup>
 
