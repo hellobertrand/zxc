@@ -20,10 +20,12 @@ A throwaway spike on 2026-10-13 compiled the seven core units under
 `/kernel /std:c17 /W4 /WX`, archived them, and linked a self-test driver
 against the archive, on x64 and ARM64, with two kits:
 
-| Kit | Toolset | x64 | ARM64 |
-|---|---|---|---|
-| 22621 (Windows 11 22H2 EWDK) | MSVC 14.31 | pass | pass |
-| 26100.6584 (Windows 11 25H2 EWDK, the line on GitHub `windows-2025` runners) | MSVC 14.44 | pass | pass |
+| Kit | Toolset | Target | x64 | ARM64 |
+|---|---|---|---|---|
+| 22621 (Windows 11 22H2 EWDK) | MSVC 14.31 | Windows 11 22H2 | pass | pass |
+| 26100.6584 (Windows 11 25H2 EWDK, the line on GitHub `windows-2025` runners) | MSVC 14.44 | Windows 11 22H2 | pass | pass |
+| 22621 | MSVC 14.31 | Windows 7 | pass | no such target |
+| 20348 (Windows Server 2022 EWDK) | MSVC 14.28 (Visual Studio 2019 16.9) | Windows 7 | pass | no such target |
 
 What the spike established, and what this design encodes:
 
@@ -56,6 +58,23 @@ What the spike established, and what this design encodes:
   import only `ntoskrnl.exe`.
 - **Stack.** Largest prologue frames: about 2.9 KiB on x64 and 3.2 KiB on
   ARM64. Eleven functions exceed the WDK code-analysis default of 1 KiB.
+- **Windows 7 target.** `ExAllocatePool2` exists only from Windows 10 2004.
+  Below that, allocation goes through the kit's inline
+  `ExAllocatePoolUninitialized` wrapper on `NonPagedPool`, with explicit
+  zeroing. The raw `ExAllocatePoolWithTag` is deprecated under
+  warnings-as-errors in the 22621 kit even for a Windows 7 target, which is
+  why the wrapper is not optional. With `POOL_NX_OPTIN` defined, that pool
+  becomes non-executable on Windows 8 and later once the driver's
+  `DriverEntry` calls `ExInitializeDriverRuntime(DrvRtPoolNxOptIn)` before
+  its first allocation. The image links `BufferOverflowK.lib` instead of the
+  fast-fail variant, carries subsystem version 6.01, and imports
+  `ExAllocatePoolWithTag`, `ExFreePoolWithTag`, `__chkstk`, `KeBugCheckEx`
+  and `DbgPrintEx` from `ntoskrnl.exe`, nothing else.
+- **Toolchain floor.** The core needs `/std:c17`, which Visual Studio 2019
+  16.8 (MSVC 14.28) introduced. The 20348 EWDK has it; the 18362 EWDK
+  (MSVC 14.20) does not and cannot build the library. Microsoft's officially
+  supported pairing for Windows 7 targets is the 19041 kit with Visual
+  Studio 2019; the 20348 and 22621 kits build the target without complaint.
 
 ## Scope
 
@@ -75,7 +94,9 @@ Out of scope:
 - Loading the driver in CI. Runtime proof is a manual step on a test-signed
   VM, as it is for the Linux module.
 - 32-bit x86 and ARM32. The 26100 kit does not support them, and the spike
-  did not try them.
+  did not try them. The user-mode library builds and is tested on 32-bit
+  x86 already; a Windows 7 x86 kernel build would need the 22621 kit or
+  older on top of everything here.
 - Shipping the library as a release artifact.
 - Pageable code sections, lookaside lists, or any allocator beyond pool.
 
@@ -109,9 +130,11 @@ primitives without import decoration, and `ntoskrnl` exports them.
 Guards, each a `#error` with a one-line reason:
 
 - `_KERNEL_MODE` undefined: the header is only for `/kernel` builds.
-- `NTDDI_VERSION` below `NTDDI_WIN10_VB`: `ExAllocatePool2` needs a
-  Windows 10 2004 target or later. There is no fallback to the older pool
-  routines.
+- `NTDDI_VERSION` below `NTDDI_WIN7`: Windows 7 is the floor.
+
+Before including `<ntddk.h>`, when the target is below Windows 10 2004, the
+header defines `POOL_NX_OPTIN` to 1 unless already defined, so that
+`NonPagedPool` resolves to the kit's runtime-selected default pool type.
 
 Definitions:
 
@@ -119,13 +142,25 @@ Definitions:
   not defined it. `zxc_internal.h` checks its constants with the two-argument
   form.
 - `ZXC_POOL_TAG`: a four-character tag that reads `zxc ` in pool dumps.
-- `ZXC_MALLOC`: `ExAllocatePool2(POOL_FLAG_NON_PAGED | POOL_FLAG_UNINITIALIZED, size, tag)`,
-  with a zero size rounded up to one byte because Driver Verifier flags
-  zero-length allocations. Non-paged, because a context built at
-  PASSIVE_LEVEL must stay usable at DISPATCH_LEVEL and a heap context's lazy
-  allocations may happen there.
-- `ZXC_CALLOC`: the size product checked with `RtlSizeTMult`, then the same
-  call without the uninitialized flag, since the allocator zeroes by default.
+- One internal allocation routine with two bodies, selected on
+  `NTDDI_VERSION` at compile time:
+  - Windows 10 2004 and later:
+    `ExAllocatePool2(POOL_FLAG_NON_PAGED | POOL_FLAG_UNINITIALIZED, size, tag)`,
+    or without the uninitialized flag when zeroing is requested, since this
+    allocator zeroes by default.
+  - Windows 7 up to Windows 10 1909:
+    `ExAllocatePoolUninitialized(NonPagedPool, size, tag)`, the kit's inline
+    wrapper that suppresses the deprecation of `ExAllocatePoolWithTag`,
+    followed by `RtlZeroMemory` when zeroing is requested. Zeroing is done
+    here rather than through `ExAllocatePoolZero`, so correctness never
+    depends on the driver's runtime-init call; only the NX property does.
+  Both bodies round a zero size up to one byte because Driver Verifier
+  flags zero-length allocations, and both allocate non-paged, because a
+  context built at PASSIVE_LEVEL must stay usable at DISPATCH_LEVEL and a
+  heap context's lazy allocations may happen there.
+- `ZXC_MALLOC`: that routine, uninitialized.
+- `ZXC_CALLOC`: the size product checked with `RtlSizeTMult`, then that
+  routine, zeroed.
 - `ZXC_FREE`: `ExFreePoolWithTag` behind a NULL check; the kernel routine
   bug-checks on NULL where libc's `free` is a no-op.
 - No `ZXC_REALLOC`: pool has none, the seven units never reallocate, and a
@@ -143,6 +178,12 @@ Definitions:
 One property sheet, imported by both projects after `Microsoft.Cpp.props`,
 so that the two never disagree on the rules the spike found. Its contents:
 
+- `TargetVersion`, unless the caller set it: `Windows7` on x64, so that one
+  library runs on every Windows from 7 up, and `Windows10` on ARM64, where
+  nothing older exists. The toolset derives `NTDDI_VERSION`, `_WIN32_WINNT`,
+  the subsystem version and the `/GS` support library from it. A consumer
+  who wants the Windows 10 2004 allocator and no runtime opt-in builds with
+  `TargetVersion=Windows10` and the matching `_NT_TARGET_VERSION`.
 - `IgnoreStandardIncludePath` true (`/X`), and `AdditionalIncludeDirectories`
   set to, in order: `$(VC_IncludePath)`, `$(UniversalCRT_IncludePath)`,
   `$(KM_IncludePath)`, `$(KIT_SHARED_IncludePath)`. This is the include-order
@@ -169,8 +210,8 @@ so that the two never disagree on the rules the spike found. Its contents:
 ### `zxc_km.vcxproj`
 
 `ConfigurationType` StaticLibrary, `PlatformToolset`
-WindowsKernelModeDriver10.0, `TargetVersion` Windows10, platforms x64 and
-ARM64, configurations Debug and Release.
+WindowsKernelModeDriver10.0, `TargetVersion` from the property sheet,
+platforms x64 and ARM64, configurations Debug and Release.
 
 A target `ZxcStage`, run before `ClCompile`, copies into `build/stage/zxc/`:
 `include/*.h`, the seven units `zxc_common.c`, `zxc_pivco_tables.c`,
@@ -194,8 +235,11 @@ linked and built first, `SignMode` Off by default, no INF. It compiles
 `selftest.c` with the staged public headers on the path.
 
 `selftest.c` is the Linux module's init, translated: a legacy software
-driver whose `DriverEntry` sets an unload routine, allocates a static
-decode workspace from non-paged pool sized for `PAGE_SIZE` blocks, and at
+driver whose `DriverEntry` calls `ExInitializeDriverRuntime(DrvRtPoolNxOptIn)`
+first when the target is below Windows 10 2004, sets an unload routine,
+allocates a static decode workspace from non-paged pool sized for
+`PAGE_SIZE` blocks through the same two-body allocation the dependency
+header uses, and at
 levels 3 and 7 round-trips one block through `zxc_compress_block` and
 `zxc_decompress_block_safe`, one frame through `zxc_compress` and
 `zxc_decompress`, and one in-place frame through
@@ -213,9 +257,18 @@ refuses to load. All pool allocations carry the driver's own tag.
 
 The README states it; the self-test project demonstrates it.
 
-- **Link** `zxc_km.lib` for the matching platform and configuration. The
-  official toolset supplies everything else; a hand-rolled link also needs
-  `ntoskrnl.lib`, `BufferOverflowFastFailK.lib`, and `arm64rt.lib` on ARM64.
+- **Link** `zxc_km.lib` for the matching platform, configuration and target
+  version. The official toolset supplies everything else; a hand-rolled
+  link also needs `ntoskrnl.lib`, the `/GS` support library
+  (`BufferOverflowK.lib` for a target below Windows 8,
+  `BufferOverflowFastFailK.lib` otherwise), and `arm64rt.lib` on ARM64.
+- **Target below Windows 10 2004** (the x64 default): define
+  `POOL_NX_OPTIN` to 1 in the driver and call
+  `ExInitializeDriverRuntime(DrvRtPoolNxOptIn)` at the top of `DriverEntry`,
+  before any allocation. The library's pool is then non-executable on
+  Windows 8 and later. Without the call the library still works, but its
+  non-paged allocations are executable there, which Driver Verifier and
+  certification tests report. The self-test shows the call.
 - **Include** `include/` from the ZXC tree (or the staged copy), and adopt
   the include order above in the consumer project, because `zxc.h` pulls
   `<stdint.h>`. The README carries the three-line project snippet.
@@ -249,19 +302,22 @@ and pull requests to `main` and `candidate` on changes under
 weekly on a different hour; manual dispatch. Same permissions and
 concurrency block, actions pinned by SHA as elsewhere in the repo.
 
-One job, matrix over `x64` and `ARM64`:
+One job, matrix over three legs: `x64` targeting Windows 7, `x64`
+targeting Windows 10 2004, and `ARM64` targeting Windows 10. The two x64
+legs compile both bodies of the allocation routine.
 
 1. Checkout.
 2. Locate the toolchain in PowerShell: MSBuild through `vswhere`, the
    kernel headers at `Windows Kits\10\Include\<version>\km\ntddk.h`, and
    `dumpbin` under the VC tools. Fail with a plain message naming what is
    missing, so a runner-image change reads as such and not as a code error.
-3. Build `zxc_selftest.vcxproj` for Release and the matrix platform with
-   `SignMode=Off`. Compiler and linker warnings are errors through the
-   property sheet; MSBuild's own warnings are not.
+3. Build `zxc_selftest.vcxproj` for Release, the matrix platform and target
+   version, with `SignMode=Off`. Compiler and linker warnings are errors
+   through the property sheet; MSBuild's own warnings are not.
 4. Assert with `dumpbin /IMPORTS` that the image imports `ntoskrnl.exe` and
-   nothing else, and with `dumpbin /HEADERS` that the subsystem is Native
-   and the machine matches the platform. This is the job's `modinfo`.
+   nothing else, and with `dumpbin /HEADERS` that the subsystem is Native,
+   the subsystem version matches the leg's target (6.01 or 10.00) and the
+   machine matches the platform. This is the job's `modinfo`.
 
 No artifacts are uploaded; the Linux job uploads none either.
 
@@ -272,11 +328,14 @@ No artifacts are uploaded; the Linux job uploads none either.
   linking and vendoring; the include-order rule and the clash behind it;
   the C-standard flags; contexts and IRQL, with the workspace table reused
   from the Linux README; the stack budget with the measured frames; the SIMD
-  rules, including the inert auto-vectorizer dispatch; loading the self-test
-  on a test-signed VM (`bcdedit /set testsigning on`, `signtool` with a test
-  certificate, `sc create ... type= kernel`, `sc start`, the DebugView or
-  debugger line to expect, `sc stop`, `sc delete`) and running it under
-  Driver Verifier; licensing (BSD-3-Clause, no GPL interaction on Windows).
+  rules, including the inert auto-vectorizer dispatch; the target-version
+  rule, the runtime opt-in call, and which kits build which target; loading
+  the self-test on a test-signed VM (`bcdedit /set testsigning on`,
+  `signtool` with a test certificate, `sc create ... type= kernel`,
+  `sc start`, the DebugView or debugger line to expect, `sc stop`,
+  `sc delete`) and running it under Driver Verifier, with the Windows 7
+  note that a SHA-256 signature needs the SHA-2 support update or a SHA-1
+  test certificate; licensing (BSD-3-Clause, no GPL interaction on Windows).
 - `docs/INSTALL.md` and `docs/API.md`: add the Windows tree next to the
   Linux pointer.
 - `.github/workflows/README.md`: an entry after `kernel.yml`.
@@ -313,9 +372,14 @@ No artifacts are uploaded; the Linux job uploads none either.
 - **Spectre on by default.** Matches the toolset and Microsoft's guidance
   for drivers; the lfence cost is the consumer's call through the toolset's
   own switch.
-- **Windows 10 2004 floor.** The oldest Windows 10 the current kits target
-  with `ExAllocatePool2`; supporting older pool routines would add a second
-  allocator path nobody has asked for.
+- **Windows 7 floor, one x64 binary.** The user asked for Windows 7 even
+  though it is not ideal. The cost is one more body in the allocation
+  routine, a deprecated-but-present pool routine behind the kit's wrapper,
+  and a runtime opt-in call in the consumer's `DriverEntry`, which is
+  Microsoft's own mechanism for drivers that span Windows 7 and later. The
+  x64 library targets Windows 7 by default so a consumer gets a single
+  binary for every supported Windows; the Windows 10 2004 allocator is one
+  property away for consumers who do not need older systems.
 - **x64 and ARM64 only.**
 - **Signing off by default.** A loadable binary needs a test certificate in
   the developer's store, a side effect a library repo should not cause on a
@@ -339,3 +403,12 @@ Each has a fallback; none changes the design.
 - Property-sheet metadata surviving the toolset's own item definitions.
   Fallback: move the affected settings into each project after the toolset
   imports.
+- The 26100 toolset accepting `TargetVersion=Windows7` through MSBuild. The
+  22621 kit's property sheets map it, and the spike built the target with
+  the compiler invoked directly on the 22621 and 20348 kits, but not through
+  MSBuild on 26100. Fallback: the Windows 7 leg sets `_NT_TARGET_VERSION`
+  and the `/GS` library by hand, or CI restores the 22621 kit from NuGet
+  for that leg.
+- Per-platform `TargetVersion` defaults in one property sheet, with ARM64
+  refusing Windows 7. Fallback: a condition on `$(Platform)` in each
+  project instead.
