@@ -10,7 +10,7 @@
 
 In modern software delivery pipelines-specifically **Mobile Gaming**, **Embedded Systems**, and **FOTA (Firmware Over-The-Air)**-data is typically generated on high-performance x86 workstations but consumed on energy-constrained ARM devices.
 
-Standard industry codecs like LZ4 offer excellent performance but fail to exploit the "Write-Once, Read-Many" (WORM) nature of these pipelines. **ZXC** is a lossless codec designed to bridge this gap. By utilizing an **asymmetric compression model**, ZXC achieves a **>75% increase in decompression speed on ARM** compared to LZ4, while simultaneously reducing storage footprints. On x86 development architecture, ZXC maintains competitive throughput, ensuring no disruption to build pipelines.
+Standard industry codecs like LZ4 offer excellent performance but fail to exploit the "Write-Once, Read-Many" (WORM) nature of these pipelines. **ZXC** is a lossless codec designed to bridge this gap. By utilizing an **asymmetric compression model**, ZXC decodes **1.5x to 2.0x faster than LZ4 on ARM** at its default level, while producing smaller output (46.65 % vs 47.60 % on Silesia). The lead holds on x86, at 1.35x to 1.65x.
 
 ## 2. The Efficiency Gap
 
@@ -27,7 +27,7 @@ ZXC utilizes a computationally intensive encoder to generate a bitstream specifi
 ZXC employs a Producer-Consumer architecture to decouple I/O operations from CPU-intensive tasks. This allows for parallel processing where input reading, compression/decompression, and output writing occur simultaneously, effectively hiding I/O latency.
 
 ### 3.2 Modular Architecture
-The ZXC file format is inherently modular. **Each block is independent and is encoded with whichever of ZXC's block codecs yields the smallest output** — GLO or GHI (the LZ paths) or RAW (stored). Independent blocks keep the format simple, enable O(1) seekable random access, and let it evolve without breaking backward compatibility.
+The ZXC file format is inherently modular. **Each block is independent and is encoded with whichever of ZXC's block codecs yields the smallest output** — GLO or GHI (the LZ paths) or RAW (stored). Independent blocks keep the format simple and enable O(1) seekable random access.
 
 > **ZXC is a pure LZ byte codec.** It compresses byte streams via LZ77 matching plus entropy coding; it has no type-aware or numeric block codec. Numeric and columnar data (timestamps, IDs, float columns) compress best when a **reversible pre-filter** — delta or byte-shuffle — is applied *before* compression and inverted *after* decompression. ZXC keeps such transforms **out of the codec and the format on purpose**: the caller, which knows the element type, owns the filter. See the *Compressing Numeric Data* example in [`EXAMPLES.md`](EXAMPLES.md).
 
@@ -37,7 +37,7 @@ ZXC utilizes a hybrid approach combining LZ77 (Lempel-Ziv) dictionary matching w
 
 ### 4.1 LZ77 Engine
 The heart of ZXC is a heavily optimized LZ77 engine that adapts its behavior based on the requested compression level:
-*   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in the history window (configurable sliding window, power-of-2 from 4 KB to 2 MB, default 512 KB).
+*   **Hash Chain & Collision Resolution**: Uses a fast hash table with chaining to find matches in a 64 KB history window (16-bit offsets), independent of the block size.
 *   **Lazy Matching**: Implements a "lookahead" strategy to find better matches at the cost of slight encoding speed, significantly improving decompression density.
 
 ### 4.2 Specialized SIMD Acceleration & Hardware Hashing
@@ -176,8 +176,8 @@ The file begins with a **16-byte** header that identifies the format and specifi
            +---------------+-------+-------+-------+-----------------------+-------+
 ```
 
-* **Magic Word (4 bytes)**: `0x9 0xCB 0x02E 0xF5`.
-* **Version (1 byte)**: Current version is `6`.
+* **Magic Word (4 bytes)**: `0x9CB02EF5` (`u32` LE).
+* **Version (1 byte)**: Current version is `9`.
 * **Chunk Size Code (1 byte)**: Defines the processing block size using **exponent encoding**:
   - The value is in `[12, 21]`: block size = `2^value` bytes (4 KB to 2 MB).
     - `12` = 4 KB, `13` = 8 KB, `14` = 16 KB, `15` = 32 KB, `16` = 64 KB, `17` = 128 KB, `18` = 256 KB, `19` = 512 KB (default), `20` = 1 MB, `21` = 2 MB.
@@ -185,7 +185,8 @@ The file begins with a **16-byte** header that identifies the format and specifi
 * **Flags (1 byte)**: Global configuration flags.
   - **Bit 7 (MSB)**: `HAS_CHECKSUM`. If `1`, checksums are enabled for the stream: every block carries a trailing 4-byte checksum. If `0`, no checksums are present.
   - **Bit 6**: `HAS_DICTIONARY`. If `1`, the stream was compressed with a pre-trained dictionary and **requires** it for decompression; the reserved field carries the `dict_id` (see below and §5.10).
-  - **Bits 4-5**: Reserved.
+  - **Bit 5**: `HAS_SEEK_TABLE`. If `1`, a seek table (§5.9) sits between the EOF block and the footer.
+  - **Bit 4**: Reserved.
   - **Bits 0-3**: Checksum Algorithm ID (e.g., `0` = RapidHash).
 * **Reserved / Dictionary ID (7 bytes)**: Zero when `HAS_DICTIONARY` is clear. When `HAS_DICTIONARY` is set, bytes `0x07..0x0A` hold the `dict_id` (`u32` LE, a 32-bit hash of the dictionary content); the remaining bytes `0x0B..0x0D` stay zero.
 * **Checksum (2 bytes)**: 16-bit Header Checksum. Calculated on the 16-byte header (with the checksum bytes set to 0) using `zxc_hash16`.
@@ -209,8 +210,8 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 **Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the block's decompressed bytes**, seeded with the block's position in the frame (§5.8).
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=GHI, 255=EOF).
-* **Flags**: Not used for now.
+* **Type**: Block encoding type (0=RAW, 1=GLO, 2=GHI, 254=SEK, 255=EOF).
+* **Flags**: No flag is defined (must be 0).
 * **Rsrvd**: Reserved for future use (must be 0).
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Checksum**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with the checksum byte set to 0) using `zxc_hash8`.
@@ -388,8 +389,8 @@ GHI Block Data Layout:
 | **Memory Access**  | Multiple stream pointers        | Single aligned 4-byte reads      |
 | **Decoder Speed**  | Fast                            | Fastest (optimized for ARM/x86)  |
 | **RLE Support**    | Yes (literals)                  | No                               |
-| **Huffman Literals** | Yes (level ≥ 6, ≥ 1024 lits)  | No                               |
-| **Parser**         | Lazy (≤ L5), Optimal DP (L6)    | Lazy                             |
+| **Huffman Literals** | Yes (level ≥ 6, ≥ 139 lits)   | No                               |
+| **Parser**         | Lazy (≤ L5), Optimal DP (L6-L7) | Lazy                             |
 | **Best For**       | General data, good compression  | Maximum decode throughput        |
 
 > **Design Rationale**: The 32-bit packed format eliminates pointer chasing between token and offset streams. By reading a single aligned word per sequence, the decoder achieves better cache utilization and enables aggressive loop unrolling (4x) for maximum throughput on modern CPUs.
@@ -454,7 +455,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
 1.  **LZ77 Parsing**: The encoder iterates through the input using a rolling hash to detect matches.
     *   *Hash Chain*: Collisions are resolved via a chain table to find optimal matches in dense data.
     *   *Lazy Matching* (levels 3–5): If a match is found, the encoder checks the next position. If a better match starts there, the current byte is emitted as a literal (deferred matching).
-    *   *Price-Based Optimal Parser* (level 6): A forward dynamic-programming pass replaces the lazy parser. `dp[p]` holds the minimum bit-cost to encode `src[0..p)`; transitions consider either emitting a single literal or any sub-length of the longest match found at `p`, using static prices (literal ≈ 9 bits, match ≈ 24 bits + varint extras). Backtracking from `dp[N]` yields the globally optimal token sequence. A long-match guard skips re-search at intra-match positions to keep the parser O(N) on highly repetitive data.
+    *   *Price-Based Optimal Parser* (levels 6-7): A forward dynamic-programming pass replaces the lazy parser. `dp[p]` holds the minimum bit-cost to encode `src[0..p)`; transitions consider either emitting a single literal or any sub-length of the longest match found at `p`, using static prices (literal ≈ 9 bits, match ≈ 24 bits + varint extras). Backtracking from `dp[N]` yields the globally optimal token sequence. A long-match guard skips re-search at intra-match positions to keep the parser O(N) on highly repetitive data.
 2.  **Tokenization**: Matches are split into three components:
     *   *Literal Length*: Number of raw bytes before the match.
     *   *Match Length*: Duration of the repeated pattern.
@@ -465,13 +466,13 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Offsets Buffer*: Variable-width distances (8-bit or 16-bit, see below).
     *   *Extras Buffer*: Overflow values for lengths >= 15 (Prefix Varint encoded).
     *   *Offset Mode Selection*: The encoder tracks the maximum offset across all sequences. If all offsets are ≤ 255, the 8-bit mode (`enc_off=1`) is selected, saving 1 byte per sequence compared to 16-bit mode.
-4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). If beneficial (>10% gain), it is compressed in place.
-5.  **Entropy Pass** (level ≥ 6, ≥ 1024 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution, joint-nudged toward a flatter (faster-decoding) tree, and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_tok = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
-    *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections far below the 1024-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
+4.  **RLE Pass**: The literals buffer is scanned for run-length encoding opportunities (runs of identical bytes). RLE is kept when it wins under the space-speed Lagrangian below (about a 3 % margin over RAW below level 7).
+5.  **Entropy Pass** (level ≥ 6, ≥ 139 literals): A length-limited canonical Huffman code (`L = 8` at level 6, `L = 11` at level 7) is fitted to the literal byte distribution, joint-nudged toward a flatter (faster-decoding) tree, and emitted in the PivCo level-ordered layout (§4.3, FORMAT.md §5.2.1). At level 7 the same treatment is applied to the sequence-token stream (`enc_tok = 2`). Candidates are selected by the space-speed Lagrangian `J = size + premium(level) × decoded_bytes`.
+    *   **Shared-Table Candidate** (dictionary archives only): when the dictionary carries a shared literal table (§5.10), a second entropy candidate is sized with the dictionary's code lengths and **no inline 128-byte lengths header**. The Lagrangian picks the minimum-J of {RAW, RLE, per-block Huffman, shared-table Huffman} (`enc_lit = 3` for the latter), so the choice is never a regression. Because the shared table only covers symbols seen in training, a block containing an uncovered literal byte automatically falls back to its per-block table. The 128-byte header amortization makes `enc_lit = 3` viable on literal sections below the 139-literal threshold of the per-block table — precisely the small-block regime dictionaries target.
 6.  **Final Serialization**: All buffers are concatenated into the payload, preceded by the two section descriptors that are actually needed, and followed by slack padding if the sections behind the literals fall short of 32 bytes.
 
 **Decoding Process**:
-1.  **Deserizalization**: The decoder walks the sections in order, deriving each size from the header and reading a descriptor only for the entropy-coded ones; the extras take the residue. It rejects the block if fewer than 32 bytes follow the literal section.
+1.  **Deserialization**: The decoder walks the sections in order, deriving each size from the header and reading a descriptor only for the entropy-coded ones; the extras take the residue. It rejects the block if fewer than 32 bytes follow the literal section.
 2.  **Literal Decompression**:
     *   `enc_lit = 0` (RAW): zero-copy view into the source buffer.
     *   `enc_lit = 1` (RLE): single pass that expands runs and copies literal chunks.
@@ -481,7 +482,7 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
 4.  **Vertical Execution**: The main loop reads from all three streams simultaneously.
 5.  **Wild Copy**:
     *   *Literals*: Copied using unaligned 16-byte SIMD loads/stores (`vld1/vst1` on ARM).
-    *   *Matches*: Copied using 16-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
+    *   *Matches*: Copied using 32-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
 
 #### Type 2: GHI (High-Velocity)
@@ -497,7 +498,7 @@ This format prioritizes decompression throughput over compression ratio. It uses
     *   *Literals Buffer*: Raw bytes (no RLE).
     *   *Sequences Buffer*: Packed 32-bit words (4 bytes each).
     *   *Extras Buffer*: Prefix Varint overflow values for lengths >= 255.
-4.  **Final Serialization**: Streams are concatenated with 3 section descriptors.
+4.  **Final Serialization**: Streams are concatenated with no section descriptor: every size follows from the header (§5.4).
 
 **Decoding Process**:
 1.  **Single-Read Loop**: The decoder reads one 32-bit word per sequence, extracting LL, ML, and offset in a single operation.
@@ -571,7 +572,7 @@ ZXC leverages a threaded **Producer-Consumer** model to saturate modern multi-co
 2.  **Dispatch**: Compressed payloads are fed into the worker job queue. Small blocks of a regular file travel in batches; a pipe keeps one block per job.
 3.  **Parallel Decoding (Worker Threads)**:
     *   Workers decode chunks into pre-allocated output buffers.
-    *   **Fast Path**: If the output buffer has sufficient margin, the decoder uses "wild copies" (16-byte SIMD stores) to bypass bounds checking for maximal speed.
+    *   **Fast Path**: If the output buffer has sufficient margin, the decoder uses "wild copies" (16- and 32-byte SIMD stores) to bypass bounds checking for maximal speed.
 4.  **Serialization**: Decompressed blocks are committed to the output stream sequentially.
 
 ## 7. Performance Analysis (Benchmarks)
@@ -999,15 +1000,15 @@ Benchmarks were conducted using lzbench 2.4.1 (from @inikep), compiled with GCC 
 
 ### 7.6 Memory Usage per Compression Context
 
-| Block Size            | Levels -1 to -5 | Level -6 (DENSITY) |
+| Block Size            | Levels -1 to -5 | Levels -6 and -7   |
 |:---------------------:|----------------:|-------------------:|
-| 256 KB                |        ~1.03 MB |           ~3.06 MB |
-| **512 KB** *(default)*|    **~1.78 MB** |       **~5.84 MB** |
-| 2 MB *(max)*          |        ~6.28 MB |          ~22.53 MB |
+| 256 KB                |        ~1.04 MB |           ~3.07 MB |
+| **512 KB** *(default)*|    **~1.79 MB** |       **~5.85 MB** |
+| 2 MB *(max)*          |        ~6.29 MB |          ~22.54 MB |
 
-*Levels -1 to -5 share the same context layout (LZ77 hash + chain + sequence / literal buffers) and scale linearly with block size. Level -6 (DENSITY) lazily allocates the optimal-parser scratch (per-position DP cost, parent length / offset, packed match-end bitmap), adding ~×3 overhead. Exact values for any (block, level) combination are reproducible via the public API call `zxc_estimate_cctx_size(block_size, level)`.*
+*Levels -1 to -5 share the same context layout (LZ77 hash + chain + sequence / literal buffers) and scale linearly with block size. Levels -6 and -7 lazily allocate the optimal-parser scratch (per-position DP cost, parent length / offset, packed match-end bitmap), adding ~×3 overhead. Exact values for any (block, level) combination are reproducible via the public API call `zxc_estimate_cctx_size(block_size, level)`.*
 
-> **Guideline:** Default 512 KB block keeps cctx under 6 MB even at the densest level (-6) — well within reach for typical server / desktop pipelines. For streaming, embedded, or memory-constrained environments, use `-B 256K` (or smaller) and stick to levels -1 to -5. Level -6 is best reserved for offline encoding pipelines where ratio matters and per-thread RAM is plentiful.
+> **Guideline:** Default 512 KB block keeps cctx under 6 MB even at the densest levels (-6, -7) — well within reach for typical server / desktop pipelines. For streaming, embedded, or memory-constrained environments, use `-B 256K` (or smaller) and stick to levels -1 to -5. Levels -6 and -7 are best reserved for offline encoding pipelines where ratio matters and per-thread RAM is plentiful.
 
 ### 7.7 In-Place Decompression
 
@@ -1031,7 +1032,7 @@ ZXC is designed to adapt to various deployment scenarios by selecting the approp
     A high-efficiency alternative for cold storage, providing better compression ratios than LZ4 and significantly faster retrieval speeds than Zstandard. **Level 6** (DENSITY) beats LZ4-HC on both axes — better ratio (36.28 vs 36.75 on silesia) *and* faster decode on every measured platform (+52 % on Apple Silicon, +29 % on Neoverse-V2, +24 % on Zen 5 and +15 % on Zen 3): ideal for write-once / read-many archives where compression time is amortized over many reads.
 
 *   **Maximum Density (Level 7)**:
-    Deep parse (search depth 128), 11-bit entropy codes and Huffman-coded sequence tokens. On silesia it lands at **33.09 %** — a better ratio than `zstd -1` (34.53 %) — while decoding at **1.9-2.8x** zstd -1's speed (5.1 GB/s on Apple M2). It occupies the historical gap between the LZ4 family and Zstandard: choose it when storage or bandwidth dominates but decompression must stay in the multi-GB/s class.
+    Deep parse (search depth 128), 11-bit entropy codes and Huffman-coded sequence tokens. On silesia it lands at **33.09 %** — a better ratio than `zstd -1` (34.53 %) — while decoding at **2.2-2.8x** zstd -1's speed (5.1 GB/s on Apple M2). It occupies the historical gap between the LZ4 family and Zstandard: choose it when storage or bandwidth dominates but decompression must stay in the multi-GB/s class.
 
 *   **Small & Homogeneous Payloads — Pre-Trained Dictionaries (§5.10)**:
     An orthogonal lever, combinable with any level. Where data is compressed in **small blocks** (4 KB–128 KB) — JSON API responses, RPC messages, key-value records, structured logs, small game assets, or any large homogeneous corpus split for seekable random access — a pre-trained dictionary primes the LZ77 window per block and recovers the ratio that small blocks would otherwise lose. The external, content-addressed model (`.zxd` + `dict_id`) fits the **train-once / reuse-many** deployment pattern: a single dictionary is built offline on the build pipeline and amortized across millions of independently decodable payloads — no per-archive storage overhead, and O(1) seekable access preserved.

@@ -1,6 +1,6 @@
 # ZXC Compressed File Format (Technical Specification)
 
-**Date**: September 2026
+**Date**: October 2026
 **Format Version**: 9
 
 This document describes the on-disk binary format of a ZXC compressed file.
@@ -57,9 +57,6 @@ After each footer, the decoder reads the next 4 bytes:
 | anything else, or 1-3 bytes | reject as corrupt data                 |
 
 An empty file is truncated; a bad magic word at offset 0 is a bad magic word.
-The frame layout is unchanged, so a single-frame file is byte-identical to a
-file written before concatenation was allowed, and a decoder that predates it
-rejects a concatenated file (bytes after the footer) rather than misreading it.
 
 Each footer stores its frame's `compressed_frame_size` (§ 8), so a reader can
 also walk the frames back from the end of the input without decoding them, as
@@ -238,8 +235,9 @@ Everything else is derived, so it cannot be forged inconsistently:
 - offsets size = `n_sequences × (enc_off ? 1 : 2)`.
 - **extras size = whatever payload remains** after the three sections above.
 
-Levels 3 to 5 therefore carry **no descriptor at all** (RAW literals, RAW
-tokens), level 6 carries 4 bytes and level 7 carries 8.
+RAW literals and RAW tokens carry **no descriptor at all**. RLE or Huffman
+literals add 4 bytes (RLE at any GLO level, Huffman from level 6) and Huffman
+tokens (level 7) 4 more: 0 or 4 bytes at levels 3 to 6, up to 8 at level 7.
 
 Because the extras section is sized as the residue and its values are read on
 demand, an end pointer sitting past the last real extra is harmless. That is
@@ -272,7 +270,8 @@ and extras sections play the role of tokens/offsets/extras.
 
 - **Literals section**:
   - raw literal bytes when Literal Encoding is `0`, or
-  - RLE tokenized when it is `1`, or
+  - RLE tokenized when it is `1`
+    (see [§ 5.2.3 RLE literal section](#523-rle-literal-section)), or
   - Huffman-coded when it is `2`
     (see [§ 5.2.1 Huffman literal section](#521-huffman-literal-section)), or
   - Huffman-coded with the dictionary's shared code lengths when it is `3`
@@ -297,7 +296,7 @@ and extras sections play the role of tokens/offsets/extras.
 Overflow rules:
 - if `LL == 15`, read varint from Extras and add it to LL.
 - if `ML == 15`, read varint from Extras and add it to ML.
-- otherwise decoded match length is `ML + 5` (minimum match = 5).
+- the decoded match length is then `ML + 5`, escaped or not (minimum match = 5).
 
 ### 5.2.1 Huffman literal section
 
@@ -358,7 +357,9 @@ exactly `ceil(c*D/8)` bytes, so every run length is derived while walking the
 BFS order once.
 
 Selection is an encoder policy, not a format rule: the reference encoder
-requires level ≥ 6 and at least 1024 literals, prices every candidate
+requires level ≥ 6 and at least 139 literals for a per-block table (any
+non-empty section for the dictionary's shared table; level-7 tokens need 139
+sequences), prices every candidate
 (RAW / RLE / Huffman / shared-table Huffman) as
 `J = size + premium(level) * n_decoded_bytes`, and picks the minimum — a
 space-speed Lagrangian with a per-level decode-time premium. Before that
@@ -420,6 +421,18 @@ byte without a code.
 The level-7 token section reuses the § 5.2.1 layout (Token Encoding `2`, with the
 inline lengths header) over the token byte alphabet.
 
+### 5.2.3 RLE literal section
+
+Literal Encoding `1`. The section is a sequence of runs, each starting with a
+control byte `t`:
+
+- `t < 0x80`: a literal run. `t + 1` bytes (1 to 128) follow and are copied as is.
+- `t >= 0x80`: a repeat run. One byte `v` follows; it is written
+  `(t & 0x7F) + 4` times (4 to 131).
+
+The runs must produce exactly `n_literals` bytes; a run that overshoots it, or a
+section that ends before reaching it, is corrupt data.
+
 ## 5.3 GHI block (`type=2`)
 
 "General LZ, HIgh throughput": LZ format with packed 32-bit sequences, trading
@@ -445,9 +458,9 @@ Same binary layout as the GLO header: Sequence Count, Literal Count, Literal
 Encoding, Token Encoding, Match Length Encoding, Offset Encoding.
 
 In practice for GHI:
-- **Literal Encoding** is `0` (raw literals), so the literal section size is
-  `n_literals`.
-- **Token Encoding** and **Match Length Encoding** are written as `0`.
+- **Literal Encoding** and **Token Encoding** MUST be `0` (raw literals, so the
+  literal section size is `n_literals`); a decoder rejects any other value.
+- **Match Length Encoding** is written as `0` and ignored.
 - **Offset Encoding** is written as `0` and **must be ignored on decode**: GHI has
   no offset section, sequence words always store 16-bit offsets, so the field
   bounds nothing.
@@ -791,7 +804,7 @@ Example: 10 000 000 source bytes compressed to a 3 000 000-byte prefix, no check
    - check block bounds using the Compressed Payload Size.
 3. Decode payload according to block type. For GLO/GHI:
    - reject Literal Encoding, Token Encoding and (GLO) Offset Encoding values
-     outside § 5.2,
+     outside § 5.2 (GHI: Literal or Token Encoding other than 0, § 5.3),
    - reject a block leaving fewer than 32 bytes behind its literal section,
    - check the derived section sizes still fit the payload.
 4. If enabled, verify the trailing block checksum over the decoded bytes,
@@ -834,7 +847,7 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
 - **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version. The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension. Exception: a decoder rejects an EOF or SEK header whose Block Flags or Reserved byte is non-zero (§5.4, §5.5).
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension. Exception: a decoder rejects an EOF or SEK header whose Block Flags or Reserved byte is non-zero (§5.4, §5.5), and a footer whose `L` byte sets bit 3 or 7 (§8).
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values as a corrupt header.
 
 ### 10.4 Minimum conforming decoder
@@ -846,7 +859,9 @@ A minimal conforming decoder for version 9 **MUST** support:
   entropy sections (§5.2.1, PivCo layout) with code lengths up to 11 bits.
 - **GHI** blocks (type 2) - full LZ decode with extras varint.
 - **EOF** block (type 255) - stream termination.
-- File footer validation (source size check).
+- **SEK** block (type 254) - header check and table skip when `HAS_SEEK_TABLE=1` (§5.5).
+- File footer validation (§8: both sizes, minimal lengths, `L` byte).
+- Concatenated frames (§2.1).
 - Deriving section sizes from the header and the two optional descriptors
   (§5.2), and rejecting a block that leaves fewer than 32 bytes behind its
   literal section.
@@ -903,7 +918,7 @@ Buffer-mode decoders **MUST** return a negative error code. Stream-mode decoders
 For decoders processing untrusted input (e.g. network data, user uploads):
 - Validate **all** header checksums before processing payloads.
 - Enforce maximum allocation limits based on the Compressed Payload Size and Chunk Size Code.
-- Reject files where the Compressed Payload Size exceeds `zxc_compress_bound(chunk_size)`.
+- Reject any data block whose Compressed Payload Size exceeds the block size (§4.1).
 - Use bounded memory copies - never trust decoded lengths without cross-checking against output buffer capacity.
 
 ---
@@ -945,9 +960,7 @@ When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
    content hash, zero-extended to rapidhash's 64-bit seed. `rapidhash` and
    `fold32` are defined in [7.2](#72-per-block-checksum-optional).
 
-Older decoders that do not recognize the `HAS_DICTIONARY` flag will ignore it
-(per §10.3: reserved flag bits are ignored). However, blocks compressed with a
-dictionary contain match offsets that reference dictionary content; decoding
+Blocks compressed with a dictionary contain match offsets that reference dictionary content; decoding
 without the dictionary produces corrupt output. Per-block checksums (when
 enabled) detect it, because they cover the decompressed bytes (§7.2). This also
 covers the residual risk of a 32-bit `dict_id` collision, where the header check
@@ -1023,7 +1036,7 @@ as follows:
 - GLO header: **12** bytes
 - GHI header: **12** bytes
 - Section descriptor: **4** bytes (`u32`, written only when needed)
-- GLO descriptors total: **0**, **4** or **8** bytes (levels 3-5 / 6 / 7)
+- GLO descriptors total: **0**, **4** or **8** bytes (+4 for RLE/Huffman literals, +4 for Huffman tokens)
 - GHI descriptors total: **0** bytes
 - Minimum slack behind the literal section: **32** bytes
 - File footer: **3** to **17** bytes (**+8** with a digest)

@@ -601,7 +601,7 @@ while (n > 0) {
 
 Declared in `zxc_buffer.h`. Single-block compression and decompression
 **without file framing** (no file header, EOF block, or footer). Designed
-for filesystem integrations (DwarFS, EROFS, SquashFS) where the caller
+for filesystem integrations where the caller
 manages its own block indexing.
 
 Output format: `block_header (8 B)` + compressed payload + optional `checksum (4 B)`.
@@ -1014,7 +1014,7 @@ free(dws);
 
 ### Sizing notes
 
-| `block_size` | level 1–5 cctx | level 6 cctx | dctx |
+| `block_size` | level 1-5 cctx | level 6-7 cctx | dctx |
 |---|---|---|---|
 | 4 KB        | ~280 KB         | ~320 KB       | ~9 KB  |
 | 64 KB       | ~410 KB         | ~930 KB       | ~129 KB |

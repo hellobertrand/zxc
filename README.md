@@ -155,8 +155,8 @@ Apple M2 (ARM64)
 ## Features
 
 - **1.1x to 2.4x faster decode than LZ4** at levels -1 to -6, at an equal or better ratio. Level -7 trades that lead for density: it decodes 2.2x to 2.8x faster than `zstd -1`, at a better ratio ([benchmarks](#benchmarks)).
-- **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern ARM cores (Apple Silicon, Graviton, Axion).
-- **O(1) random access.** A built-in seek table decompresses any block without reading the rest.
+- **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern CPUs.
+- **O(1) random access.** An optional seek table (`-S`) decompresses any block without reading the rest.
 - **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
 - **Small payloads too.** A trained dictionary recovers ratio on 4–128 KB blocks ([details](#dictionary-compression)).
 - **Runs everywhere.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER, s390x, i386, with hand-tuned SIMD (AVX2/AVX-512/NEON).
@@ -278,7 +278,7 @@ can lag a release behind; if one does, open an issue on that registry's index re
 
 ### From a release archive
 
-Prebuilt binaries for Linux, macOS and Windows (x86_64 and ARM64) are on the
+Prebuilt binaries for Linux and Windows (x86_64 and ARM64) and macOS (ARM64) are on the
 [Releases page](https://github.com/hellobertrand/zxc/releases), with a signed checksum manifest
 and build attestations: [verification steps](docs/INSTALL.md#release-archives).
 
@@ -360,13 +360,13 @@ int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size, NULL);
 
 A static context accepts only archives compressed with its block size (`-B`), and no dictionary; anything else is refused with an error before decoding.
 
-**What it costs.** The margin is one block, plus 8–16 bytes per block of framing, plus ~2 KB of tail; the static context is three to four blocks. So the block size decides both, and small payloads want small blocks:
+**What it costs.** The margin is one block, plus 8–12 bytes per block of framing, plus ~2 KB of tail; the static context is three to four blocks. So the block size decides both, and small payloads want small blocks:
 
 | Block size (`-B`) | Margin, 8 MB payload | Static context |
 | ---: | ---: | ---: |
-| 4 KB | 22–31 KB (0.3–0.4 %) | 16 KB |
-| 64 KB | 69 KB (0.8 %) | 212 KB |
-| 512 KB (default) | 526 KB (6.3 %) | 1.7 MB |
+| 4 KB | 22–30 KB (0.3–0.4 %) | 16 KB |
+| 64 KB | 67–68 KB (0.8 %) | 208 KB |
+| 512 KB (default) | 514 KB (6.3 %) | 1.6 MB |
 
 The higher margin is with block checksums, which the CLI writes by default. Smaller blocks cost some ratio and decode speed; measure on your data. Always size the buffer with `zxc_decompress_inplace_bound` rather than the formula.
 
@@ -409,14 +409,14 @@ one without supplying it returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong 
 
 ## Block Size Tuning
 
-The default block size is **512 KB**, tuned for bulk/archival workloads where ratio and decompression throughput matter most. For **memory-constrained or streaming use cases**, **256 KB blocks** halve the per-context memory footprint at a small cost in ratio and decompression speed.
+The default block size is **512 KB**, tuned for bulk/archival workloads where ratio and decompression throughput matter most. For **memory-constrained or streaming use cases**, **256 KB blocks** halve the decompression context and cut the compression context by ~40 % at a small cost in ratio and decompression speed.
 
 **Why larger blocks help:** Each block starts with a cold hash table, so the LZ match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties, improving both ratio and decompression speed.
 
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
-| 256 KB | ~1.03 MB | ~256 KB | 47.21% | — |
-| 512 KB *(default)* | ~1.78 MB | ~512 KB | 46.65% *(−0.56 pp)* | +1% to +8% depending on CPU |
+| 256 KB | ~1.04 MB | ~514 KB | 47.21% | — |
+| 512 KB *(default)* | ~1.79 MB | ~1.0 MB | 46.65% *(−0.56 pp)* | +1% to +8% depending on CPU |
 
 ```bash
 # CLI — fall back to 256 KB blocks (e.g. embedded / streaming)
@@ -439,7 +439,7 @@ The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT
 
 Two complementary, byte-frozen suites guard that format:
 
-* **Decoder conformance** — [`conformance/`](conformance/README.md) ships public reference vectors, frozen per format version: `valid/*.zxc` streams paired with their expected decompressed output, plus `invalid/*.zxc` streams that a correct decoder **must** reject, one per row of the format's error table. Point your own decoder at them to prove interoperability — no dependency on this implementation. Run locally via the `conformance` CTest.
+* **Decoder conformance** — [`conformance/`](conformance/README.md) ships public reference vectors, frozen per format version: `valid/*.zxc` streams paired with their expected decompressed output, plus `invalid/*.zxc` streams that a correct decoder **must** reject, at least one per row of the format's error table. Point your own decoder at them to prove interoperability — no dependency on this implementation. Run locally via the `conformance` CTest.
 * **Wire-format stability** — [`tests/format/`](tests/format/README.md) pins the exact bytes the encoder emits for every block type and integrity field. A CI job ([`vector-stability.yml`](.github/workflows/vector-stability.yml)) fails on any single-byte drift, so an encoder change can only ever be deliberate.
 
 The distinction: conformance freezes decoder *behaviour* (`decode(x) == expected`), while the golden suite freezes the encoder's *bytes*. Together they make the format both interoperable and stable.
