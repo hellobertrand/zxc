@@ -289,9 +289,13 @@ rejected at load.
 target on every change to this tree or the library, then runs
 `check-image.ps1`. The runner image carries the WDK's Visual Studio
 extension but not the kit content, so the job installs the 26100 WDK with
-Microsoft's installer first. Plan B needs the 22000 kit, so a second job
-installs that SDK and WDK and builds x64 and Win32 at the Windows 7 target
-on the weekly schedule and on manual dispatch only.
+Microsoft's installer first, and it builds with Visual Studio 2022, the
+version that kit's MSBuild task assemblies are built for.
+
+Plan B is not built in CI. The 22000 kit ships those assemblies for Visual
+Studio 2019 only, which the runner image does not carry, so the Windows 7
+and x86 builds are verified locally against the 22000 EWDK, as described
+above, and should be re-run before a release that touches the library.
 
 ## Licensing
 

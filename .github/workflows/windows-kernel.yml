@@ -6,10 +6,11 @@ name: Windows Kernel Library
 # library change.
 #
 # The runner image carries the WDK's Visual Studio extension (the kernel-mode
-# toolset) but not the kit itself (km headers and libraries), so each job
-# installs the kit content it needs with Microsoft's installers. Plan B (the
-# Windows 7 target and x86) needs the 22000 kit, so a second job installs that
-# one and runs on the schedule and on dispatch only.
+# toolset) but not the kit itself (km headers and libraries), so the job
+# installs the 26100 kit with Microsoft's installer first. Plan B (the
+# Windows 7 target and x86) is not built here: it needs the 22000 kit, whose
+# MSBuild task assemblies exist for Visual Studio 2019 only, which the image
+# does not carry. It is built locally against the 22000 EWDK (see the README).
 
 on:
   workflow_dispatch:
@@ -70,8 +71,10 @@ jobs:
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          # The Visual Studio instance that has the WDK extension, not merely the newest one.
-          $vs = & $vswhere -latest -products * -requires Component.Microsoft.Windows.DriverKit -property installationPath | Select-Object -First 1
+          # Visual Studio 2022 with the WDK extension: the 26100 kit ships MSBuild
+          # task assemblies for Visual Studio 2022 only, and the image also carries
+          # Visual Studio 2026, which vswhere -latest would pick.
+          $vs = & $vswhere -latest -products * -version '[17.0,18.0)' -requires Component.Microsoft.Windows.DriverKit -property installationPath | Select-Object -First 1
           $msbuild = if ($vs) { Get-ChildItem "$vs\MSBuild\*\Bin\MSBuild.exe" | Select-Object -First 1 -ExpandProperty FullName }
           $dumpbin = if ($vs) { Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName }
           $km = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include\*\km\ntddk.h" -ErrorAction SilentlyContinue | Select-Object -Last 1
@@ -92,62 +95,3 @@ jobs:
         shell: pwsh
         run: |
           .\contrib\windows-kernel\check-image.ps1 -Image contrib\windows-kernel\build\${{ matrix.platform }}\Release\zxc_selftest.sys -Machine ${{ matrix.platform }} -SubsystemVersion 10.00 -Dumpbin "${{ steps.tools.outputs.dumpbin }}"
-
-  plan-b:
-    name: "Kernel library plan B (${{ matrix.platform }}, Windows 7, kit 22000)"
-    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
-    runs-on: windows-2025
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: x64
-            machine: x64
-          - platform: Win32
-            machine: x86
-
-    steps:
-      - name: Checkout Repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
-      # SDK and WDK 10.0.22000.1 (Windows 11 21H2), the newest kit whose
-      # project system accepts a Windows 7 target and the Win32 platform.
-      - name: Install the 22000 SDK and WDK
-        shell: pwsh
-        run: |
-          foreach ($kit in @(@("winsdksetup.exe", "https://go.microsoft.com/fwlink/?linkid=2173743"), @("wdksetup.exe", "https://go.microsoft.com/fwlink/?linkid=2166289"))) {
-            $exe = "$env:RUNNER_TEMP\$($kit[0])"
-            Invoke-WebRequest -Uri $kit[1] -OutFile $exe
-            $p = Start-Process -FilePath $exe -ArgumentList "/features", "+", "/quiet", "/norestart" -Wait -PassThru
-            if ($p.ExitCode) { Write-Host "::error::$($kit[0]) exited $($p.ExitCode)"; exit 1 }
-          }
-          if (-not (Test-Path "${env:ProgramFiles(x86)}\Windows Kits\10\Include\10.0.22000.0\km\ntddk.h")) {
-            Write-Host "::error::kit 22000 kernel headers missing after the install"; exit 1
-          }
-
-      - name: Locate the toolchain
-        id: tools
-        shell: pwsh
-        run: |
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vs = & $vswhere -latest -products * -requires Component.Microsoft.Windows.DriverKit -property installationPath | Select-Object -First 1
-          $msbuild = if ($vs) { Get-ChildItem "$vs\MSBuild\*\Bin\MSBuild.exe" | Select-Object -First 1 -ExpandProperty FullName }
-          $dumpbin = if ($vs) { Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName }
-          foreach ($pair in @(@("Visual Studio with the WDK extension", $vs), @("MSBuild", $msbuild), @("dumpbin", $dumpbin))) {
-            if (-not $pair[1]) { Write-Host "::error::$($pair[0]) not found on this runner image"; exit 1 }
-            "$($pair[0]): $($pair[1])"
-          }
-          "msbuild=$msbuild" >> $env:GITHUB_OUTPUT
-          "dumpbin=$dumpbin" >> $env:GITHUB_OUTPUT
-
-      - name: Build for the Windows 7 target
-        shell: pwsh
-        run: |
-          & "${{ steps.tools.outputs.msbuild }}" contrib\windows-kernel\zxc_selftest.vcxproj /nologo /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:TargetVersion=Windows7 /p:SignMode=Off
-          exit $LASTEXITCODE
-
-      - name: Check the image
-        shell: pwsh
-        run: |
-          .\contrib\windows-kernel\check-image.ps1 -Image contrib\windows-kernel\build\${{ matrix.platform }}\Release\zxc_selftest.sys -Machine ${{ matrix.machine }} -SubsystemVersion 6.01 -Dumpbin "${{ steps.tools.outputs.dumpbin }}"

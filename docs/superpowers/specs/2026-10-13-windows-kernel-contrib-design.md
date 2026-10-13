@@ -404,13 +404,13 @@ job installs the 26100 WDK with Microsoft's installer before it builds, and
 takes MSBuild from the Visual Studio instance that has the extension rather
 than the newest instance.
 
-The second is plan B: it installs the 22000 WDK with `winget` first, since
-the runner's kit refuses both the Windows 7 target and the Win32 platform,
-then builds `x64` and `Win32` at the Windows 7 target and runs the same
-assertions. The two jobs together compile both bodies of the allocation
-routine. The install costs minutes, so this job runs on the weekly schedule
-and on manual dispatch only, not on pull requests; it exists so plan B
-cannot rot unnoticed, not to gate merges.
+The second job for plan B was designed to install the 22000 kit and build
+`x64` and `Win32` at the Windows 7 target on the schedule and on dispatch.
+It was dropped after the first runs: the 22000 kit ships its MSBuild task
+assemblies for Visual Studio 2019 only, selected by `$(VisualStudioVersion)`,
+and the runner image carries Visual Studio 2022 and 2026, so the kit's
+targets cannot load there. Plan B is therefore verified locally against the
+22000 EWDK, the fallback this spec names below, and the README says so.
 
 1. Checkout.
 2. Locate the toolchain in PowerShell: MSBuild through `vswhere`, the
