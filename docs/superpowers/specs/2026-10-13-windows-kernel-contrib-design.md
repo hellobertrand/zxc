@@ -31,6 +31,29 @@ against the archive, on x64 and ARM64, with two kits:
 | 22621 | MSVC 14.31 | Windows 7 | pass | no such target |
 | 20348 (Windows Server 2022 EWDK) | MSVC 14.28 (Visual Studio 2019 16.9) | Windows 7 | pass | no such target |
 
+And for 32-bit x86, which the 22621 kit is the last to ship kernel
+libraries for:
+
+| Kit | Toolset | Target | x86 |
+|---|---|---|---|
+| 22621 | MSVC 14.31 | Windows 11 22H2 | pass |
+| 22621 | MSVC 14.31 | Windows 7 | pass |
+
+Those rows are compiler-level builds. Through the official project system
+the picture is narrower: a probe driver project built with each kit's
+MSBuild toolset gave
+
+| Kit | x64, latest target | x64, Windows 7 | Win32, Windows 7 |
+|---|---|---|---|
+| 22000 (Windows 11 21H2 EWDK, MSVC 14.28) | builds | builds | builds |
+| 22621 | builds | refused | refused |
+
+The 22621 kit's `WindowsDriver.common.targets` refuses Win32 for kernel
+drivers and any `TargetVersion` other than the latest whenever the kit is
+newer than 22000; the 26100 kit inherits both rules. So plan B, Windows 7
+and x86, is built with the 22000 kit, whose compiler is the same MSVC 14.28
+the 20348 kit carries.
+
 What the spike established, and what this design encodes:
 
 - **Include order.** With the kernel toolset's own order, the kit's legacy
@@ -74,6 +97,19 @@ What the spike established, and what this design encodes:
   fast-fail variant, carries subsystem version 6.01, and imports
   `ExAllocatePoolWithTag`, `ExFreePoolWithTag`, `__chkstk`, `KeBugCheckEx`
   and `DbgPrintEx` from `ntoskrnl.exe`, nothing else.
+- **x86.** Built with the toolset's x86 settings (`_X86_`, `i386`,
+  `STD_CALL`, `/Gz`, SafeSEH, entry `GsDriverEntry@8`, the kit's
+  `memcmp.lib`, all confirmed from the 22000 toolset's own command lines,
+  which pass no `/arch` at all) plus `/arch:IA32`,
+  the x86 library contains no SSE, MMX, x87, POPCNT or LZCNT instructions,
+  only the baseline bit scans; 64-bit arithmetic goes through the
+  `_allmul`, `_allshl` and `_aullshr` helpers that `ntoskrnl` exports. The
+  x86 kernel exports `memcpy` and `memset` but not `memcmp`, which the kit
+  supplies as `memcmp.lib`. Without `/arch:IA32` the same build carried
+  about 3,900 XMM instructions. The kit's force-included `warning.h` sets
+  C4242 to level 3 by pragma, which a `/wd4242` on the command line cannot
+  undo, and on a 32-bit `size_t` the core's block-bounded `uint64_t`
+  narrowing at call sites trips it. Largest frame about 2.9 KiB.
 - **Toolchain floor.** The core needs `/std:c17`, which Visual Studio 2019
   16.8 (MSVC 14.28) introduced. The 20348 EWDK has it; the 18362 EWDK
   (MSVC 14.20) does not and cannot build the library. Microsoft's officially
@@ -86,6 +122,11 @@ In scope:
 
 - `contrib/windows-kernel/`: dependency header, shared project settings, the
   library project, the self-test driver project and source, README.
+- Three platforms: x64 and ARM64 on the current kit, and 32-bit x86 as the
+  second axis of plan B. Plan B, both the Windows 7 target and x86, is
+  built with the 22000 kit, the newest whose project system accepts
+  either. The user-mode library already builds and is tested on 32-bit
+  x86; this adds the kernel-mode build.
 - `.github/workflows/windows-kernel.yml`: build both platforms, assert the
   image's imports.
 - Pointers in `docs/INSTALL.md`, `docs/API.md` and
@@ -97,10 +138,8 @@ Out of scope:
   kernel mode; the vendored `zxc_deps.h` replacement is the whole contract.
 - Loading the driver in CI. Runtime proof is a manual step on a test-signed
   VM, as it is for the Linux module.
-- 32-bit x86 and ARM32. The 26100 kit does not support them, and the spike
-  did not try them. The user-mode library builds and is tested on 32-bit
-  x86 already; a Windows 7 x86 kernel build would need the 22621 kit or
-  older on top of everything here.
+- ARM32. No kit in use supports it and nothing asks for it.
+- Loading the x86 build in CI, for the same reason as the others.
 - Shipping the library as a release artifact.
 - Pageable code sections, lookaside lists, or any allocator beyond pool.
 
@@ -146,6 +185,10 @@ Definitions:
   not defined it. `zxc_internal.h` checks its constants with the two-argument
   form.
 - `ZXC_POOL_TAG`: a four-character tag that reads `zxc ` in pool dumps.
+- On `_M_IX86`, `#pragma warning(disable : 4242)`: the kit's `warning.h`
+  sets C4242 to level 3, and on a 32-bit `size_t` the core's block-bounded
+  `uint64_t` narrowing at call sites trips it, the same class the CMake
+  build leaves unchecked on 32-bit hosts.
 - One internal allocation routine with two bodies, selected on
   `NTDDI_VERSION` at compile time:
   - Windows 10 2004 and later:
@@ -186,9 +229,12 @@ so that the two never disagree on the rules the spike found. Its contents:
   (`0xA000008`) on both platforms, unless the caller set them. The toolset
   derives `NTDDI_VERSION`, `_WIN32_WINNT`, the subsystem version and the
   `/GS` support library from them. Plan B: building with
-  `TargetVersion=Windows7`, x64 only, selects the Windows 7 body of the
-  allocation routine and yields one library that runs on every Windows
-  from 7 up.
+  `TargetVersion=Windows7` on x64 or Win32 selects the Windows 7 body of
+  the allocation routine and yields one library that runs on every Windows
+  from 7 up. Plan B requires the 22000 kit: the sheet sets
+  `WindowsTargetPlatformVersion` to `10.0.22000.0` for it, and fails early
+  with a plain message when that kit is not installed, because the 22621
+  and newer project systems refuse both the target and the platform.
 - `IgnoreStandardIncludePath` true (`/X`), and `AdditionalIncludeDirectories`
   set to, in order: `$(VC_IncludePath)`, `$(UniversalCRT_IncludePath)`,
   `$(KM_IncludePath)`, `$(KIT_SHARED_IncludePath)`. This is the include-order
@@ -200,7 +246,10 @@ so that the two never disagree on the rules the spike found. Its contents:
   `ZXC_DISABLE_SIMD`: baseline SSE2 and NEON are legal in kernel mode, and
   the dispatcher's CPUID probes compile out.
 - `WarningLevel` 4, `TreatWarningAsError` true, `DisableSpecificWarnings`
-  4244 and 4310, the two suppressions the CMake build applies.
+  4244 and 4310, the two suppressions the CMake build applies. A third
+  suppression, C4242 on 32-bit, cannot live here: the kit's force-included
+  `warning.h` raises that warning by pragma after the command line, so the
+  dependency header disables it by pragma on `_M_IX86` instead.
 - `DebugInformationFormat` OldStyle (`/Z7`): the objects carry their debug
   info, so the library needs no companion PDB.
 - `OmitDefaultLibName` true (`/Zl`): no default-library directive in the
@@ -215,8 +264,10 @@ so that the two never disagree on the rules the spike found. Its contents:
 ### `zxc_km.vcxproj`
 
 `ConfigurationType` StaticLibrary, `PlatformToolset`
-WindowsKernelModeDriver10.0, `TargetVersion` from the property sheet,
-platforms x64 and ARM64, configurations Debug and Release.
+WindowsKernelModeDriver10.0, `TargetVersion` and kit from the property
+sheet, platforms x64, ARM64 and Win32, configurations Debug and Release.
+Win32 is plan B only and builds with the 22000 kit, which the property
+sheet checks for and reports.
 
 A target `ZxcStage`, run before `ClCompile`, copies into `build/stage/zxc/`:
 `include/*.h`, the seven units `zxc_common.c`, `zxc_pivco_tables.c`,
@@ -297,7 +348,22 @@ The README states it; the self-test project demonstrates it.
   `KeExpandKernelStackAndCalloutEx` or levels 1 to 5.
 - **SIMD.** The library uses SSE2 on x64 and NEON on ARM64, both allowed in
   kernel mode without save and restore. It never uses AVX. Do not build it
-  with `/arch:AVX*`; `/kernel` refuses that anyway.
+  with `/arch:AVX*`; `/kernel` refuses that anyway. On x86 the library is
+  scalar, by `/arch:IA32`, because x86 kernel mode does not preserve XMM
+  state for drivers.
+- **x86.** Plan B only, built with the 22000 kit: newer project systems
+  refuse the platform, and the 26100 kit ships no x86 kernel libraries at
+  all. The property sheet sets `/arch:IA32` on Win32: `/kernel` alone
+  leaves the 32-bit compiler on SSE2 code generation, with `_M_IX86_FP` at
+  2, which both lets the compiler use XMM registers and switches the
+  core's explicit SSE2 paths on; IA32 takes both out, and `/kernel` rejects
+  `/arch:SSE2` outright. The kernel toolset compiles x86 with `/Gz`, so the library's
+  public functions are stdcall and the consumer must be built the same
+  way, which any kernel-toolset project is. The x86 kernel does not export
+  `memcmp`; the kit's `memcmp.lib` provides it and the toolset links it
+  automatically, a hand-rolled link names it. The 64-bit arithmetic helpers
+  the compiler emits come from `ntoskrnl`. The 12 KB x86 kernel stack
+  leaves room for decoding and for compression at levels 1 to 5 only.
 
 ## CI: `windows-kernel.yml`
 
@@ -308,9 +374,18 @@ and pull requests to `main` and `candidate` on changes under
 weekly on a different hour; manual dispatch. Same permissions and
 concurrency block, actions pinned by SHA as elsewhere in the repo.
 
-One job, matrix over three legs: `x64` and `ARM64` at the default
-Windows 10 2004 target, and `x64` at Windows 7, the plan B leg. The two x64
-legs compile both bodies of the allocation routine.
+Two jobs.
+
+The first, on the pull-request path, is a matrix over `x64` and `ARM64` at
+the default Windows 10 2004 target, with the runner's own 26100 kit.
+
+The second is plan B: it installs the 22000 WDK with `winget` first, since
+the runner's kit refuses both the Windows 7 target and the Win32 platform,
+then builds `x64` and `Win32` at the Windows 7 target and runs the same
+assertions. The two jobs together compile both bodies of the allocation
+routine. The install costs minutes, so this job runs on the weekly schedule
+and on manual dispatch only, not on pull requests; it exists so plan B
+cannot rot unnoticed, not to gate merges.
 
 1. Checkout.
 2. Locate the toolchain in PowerShell: MSBuild through `vswhere`, the
@@ -387,7 +462,16 @@ No artifacts are uploaded; the Linux job uploads none either.
   runtime opt-in call in the consumer's `DriverEntry`, which is Microsoft's
   own mechanism for drivers that span Windows 7 and later. CI builds plan B
   on every run, so it cannot rot.
-- **x64 and ARM64 only.**
+- **x86 as part of plan B.** The user asked about it twice; the 22000 kit
+  builds it through the project system, and the only costs are one pragma
+  and one `/arch` flag, a Win32 platform in the projects, and the scheduled
+  CI job plan B already needs. It is not on the pull-request path because
+  that kit is not on the runner.
+- **Plan B on the 22000 kit, not the latest.** Not a choice: kits newer
+  than 22000 refuse down-level targets and x86 in their MSBuild targets,
+  while their compilers still build the code. The 22000 kit carries the
+  same MSVC 14.28 as the 20348 kit, so plan B's compiler floor is Visual
+  Studio 2019 16.8 either way.
 - **Signing off by default.** A loadable binary needs a test certificate in
   the developer's store, a side effect a library repo should not cause on a
   plain build.
@@ -410,12 +494,13 @@ Each has a fallback; none changes the design.
 - Property-sheet metadata surviving the toolset's own item definitions.
   Fallback: move the affected settings into each project after the toolset
   imports.
-- The 26100 toolset accepting `TargetVersion=Windows7` through MSBuild. The
-  22621 kit's property sheets map it, and the spike built the target with
-  the compiler invoked directly on the 22621 and 20348 kits, but not through
-  MSBuild on 26100. Fallback: the Windows 7 leg sets `_NT_TARGET_VERSION`
-  and the `/GS` library by hand, or CI restores the 22621 kit from NuGet
-  for that leg.
 - The toolset refusing `TargetVersion=Windows7` on ARM64 with a readable
-  error, so the README can say "x64 only" and leave it there. Fallback: a
-  guard in the property sheet that fails the build with its own message.
+  error, so the README can say "x64 and x86 only" and leave it there.
+  Fallback: a guard in the property sheet that fails the build with its own
+  message.
+- `winget` offering the 22000 WDK, installing it on the runner within a
+  tolerable time, and the 22000 kit coexisting with the runner's 26100 kit
+  under one `Windows Kits\10` root with `WindowsTargetPlatformVersion`
+  selecting it. Fallback: the plan B job installs the 22000 kit from
+  Microsoft's download link instead, or plan B stays a documented local
+  build against the EWDK.
