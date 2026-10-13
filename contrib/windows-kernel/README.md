@@ -286,10 +286,12 @@ rejected at load.
 ## CI
 
 `.github/workflows/windows-kernel.yml` builds x64 and ARM64 at the default
-target with the runner's kit on every change to this tree or the library,
-then runs `check-image.ps1`. Plan B needs the 22000 kit, which the runner
-lacks, so a second job installs it and builds x64 and Win32 at the Windows 7
-target on the weekly schedule and on manual dispatch only.
+target on every change to this tree or the library, then runs
+`check-image.ps1`. The runner image carries the WDK's Visual Studio
+extension but not the kit content, so the job installs the 26100 WDK with
+Microsoft's installer first. Plan B needs the 22000 kit, so a second job
+installs that SDK and WDK and builds x64 and Win32 at the Windows 7 target
+on the weekly schedule and on manual dispatch only.
 
 ## Licensing
 

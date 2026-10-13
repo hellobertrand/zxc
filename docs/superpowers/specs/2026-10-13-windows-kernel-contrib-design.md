@@ -398,7 +398,11 @@ concurrency block, actions pinned by SHA as elsewhere in the repo.
 Two jobs.
 
 The first, on the pull-request path, is a matrix over `x64` and `ARM64` at
-the default Windows 10 2004 target, with the runner's own 26100 kit.
+the default Windows 10 2004 target. The first run showed the runner image
+carries the WDK's Visual Studio extension but not the kit content, so the
+job installs the 26100 WDK with Microsoft's installer before it builds, and
+takes MSBuild from the Visual Studio instance that has the extension rather
+than the newest instance.
 
 The second is plan B: it installs the 22000 WDK with `winget` first, since
 the runner's kit refuses both the Windows 7 target and the Win32 platform,
