@@ -75,7 +75,7 @@ callback. It is opt-in only because most consumers do not need
 random-access decompression; it does not pull `<stdio.h>`. Kernel /
 embedded consumers can include it directly.
 
-Porting to a libc-less target: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
+Porting to a libc-less target: [contrib/linux-kernel](../contrib/linux-kernel/README.md); Windows drivers: [contrib/windows-kernel](../contrib/windows-kernel/README.md).
 
 `zxc_stream.h` is the only header that requires `<stdio.h>`. It groups
 every `FILE*`-flavored entry point: the multi-threaded streaming driver
