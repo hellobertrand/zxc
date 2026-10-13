@@ -287,10 +287,11 @@ rejected at load.
 
 `.github/workflows/windows-kernel.yml` builds x64 and ARM64 at the default
 target on every change to this tree or the library, then runs
-`check-image.ps1`. The runner image carries the WDK's Visual Studio
-extension but not the kit content, so the job installs the 26100 WDK with
-Microsoft's installer first, and it builds with Visual Studio 2022, the
-version that kit's MSBuild task assemblies are built for.
+`check-image.ps1`. The runner image carries Visual Studio 2026 with the
+WDK's Visual Studio extension but no kit, so the job installs the 28000
+SDK and WDK, the kit line built for Visual Studio 2026, with Microsoft's
+installers first. A kit's MSBuild task assemblies exist for one Visual
+Studio version: 26100 for 2022, 28000 for 2026.
 
 Plan B is not built in CI. The 22000 kit ships those assemblies for Visual
 Studio 2019 only, which the runner image does not carry, so the Windows 7

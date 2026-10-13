@@ -30,6 +30,7 @@ against the archive, on x64 and ARM64, with two kits:
 | 26100.6584 (Windows 11 25H2 EWDK, the line on GitHub `windows-2025` runners) | MSVC 14.44 | Windows 11 22H2 | pass | pass |
 | 22621 | MSVC 14.31 | Windows 7 | pass | no such target |
 | 20348 (Windows Server 2022 EWDK) | MSVC 14.28 (Visual Studio 2019 16.9) | Windows 7 | pass | no such target |
+| 28000.2526 (Windows 11 26H1 EWDK, the Visual Studio 2026 line CI uses) | MSVC 14.50 (Visual Studio 2026 18.3) | Windows 10 2004 | pass | pass |
 
 And for 32-bit x86, which the 22621 kit is the last to ship kernel
 libraries for:
@@ -398,11 +399,12 @@ concurrency block, actions pinned by SHA as elsewhere in the repo.
 Two jobs.
 
 The first, on the pull-request path, is a matrix over `x64` and `ARM64` at
-the default Windows 10 2004 target. The first run showed the runner image
-carries the WDK's Visual Studio extension but not the kit content, so the
-job installs the 26100 WDK with Microsoft's installer before it builds, and
-takes MSBuild from the Visual Studio instance that has the extension rather
-than the newest instance.
+the default Windows 10 2004 target. The first runs showed the runner image
+carries Visual Studio 2026 only, with the WDK's Visual Studio extension but
+no kit content, and that a kit's MSBuild task assemblies exist for one
+Visual Studio version (26100 for 2022, 28000 for 2026). So the job installs
+the 28000 SDK and WDK with Microsoft's installers before it builds and
+takes MSBuild from the Visual Studio 2026 instance that has the extension.
 
 The second job for plan B was designed to install the 22000 kit and build
 `x64` and `Win32` at the Windows 7 target on the schedule and on dispatch.
