@@ -1,3 +1,9 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * ZXC - High-performance lossless compression
+ *
+ * Copyright (c) Bertrand Lebonnois and contributors.
+ */
 // libzxc.org: small progressive enhancements. Every page works without this file.
 (function () {
   "use strict";

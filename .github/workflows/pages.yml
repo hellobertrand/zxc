@@ -53,12 +53,20 @@ jobs:
           INPUT_REF: ${{ inputs.docs_ref }}
           REPO: ${{ github.repository }}
         run: |
-          if [ "$EVENT" = "release" ]; then
-            ref="$RELEASE_TAG"
-          elif [ -n "$INPUT_REF" ]; then
+          newest="$( { [ "$EVENT" = "release" ] && printf '%s\n' "$RELEASE_TAG"
+            gh api --paginate "repos/$REPO/releases" \
+              --jq '.[] | select((.draft or .prerelease) | not) | .tag_name'; } \
+            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)" || true
+          if [ "$EVENT" != "release" ] && [ -n "$INPUT_REF" ]; then
             ref="$INPUT_REF"
           else
-            ref="$(gh api "repos/$REPO/releases/latest" --jq .tag_name)"
+            ref="$newest"
+            if [ "$EVENT" = "release" ] && [ "$RELEASE_TAG" != "$newest" ]; then
+              echo "Release $RELEASE_TAG is older than $newest: keeping the $newest docs"
+            fi
+          fi
+          if [ -z "$ref" ]; then
+            echo "::error::No published v* release to build the docs from"; exit 1
           fi
           if ! printf '%s' "$ref" | grep -Eq '^[A-Za-z0-9._/-]+$'; then
             echo "::error::Unexpected ref: $ref"; exit 1

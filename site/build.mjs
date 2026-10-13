@@ -1,4 +1,10 @@
 #!/usr/bin/env node
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * ZXC - High-performance lossless compression
+ *
+ * Copyright (c) Bertrand Lebonnois and contributors.
+ */
 // Static site generator for libzxc.org.
 //
 //   node build.mjs            -> writes ./dist

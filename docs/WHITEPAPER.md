@@ -881,7 +881,7 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 ### 7.5 Benchmarks Results
 
-**Figure C**: Decompression Efficiency : Cycles Per Byte Comparaison
+**Figure C**: Decompression Efficiency: Cycles Per Byte Comparison
 
 ![Benchmark Cycles Per Byte](./images/bench-cycles.svg)
 

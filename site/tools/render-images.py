@@ -1,3 +1,7 @@
+# SPDX-License-Identifier: BSD-3-Clause
+# ZXC - High-performance lossless compression
+#
+# Copyright (c) Bertrand Lebonnois and contributors.
 """Render the social preview image from tools/og.html."""
 import asyncio, pathlib
 from playwright.async_api import async_playwright
