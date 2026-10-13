@@ -79,7 +79,7 @@ const esc = (s) => String(s)
   .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const unesc = (s) => String(s)
   .replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&amp;/g, "&");
-const stripTags = (s) => unesc(String(s).replace(/<[^>]*>/g, ""));
+const reEscape = (s) => String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 const fmt = (n) => (n >= 100 ? Math.round(n).toLocaleString("en-US") : String(n));
 
 /** GitHub-compatible heading slug, so anchors written for GitHub keep working. */
@@ -232,7 +232,10 @@ function makeMarkdown(doc) {
     renderer: {
       heading({ tokens, depth }) {
         const inner = this.parser.parseInline(tokens);
-        const text = stripTags(inner);
+        const plain = Object.create(this.parser.textRenderer);
+        plain.html = () => "";
+        plain.image = () => "";
+        const text = unesc(this.parser.parseInline(tokens, plain));
         if (depth === 1 && title === null) { title = text; return ""; }
         const id = uniqueSlug(text);
         if (depth === 2 || (depth === 3 && doc.slug !== "changelog" && doc.slug !== "api")) {
@@ -581,7 +584,7 @@ async function build() {
   META.stars = stars;
   const changelog = existsSync(path.join(REPO, CHANGELOG)) ? await readRepo(CHANGELOG) : "";
   // "[v0.15.0] - date" (CHANGELOG) or "## [0.14.1] - date" (CHANGELOG.md).
-  const releaseDate = (changelog.match(new RegExp(`^(?:## )?\\[v?${version.replace(/\./g, "\\.")}\\] - (\\d{4}-\\d{2}-\\d{2})`, "m")) || [])[1] || "";
+  const releaseDate = (changelog.match(new RegExp(`^(?:## )?\\[v?${reEscape(version)}\\] - (\\d{4}-\\d{2}-\\d{2})`, "m")) || [])[1] || "";
   META.version = version;
   META.releaseDate = releaseDate;
 
