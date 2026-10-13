@@ -278,6 +278,7 @@ int test_eof_block_structure(void);
 int test_header_checksum(void);
 int test_swapped_blocks_stream(void);
 int test_forged_block_comp_size(void);
+int test_rle_section_trailing_bytes(void);
 int test_swapped_blocks_oneshot(void);
 int test_tail_between_eof_and_footer(void);
 int test_seek_flag_contract(void);

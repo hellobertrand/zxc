@@ -1635,3 +1635,88 @@ int test_header_checksum_single_bit(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/*
+ * An RLE literal section must end exactly where its runs fill n_literals
+ * (FORMAT.md Sec 5.2.3). Forge one trailing byte into it - lit_comp and
+ * comp_size grow by one, the header is re-signed - and the decoder, which
+ * used to stop at n_literals and skip the rest, must reject the block.
+ */
+int test_rle_section_trailing_bytes(void) {
+    printf("=== TEST: RLE literal section with trailing bytes ===\n");
+
+    // Random bytes repeated 4 times: runs too short to match (min match 5),
+    // long enough for RLE (repeat runs start at 4).
+    const size_t n = 4096;
+    uint8_t* src = (uint8_t*)malloc(n);
+    const size_t bound = (size_t)zxc_compress_block_bound(n);
+    uint8_t* comp = (uint8_t*)malloc(bound + 1);
+    uint8_t* forged = (uint8_t*)malloc(bound + 1);
+    uint8_t* out = (uint8_t*)malloc((size_t)zxc_decompress_block_bound(n));
+    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    if (!src || !comp || !forged || !out || !cctx || !dctx) {
+        printf("  [FAIL] allocation\n");
+        goto done;
+    }
+    uint32_t seed = 0xC0FFEEu;
+    for (size_t i = 0; i < n; i += 4) {
+        seed = seed * 1664525u + 1013904223u;
+        memset(src + i, (int)(seed >> 24), 4);
+    }
+
+    zxc_compress_opts_t co = {0};
+    co.level = ZXC_LEVEL_DEFAULT;
+    const int64_t csz = zxc_compress_block(cctx, src, n, comp, bound, &co);
+    const size_t glo = ZXC_BLOCK_HEADER_SIZE;
+    const size_t desc = glo + ZXC_GLO_HEADER_BINARY_SIZE;
+    if (csz <= 0 || comp[0] != ZXC_BLOCK_GLO || comp[glo + 8] != ZXC_SECTION_ENCODING_RLE ||
+        comp[glo + 9] != ZXC_SECTION_ENCODING_RAW) {
+        printf("  [FAIL] expected a GLO block with RLE literals and RAW tokens\n");
+        goto done;
+    }
+    if (zxc_decompress_block(dctx, comp, (size_t)csz, out, (size_t)zxc_decompress_block_bound(n),
+                             NULL) != (int64_t)n ||
+        memcmp(out, src, n) != 0) {
+        printf("  [FAIL] untouched block does not round-trip\n");
+        goto done;
+    }
+
+    // Insert one byte at the end of the literal section.
+    const uint32_t lit_comp = zxc_le32(comp + desc);
+    const size_t cut = desc + 4 + lit_comp;
+    memcpy(forged, comp, cut);
+    forged[cut] = 0xAA;
+    memcpy(forged + cut + 1, comp + cut, (size_t)csz - cut);
+    zxc_store_le32(forged + desc, lit_comp + 1);
+    zxc_block_header_t bh;
+    if (zxc_read_block_header(forged, (size_t)csz + 1, &bh) != ZXC_OK) {
+        printf("  [FAIL] block header unreadable\n");
+        goto done;
+    }
+    bh.comp_size += 1;
+    if (zxc_write_block_header(forged, (size_t)csz + 1, &bh) != ZXC_BLOCK_HEADER_SIZE) {
+        printf("  [FAIL] block header not rewritten\n");
+        goto done;
+    }
+
+    const int64_t r = zxc_decompress_block(dctx, forged, (size_t)csz + 1, out,
+                                           (size_t)zxc_decompress_block_bound(n), NULL);
+    if (r != ZXC_ERROR_CORRUPT_DATA) {
+        printf("  [FAIL] trailing RLE byte: got %lld, want ZXC_ERROR_CORRUPT_DATA\n", (long long)r);
+        goto done;
+    }
+    printf("  [PASS] trailing byte rejected\n");
+    printf("PASS\n\n");
+    ok = 1;
+
+done:
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(out);
+    free(forged);
+    free(comp);
+    free(src);
+    return ok;
+}

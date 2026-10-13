@@ -144,6 +144,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_header_checksum),
     TEST_CASE(test_swapped_blocks_stream),
     TEST_CASE(test_forged_block_comp_size),
+    TEST_CASE(test_rle_section_trailing_bytes),
     TEST_CASE(test_swapped_blocks_oneshot),
     TEST_CASE(test_tail_between_eof_and_footer),
     TEST_CASE(test_seek_flag_contract),

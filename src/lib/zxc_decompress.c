@@ -911,10 +911,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_glo_impl(const zxc_cctx_t* RESTRIC
                     w_ptr += len;
                 }
             }
-            if (UNLIKELY(w_ptr != w_end)) return ZXC_ERROR_CORRUPT_DATA;
+            if (UNLIKELY(w_ptr != w_end || r_ptr != r_end)) return ZXC_ERROR_CORRUPT_DATA;
             l_ptr = rle_buf;
             l_end = rle_buf + required_size;
         } else {
+            if (UNLIKELY(lit_stream_size != 0)) return ZXC_ERROR_CORRUPT_DATA;
             l_ptr = p_curr;
             l_end = p_curr;
         }
