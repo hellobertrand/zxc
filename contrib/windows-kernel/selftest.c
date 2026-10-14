@@ -2,7 +2,7 @@
 /*
  * ZXC - High-performance lossless compression
  *
- * Copyright (c) Bertrand Lebonnois and contributors.
+ * Copyright (c) Jean Gautier and contributors.
  */
 
 /*

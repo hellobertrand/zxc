@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- ZXC - High-performance lossless compression -->
-<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
   Imported by both projects before Microsoft.Cpp.Default.props. The kernel
   toolset reads TargetVersion, _NT_TARGET_VERSION and

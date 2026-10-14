@@ -86,7 +86,7 @@ Create `contrib/windows-kernel/zxc_deps.h`:
 /*
  * ZXC - High-performance lossless compression
  *
- * Copyright (c) Bertrand Lebonnois and contributors.
+ * Copyright (c) Jean Gautier and contributors.
  */
 
 /**
@@ -242,7 +242,7 @@ Create `contrib/windows-kernel/zxc_km_target.props`:
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- ZXC - High-performance lossless compression -->
-<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
   Imported by both projects before Microsoft.Cpp.Default.props. The kernel
   toolset reads TargetVersion, _NT_TARGET_VERSION and
@@ -272,7 +272,7 @@ Create `contrib/windows-kernel/zxc_km.props`:
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- ZXC - High-performance lossless compression -->
-<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
   Imported by both projects after Microsoft.Cpp.props. What a kernel-mode
   build of zxc needs beyond the toolset's defaults, and why:
@@ -344,7 +344,7 @@ Create `contrib/windows-kernel/zxc_km.vcxproj`:
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- ZXC - High-performance lossless compression -->
-<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
   zxc_km.lib: the seven core units compiled in kernel mode. The ZxcStage
   target copies them, the internal headers, the vendored hash and the public
@@ -489,7 +489,7 @@ Create `contrib/windows-kernel/selftest.c`:
 /*
  * ZXC - High-performance lossless compression
  *
- * Copyright (c) Bertrand Lebonnois and contributors.
+ * Copyright (c) Jean Gautier and contributors.
  */
 
 /*
@@ -630,7 +630,7 @@ Create `contrib/windows-kernel/zxc_selftest.vcxproj`:
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- ZXC - High-performance lossless compression -->
-<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
   zxc_selftest.sys: a WDM driver that links zxc_km.lib and round-trips data in
   DriverEntry. No INF: it loads as a legacy software driver (sc create
@@ -693,7 +693,7 @@ Create `contrib/windows-kernel/check-image.ps1`:
 # SPDX-License-Identifier: BSD-3-Clause
 # ZXC - High-performance lossless compression
 #
-# Copyright (c) Bertrand Lebonnois and contributors.
+# Copyright (c) Jean Gautier and contributors.
 
 <#
 .SYNOPSIS

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- SPDX-License-Identifier: BSD-3-Clause -->
 <!-- ZXC - High-performance lossless compression -->
-<!-- Copyright (c) Bertrand Lebonnois and contributors. -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
   zxc_selftest.sys: a WDM driver that links zxc_km.lib and round-trips data in
   DriverEntry. No INF: it loads as a legacy software driver (sc create
