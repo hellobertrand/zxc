@@ -24,6 +24,11 @@ msvc_narrowing_args = msvc_syntax ? ['/wd4244', '/wd4310'] : []
 # As CMake: /W4 for MSVC, top-level only (warning_level=3 is /W4 there).
 msvc_w4 = msvc_syntax and not meson.is_subproject() ? ['warning_level=3'] : []
 
+# As CMake: a subproject inherits the parent's optimisation level, maybe none.
+if meson.is_subproject() and get_option('optimization') == '0'
+  warning('zxc: optimization=0 - the library will be built unoptimised. Set buildtype=release.')
+endif
+
 # As CMake's ZXC_WARNING_FLAGS; warning_level=2 gives -Wall -Wextra.
 if not meson.is_subproject() and not msvc_syntax
   add_project_arguments(cc.get_supported_arguments([

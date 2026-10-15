@@ -16,6 +16,13 @@ project(zxc
     DESCRIPTION "High-performance asymmetric lossless compression library"
 )
 
+get_property(ZXC_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
+if(PROJECT_IS_TOP_LEVEL AND NOT ZXC_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE
+   AND NOT CMAKE_C_FLAGS MATCHES "[-/]O")
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+    message(STATUS "zxc: no CMAKE_BUILD_TYPE given, defaulting to Release")
+endif()
+
 include(zxcOptions)         # Build options
 include(zxcPlatform)        # Target architecture + Emscripten/WASM overrides
 include(zxcCompilerFlags)   # C standard, LTO/PGO, per-target flag helpers
@@ -102,7 +109,6 @@ endif()
 # The optimisation level comes from the build type, here as everywhere else.
 # Forcing -O3 would only have covered zxc_lib: the codec itself lives in the
 # variant objects, which never had it.
-get_property(ZXC_MULTI_CONFIG GLOBAL PROPERTY GENERATOR_IS_MULTI_CONFIG)
 if(NOT ZXC_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE AND NOT CMAKE_C_FLAGS MATCHES "[-/]O")
     message(WARNING "zxc: no CMAKE_BUILD_TYPE and no optimisation flag - the library will be "
                     "built unoptimised. Set CMAKE_BUILD_TYPE=Release.")

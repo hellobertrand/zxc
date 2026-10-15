@@ -68,7 +68,8 @@ cd zxc
 
 ### Single-config generators (Unix Makefiles, Ninja)
 
-The default on Linux and macOS. The build type is fixed at configure time.
+The default on Linux and macOS. The build type is fixed at configure time and
+defaults to `Release` (unless `CMAKE_C_FLAGS` sets `-O`).
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -223,8 +224,8 @@ the warning level (`-Wall -Wextra`, `/W3`) and code generation policy
 `-fdata-sections` and the matching dead-strip link options) are the embedding
 project's to set. An embedder that builds with frame pointers for its profiler,
 its own aliasing rules or a quiet build log keeps them. A configure-time warning
-fires if neither a build type nor an optimisation flag is set, since zxc would
-then be built unoptimised.
+fires if neither a build type nor an optimisation flag is set (the `Release`
+default is top-level only), since zxc would then be built unoptimised.
 
 Third-party code is vendored, never probed: `rapidhash.h` comes from the copy in
 the tree unless `-DZXC_USE_SYSTEM_RAPIDHASH=ON` asks for a system one, so a
