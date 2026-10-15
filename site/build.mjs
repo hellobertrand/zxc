@@ -722,7 +722,7 @@ function serve(port = Number(process.env.PORT) || 8080) {
       res.writeHead(200, { "content-type": TYPES[path.extname(file)] || "application/octet-stream" });
       res.end(await readFile(file));
     } catch { res.writeHead(400); res.end(); }
-  }).listen(port, () => console.log(`preview on http://localhost:${port}`));
+  }).listen(port, "127.0.0.1", () => console.log(`preview on http://localhost:${port}`));
 }
 
 await build();

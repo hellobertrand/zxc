@@ -30,7 +30,7 @@
   // at most once an hour per browser.
   var stars = document.querySelectorAll("[data-gh-stars]");
   if (stars.length && window.fetch) {
-    var KEY = "zxc-gh-stars", HOUR = 3600 * 1000;
+    var CACHE = "zxc-gh-stars", HOUR = 3600 * 1000;
     var show = function (n) {
       stars.forEach(function (el) {
         el.querySelector("[data-gh-stars-n]").textContent = n.toLocaleString("en-US");
@@ -38,7 +38,7 @@
       });
     };
     var cached = null;
-    try { cached = JSON.parse(localStorage.getItem(KEY)); } catch (e) { cached = null; }
+    try { cached = JSON.parse(localStorage.getItem(CACHE)); } catch (e) { cached = null; }
     if (cached && typeof cached.n === "number" && Date.now() - cached.t < HOUR) {
       show(cached.n);
     } else {
@@ -47,7 +47,7 @@
         .then(function (d) {
           if (!d || typeof d.stargazers_count !== "number") return;
           show(d.stargazers_count);
-          try { localStorage.setItem(KEY, JSON.stringify({ n: d.stargazers_count, t: Date.now() })); } catch (e) {}
+          try { localStorage.setItem(CACHE, JSON.stringify({ n: d.stargazers_count, t: Date.now() })); } catch (e) {}
         })
         .catch(function () {});
     }
