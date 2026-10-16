@@ -240,6 +240,16 @@ jobs:
             echo "No non-ASCII characters found."
           fi
 
+      - name: Integer Suffix Check
+        shell: bash
+        run: |
+          # U or ULL only: unsigned long (UL/LU) is 32 bits on Windows; LLU is ULL reordered.
+          # clang-format uppercases suffixes, so matching the uppercase forms is enough.
+          if git grep -nwE '(0[xX][0-9a-fA-F]+|[0-9]+)(UL|LU|LLU)' -- '*.c' '*.cc' '*.h' ':!*/vendors/*'; then
+            echo "::error::UL/LU/LLU suffix found, use U or ULL."
+            exit 1
+          fi
+
       - name: SPDX Header Check
         shell: bash
         run: |

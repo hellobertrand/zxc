@@ -99,6 +99,10 @@ lint:
 	  $$files \
 	&& echo "OK: No non-ASCII characters found." \
 	|| { echo "ERROR: Non-ASCII characters found in source files."; exit 1; }
+	@echo "Scanning for UL/LU/LLU integer suffixes (use U or ULL)..."
+	@! git grep -nwE '(0[xX][0-9a-fA-F]+|[0-9]+)(UL|LU|LLU)' -- '*.c' '*.cc' '*.h' ':!*/vendors/*' \
+	|| { echo "ERROR: UL/LU/LLU suffix found, use U or ULL."; exit 1; }
+	@echo "OK: No UL/LU/LLU suffix found."
 
 # ── Documentation ────────────────────────────────────────────
 # ── Man page ─────────────────────────────────────────────────
