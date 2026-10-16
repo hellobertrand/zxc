@@ -187,6 +187,90 @@ fail:
     return 0;
 }
 
+/* Frame or block API compression on @p c. */
+static int64_t cctx_compress(zxc_cctx* c, const int block_api, const uint8_t* src, const size_t n,
+                             uint8_t* dst, const size_t cap, const zxc_compress_opts_t* co) {
+    return block_api ? zxc_compress_block(c, src, n, dst, cap, co)
+                     : zxc_compress_cctx(c, src, n, dst, cap, co);
+}
+
+/* #532: zero opts fields mean defaults, and a failed call is not remembered.
+ * Second call on a reused context vs. a fresh context. */
+int test_cctx_zero_opts_defaults(void) {
+    printf("=== TEST: Opaque Context API - zero opts fields, failed calls (#532) ===\n");
+
+    static const struct {
+        const char* name;
+        int fail_first;  /* first call fails: too-small destination */
+        int null_second; /* second call: NULL opts, not zeroed ones */
+        int want_custom; /* expect the custom output, not the defaults */
+    } cases[] = {
+        {"zero opts after a successful custom call", 0, 0, 0},
+        {"zero opts after a failed custom call", 1, 0, 0},
+        {"NULL opts after a failed custom call", 1, 1, 0},
+        {"NULL opts after a successful custom call (sticky)", 0, 1, 1},
+    };
+    const zxc_compress_opts_t zero = {0};
+    const zxc_compress_opts_t custom = {.level = 1, .block_size = 4096};
+
+    const size_t src_sz = 300000;
+    const uint64_t fb = zxc_compress_bound(src_sz), bb = zxc_compress_block_bound(src_sz);
+    const size_t cap = (size_t)(fb > bb ? fb : bb);
+    uint8_t* const src = malloc(src_sz);
+    uint8_t* const ref[2] = {malloc(cap), malloc(cap)}; /* defaults, custom */
+    uint8_t* const out = malloc(cap);
+    uint8_t tiny[16];
+    int ok = 0;
+    if (!src || !ref[0] || !ref[1] || !out) goto done;
+    gen_lz_data(src, src_sz);
+
+    for (int block_api = 0; block_api <= 1; block_api++) {
+        const char* const api = block_api ? "block" : "frame";
+        int64_t n_ref[2];
+        for (int k = 0; k < 2; k++) {
+            zxc_cctx* const c = zxc_create_cctx(NULL);
+            n_ref[k] =
+                c ? cctx_compress(c, block_api, src, src_sz, ref[k], cap, k ? &custom : &zero) : -1;
+            zxc_free_cctx(c);
+        }
+        if (n_ref[0] <= 0 || n_ref[1] <= 0 ||
+            (n_ref[0] == n_ref[1] && memcmp(ref[0], ref[1], (size_t)n_ref[0]) == 0)) {
+            printf("  [FAIL] %s: custom opts must change the output (%lld vs %lld)\n", api,
+                   (long long)n_ref[0], (long long)n_ref[1]);
+            goto done;
+        }
+
+        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
+            zxc_cctx* const c = zxc_create_cctx(NULL);
+            if (!c) goto done;
+            const int64_t first =
+                cases[i].fail_first
+                    ? cctx_compress(c, block_api, src, src_sz, tiny, sizeof(tiny), &custom)
+                    : cctx_compress(c, block_api, src, src_sz, out, cap, &custom);
+            const int64_t n = cctx_compress(c, block_api, src, src_sz, out, cap,
+                                            cases[i].null_second ? NULL : &zero);
+            zxc_free_cctx(c);
+            const int want = cases[i].want_custom;
+            if ((cases[i].fail_first ? first >= 0 : first <= 0) || n != n_ref[want] ||
+                memcmp(out, ref[want], (size_t)n) != 0) {
+                printf("  [FAIL] %s, %s: first %lld, second %lld, want %lld\n", api, cases[i].name,
+                       (long long)first, (long long)n, (long long)n_ref[want]);
+                goto done;
+            }
+        }
+        printf("  [PASS] %s API: zero fields mean defaults; failures not remembered\n", api);
+    }
+    ok = 1;
+    printf("PASS\n\n");
+
+done:
+    free(src);
+    free(ref[0]);
+    free(ref[1]);
+    free(out);
+    return ok;
+}
+
 int test_estimate_cctx_size(void) {
     printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
 

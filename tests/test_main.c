@@ -75,6 +75,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_context_api_seekable_frame),
     TEST_CASE(test_context_api_seekable_compress),
     TEST_CASE(test_cctx_level_raise_reinit),
+    TEST_CASE(test_cctx_zero_opts_defaults),
     TEST_CASE(test_estimate_cctx_size),
 
     /* --- Static Context API --- */

@@ -141,6 +141,7 @@ int test_context_api_empty_input(void);
 int test_context_api_seekable_frame(void);
 int test_context_api_seekable_compress(void);
 int test_cctx_level_raise_reinit(void);
+int test_cctx_zero_opts_defaults(void);
 int test_estimate_cctx_size(void);
 
 /* Static Context API */

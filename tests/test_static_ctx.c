@@ -245,6 +245,19 @@ int test_static_ctx_block_size_locked(void) {
         return 0;
     }
 
+    /* Zero block_size means the pinned one (#532). */
+    uint8_t ref[1024];
+    const zxc_compress_opts_t zero_bs = {.level = ZXC_LEVEL_DEFAULT};
+    const int64_t rc3 = zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), &zero_bs);
+    const int64_t rc4 = zxc_compress(src, sizeof(src), ref, sizeof(ref), &opts);
+    if (rc3 <= 0 || rc3 != rc4 || memcmp(dst, ref, (size_t)rc3) != 0) {
+        printf("  [FAIL] zero block_size on a pinned context: %lld, one-shot %lld\n",
+               (long long)rc3, (long long)rc4);
+        zxc_free_cctx(cctx);
+        test_aligned_free(ws);
+        return 0;
+    }
+
     zxc_free_cctx(cctx);
     test_aligned_free(ws);
     printf("  [PASS] mismatched block_size rejected; matching one accepted\n");
