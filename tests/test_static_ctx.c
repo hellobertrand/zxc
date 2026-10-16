@@ -546,7 +546,7 @@ int test_static_dctx_block_bounds(void) {
             printf("  [FAIL] setup\n");
             break;
         }
-        zxc_test_srand(0x5747u);
+        zxc_test_srand(0x5747U);
         gen_lz_data(lz, XL);
         gen_random_data(rnd, XL);
         for (size_t i = 0; i < LIT - 1000; i++)
@@ -713,7 +713,7 @@ int test_static_dctx_block_bounds(void) {
             const zxc_decompress_opts_t* o = pass ? &ck : NULL;
             for (size_t bit = 0; bit < (size_t)b->n * 8; bit++, flips++) {
                 memcpy(mut, b->comp, (size_t)b->n);
-                mut[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+                mut[bit >> 3] ^= (uint8_t)(1U << (bit & 7));
                 const int64_t rs = zxc_decompress_block(sd, mut, (size_t)b->n, out, PIN, o);
                 const int64_t rd = zxc_decompress_block(hd, mut, (size_t)b->n, out2, PIN, o);
                 const int same = rs == rd && (rs <= 0 || memcmp(out, out2, (size_t)rs) == 0);
@@ -839,7 +839,7 @@ static int64_t inplace_refusal(zxc_dctx* d, const uint8_t* src, size_t n, size_t
 int test_static_dctx_inplace(void) {
     printf("=== TEST: Static Context API - in-place decode ===\n");
 
-    const size_t N = 1u << 20;
+    const size_t N = 1U << 20;
     uint8_t* const text = (uint8_t*)malloc(N);
     uint8_t* const noise = (uint8_t*)malloc(N);
     if (!text || !noise) {

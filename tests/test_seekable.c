@@ -1608,9 +1608,9 @@ int test_seekable_range_reports_short_reads(void) {
     const size_t BLK = 64 * 1024;
     uint8_t* src = malloc(SRC_SIZE);
     if (!src) return 0;
-    uint32_t rng = 0x2E5B9A17u;
+    uint32_t rng = 0x2E5B9A17U;
     for (size_t i = 0; i < SRC_SIZE; i++) {
-        rng = rng * 1103515245u + 12345u;
+        rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
     const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
@@ -1688,9 +1688,9 @@ int test_seekable_swapped_blocks_caught(void) {
     printf("=== TEST: Seekable - a swapped block fails its checksum ===\n");
     enum { BLK = 4096, NBLK = 4, SPAN = ZXC_BLOCK_HEADER_SIZE + BLK + ZXC_BLOCK_CHECKSUM_SIZE };
     static uint8_t src[BLK * NBLK], arc[2 * BLK * NBLK], dec[BLK * NBLK], tmp[SPAN];
-    uint32_t rng = 0x6A09E667u;
+    uint32_t rng = 0x6A09E667U;
     for (size_t i = 0; i < sizeof(src); i++) {
-        rng = rng * 1103515245u + 12345u;
+        rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
     const zxc_compress_opts_t co = {
@@ -1745,9 +1745,9 @@ int test_seekable_corrupted_block_checksum(void) {
     const size_t BLK = 64 * 1024;
     uint8_t* src = malloc(SRC_SIZE);
     if (!src) return 0;
-    uint32_t rng = 0x2E5B9A17u;
+    uint32_t rng = 0x2E5B9A17U;
     for (size_t i = 0; i < SRC_SIZE; i++) {
-        rng = rng * 1103515245u + 12345u;
+        rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
 
@@ -2141,7 +2141,7 @@ done:
 
 /* 2^32 + 5 RAW blocks of 4 KiB served by a callback, sixteen terabytes that never
  * exist: no field caps the count, open costs three reads, nothing is loaded. */
-#define SYNTH_BS 4096u
+#define SYNTH_BS 4096U
 #define SYNTH_BLK (ZXC_BLOCK_HEADER_SIZE + SYNTH_BS)
 
 typedef struct {
@@ -2158,7 +2158,7 @@ typedef struct {
 } synth_ctx_t;
 
 static uint8_t synth_payload(const uint64_t blk, const uint32_t pos) {
-    return (uint8_t)(blk * 7u + (blk >> 11) + pos * 13u);
+    return (uint8_t)(blk * 7U + (blk >> 11) + pos * 13U);
 }
 
 static uint8_t synth_byte(const synth_ctx_t* c, uint64_t off) {

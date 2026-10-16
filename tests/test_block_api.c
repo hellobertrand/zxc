@@ -823,7 +823,7 @@ int test_block_api_direct_decode(void) {
             printf("  [FAIL] setup\n");
             break;
         }
-        zxc_test_srand(0xD1EC7u);
+        zxc_test_srand(0xD1EC7U);
         gen_lz_data(lz, max);
         for (size_t i = 0; i < max; i++) lit[i] = (uint8_t)('a' + zxc_test_rand() % 26);
         for (size_t i = 0; i < 4096; i++) dict[i] = (uint8_t)('a' + zxc_test_rand() % 26);

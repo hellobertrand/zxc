@@ -153,11 +153,11 @@ static int glo_layout(const uint8_t* d, size_t n, glo_layout_t* L) {
     if (enc_lit != 0 || enc_tok != 0 || n_seq == 0) return 0; /* RAW sections only */
     L->tok = PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + n_lit;
     L->off = L->tok + n_seq;
-    L->extras = L->off + (size_t)n_seq * (enc_off ? 1u : 2u);
+    L->extras = L->off + (size_t)n_seq * (enc_off ? 1U : 2U);
     if (L->extras + 8 > PAY0 + comp || L->extras + 8 > n) return 0;
     for (uint32_t i = 0; i < n_seq; i++) {
         const uint8_t tok = d[L->tok + i];
-        if ((tok >> 4) == 15u || (tok & 15u) == 15u) return 1;
+        if ((tok >> 4) == 15U || (tok & 15U) == 15U) return 1;
     }
     return 0;
 }

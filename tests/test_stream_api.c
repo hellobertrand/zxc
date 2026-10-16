@@ -1508,7 +1508,7 @@ static int dstream_finishes(const uint8_t* arc, size_t alen, uint8_t* out, size_
  * That order the other way round is what made Windows read a truncated frame. */
 int test_stream_size_then_decompress(void) {
     printf("=== TEST: Stream - stored-size lookup then decode, same stream ===\n");
-    const size_t n = 600u * 1024u; /* > 1 block at the 512 KB default */
+    const size_t n = 600U * 1024U; /* > 1 block at the 512 KB default */
     const char* const path = "zxc_size_then_decode.tmp";
     uint8_t* const src = malloc(n);
     uint8_t* const out = malloc(n);
@@ -1549,8 +1549,8 @@ int test_stream_size_then_decompress(void) {
         FILE* const f_arc = fopen(path, "rb");
         char* buf = NULL;
         if (f_arc && buffered) {
-            buf = malloc(1u << 16);
-            if (buf) setvbuf(f_arc, buf, _IOFBF, 1u << 16);
+            buf = malloc(1U << 16);
+            if (buf) setvbuf(f_arc, buf, _IOFBF, 1U << 16);
         }
         FILE* const f_out = tmpfile();
         int64_t reported = -1, got = -1;
@@ -1605,7 +1605,7 @@ int test_stream_size_then_decompress(void) {
 int test_stream_footer_looks_like_sek(void) {
     printf("=== TEST: Stream - a footer that parses as a SEK header ===\n");
     uint64_t n = 0;
-    for (uint64_t k = ZXC_BLOCK_SEK; k < (1u << 24) && !n; k += 256) {
+    for (uint64_t k = ZXC_BLOCK_SEK; k < (1U << 24) && !n; k += 256) {
         uint8_t b[8];
         zxc_store_le64(b, k);
         zxc_block_header_t bh;

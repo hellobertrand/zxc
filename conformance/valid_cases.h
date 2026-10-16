@@ -23,8 +23,8 @@
 
 #include "../include/zxc_opts.h"
 
-#define VC_KB(n) ((size_t)(n) * 1024u)
-#define VC_MB(n) ((size_t)(n) * 1024u * 1024u)
+#define VC_KB(n) ((size_t)(n) * 1024U)
+#define VC_MB(n) ((size_t)(n) * 1024U * 1024U)
 
 typedef struct {
     const char* name; /* <name>.expected -> <name>.zxc */

@@ -490,7 +490,7 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
                         "FAIL: %s  does not match its recipe (level %d, block %zu KB%s%s):\n"
                         "        committed %zu bytes, recipe produces %lld\n"
                         "        regenerate with zxc_valid_gen, or fix valid_cases.h\n",
-                        vc->name, vc->opts.level, vc->opts.block_size / 1024u,
+                        vc->name, vc->opts.level, vc->opts.block_size / 1024U,
                         vc->opts.checksum_enabled ? ", checksum" : "",
                         vc->opts.seekable ? ", seekable" : "", ref_size, (long long)csize);
             } else {

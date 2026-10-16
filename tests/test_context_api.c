@@ -374,7 +374,7 @@ int test_context_api_seekable_compress(void) {
     }
     uint32_t x = 12345;
     for (size_t i = 0; i < n; i++) {
-        x = x * 1103515245u + 12345u;
+        x = x * 1103515245U + 12345U;
         src[i] = (uint8_t)((i % 97 < 60) ? 'a' + (i % 13) : (x >> 24));
     }
     for (size_t i = 0; i < sizeof(dict); i++) dict[i] = (uint8_t)('a' + (i % 13));

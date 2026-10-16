@@ -450,7 +450,7 @@ int test_container_seekable(void) {
                                         "little ", "queen ", "very ", "she ",    "a ",    "\n"};
     uint8_t* const text = malloc(80000);
     for (size_t i = 0, x = 12345; text && i < 80000;) {
-        x = x * 1103515245u + 12345u;
+        x = x * 1103515245U + 12345U;
         const char* w = words[(x >> 16) % 12];
         while (*w && i < 80000) text[i++] = (uint8_t)*w++;
     }

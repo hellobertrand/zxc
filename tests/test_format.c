@@ -868,9 +868,9 @@ int test_swapped_blocks_oneshot(void) {
     if (!src) return 0;
     /* Each block distinct, and incompressible so every block is RAW and its
      * physical size is predictable. */
-    uint32_t rng = 0x51ED270Bu;
+    uint32_t rng = 0x51ED270BU;
     for (size_t i = 0; i < in_sz; i++) {
-        rng = rng * 1103515245u + 12345u;
+        rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
 
@@ -1011,7 +1011,7 @@ int test_tail_between_eof_and_footer(void) {
         free(out);
         return 0;
     }
-    for (size_t i = 0; i < n; i++) src[i] = (uint8_t)(i * 7u);
+    for (size_t i = 0; i < n; i++) src[i] = (uint8_t)(i * 7U);
 
     int ok = 1;
     const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
@@ -1220,9 +1220,9 @@ int test_footer_digest(void) {
     enum { N = 40 * 1024 };
     uint8_t* src = malloc(N);
     if (!src) return 0;
-    uint32_t rng = 0x2545F491u;
+    uint32_t rng = 0x2545F491U;
     for (size_t i = 0; i < N; i++) {
-        rng = rng * 1103515245u + 12345u;
+        rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
     const size_t cap = (size_t)zxc_compress_bound(N);
@@ -1345,9 +1345,9 @@ static uint8_t* forge_build(size_t plain_sz, int compressible, size_t block_sz, 
                             uint8_t** out_plain, size_t* out_sz) {
     uint8_t* plain = (uint8_t*)malloc(plain_sz);
     if (!plain) return NULL;
-    unsigned s = 99u;
+    unsigned s = 99U;
     for (size_t i = 0; i < plain_sz; i++) {
-        s = s * 1103515245u + 12345u;
+        s = s * 1103515245U + 12345U;
         plain[i] = compressible ? (uint8_t)('a' + (i % 26)) : (uint8_t)(s >> 24);
     }
     const uint64_t bound = zxc_compress_bound(plain_sz);
@@ -1459,7 +1459,7 @@ int test_forged_block_comp_size(void) {
 
         if (ok) { /* One byte over the bound. */
             memcpy(forged, arc, arc_sz);
-            ok = forge_comp_size(forged, arc_sz, (uint32_t)block_sz + 1u);
+            ok = forge_comp_size(forged, arc_sz, (uint32_t)block_sz + 1U);
             for (int via = 0; ok && via <= 1; via++) {
                 const int64_t r = forge_decode_via(forged, arc_sz, plain_sz, checksum, via);
                 if (r != ZXC_ERROR_BAD_BLOCK_SIZE) {
@@ -1534,21 +1534,21 @@ int test_header_checksum_single_bit(void) {
     printf("=== TEST: every header bit moves its checksum ===\n");
 
     const int rounds = 4000;
-    uint32_t seed = 0x5EED1234u;
+    uint32_t seed = 0x5EED1234U;
 
     // Block header: bytes 0-6 are covered, byte 7 holds the checksum.
     for (int r = 0; r < rounds; r++) {
         uint8_t h[ZXC_BLOCK_HEADER_SIZE];
         for (size_t i = 0; i < sizeof(h); i++) {
-            seed = seed * 1664525u + 1013904223u;
+            seed = seed * 1664525U + 1013904223U;
             h[i] = (uint8_t)(seed >> 24);
         }
         h[7] = 0;
         const uint8_t ref = zxc_hash8(h);
         for (int bit = 0; bit < 56; bit++) {
-            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            h[bit >> 3] ^= (uint8_t)(1U << (bit & 7));
             const uint8_t got = zxc_hash8(h);
-            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            h[bit >> 3] ^= (uint8_t)(1U << (bit & 7));
             if (got == ref) {
                 printf("  [FAIL] hash8: flipping byte %d bit %d leaves 0x%02X\n", bit >> 3, bit & 7,
                        ref);
@@ -1562,16 +1562,16 @@ int test_header_checksum_single_bit(void) {
     for (int r = 0; r < rounds; r++) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         for (size_t i = 0; i < sizeof(h); i++) {
-            seed = seed * 1664525u + 1013904223u;
+            seed = seed * 1664525U + 1013904223U;
             h[i] = (uint8_t)(seed >> 24);
         }
         h[14] = 0;
         h[15] = 0;
         const uint16_t ref = zxc_hash16(h);
         for (int bit = 0; bit < 112; bit++) {
-            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            h[bit >> 3] ^= (uint8_t)(1U << (bit & 7));
             const uint16_t got = zxc_hash16(h);
-            h[bit >> 3] ^= (uint8_t)(1u << (bit & 7));
+            h[bit >> 3] ^= (uint8_t)(1U << (bit & 7));
             if (got == ref) {
                 printf("  [FAIL] hash16: flipping byte %d bit %d leaves 0x%04X\n", bit >> 3,
                        bit & 7, ref);
@@ -1590,12 +1590,12 @@ int test_header_checksum_single_bit(void) {
         for (int k = 0; k < 48; k++) c[64 + k] = (1ULL << k) * ZXC_HASH_GOLDEN64;
         for (int a = 0; a < 112; a++) {
             for (int b = a; b < 112; b++) { /* b == a: weight 1 */
-                for (unsigned sg = 0; sg < 4u; sg++) {
+                for (unsigned sg = 0; sg < 4U; sg++) {
                     if (b == a && sg > 1) break;
-                    uint64_t d = (sg & 1u) ? 0 - c[a] : c[a];
-                    if (b != a) d += (sg & 2u) ? 0 - c[b] : c[b];
+                    uint64_t d = (sg & 1U) ? 0 - c[a] : c[a];
+                    if (b != a) d += (sg & 2U) ? 0 - c[b] : c[b];
                     const unsigned top = (unsigned)(d >> 48);
-                    if (top == 0 || top == 0xFFFFu) {
+                    if (top == 0 || top == 0xFFFFU) {
                         printf("  [FAIL] hash16: bits %d,%d can cancel in the top halfword\n", a,
                                b);
                         return 0;
@@ -1610,24 +1610,24 @@ int test_header_checksum_single_bit(void) {
     for (int r = 0; r < 8; r++) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         for (size_t i = 0; i < sizeof(h); i++) {
-            seed = seed * 1664525u + 1013904223u;
+            seed = seed * 1664525U + 1013904223U;
             h[i] = (uint8_t)(seed >> 24);
         }
         h[14] = 0;
         h[15] = 0;
         const uint16_t ref = zxc_hash16(h);
         for (int a = 0; a < 112; a++) {
-            h[a >> 3] ^= (uint8_t)(1u << (a & 7));
+            h[a >> 3] ^= (uint8_t)(1U << (a & 7));
             for (int b = a + 1; b < 112; b++) {
-                h[b >> 3] ^= (uint8_t)(1u << (b & 7));
+                h[b >> 3] ^= (uint8_t)(1U << (b & 7));
                 const int same = zxc_hash16(h) == ref;
-                h[b >> 3] ^= (uint8_t)(1u << (b & 7));
+                h[b >> 3] ^= (uint8_t)(1U << (b & 7));
                 if (same) {
                     printf("  [FAIL] hash16: bits %d,%d flipped, checksum unchanged\n", a, b);
                     return 0;
                 }
             }
-            h[a >> 3] ^= (uint8_t)(1u << (a & 7));
+            h[a >> 3] ^= (uint8_t)(1U << (a & 7));
         }
     }
     printf("  [PASS] hash16: weight 2 exhaustive on 8 headers\n");
@@ -1660,9 +1660,9 @@ int test_rle_section_trailing_bytes(void) {
         printf("  [FAIL] allocation\n");
         goto done;
     }
-    uint32_t seed = 0xC0FFEEu;
+    uint32_t seed = 0xC0FFEEU;
     for (size_t i = 0; i < n; i += 4) {
-        seed = seed * 1664525u + 1013904223u;
+        seed = seed * 1664525U + 1013904223U;
         memset(src + i, (int)(seed >> 24), 4);
     }
 

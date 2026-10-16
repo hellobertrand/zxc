@@ -2117,9 +2117,9 @@ int test_dict_id_collision_caught_by_checksum(void) {
     static uint8_t a[DSZ], b[DSZ], src[SRC], arc[SRC * 2], out[SRC * 2];
     for (int k = 0; k < 2; k++) {
         uint8_t* d = k ? b : a;
-        uint32_t s = (k ? 73013u : 58488u) * 2654435761u + 1u;
+        uint32_t s = (k ? 73013U : 58488U) * 2654435761U + 1U;
         for (int i = 0; i < DSZ; i++) {
-            s = s * 1103515245u + 12345u;
+            s = s * 1103515245U + 12345U;
             d[i] = (uint8_t)(s >> 16);
         }
     }
@@ -2177,9 +2177,9 @@ int test_dict_checksum_cross_paths(void) {
     printf("=== TEST: Dictionary - block checksums agree across paths ===\n");
     enum { DSZ = 2048, BS = 4096, N = 4 * BS };
     static uint8_t dict[DSZ], src[N], arc[2 * N], out[N];
-    uint32_t s = 0x1234567u;
+    uint32_t s = 0x1234567U;
     for (int i = 0; i < DSZ; i++) {
-        s = s * 1103515245u + 12345u;
+        s = s * 1103515245U + 12345U;
         dict[i] = (uint8_t)(s >> 16);
     }
     /* Built from slices of the dictionary, so the encoder emits matches into it. */
