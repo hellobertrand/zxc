@@ -189,12 +189,17 @@ BMI, SSSE3 or SSE4.2; the ARM64 one no LSE atomics, CRC32, dot product,
 crypto, PAC or BTI. At `/O2` MSVC's auto-vectorizer emits a few SSE4.1
 instructions behind a runtime test of `__isa_available`, which an image
 without the C runtime pins to zero through the compiler's `/alternatename`,
-so that path never runs. CI checks every image for `ymm` and `zmm`
-registers, so an AVX instruction fails the build.
+so that path never runs. CI rejects any image whose disassembly names a
+`ymm` or `zmm` register or, on x64, a VEX or EVEX instruction (every AVX
+mnemonic starts with `v`, `vzeroupper` and 128-bit forms included), so an AVX
+instruction fails the build.
 
 ## Loading the self-test
 
-On a test machine or VM, as administrator:
+On a test machine or VM, as administrator. Test signing is refused while
+Secure Boot is on: turn it off in the firmware first (on a Hyper-V VM, in the
+VM's security settings), suspending BitLocker beforehand if it protects the
+system drive.
 
 ```
 bcdedit /set testsigning on          (then reboot)
