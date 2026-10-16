@@ -250,8 +250,9 @@ int64_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, &d_
 
 The same options structs drive the other entry points: `zxc_stream_compress()` /
 `zxc_stream_decompress()` for multi-threaded file streaming, reusable `zxc_cctx` / `zxc_dctx`
-contexts for tight loops where per-call `malloc`/`free` overhead matters (settings are **sticky**,
-so passing `NULL` reuses those given at creation), and `.seekable = 1` to append a seek table for
+contexts for tight loops where per-call `malloc`/`free` overhead matters (settings are **sticky**:
+passing `NULL` reuses the last successful call's, starting from those given at creation), and
+`.seekable = 1` to append a seek table for
 O(1) random-access decompression.
 
 **[👉 See complete examples and advanced usage](docs/EXAMPLES.md)** — stream API, reusable contexts,

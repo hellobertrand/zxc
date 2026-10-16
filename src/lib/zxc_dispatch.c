@@ -1117,9 +1117,10 @@ struct zxc_cctx_s {
                                               1 = caller-supplied static workspace (no-op free,
                                               block_size pinned at init) */
     size_t last_block_size;                /* block size used for last init */
-    zxc_cctx_opts_t base;                  /* creation options; zero fields fall back to it */
+    size_t base_block_size;                /* creation block_size, used for a zero one */
     zxc_cctx_opts_t sticky;                /* last successful call; NULL opts reuses it */
     int huf_cached;                        /* inner carries the table below */
+    int base_level;                        /* creation level, used for a zero one */
     uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
 };
 
@@ -1158,10 +1159,10 @@ static zxc_cctx_opts_t zxc_cctx_base(const zxc_compress_opts_t* opts) {
 /** @brief NULL reuses the sticky options; a zero field means the creation value. */
 static zxc_cctx_opts_t zxc_cctx_resolve(const zxc_cctx* cctx, const zxc_compress_opts_t* opts) {
     if (!opts) return cctx->sticky;
-    return (zxc_cctx_opts_t){.level = ZXC_OPTS_LEVEL(opts, cctx->base.level),
+    return (zxc_cctx_opts_t){.level = ZXC_OPTS_LEVEL(opts, cctx->base_level),
                              .checksum = opts->checksum_enabled,
                              .seekable = opts->seekable,
-                             .block_size = ZXC_OPTS_BLOCK_SIZE(opts, cctx->base.block_size)};
+                             .block_size = ZXC_OPTS_BLOCK_SIZE(opts, cctx->base_block_size)};
 }
 
 zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
@@ -1169,7 +1170,8 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
     if (UNLIKELY(!cctx)) return NULL;  // LCOV_EXCL_LINE
 
     const zxc_cctx_opts_t o = zxc_cctx_base(opts);
-    cctx->base = o;
+    cctx->base_level = o.level;
+    cctx->base_block_size = o.block_size;
     cctx->sticky = o;
 
     if (opts) {
@@ -1713,10 +1715,10 @@ static int64_t zxc_compress_block_resolved(zxc_cctx* cctx, const void* RESTRICT 
     if (UNLIKELY(cctx->owns_workspace && o.level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch))
         return ZXC_ERROR_BAD_LEVEL;
 
-    // Re-init when block_size changed, a level raise needs the optimal-parser
-    // scratch, or a dictionary arrives on a context carved without its prefix
-    // (a block_size switch can round [dict | block] back to the same size).
-    if (UNLIKELY(!cctx->initialized || cctx->last_block_size != effective_block_size ||
+    // Re-init when [dict | block] outgrows the workspace (a larger one encodes
+    // the same, so a smaller block keeps it), a level raise needs the
+    // optimal-parser scratch, or a dictionary meets a context carved without it.
+    if (UNLIKELY(!cctx->initialized || cctx->last_block_size < effective_block_size ||
                  (o.level >= ZXC_LEVEL_DENSITY && !cctx->inner.opt_scratch) ||
                  (b_dict_size > 0 && !cctx->inner.dict_buffer))) {
         if (cctx->initialized) {
@@ -1783,13 +1785,14 @@ int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, const si
     zxc_cctx_opts_t o = zxc_cctx_resolve(cctx, opts);
     // No seek table in a block: seekable stays as the frame API set it.
     o.seekable = cctx->sticky.seekable;
-    // Grown to hold the source, then checked: nothing invalid gets remembered.
-    const size_t min_bs = zxc_block_size_ceil(src_size);
-    if (o.block_size < min_bs) o.block_size = min_bs;
     if (UNLIKELY(!zxc_validate_block_size(o.block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
+    // Carve for the source if block_size is smaller; remember block_size as asked.
+    zxc_cctx_opts_t carve = o;
+    const size_t min_bs = zxc_block_size_ceil(src_size);
+    if (carve.block_size < min_bs) carve.block_size = min_bs;
 
-    const int64_t n =
-        zxc_compress_block_resolved(cctx, src, src_size, dst, dst_capacity, o, opts, block_index);
+    const int64_t n = zxc_compress_block_resolved(cctx, src, src_size, dst, dst_capacity, carve,
+                                                  opts, block_index);
     if (LIKELY(n > 0)) cctx->sticky = o;
     return n;
 }
@@ -2021,13 +2024,9 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     // Not clamped: the workspace is sized for the level as given.
     if (UNLIKELY(opts->level > ZXC_LEVEL_ULTRA)) return NULL;
     const zxc_cctx_opts_t o = zxc_cctx_base(opts);
-    const int level = o.level;
-    const size_t block_size = o.block_size;
-    const int checksum_enabled = o.checksum;
+    if (UNLIKELY(!zxc_validate_block_size(o.block_size))) return NULL;
 
-    if (UNLIKELY(!zxc_validate_block_size(block_size))) return NULL;
-
-    const size_t inner_sz = zxc_cctx_compute_workspace_size(block_size, 1, level, 0);
+    const size_t inner_sz = zxc_cctx_compute_workspace_size(o.block_size, 1, o.level, 0);
     if (UNLIKELY(inner_sz == 0)) return NULL;
     if (UNLIKELY(workspace_size < ZXC_STATIC_CCTX_HDR_SIZE + inner_sz)) return NULL;
 
@@ -2035,14 +2034,15 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     ZXC_MEMSET(cctx, 0, sizeof(*cctx));
 
     uint8_t* const inner_ws = (uint8_t*)workspace + ZXC_STATIC_CCTX_HDR_SIZE;
-    if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, block_size, 1, level,
-                                            checksum_enabled, 0, 0) != ZXC_OK))
+    if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, o.block_size, 1,
+                                            o.level, o.checksum, 0, 0) != ZXC_OK))
         return NULL;
 
     cctx->owns_workspace = 1;
     cctx->initialized = 1;
-    cctx->last_block_size = block_size;
-    cctx->base = o;
+    cctx->last_block_size = o.block_size;
+    cctx->base_level = o.level;
+    cctx->base_block_size = o.block_size;
     cctx->sticky = o;
     return cctx;
 }

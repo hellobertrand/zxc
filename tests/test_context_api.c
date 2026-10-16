@@ -272,32 +272,49 @@ done:
     return ok;
 }
 
-/* #532: zero fields mean the creation values, on both APIs; an invalid
- * block_size is never remembered. */
+/* Block size declared by archive @p arc (@p n bytes); 0 if unreadable. */
+static size_t frame_block_size(const uint8_t* arc, const int64_t n) {
+    zxc_frame_info_t info = {0};
+    if (n <= 0 || zxc_get_frame_info(arc, (size_t)n, &info, sizeof(info)) != ZXC_OK) return 0;
+    return info.block_size;
+}
+
+/* #532: zero fields mean the creation values even after a call with others;
+ * an invalid block_size is refused whatever the source; the block API
+ * remembers the block_size asked for, not the carve, and reuses a larger carve. */
 int test_cctx_zero_opts_creation_values(void) {
     printf("=== TEST: Opaque Context API - zero opts fields keep the creation values (#532) ===\n");
-    enum { BS = 4096, SRC = 3000 };
+    enum { BS = 4096, SRC = 3000, BIG = 600000 };
     const size_t cap = (size_t)zxc_compress_bound(SRC),
-                 bcap = (size_t)zxc_compress_block_bound(SRC);
+                 bcap = (size_t)zxc_compress_block_bound(BIG);
     uint8_t src[SRC];
+    uint8_t* const big = malloc(BIG);
     uint8_t* const arc = malloc(cap);
     uint8_t* const ref = malloc(cap);
     uint8_t* const blk = malloc(bcap);
     const zxc_compress_opts_t create = {.level = ZXC_LEVEL_FASTEST, .block_size = BS};
     zxc_cctx* const c = zxc_create_cctx(&create);
+    zxc_cctx* const fresh = zxc_create_cctx(NULL);
     int ok = 0;
-    if (!arc || !ref || !blk || !c) goto done;
+    if (!big || !arc || !ref || !blk || !c || !fresh) goto done;
     gen_lz_data(src, sizeof(src));
+    gen_lz_data(big, BIG);
 
-    /* Block call with level only: the next NULL frame still declares 4 KiB. */
+    /* Other values first, so creation and last call differ from here on. */
+    const zxc_compress_opts_t other = {.level = 3, .block_size = 65536};
+    int64_t n = zxc_compress_block(c, src, SRC, blk, bcap, &other);
+    if (n <= 0) {
+        printf("  [FAIL] setup call: %lld\n", (long long)n);
+        goto done;
+    }
+
+    /* Block call with level only: the next NULL frame declares 4 KiB, not 64. */
     const zxc_compress_opts_t lvl3 = {.level = 3};
-    zxc_frame_info_t info = {0};
-    int64_t n = zxc_compress_block(c, src, SRC, blk, bcap, &lvl3);
+    n = zxc_compress_block(c, src, SRC, blk, bcap, &lvl3);
     if (n > 0) n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
-    if (n <= 0 || zxc_get_frame_info(arc, (size_t)n, &info, sizeof(info)) != ZXC_OK ||
-        info.block_size != BS) {
+    if (frame_block_size(arc, n) != BS) {
         printf("  [FAIL] block call then NULL frame: %lld, declares %zu, want %d\n", (long long)n,
-               info.block_size, (int)BS);
+               frame_block_size(arc, n), (int)BS);
         goto done;
     }
 
@@ -312,21 +329,43 @@ int test_cctx_zero_opts_creation_values(void) {
         goto done;
     }
 
-    /* Invalid block_size refused; the sticky settings survive it. */
+    /* Invalid block_size refused whether the source fits it or not; sticky survives. */
     const zxc_compress_opts_t bad = {.block_size = 10000};
-    const int64_t e = zxc_compress_block(c, src, SRC, blk, bcap, &bad);
+    const int64_t e1 = zxc_compress_block(c, src, SRC, blk, bcap, &bad);
+    const int64_t e2 = zxc_compress_block(c, big, BIG, blk, bcap, &bad);
     n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
-    if (e != ZXC_ERROR_BAD_BLOCK_SIZE || n != r || memcmp(arc, ref, (size_t)n) != 0) {
-        printf("  [FAIL] invalid block_size: %lld, NULL call after it %lld\n", (long long)e,
-               (long long)n);
+    if (e1 != ZXC_ERROR_BAD_BLOCK_SIZE || e2 != ZXC_ERROR_BAD_BLOCK_SIZE || n != r ||
+        memcmp(arc, ref, (size_t)n) != 0) {
+        printf("  [FAIL] invalid block_size: %lld / %lld, NULL call after it %lld\n", (long long)e1,
+               (long long)e2, (long long)n);
+        goto done;
+    }
+
+    /* 600 KB block on NULL: carved at 1 MiB, remembered block_size still 4 KiB;
+     * a small block then encodes in that carve as on a fresh context. */
+    n = zxc_compress_block(c, big, BIG, blk, bcap, NULL);
+    if (n > 0) n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
+    if (frame_block_size(arc, n) != BS) {
+        printf("  [FAIL] 600 KB block then NULL frame: %lld, declares %zu, want %d\n", (long long)n,
+               frame_block_size(arc, n), (int)BS);
+        goto done;
+    }
+    uint8_t* const blk2 = ref; /* cap >= a 3000-byte block's bound */
+    n = zxc_compress_block(c, src, SRC, blk, bcap, &lvl3);
+    const int64_t f = zxc_compress_block(fresh, src, SRC, blk2, cap, &lvl3);
+    if (n <= 0 || n != f || memcmp(blk, blk2, (size_t)n) != 0) {
+        printf("  [FAIL] block in a 1 MiB carve: %lld, fresh context %lld\n", (long long)n,
+               (long long)f);
         goto done;
     }
     ok = 1;
-    printf("  [PASS] creation values kept; invalid block_size refused\n");
+    printf("  [PASS] creation values kept; invalid block_size refused; carve kept\n");
     printf("PASS\n\n");
 
 done:
     zxc_free_cctx(c);
+    zxc_free_cctx(fresh);
+    free(big);
     free(arc);
     free(ref);
     free(blk);

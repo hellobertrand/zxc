@@ -245,8 +245,16 @@ int test_static_ctx_block_size_locked(void) {
         return 0;
     }
 
-    /* Zero level and block_size mean the pinned ones (#532). */
+    /* Zero fields mean the pinned values, not the last call's (#532): level 3
+     * first, so the two differ. */
     uint8_t ref[1024];
+    const zxc_compress_opts_t lvl3 = {.level = 3, .block_size = pinned_bs};
+    if (zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), &lvl3) <= 0) {
+        printf("  [FAIL] level-3 call on the pinned context\n");
+        zxc_free_cctx(cctx);
+        test_aligned_free(ws);
+        return 0;
+    }
     const zxc_compress_opts_t zero = {0};
     const int64_t rc3 = zxc_compress_cctx(cctx, src, sizeof(src), dst, sizeof(dst), &zero);
     const int64_t rc4 = zxc_compress(src, sizeof(src), ref, sizeof(ref), &opts);

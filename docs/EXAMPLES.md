@@ -233,8 +233,8 @@ common case (same block size, different data) is completely allocation-free.
 Options are **sticky**: `zxc_compress_cctx()` remembers the options of its
 last successful call, starting from those given to `zxc_create_cctx()`, and
 reuses them when `opts` is `NULL`. In a non-NULL `opts`, a zero `level` or
-`block_size` means the creation value, so an override only needs the fields it
-changes.
+`block_size` means the creation value, so a level or block-size override needs
+only that field; `checksum_enabled` and `seekable` are taken as given (0 = off).
 
 ```c
 #include "zxc.h"

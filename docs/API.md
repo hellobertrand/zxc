@@ -669,7 +669,8 @@ use the frame API (`zxc_compress`) or streaming API (`zxc_cstream_*`), which
 chunk transparently into format-conformant blocks.
 
 **Returns**: compressed block size (> 0) on success, or negative `zxc_error_t`.
-Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `src_size > ZXC_BLOCK_SIZE_MAX`.
+Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `src_size > ZXC_BLOCK_SIZE_MAX`, or if
+`block_size` is not a power of two in range.
 
 ### `zxc_decompress_block`
 
@@ -804,7 +805,8 @@ ZXC_EXPORT int64_t zxc_compress_cctx(
 ```
 
 Same as `zxc_compress()` but reuses internal buffers from `cctx`.
-Automatically re-initializes when `block_size` or `level` changes. A zero
+The workspace is re-carved when the block size changes, or when a level raise
+into `ZXC_LEVEL_DENSITY` needs the optimal-parser scratch. A zero
 `src_size` writes the empty archive, as `zxc_compress()` does, without carving
 the workspace. Dictionary options are honoured as in `zxc_compress()` but are
 not sticky; the shared literal table is rebuilt only when it changes. A static
@@ -816,7 +818,7 @@ Options are **sticky**: `NULL` reuses the last successful call's `level`,
 `block_size`, `checksum_enabled` and `seekable` (the first three for
 `zxc_compress_block()`), starting from the creation options. A zero `level` or
 `block_size` in a non-NULL `opts` means the value the context was created
-with, never an earlier call's. A failed call changes nothing.
+with, never an earlier call's. A failed call leaves them untouched.
 
 ### `zxc_create_dctx`
 
