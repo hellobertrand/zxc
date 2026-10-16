@@ -14,11 +14,8 @@
  * freestanding in a WDK build, and ntoskrnl exports the memory primitives,
  * so unlike contrib/linux-kernel no header shim is needed.
  *
- * One allocation routine with two bodies, selected on the target version:
- * ExAllocatePool2 from Windows 10 2004, the kit's ExAllocatePoolUninitialized
- * wrapper below that (plan B), where POOL_NX_OPTIN and the driver's
- * ExInitializeDriverRuntime(DrvRtPoolNxOptIn) call make the pool
- * non-executable on Windows 8 and later.
+ * Windows 10 2004 is the floor: allocations go through ExAllocatePool2,
+ * whose non-paged pool is non-executable.
  */
 
 #ifndef ZXC_DEPS_H
@@ -32,26 +29,20 @@
 // The kernel toolset derives NTDDI_VERSION from TargetVersion; a hand-rolled
 // build passes it. sdkddkver.h cannot be included ahead of ntddk.h to supply a
 // default (it then defines DECLSPEC_DEPRECATED_DDK_WINXP before ntdef.h has
-// defined what it expands to, and wdm.h fails), so the two thresholds are
-// spelled out here and checked against the kit once ntddk.h is in.
+// defined what it expands to, and wdm.h fails), so the threshold is spelled
+// out here and checked against the kit once ntddk.h is in.
 #ifndef NTDDI_VERSION
-#error \
-    "contrib/windows-kernel: define NTDDI_VERSION (0x06010000 for Windows 7, 0x0A000008 for Windows 10 2004)"
+#error "contrib/windows-kernel: define NTDDI_VERSION (0x0A000008 for Windows 10 2004)"
 #endif
-#define ZXC_KM_NTDDI_WIN7 0x06010000
 #define ZXC_KM_NTDDI_WIN10_VB 0x0A000008
 
-#if NTDDI_VERSION < ZXC_KM_NTDDI_WIN7
-#error "contrib/windows-kernel: Windows 7 is the floor (NTDDI_VERSION is below NTDDI_WIN7)"
+#if NTDDI_VERSION < ZXC_KM_NTDDI_WIN10_VB
+#error \
+    "contrib/windows-kernel: Windows 10 2004 is the floor (NTDDI_VERSION is below NTDDI_WIN10_VB)"
 #endif
 
-// Plan B: below Windows 10 2004, NonPagedPool resolves to the kit's run-time
-// selected default pool type, which the driver's DriverEntry sets with
-// ExInitializeDriverRuntime(DrvRtPoolNxOptIn).
-#if NTDDI_VERSION < ZXC_KM_NTDDI_WIN10_VB
-#ifndef POOL_NX_OPTIN
-#define POOL_NX_OPTIN 1
-#endif
+#if !defined(_M_AMD64) && !defined(_M_ARM64)
+#error "contrib/windows-kernel: x64 and ARM64 only"
 #endif
 
 #include <limits.h>
@@ -61,23 +52,14 @@
 #include <stdint.h>
 #include <string.h>
 
-#if ZXC_KM_NTDDI_WIN7 != NTDDI_WIN7 || ZXC_KM_NTDDI_WIN10_VB != NTDDI_WIN10_VB
-#error \
-    "contrib/windows-kernel: the kit's NTDDI_WIN7 / NTDDI_WIN10_VB differ from the values spelled out above"
+#if ZXC_KM_NTDDI_WIN10_VB != NTDDI_WIN10_VB
+#error "contrib/windows-kernel: the kit's NTDDI_WIN10_VB differs from the value spelled out above"
 #endif
 
 // <assert.h> is the hosted spelling of the keyword; zxc_internal.h checks its
 // constants with the two-argument form.
 #ifndef static_assert
 #define static_assert(expr, msg) _Static_assert(expr, msg)
-#endif
-
-// The kit's force-included warning.h raises C4242 to level 3 by pragma, past
-// any /wd on the command line. On a 32-bit size_t the core's block-bounded
-// uint64 -> size_t narrowing at call sites trips it; the CMake build leaves
-// the same class unchecked on 32-bit hosts for the same reason.
-#if defined(_M_IX86)
-#pragma warning(disable : 4242)
 #endif
 
 /** @brief Pool tag; pool dumps display tags reversed, so this reads "zxc ". */
@@ -87,23 +69,10 @@
 // DISPATCH_LEVEL, and the lazy allocations of a heap context may happen there.
 // A zero size is rounded up to one byte: Driver Verifier flags zero-length
 // allocations.
-#if NTDDI_VERSION >= NTDDI_WIN10_VB
 static inline void* zxc_km_alloc(const size_t size, const int zero) {
     return ExAllocatePool2(POOL_FLAG_NON_PAGED | (zero ? 0 : POOL_FLAG_UNINITIALIZED),
                            size ? size : 1, ZXC_POOL_TAG);
 }
-#else
-// The kit's inline wrapper over ExAllocatePoolWithTag, which the kit otherwise
-// deprecates. Zeroing is done here rather than through ExAllocatePoolZero, so
-// correctness never depends on the driver's runtime-init call; only the NX
-// property of the pool does.
-static inline void* zxc_km_alloc(const size_t size, const int zero) {
-    const size_t n = size ? size : 1;
-    void* p = ExAllocatePoolUninitialized(NonPagedPool, n, ZXC_POOL_TAG);
-    if (p && zero) RtlZeroMemory(p, n);
-    return p;
-}
-#endif
 
 static inline void* zxc_km_calloc(const size_t nmemb, const size_t size) {
     size_t total;

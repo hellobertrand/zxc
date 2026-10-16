@@ -17,17 +17,9 @@
  */
 
 // The kernel toolset derives NTDDI_VERSION from TargetVersion; a hand-rolled
-// build passes it. sdkddkver.h cannot supply a default ahead of ntddk.h (see
-// zxc_deps.h), so the Windows 10 2004 threshold is spelled out here.
+// build passes it.
 #ifndef NTDDI_VERSION
 #error "zxc_selftest: define NTDDI_VERSION (the kernel toolset sets it from TargetVersion)"
-#endif
-
-// Plan B (below Windows 10 2004, NTDDI_WIN10_VB): opt into NX non-paged pool
-// at run time; the kernel honours it from Windows 8. The library's allocations
-// follow this setting too, through the kit's shared ExDefaultNonPagedPoolType.
-#if NTDDI_VERSION < 0x0A000008
-#define POOL_NX_OPTIN 1
 #endif
 
 #include <ntddk.h>
@@ -35,27 +27,20 @@
 
 #include "zxc.h"
 
-#define ZXC_SELFTEST_TAG ((ULONG)'tsxz')
-
-// The dense level. Compressing at levels 6 and 7 peaks past 12 KiB of stack,
-// which is the whole x86 kernel stack; levels 1 to 5 stay under 6 KiB.
-#if defined(_M_IX86)
-#define ZXC_SELFTEST_DENSE 5
-#else
-#define ZXC_SELFTEST_DENSE 7
+#ifndef static_assert
+#define static_assert(expr, msg) _Static_assert(expr, msg)
 #endif
-_Static_assert(ZXC_SELFTEST_DENSE <= 5 || sizeof(void*) == 8,
-               "levels 6 and 7 do not fit the 12 KB x86 kernel stack");
+
+static_assert(NTDDI_VERSION >= NTDDI_WIN10_VB, "ExAllocatePool2 needs Windows 10 2004");
+
+#define ZXC_SELFTEST_TAG ((ULONG)'tsxz')
+#define ZXC_SELFTEST_DENSE 7
 
 DRIVER_INITIALIZE DriverEntry;
 DRIVER_UNLOAD zxc_selftest_unload;
 
 static void* st_alloc(const size_t n) {
-#if NTDDI_VERSION >= NTDDI_WIN10_VB
     return ExAllocatePool2(POOL_FLAG_NON_PAGED | POOL_FLAG_UNINITIALIZED, n, ZXC_SELFTEST_TAG);
-#else
-    return ExAllocatePoolUninitialized(NonPagedPool, n, ZXC_SELFTEST_TAG);
-#endif
 }
 
 static void st_free(void* p) {
@@ -78,9 +63,6 @@ _Use_decl_annotations_ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
     int i;
 
     UNREFERENCED_PARAMETER(RegistryPath);
-#if POOL_NX_OPTIN
-    ExInitializeDriverRuntime(DrvRtPoolNxOptIn);  // before the first allocation
-#endif
     DriverObject->DriverUnload = zxc_selftest_unload;
 
     cap = (size_t)zxc_compress_bound(sizeof(msg));

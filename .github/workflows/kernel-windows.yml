@@ -8,10 +8,7 @@ name: Windows Kernel Library
 # The runner image carries Visual Studio 2026 with the WDK's Visual Studio
 # extension (the kernel-mode toolset) but not a kit (km headers and
 # libraries), so the job installs the 28000 SDK and WDK, the Visual Studio
-# 2026 line, with Microsoft's installers first. Plan B (the Windows 7 target
-# and x86) is not built here: it needs the 22000 kit, whose MSBuild task
-# assemblies exist for Visual Studio 2019 only. It is built locally against
-# the 22000 EWDK (see the README).
+# 2026 line, with Microsoft's installers first.
 
 on:
   workflow_dispatch:
@@ -23,14 +20,14 @@ on:
       - 'contrib/windows-kernel/**'
       - 'include/**'
       - 'src/lib/**'
-      - '.github/workflows/windows-kernel.yml'
+      - '.github/workflows/kernel-windows.yml'
   pull_request:
     branches: [ main, candidate ]
     paths:
       - 'contrib/windows-kernel/**'
       - 'include/**'
       - 'src/lib/**'
-      - '.github/workflows/windows-kernel.yml'
+      - '.github/workflows/kernel-windows.yml'
 
 permissions:
   contents: read
@@ -55,15 +52,29 @@ jobs:
 
       # SDK and WDK 10.0.28000.2526, the Visual Studio 2026 line: its MSBuild
       # task assemblies are the 18.0 ones that instance loads. Skipped when the
-      # kit is already there.
+      # kit is already there. The installers are pinned to their versioned
+      # download URLs (what the fwlinks go.microsoft.com/fwlink/?linkid=2372508
+      # and ?LinkId=2371554 resolved to) and checked against their SHA-256 and
+      # Microsoft's Authenticode signature before they run; the bootstrappers
+      # verify the signed payloads they fetch.
       - name: Install the 28000 SDK and WDK
         shell: pwsh
         run: |
           $km = "${env:ProgramFiles(x86)}\Windows Kits\10\Include\10.0.28000.0\km\ntddk.h"
           if (Test-Path $km) { "kit 28000 already present: $km"; exit 0 }
-          foreach ($kit in @(@("winsdksetup.exe", "https://go.microsoft.com/fwlink/?linkid=2372508"), @("wdksetup.exe", "https://go.microsoft.com/fwlink/?LinkId=2371554"))) {
+          $kits = @(
+            @("winsdksetup.exe", "https://download.microsoft.com/download/06fc99ac-527e-451e-a536-8866695a2e7e/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe", "02988EA51EAB2A2DB53E19735E51C97A6D221ADA74B9174FA0868870B9403BA0"),
+            @("wdksetup.exe", "https://download.microsoft.com/download/eb29e759-d7ad-4541-b60c-e9774ad8c593/KIT_BUNDLE_WDK_MEDIACREATION/wdksetup.exe", "C80040A9DBA50460CAE149580A41C05B32742FB0463683945905F55949CAEF78")
+          )
+          foreach ($kit in $kits) {
             $exe = "$env:RUNNER_TEMP\$($kit[0])"
             Invoke-WebRequest -Uri $kit[1] -OutFile $exe
+            $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash
+            if ($sha -ne $kit[2]) { Write-Host "::error::$($kit[0]) SHA-256 is $sha, expected $($kit[2])"; exit 1 }
+            $sig = Get-AuthenticodeSignature $exe
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '\bO=Microsoft Corporation\b') {
+              Write-Host "::error::$($kit[0]) signature is $($sig.Status), signer '$($sig.SignerCertificate.Subject)'"; exit 1
+            }
             $p = Start-Process -FilePath $exe -ArgumentList "/features", "+", "/quiet", "/norestart" -Wait -PassThru
             if ($p.ExitCode) { Write-Host "::error::$($kit[0]) exited $($p.ExitCode)"; exit 1 }
           }

@@ -18,8 +18,6 @@
     the kit's wdm.h ARM64 macros fail the conforming preprocessor (C5103).
   - ZXC_ONLY_DEFAULT, not ZXC_DISABLE_SIMD: baseline SSE2 (x64) and NEON
     (ARM64) are legal in kernel mode; the CPUID probes compile out.
-  - Win32: /arch:IA32. x86 kernel mode does not preserve XMM state for
-    drivers, and /kernel alone leaves the 32-bit compiler on SSE2.
   - /Z7 so the library carries its own debug info, /Zl so no default-library
     directive leaks into the objects, /O2 because this is a codec.
   - /kernel, spelled out: the toolset passes it to Driver configurations
@@ -50,17 +48,4 @@
       <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
     </ClCompile>
   </ItemDefinitionGroup>
-
-  <ItemDefinitionGroup Condition="'$(Platform)' == 'Win32'">
-    <ClCompile>
-      <EnableEnhancedInstructionSet>NoExtensions</EnableEnhancedInstructionSet>
-    </ClCompile>
-  </ItemDefinitionGroup>
-
-  <!-- Plan B needs the 22000 kit's kernel headers; say so instead of failing on
-       a missing include. -->
-  <Target Name="ZxcCheckKit" BeforeTargets="ClCompile" Condition="'$(ZxcPlanB)' == 'true'">
-    <Error Condition="!Exists('$(KM_IncludePath)\ntddk.h')"
-           Text="zxc_km plan B (TargetVersion=Windows7 or Platform=Win32) needs the 22000 kit: '$(KM_IncludePath)\ntddk.h' not found. Install WDK 10.0.22000 with its SDK, or build from the 22000 EWDK." />
-  </Target>
 </Project>

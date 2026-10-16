@@ -14,12 +14,10 @@
     <ProjectConfiguration Include="Release|x64"><Configuration>Release</Configuration><Platform>x64</Platform></ProjectConfiguration>
     <ProjectConfiguration Include="Debug|ARM64"><Configuration>Debug</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
     <ProjectConfiguration Include="Release|ARM64"><Configuration>Release</Configuration><Platform>ARM64</Platform></ProjectConfiguration>
-    <ProjectConfiguration Include="Debug|Win32"><Configuration>Debug</Configuration><Platform>Win32</Platform></ProjectConfiguration>
-    <ProjectConfiguration Include="Release|Win32"><Configuration>Release</Configuration><Platform>Win32</Platform></ProjectConfiguration>
   </ItemGroup>
 
   <PropertyGroup Label="Globals">
-    <ProjectGuid>{A1B2C3D4-E5F6-4A7B-8C9D-0E1F2A3B4C5D}</ProjectGuid>
+    <ProjectGuid>{28CF329D-7D3D-4D49-95FE-FFD365FB0143}</ProjectGuid>
     <RootNamespace>zxc_selftest</RootNamespace>
     <DriverType>WDM</DriverType>
     <Configuration Condition="'$(Configuration)' == ''">Release</Configuration>
@@ -62,10 +60,10 @@
 
   <!-- A project property does not cross a ProjectReference: the library would
        build for its own default target. Forward TargetVersion so the archive
-       matches the driver (plan B), as a consumer must. -->
+       matches the driver, as a consumer must. -->
   <ItemGroup>
     <ProjectReference Include="zxc_km.vcxproj">
-      <Project>{6E3C7B1A-2D4F-4C8E-9A0B-5F1D2E3C4B5A}</Project>
+      <Project>{B3A184D6-C740-4C29-B8A5-FF8D49A6217F}</Project>
       <AdditionalProperties Condition="'$(TargetVersion)' != ''">TargetVersion=$(TargetVersion)</AdditionalProperties>
     </ProjectReference>
   </ItemGroup>

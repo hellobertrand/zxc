@@ -10,7 +10,7 @@ a mismatch.
 
 ```
 zxc_deps.h            the kernel replacement for src/lib/zxc_deps.h
-zxc_km_target.props   target version and kit, read before the toolset's own sheets
+zxc_km_target.props   target version, read before the toolset's own sheets
 zxc_km.props          include order, flags, defines; both projects import it
 zxc_km.vcxproj        the library: stages the sources, builds zxc_km.lib
 zxc_selftest.vcxproj  the reference consumer: a WDM driver linking the library
@@ -40,17 +40,17 @@ msbuild contrib\windows-kernel\zxc_selftest.vcxproj /p:Configuration=Release /p:
 ```
 
 builds `zxc_km.lib` and then `zxc_selftest.sys` into
-`contrib\windows-kernel\build\x64\Release\`. Platforms: `x64`, `ARM64`, and
-`Win32` for plan B. Configurations: `Debug`, `Release`. Build only the library
-with `zxc_km.vcxproj`. The library carries its own debug information (`/Z7`),
+`contrib\windows-kernel\build\x64\Release\`. Platforms: `x64`, `ARM64`.
+Configurations: `Debug`, `Release`. Build only the library with
+`zxc_km.vcxproj`. The library carries its own debug information (`/Z7`),
 so there is no companion PDB to ship, and its objects are plain COFF, not
 whole-program-optimized, so any kernel-toolset compiler links them.
 
-The default target is Windows 10 2004 (`_NT_TARGET_VERSION` `0xA000008`), the
-first Windows with `ExAllocatePool2`. The build uses whichever kit the
-environment offers; the 26100 kit is what CI uses. Add `/p:TargetVersion=Windows7`
-for plan B, below. `build\<platform>\Release` holds whatever target was built
-last.
+The target is Windows 10 2004 (`_NT_TARGET_VERSION` `0xA000008`), the first
+Windows with `ExAllocatePool2`, and the floor: `zxc_deps.h` refuses an older
+`NTDDI_VERSION`. Windows 7 and 32-bit x86 are not supported; both are out of
+Microsoft support and CI cannot build them. The build uses whichever kit the
+environment offers; the 28000 kit is what CI uses.
 
 ## Consuming the library
 
@@ -61,7 +61,7 @@ matter, and `zxc_selftest.vcxproj` is the worked example:
 ```xml
 <ItemGroup>
   <ProjectReference Include="path\to\contrib\windows-kernel\zxc_km.vcxproj">
-    <Project>{6E3C7B1A-2D4F-4C8E-9A0B-5F1D2E3C4B5A}</Project>
+    <Project>{B3A184D6-C740-4C29-B8A5-FF8D49A6217F}</Project>
     <AdditionalProperties Condition="'$(TargetVersion)' != ''">TargetVersion=$(TargetVersion)</AdditionalProperties>
   </ProjectReference>
 </ItemGroup>
@@ -76,17 +76,14 @@ matter, and `zxc_selftest.vcxproj` is the worked example:
 The include order is the rule that matters (see below). The
 `AdditionalProperties` line is the other one: a `TargetVersion` set in the
 driver's project file does not cross a project reference, so without it the
-library builds for its own default, Windows 10 2004, and a plan B driver
-loads on Windows 7 with a missing `ExAllocatePool2` import. A
-`/p:TargetVersion=Windows7` on the command line is global and reaches the
+library builds for its own default, Windows 10 2004, whatever the driver
+targets. A `TargetVersion` on the command line is global and reaches the
 library either way. The official toolset supplies every other link input; a
-hand-rolled link also needs
-`ntoskrnl.lib`, the `/GS` support library (`BufferOverflowK.lib` for a target
-below Windows 8, `BufferOverflowFastFailK.lib` otherwise), `arm64rt.lib` on
-ARM64, and `memcmp.lib` on x86. The library's externals are `memcpy`,
-`memset`, `memcmp`, the two pool routines, `__chkstk`, and the `/GS` and
-CFG support symbols; a linked image imports `ntoskrnl.exe` only, which
-`check-image.ps1` asserts.
+hand-rolled link also needs `ntoskrnl.lib`, the `/GS` support library
+(`BufferOverflowFastFailK.lib`), and `arm64rt.lib` on ARM64. The library's
+externals are `memcpy`, `memset`, `memcmp`, the two pool routines,
+`__chkstk`, and the `/GS` and CFG support symbols; a linked image imports
+`ntoskrnl.exe` only, which `check-image.ps1` asserts.
 
 Vendoring instead: add the seven units named in `zxc_km.vcxproj` to the
 driver project, import `zxc_km.props` after `Microsoft.Cpp.props`, and keep
@@ -113,64 +110,15 @@ property, so it travels through `AdditionalOptions`, together with
 `/Zc:preprocessor-`, because the kit's `wdm.h` ARM64 macros fail the
 conforming preprocessor.
 
-## Plan B: Windows 7 and 32-bit x86
-
-Windows 7 is the floor, as an opt-in build:
-
-```
-msbuild contrib\windows-kernel\zxc_selftest.vcxproj /p:Configuration=Release /p:Platform=x64 /p:TargetVersion=Windows7
-msbuild contrib\windows-kernel\zxc_selftest.vcxproj /p:Configuration=Release /p:Platform=Win32 /p:TargetVersion=Windows7
-```
-
-One library built this way runs on every Windows from 7 up. The target
-version must reach `zxc_km.vcxproj`: on the command line as above, or
-forwarded through the project reference as shown under "Consuming the
-library"; a value in the consumer's project file alone does not. What
-changes:
-
-- **The kit.** Kits newer than 22000 refuse both a Windows 7 target and the
-  Win32 platform in their MSBuild targets, though their compilers still
-  build the code. Plan B therefore builds with the 22000 kit
-  (`WindowsTargetPlatformVersion` `10.0.22000.0`, set by
-  `zxc_km_target.props`), whose compiler is MSVC 14.28 from Visual Studio
-  2019 16.9, the first toolset with `/std:c17`. The 22000 EWDK is
-  self-contained; or install WDK 10.0.22000 with its SDK next to a newer
-  kit. On a machine with only a newer kit the build stops at evaluation
-  with that toolset's own message, on 26100 `Unknown or unsupported property
-  value '1.9' for KmdfVersion for target OS 'Windows7'`; with the 22000 kit
-  present but its kernel headers missing, `zxc_km.props` names the missing
-  `ntddk.h`. Neither produces a binary.
-- **The allocator.** Below Windows 10 2004 the dependency header allocates
-  through the kit's `ExAllocatePoolUninitialized` wrapper on non-paged pool
-  and zeroes explicitly. The raw `ExAllocatePoolWithTag` is deprecated under
-  warnings-as-errors in newer kits even for a Windows 7 target, which is why
-  the wrapper is not optional.
-- **The opt-in call.** Define `POOL_NX_OPTIN` to 1 before including
-  `<ntddk.h>` in the driver and call `ExInitializeDriverRuntime(DrvRtPoolNxOptIn)`
-  at the top of `DriverEntry`, before any allocation; `selftest.c` shows it.
-  The library's pool is then non-executable on Windows 8 and later. Without
-  the call the library still works, but its non-paged allocations are
-  executable there, which Driver Verifier and certification tests report.
-- **x86** is scalar: `zxc_km.props` sets `/arch:IA32` on Win32, because
-  x86 kernel mode does not preserve XMM state for drivers and `/kernel`
-  alone leaves the 32-bit compiler on SSE2 code generation. The toolset
-  compiles x86 with `/Gz`, so the library's functions are stdcall; any
-  kernel-toolset project matches. The 12 KB x86 kernel stack leaves room for
-  decoding and for compression at levels 1 to 5 only, so the self-test's
-  dense level is 5 there.
-- ARM64 has no Windows 7 edition; plan B is x64 and Win32 only. Asking for
-  it stops with the toolset's `The specified architecture 'ARM64' is not
-  supported by the target OS 'Windows7'`.
-
 ## The dependency header
 
 `zxc_deps.h` here replaces `src/lib/zxc_deps.h` (the `ZxcStage` target
 copies it over). What it maps, and why:
 
 - `ZXC_MALLOC` / `ZXC_CALLOC` / `ZXC_FREE`: `ExAllocatePool2` on non-paged
-  pool with the tag `zxc `, or the plan B wrapper below Windows 10 2004.
-  Non-paged, because a context built at PASSIVE_LEVEL must stay usable at
-  DISPATCH_LEVEL and a heap context's lazy allocations may happen there. A
+  pool with the tag `zxc `. Non-paged, because a context built at
+  PASSIVE_LEVEL must stay usable at DISPATCH_LEVEL and a heap context's lazy
+  allocations may happen there. A
   zero size is rounded up to one byte, which Driver Verifier would otherwise
   flag; free of NULL is a no-op, which the kernel routine is not.
 - No `ZXC_REALLOC`: pool has none, and these units never reallocate; a
@@ -183,11 +131,9 @@ copies it over). What it maps, and why:
 - `static_assert`: the keyword, since `<assert.h>` is not included.
 - `NTDDI_VERSION` must be defined; the toolset derives it from
   `TargetVersion`. The header cannot default it through `sdkddkver.h`, which
-  breaks `wdm.h` when included ahead of `ntddk.h`, so it spells the two
-  thresholds out and checks them against the kit afterwards.
-- On x86, C4242 disabled by pragma: the kit's force-included `warning.h`
-  raises it past any command-line `/wd`, and the core's block-bounded
-  `uint64_t` narrowing at call sites trips it on a 32-bit `size_t`.
+  breaks `wdm.h` when included ahead of `ntddk.h`, so it spells the Windows
+  10 2004 threshold out, refuses anything older, and checks the value against
+  the kit afterwards. It also refuses any machine but x64 and ARM64.
 
 ## Contexts and IRQL
 
@@ -222,16 +168,16 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
 
 ## Stack
 
-Kernel stacks are 12 KB on x86 and 24 KB on x64 and ARM64, shared with
+Kernel stacks are 24 KB on x64 and ARM64, shared with
 whatever the I/O stack above already used. On Linux with GCC, decoding peaks
 at 4.5 KiB whatever the level and compression at 12.3 KiB at levels 6-7
 (5.9 KiB up to level 5), over the whole call path; the largest single MSVC
-frames measured here are about 2.9 KiB on x64 and x86 and 3.2 KiB on ARM64.
-Decoding fits everywhere. Compressing at levels 6 and 7 wants
-`KeExpandKernelStackAndCalloutEx` on x64 and ARM64 and does not fit x86 at
-all. The WDK's code analysis flags any frame over 1 KiB; eleven of the
-library's functions pass that, which only matters if analysis runs over the
-library sources rather than the consumer linking the archive.
+frames measured here are about 2.9 KiB on x64 and 3.2 KiB on ARM64.
+Decoding fits everywhere. Compressing at levels 6 and 7 from a deep I/O
+stack wants `KeExpandKernelStackAndCalloutEx`. The WDK's code analysis flags
+any frame over 1 KiB; eleven of the library's functions pass that, which only
+matters if analysis runs over the library sources rather than the consumer
+linking the archive.
 
 ## SIMD
 
@@ -243,7 +189,8 @@ BMI, SSSE3 or SSE4.2; the ARM64 one no LSE atomics, CRC32, dot product,
 crypto, PAC or BTI. At `/O2` MSVC's auto-vectorizer emits a few SSE4.1
 instructions behind a runtime test of `__isa_available`, which an image
 without the C runtime pins to zero through the compiler's `/alternatename`,
-so that path never runs. x86 is scalar (see plan B).
+so that path never runs. CI checks every image for `ymm` and `zmm`
+registers, so an AVX instruction fails the build.
 
 ## Loading the self-test
 
@@ -279,24 +226,19 @@ verifier /standard /driver zxc_selftest.sys     (then reboot, load, and verifier
 The standard settings check IRQL, pool tags, zero-length allocations and
 leaks; add low-resource simulation (`verifier /flags 0x4`) to see the
 allocation-failure paths return `STATUS_INSUFFICIENT_RESOURCES` instead of
-bug-checking. On Windows 7, sign with a SHA-1 test certificate or install the
-SHA-2 code-signing support update first; a SHA-256 signature is otherwise
-rejected at load.
+bug-checking.
 
 ## CI
 
-`.github/workflows/windows-kernel.yml` builds x64 and ARM64 at the default
+`.github/workflows/kernel-windows.yml` builds x64 and ARM64 at the default
 target on every change to this tree or the library, then runs
 `check-image.ps1`. The runner image carries Visual Studio 2026 with the
 WDK's Visual Studio extension but no kit, so the job installs the 28000
 SDK and WDK, the kit line built for Visual Studio 2026, with Microsoft's
-installers first. A kit's MSBuild task assemblies exist for one Visual
-Studio version: 26100 for 2022, 28000 for 2026.
-
-Plan B is not built in CI. The 22000 kit ships those assemblies for Visual
-Studio 2019 only, which the runner image does not carry, so the Windows 7
-and x86 builds are verified locally against the 22000 EWDK, as described
-above, and should be re-run before a release that touches the library.
+installers first, each pinned to a versioned download and checked against
+its SHA-256 and Microsoft Authenticode signature before it runs. A kit's
+MSBuild task assemblies exist for one Visual Studio version: 26100 for 2022,
+28000 for 2026.
 
 ## Licensing
 

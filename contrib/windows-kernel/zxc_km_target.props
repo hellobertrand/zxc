@@ -14,10 +14,6 @@
     <!-- Default target: Windows 10 2004 (NTDDI_WIN10_VB), the first with ExAllocatePool2. -->
     <TargetVersion Condition="'$(TargetVersion)' == ''">Windows10</TargetVersion>
     <_NT_TARGET_VERSION Condition="'$(_NT_TARGET_VERSION)' == '' and '$(TargetVersion)' == 'Windows10'">0xA000008</_NT_TARGET_VERSION>
-    <!-- Plan B: a Windows 7 target or the Win32 platform. Kits newer than 22000
-         refuse both in their MSBuild targets, so plan B builds with the 22000 kit. -->
-    <ZxcPlanB Condition="'$(TargetVersion)' == 'Windows7' or '$(Platform)' == 'Win32'">true</ZxcPlanB>
-    <WindowsTargetPlatformVersion Condition="'$(WindowsTargetPlatformVersion)' == '' and '$(ZxcPlanB)' == 'true'">10.0.22000.0</WindowsTargetPlatformVersion>
     <DriverTargetPlatform Condition="'$(DriverTargetPlatform)' == ''">Desktop</DriverTargetPlatform>
   </PropertyGroup>
 </Project>
