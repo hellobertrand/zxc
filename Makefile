@@ -11,7 +11,7 @@
 #   make conformance  Build and run only the decoder conformance suite
 #   make format       Format source code with clang-format
 #   make format-check Check formatting (CI mode)
-#   make lint         Scan source files for non-ASCII characters (CI mirror)
+#   make lint         Scan sources for non-ASCII characters and integer suffixes (CI mirror)
 #   make man          Regenerate src/cli/zxc.1 from src/cli/zxc.1.md (pandoc)
 #   make man-check    Check that src/cli/zxc.1 is up to date (CI mode)
 #   make doc          Generate Doxygen documentation
@@ -86,7 +86,11 @@ format-check:
 	@$(CMAKE) --build $(BUILD) --target format-check
 
 # ── Lint (mirrors .github/workflows/quality.yml) ─────────────
-# Scans every .c/.h in the repository, as quality.yml does.
+# Non-ASCII: every .c/.h in the repository, as quality.yml does.
+# Suffixes: .c/.cc/.h known to git, untracked included, vendors excluded.
+# U or ULL only: unsigned long (UL/LU) is 32 bits on Windows; LLU is ULL
+# reordered. A number after % or . is a printf conversion (%02u, %6llu).
+SUFFIX_RE := (^|[^%.0-9A-Za-z_])(0[xX][0-9a-fA-F]+|0[bB][01]+|[0-9]+)(u|[uU][lL]|[lL]{1,2}[uU]|u[lL]{2}|U(l[lL]|Ll))([^0-9A-Za-z_]|$$)
 lint:
 	@echo "Scanning for non-ASCII characters in .c and .h files..."
 	@files=$$(find . -type f \( -name '*.c' -o -name '*.h' \) \
@@ -99,10 +103,11 @@ lint:
 	  $$files \
 	&& echo "OK: No non-ASCII characters found." \
 	|| { echo "ERROR: Non-ASCII characters found in source files."; exit 1; }
-	@echo "Scanning for UL/LU/LLU integer suffixes (use U or ULL)..."
-	@! git grep -nwE '(0[xX][0-9a-fA-F]+|[0-9]+)(UL|LU|LLU)' -- '*.c' '*.cc' '*.h' ':!*/vendors/*' \
-	|| { echo "ERROR: UL/LU/LLU suffix found, use U or ULL."; exit 1; }
-	@echo "OK: No UL/LU/LLU suffix found."
+	@echo "Scanning for unsigned suffixes other than U and ULL..."
+	@rc=0; git --no-pager grep -nE --untracked '$(SUFFIX_RE)' -- '*.c' '*.cc' '*.h' ':!*/vendors/*' || rc=$$?; \
+	if [ $$rc -eq 0 ]; then echo "ERROR: unsigned suffix other than U or ULL found."; exit 1; fi; \
+	if [ $$rc -ne 1 ]; then echo "ERROR: git grep failed (exit $$rc)."; exit 1; fi; \
+	echo "OK: All unsigned suffixes are U or ULL."
 
 # ── Documentation ────────────────────────────────────────────
 # ── Man page ─────────────────────────────────────────────────

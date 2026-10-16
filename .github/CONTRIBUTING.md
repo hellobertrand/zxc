@@ -86,8 +86,6 @@ ctest --output-on-failure
 
 ### Format Code
 
-Requires **clang-format 22** or newer (`make format-check` refuses older versions).
-
 ```bash
 clang-format -i src/lib/*.c include/*.h
 ```
@@ -96,7 +94,6 @@ clang-format -i src/lib/*.c include/*.h
 
 - **C17** compiler (GCC, Clang, or MSVC)
 - **CMake** 3.21+
-- **clang-format** 22+ (formatting only)
 - Follow `.clang-format` style (Google)
 - All code must be ASCII-only
 - Pass `ctest` and static analysis

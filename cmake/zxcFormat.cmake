@@ -5,41 +5,13 @@
 #
 # Code Formatting (clang-format).
 
-# .clang-format uses NumericLiteralCase, added in clang-format 22.
-set(ZXC_CLANG_FORMAT_MIN 22)
-
 # Allow override via environment variable (e.g., CLANG_FORMAT=clang-format-22)
 if(DEFINED ENV{CLANG_FORMAT})
     set(CLANG_FORMAT "$ENV{CLANG_FORMAT}")
 else()
-    find_program(CLANG_FORMAT NAMES clang-format-${ZXC_CLANG_FORMAT_MIN} clang-format)
+    find_program(CLANG_FORMAT clang-format)
 endif()
-
 if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
-    execute_process(COMMAND ${CLANG_FORMAT} --version
-        OUTPUT_VARIABLE ZXC_CLANG_FORMAT_OUT ERROR_QUIET RESULT_VARIABLE ZXC_CLANG_FORMAT_RC)
-    string(REGEX MATCH "version ([0-9]+(\\.[0-9]+)*)" _ "${ZXC_CLANG_FORMAT_OUT}")
-    set(ZXC_CLANG_FORMAT_VERSION "${CMAKE_MATCH_1}")
-    if(NOT ZXC_CLANG_FORMAT_RC EQUAL 0 OR NOT ZXC_CLANG_FORMAT_VERSION)
-        set(ZXC_CLANG_FORMAT_VERSION "unknown version")
-    endif()
-endif()
-
-if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL AND
-   (ZXC_CLANG_FORMAT_VERSION STREQUAL "unknown version" OR
-    ZXC_CLANG_FORMAT_VERSION VERSION_LESS ZXC_CLANG_FORMAT_MIN))
-    # Only the format targets fail: building the library never needs clang-format.
-    set(ZXC_CLANG_FORMAT_ERROR
-        "Error: clang-format >= ${ZXC_CLANG_FORMAT_MIN} required, found ${CLANG_FORMAT} (${ZXC_CLANG_FORMAT_VERSION}); set CLANG_FORMAT=/path/to/clang-format-${ZXC_CLANG_FORMAT_MIN}")
-    message(STATUS "${ZXC_CLANG_FORMAT_ERROR} - format/format-check targets will fail")
-    foreach(target format format-check)
-        add_custom_target(${target}
-            COMMAND ${CMAKE_COMMAND} -E echo "${ZXC_CLANG_FORMAT_ERROR}"
-            COMMAND ${CMAKE_COMMAND} -E false
-            VERBATIM
-        )
-    endforeach()
-elseif(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
     file(GLOB_RECURSE ZXC_FORMAT_SOURCES CONFIGURE_DEPENDS
         "${CMAKE_CURRENT_SOURCE_DIR}/include/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/lib/*.c"
