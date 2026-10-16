@@ -32,7 +32,7 @@ Runs performance benchmarks using LZbench on Ubuntu and macOS. Integrates ZXC in
 Builds the project with coverage instrumentation (`-DZXC_ENABLE_COVERAGE=ON`), runs unit and CLI tests, and generates a coverage report using `lcov`. The report is then uploaded to Codecov for analysis.
 
 ### fuzzing.yml - Fuzz Testing
-**Triggers:** Pull requests, scheduled (every 3 days), manual dispatch
+**Triggers:** Pull requests, manual dispatch
 
 Executes fuzz testing using ClusterFuzzLite with multiple sanitizers (address, undefined) on decompression and roundtrip fuzzers. Helps identify memory safety issues and edge cases.
 
