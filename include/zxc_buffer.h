@@ -537,10 +537,10 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  *
  * Options are **sticky**: NULL @p opts reuses the last successful call's level,
  * block_size, checksum_enabled and seekable (the first three for
- * zxc_compress_block()), starting from zxc_create_cctx(). A zero field in a
- * non-NULL @p opts means its default, never a remembered value; a static
- * context defaults block_size to its pinned size. Levels above
- * @ref ZXC_LEVEL_ULTRA are silently clamped.
+ * zxc_compress_block()), starting from zxc_create_cctx(). In a non-NULL
+ * @p opts, a zero level or block_size means the creation value (the library
+ * default for a NULL zxc_create_cctx()), never an earlier call's; a failed call
+ * changes nothing. Levels above @ref ZXC_LEVEL_ULTRA are silently clamped.
  * Dictionary options are the exception: honoured as in zxc_compress() but
  * never remembered, so pass them on every call; the shared table is rebuilt
  * only when it changes. A static context returns
@@ -711,11 +711,12 @@ ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const 
  * @par Locked parameters
  * @c block_size, @c level and @c checksum_enabled are pinned at init time. A
  * later @ref zxc_compress_cctx call asking for a different @c block_size
- * returns @ref ZXC_ERROR_BAD_BLOCK_SIZE without re-initialising; a zero one
- * means the pinned size. A different @c level / @c checksum_enabled is honoured
- * per call without re-partitioning, except a raise into @ref ZXC_LEVEL_DENSITY
- * on a workspace carved below it: the optimal-parser scratch is absent, so the
- * call returns @ref ZXC_ERROR_BAD_LEVEL. Dictionaries are rejected too:
+ * returns @ref ZXC_ERROR_BAD_BLOCK_SIZE without re-initialising; a zero
+ * @c block_size or @c level means the pinned one. A different @c level /
+ * @c checksum_enabled is honoured per call without re-partitioning, except a
+ * raise into @ref ZXC_LEVEL_DENSITY on a workspace carved below it: the
+ * optimal-parser scratch is absent, so the call returns
+ * @ref ZXC_ERROR_BAD_LEVEL. Dictionaries are rejected too:
  * @ref ZXC_ERROR_DICT_UNSUPPORTED.
  *
  * @param[in,out] workspace       Caller-allocated buffer, cache-line aligned.

@@ -230,9 +230,11 @@ ZXC provides opaque reusable contexts.
 Internal buffers are only reallocated when the **block size changes**, so the
 common case (same block size, different data) is completely allocation-free.
 
-Options are **sticky**: settings passed via `opts` to `zxc_create_cctx()` or
-`zxc_compress_cctx()` are remembered and reused on subsequent calls where
-`opts` is `NULL`.
+Options are **sticky**: `zxc_compress_cctx()` remembers the options of its
+last successful call, starting from those given to `zxc_create_cctx()`, and
+reuses them when `opts` is `NULL`. In a non-NULL `opts`, a zero `level` or
+`block_size` means the creation value, so an override only needs the fields it
+changes.
 
 ```c
 #include "zxc.h"
@@ -283,8 +285,8 @@ int main(void) {
         }
     }
 
-    // Override sticky settings for a single call (e.g. switch to level 5).
-    // This also updates the sticky settings for future NULL calls.
+    // Switch to level 5. block_size 0 keeps the one from create_opts, so no
+    // re-allocation; later NULL calls reuse level 5.
     zxc_compress_opts_t high_opts = { .level = 5 };
     int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, &high_opts);
     printf("Level-5 compressed: %lld bytes\n", (long long)csz);

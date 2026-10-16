@@ -211,7 +211,8 @@ int test_cctx_zero_opts_defaults(void) {
         {"NULL opts after a successful custom call (sticky)", 0, 1, 1},
     };
     const zxc_compress_opts_t zero = {0};
-    const zxc_compress_opts_t custom = {.level = 1, .block_size = 4096};
+    const zxc_compress_opts_t custom = {
+        .level = 1, .block_size = 4096, .checksum_enabled = 1, .seekable = 1};
 
     const size_t src_sz = 300000;
     const uint64_t fb = zxc_compress_bound(src_sz), bb = zxc_compress_block_bound(src_sz);
@@ -268,6 +269,67 @@ done:
     free(ref[0]);
     free(ref[1]);
     free(out);
+    return ok;
+}
+
+/* #532: zero fields mean the creation values, on both APIs; an invalid
+ * block_size is never remembered. */
+int test_cctx_zero_opts_creation_values(void) {
+    printf("=== TEST: Opaque Context API - zero opts fields keep the creation values (#532) ===\n");
+    enum { BS = 4096, SRC = 3000 };
+    const size_t cap = (size_t)zxc_compress_bound(SRC),
+                 bcap = (size_t)zxc_compress_block_bound(SRC);
+    uint8_t src[SRC];
+    uint8_t* const arc = malloc(cap);
+    uint8_t* const ref = malloc(cap);
+    uint8_t* const blk = malloc(bcap);
+    const zxc_compress_opts_t create = {.level = ZXC_LEVEL_FASTEST, .block_size = BS};
+    zxc_cctx* const c = zxc_create_cctx(&create);
+    int ok = 0;
+    if (!arc || !ref || !blk || !c) goto done;
+    gen_lz_data(src, sizeof(src));
+
+    /* Block call with level only: the next NULL frame still declares 4 KiB. */
+    const zxc_compress_opts_t lvl3 = {.level = 3};
+    zxc_frame_info_t info = {0};
+    int64_t n = zxc_compress_block(c, src, SRC, blk, bcap, &lvl3);
+    if (n > 0) n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
+    if (n <= 0 || zxc_get_frame_info(arc, (size_t)n, &info, sizeof(info)) != ZXC_OK ||
+        info.block_size != BS) {
+        printf("  [FAIL] block call then NULL frame: %lld, declares %zu, want %d\n", (long long)n,
+               info.block_size, (int)BS);
+        goto done;
+    }
+
+    /* Frame call with level only: byte-identical to the one-shot at {5, 4 KiB}. */
+    const zxc_compress_opts_t lvl5 = {.level = 5};
+    const zxc_compress_opts_t lvl5_bs = {.level = 5, .block_size = BS};
+    n = zxc_compress_cctx(c, src, SRC, arc, cap, &lvl5);
+    const int64_t r = zxc_compress(src, SRC, ref, cap, &lvl5_bs);
+    if (n <= 0 || n != r || memcmp(arc, ref, (size_t)n) != 0) {
+        printf("  [FAIL] {.level = 5} on a 4 KiB context: %lld, one-shot %lld\n", (long long)n,
+               (long long)r);
+        goto done;
+    }
+
+    /* Invalid block_size refused; the sticky settings survive it. */
+    const zxc_compress_opts_t bad = {.block_size = 10000};
+    const int64_t e = zxc_compress_block(c, src, SRC, blk, bcap, &bad);
+    n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
+    if (e != ZXC_ERROR_BAD_BLOCK_SIZE || n != r || memcmp(arc, ref, (size_t)n) != 0) {
+        printf("  [FAIL] invalid block_size: %lld, NULL call after it %lld\n", (long long)e,
+               (long long)n);
+        goto done;
+    }
+    ok = 1;
+    printf("  [PASS] creation values kept; invalid block_size refused\n");
+    printf("PASS\n\n");
+
+done:
+    zxc_free_cctx(c);
+    free(arc);
+    free(ref);
+    free(blk);
     return ok;
 }
 
