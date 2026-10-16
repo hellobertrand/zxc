@@ -20,6 +20,8 @@ if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/cli/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.c"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/*.h"
+        "${CMAKE_CURRENT_SOURCE_DIR}/conformance/*.c"
+        "${CMAKE_CURRENT_SOURCE_DIR}/conformance/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/nodejs/src/*.cc"
         "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/nodejs/src/*.h"
         "${CMAKE_CURRENT_SOURCE_DIR}/wrappers/python/src/zxc/*.c"
@@ -37,14 +39,14 @@ if(CLANG_FORMAT AND PROJECT_IS_TOP_LEVEL)
     add_custom_target(format
         COMMAND ${CLANG_FORMAT} --style=file -i ${ZXC_FORMAT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Formatting include/, src/, tests/, wrappers/ and contrib/ with clang-format"
+        COMMENT "Formatting include/, src/, tests/, conformance/, wrappers/ and contrib/ with clang-format"
         VERBATIM
     )
 
     add_custom_target(format-check
         COMMAND ${CLANG_FORMAT} --style=file --dry-run --Werror ${ZXC_FORMAT_SOURCES}
         WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}
-        COMMENT "Checking formatting of include/, src/, tests/, wrappers/ and contrib/"
+        COMMENT "Checking formatting of include/, src/, tests/, conformance/, wrappers/ and contrib/"
         VERBATIM
     )
 elseif(PROJECT_IS_TOP_LEVEL)

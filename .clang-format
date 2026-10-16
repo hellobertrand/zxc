@@ -12,3 +12,5 @@ AlignConsecutiveAssignments: false
 AlignConsecutiveDeclarations: false
 
 BreakBeforeBraces: Attach
+NumericLiteralCase:
+  Suffix: Upper
