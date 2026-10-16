@@ -91,11 +91,11 @@
   <figcaption>Figure 3. Compression ratio of <code>silesia.tar</code> against single-threaded compression speed (logarithmic scale), on the same four processors; up and to the right is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
-<p>Raw decode speed leaves out half of the picture. When the decoder is fed from a disk, a network or another core, the compressed bytes are what is scarce, and what matters is how much original data each compressed megabyte yields. Effective throughput combines both: decode speed &times; 100 / ratio&nbsp;(%). On this measure every ZXC level is ahead of LZ4, on all four processors.</p>
+<p>Raw decode speed leaves out half of the picture. When the data comes from a disk, a network or another core, the link limits how fast it arrives. With transfer and decoding overlapped, a reader gets min(decode speed, bandwidth / ratio) of original data per second. Below 0.4 to 0.6&nbsp;GB/s the ratio decides, and Zstandard is ahead. From there until one decoding thread can no longer keep up with the link, a ZXC level delivers the most data, and no LZ4 level is ever ahead of it.</p>
 
 <figure class="pareto">
-  <a href="/docs/images/bench-effective.svg"><img src="/docs/images/bench-effective.svg" width="960" height="584" alt="Effective throughput relative to LZ4 for every ZXC level and for LZ4, LZ4HC, LZAV, Zstandard and Snappy, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. All ZXC levels are above the LZ4 baseline of 1.00." loading="lazy"></a>
-  <figcaption>Figure 4. Effective throughput (decode speed &times; 100 / ratio&nbsp;%) relative to LZ4, on the same four processors; higher is better, and LZ4 is 1.00. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
+  <a href="/docs/images/bench-link-throughput.svg"><img src="/docs/images/bench-link-throughput.svg" width="960" height="776" alt="Speed-up over sending the data uncompressed as a function of link bandwidth, for the best level of ZXC, LZ4 and Zstandard, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. Zstandard leads below about 0.5 GB/s, ZXC above, and the LZ4 curve never rises above the ZXC curve." loading="lazy"></a>
+  <figcaption>Figure 4. Speed-up over sending <code>silesia.tar</code> uncompressed, against link bandwidth (logarithmic scale), with each codec at its best level for the link and one decoding thread, on the same four processors; higher is better, and 1&times; is the uncompressed transfer. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
 <p>Dividing the clock frequency by the decompression speed gives the cost of each decompressed byte in processor cycles, which compares processors running at different frequencies. ZXC spends less than one cycle per byte at every level.</p>

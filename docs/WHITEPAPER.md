@@ -638,30 +638,18 @@ Benchmarks were conducted using `lzbench` (by inikep) with default block size of
 
 *Lower is better. Calculated using Apple M2 Performance Core frequency (3.5 GHz). Formula: `Cycles/Byte = 3500 / Decompression Speed (MB/s)`.*
 
-**Effective Throughput (Ratio-normalized decode)**
+**Throughput over a link**
 
-| Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
-| :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** | 13 513 | 61.76 | **21 880** | **2.18x** |
-| **zxc 0.15.0 -2** | 11 320 | 53.86 | **21 017** | **2.10x** |
-| **zxc 0.15.0 -3** |  9 707 | 46.65 | **20 808** | **2.07x** |
-| **zxc 0.15.0 -4** |  8 790 | 43.43 | **20 240** | **2.02x** |
-| **zxc 0.15.0 -5** |  8 118 | 40.83 | **19 882** | **1.98x** |
-| **zxc 0.15.0 -6** |  6 884 | 36.28 | **18 975** | **1.89x** |
-| **zxc 0.15.0 -7** |  5 054 | 33.09 | **15 273** | **1.52x** |
-| lz4 1.10.0 (Ref) | 4 774 | 47.60 | 10 029 | 1.00x |
-| lz4 1.10.0 --fast -17 | 5 609 | 62.15 | 9 025 | 0.90x |
-| lz4hc 1.10.0 -9 | 4 522 | 36.75 | 12 305 | 1.23x |
-| lzav 5.17 -1 | 3 876 | 39.91 | 9 712 | 0.97x |
-| snappy 1.3.1 | 3 258 | 47.85 | 6 809 | 0.68x |
-| zstd 1.5.7 --fast --1 | 2 538 | 41.01 | 6 189 | 0.62x |
-| zstd 1.5.7 -1 | 1 803 | 34.53 | 5 222 | 0.52x |
-| zstd 1.5.7 -3 | 1 680 | 31.20 | 5 385 | 0.54x |
-| zlib 1.3.2 -1 | 378 | 36.45 | 1 037 | 0.10x |
+| Link bandwidth | ZXC | LZ4 / LZ4HC | Zstandard |
+| :--- | ---: | ---: | ---: |
+| 125 MB/s (1 GbE) | 3.02x (`zxc -7`) | 2.72x (`lz4hc -9`) | **3.21x** (`zstd -3`) |
+| 1.25 GB/s (10 GbE) | **3.02x** (`zxc -7`) | 2.72x (`lz4hc -9`) | 2.03x (`zstd --fast --1`) |
+| 3 GB/s | **2.45x** (`zxc -5`) | 1.61x (`lz4 --fast -17`) | 0.85x (`zstd --fast --1`) |
+| 7 GB/s (NVMe) | **1.62x** (`zxc -1`) | 0.80x (`lz4 --fast -17`) | 0.36x (`zstd --fast --1`) |
 
-*Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
+*Higher is better. Speed-up over sending the data uncompressed: `min(Decode, Bandwidth × 100 / Ratio (%)) / Bandwidth`, each codec family at its best level for that bandwidth (Figure D). One decoding thread, transfer and decoding overlapped; compression time is left out, as it is paid once.*
 
-*Reading: on Apple M2, ZXC levels -1 through -6 deliver between **1.89x** and **2.18x** LZ4 effective bandwidth, and the ULTRA level -7 reaches a **33.09%** ratio at **1.52x** LZ4. ZXC -6 (18 975 MB/s, 1.89x LZ4) clearly leads `lz4hc -9` (12 305 MB/s, 1.23x) on this platform — **1.54x more effective bandwidth at equivalent ratio**. Apple Silicon's deep pipelines amplify ZXC's lead at every level.*
+*Reading: on Apple M2, the ratio of `zstd -3` leads below 556 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.67 GB/s, then the faster levels in turn, up to 13.5 GB/s, where one decoding thread falls behind the link and compression stops paying (5.61 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
 
 
 ### 7.2 Cloud Server Summary (ARM64 / Google Axion Neoverse-V2)
@@ -709,32 +697,18 @@ Benchmarks were conducted using `lzbench` (by inikep) with default block size of
 
 *Lower is better. Calculated using Neoverse-V2 base frequency (2.6 GHz). Formula: `Cycles/Byte = 2600 / Decompression Speed (MB/s)`.*
 
-**Effective Throughput (Ratio-normalized decode)**
+**Throughput over a link**
 
-This metric expresses how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Ratio (%)`. It captures the combined benefit of fast decode and good ratio: a smaller compressed file feeds the decoder with less bandwidth pressure on the source (storage / network / inter-core), so each MB of compressed data yields more MB of original data per second of decode work. *Higher is better.*
+| Link bandwidth | ZXC | LZ4 / LZ4HC | Zstandard |
+| :--- | ---: | ---: | ---: |
+| 125 MB/s (1 GbE) | 3.02x (`zxc -7`) | 2.72x (`lz4hc -9`) | **3.21x** (`zstd -3`) |
+| 1.25 GB/s (10 GbE) | **2.85x** (`zxc -7`) | 2.72x (`lz4hc -9`) | 1.83x (`zstd --fast --1`) |
+| 3 GB/s | **2.14x** (`zxc -3`) | 1.61x (`lz4 --fast -17`) | 0.76x (`zstd --fast --1`) |
+| 7 GB/s (NVMe) | **1.37x** (`zxc -1`) | 0.71x (`lz4 --fast -17`) | 0.33x (`zstd --fast --1`) |
 
-| Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
-| :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** |  9 564 | 61.76 | **15 486** | **1.73x** |
-| **zxc 0.15.0 -2** |  7 895 | 53.86 | **14 658** | **1.64x** |
-| **zxc 0.15.0 -3** |  6 571 | 46.65 | **14 086** | **1.57x** |
-| **zxc 0.15.0 -4** |  6 105 | 43.43 | **14 057** | **1.57x** |
-| **zxc 0.15.0 -5** |  5 683 | 40.83 | **13 919** | **1.56x** |
-| **zxc 0.15.0 -6** |  4 950 | 36.28 | **13 644** | **1.53x** |
-| **zxc 0.15.0 -7** |  3 563 | 33.09 | **10 768** | **1.20x** |
-| lz4 1.10.0 (Ref) | 4 258 | 47.60 | 8 945 | 1.00x |
-| lz4 1.10.0 --fast -17 | 4 954 | 62.15 | 7 971 | 0.89x |
-| lz4hc 1.10.0 -9 | 3 850 | 36.75 | 10 476 | 1.17x |
-| lzav 5.17 -1 | 2 949 | 39.91 | 7 389 | 0.83x |
-| snappy 1.3.1 | 2 295 | 47.85 | 4 796 | 0.54x |
-| zstd 1.5.7 --fast --1 | 2 291 | 41.01 | 5 586 | 0.62x |
-| zstd 1.5.7 -1 | 1 642 | 34.53 | 4 755 | 0.53x |
-| zstd 1.5.7 -3 | 1 525 | 31.20 | 4 888 | 0.55x |
-| zlib 1.3.2 -1 | 389 | 36.45 | 1 067 | 0.12x |
+*Higher is better. Speed-up over sending the data uncompressed: `min(Decode, Bandwidth × 100 / Ratio (%)) / Bandwidth`, each codec family at its best level for that bandwidth (Figure D). One decoding thread, transfer and decoding overlapped; compression time is left out, as it is paid once.*
 
-*Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
-
-*Reading: at ZXC -6, every MB/s of compressed input yields **13 644 MB/s** of original output — **1.30x** more effective bandwidth than `lz4hc -9` at equivalent ratio (36.28 vs 36.75), and **1.53x** more than LZ4 default. Levels -1 through -6 stay above **1.5x** LZ4; the ULTRA level -7 now clears LZ4 as well (**1.20x**) at a 33.09% ratio.*
+*Reading: on Google Axion, the ratio of `zstd -3` leads below 505 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.18 GB/s, then the faster levels in turn, up to 9.56 GB/s, where one decoding thread falls behind the link and compression stops paying (4.95 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
 
 
 ### 7.3 Build Server Summary (x86_64 / AMD EPYC 9B45, Zen 5)
@@ -782,30 +756,18 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 *Lower is better. Calculated using AMD EPYC 9B45 base frequency (2.1 GHz). Formula: `Cycles/Byte = 2100 / Decompression Speed (MB/s)`.*
 
-**Effective Throughput (Ratio-normalized decode)**
+**Throughput over a link**
 
-| Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
-| :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** | 11 609 | 61.76 | **18 797** | **1.77x** |
-| **zxc 0.15.0 -2** | 10 332 | 53.86 | **19 183** | **1.81x** |
-| **zxc 0.15.0 -3** |  8 335 | 46.65 | **17 867** | **1.68x** |
-| **zxc 0.15.0 -4** |  7 508 | 43.43 | **17 288** | **1.63x** |
-| **zxc 0.15.0 -5** |  7 014 | 40.83 | **17 179** | **1.62x** |
-| **zxc 0.15.0 -6** |  6 045 | 36.28 | **16 662** | **1.57x** |
-| **zxc 0.15.0 -7** |  4 724 | 33.09 | **14 276** | **1.35x** |
-| lz4 1.10.0 (Ref) | 5 052 | 47.60 | 10 613 | 1.00x |
-| lz4 1.10.0 --fast -17 | 5 305 | 62.15 | 8 536 | 0.80x |
-| lz4hc 1.10.0 -9 | 4 861 | 36.75 | 13 227 | 1.25x |
-| lzav 5.17 -1 | 3 603 | 39.91 | 9 028 | 0.85x |
-| snappy 1.3.1 | 2 420 | 47.89 | 5 053 | 0.48x |
-| zstd 1.5.7 --fast --1 | 2 451 | 41.01 | 5 977 | 0.56x |
-| zstd 1.5.7 -1 | 1 898 | 34.53 | 5 497 | 0.52x |
-| zstd 1.5.7 -3 | 1 733 | 31.20 | 5 554 | 0.52x |
-| zlib 1.3.2 -1 | 392 | 36.45 | 1 075 | 0.10x |
+| Link bandwidth | ZXC | LZ4 / LZ4HC | Zstandard |
+| :--- | ---: | ---: | ---: |
+| 125 MB/s (1 GbE) | 3.02x (`zxc -7`) | 2.72x (`lz4hc -9`) | **3.21x** (`zstd -3`) |
+| 1.25 GB/s (10 GbE) | **3.02x** (`zxc -7`) | 2.72x (`lz4hc -9`) | 1.96x (`zstd --fast --1`) |
+| 3 GB/s | **2.34x** (`zxc -5`) | 1.68x (`lz4`) | 0.82x (`zstd --fast --1`) |
+| 7 GB/s (NVMe) | **1.62x** (`zxc -1`) | 0.76x (`lz4 --fast -17`) | 0.35x (`zstd --fast --1`) |
 
-*Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
+*Higher is better. Speed-up over sending the data uncompressed: `min(Decode, Bandwidth × 100 / Ratio (%)) / Bandwidth`, each codec family at its best level for that bandwidth (Figure D). One decoding thread, transfer and decoding overlapped; compression time is left out, as it is paid once.*
 
-*Reading: on EPYC 9B45, ZXC levels -1 through -6 deliver between **1.57x** and **1.81x** LZ4 effective bandwidth. On this Zen 5 platform ZXC -6 (16 662 MB/s, **1.57x** LZ4) clearly leads `lz4hc -9` (13 227 MB/s, 1.25x) — ZXC -6's decode (6 045 MB/s) runs ~24% faster than lz4hc -9 (4 861 MB/s) here while keeping the ratio advantage (36.28 vs 36.75). The ULTRA level -7 reaches a 33.09% ratio at 1.35x LZ4.*
+*Reading: on AMD EPYC 9B45, the ratio of `zstd -3` leads below 573 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.56 GB/s, then the faster levels in turn, up to 11.6 GB/s, where one decoding thread falls behind the link and compression stops paying (5.30 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
 
 
 ### 7.4 Production Server Summary (x86_64 / AMD EPYC 7B13, Zen 3)
@@ -853,30 +815,18 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 *Lower is better. Calculated using AMD EPYC 7B13 base frequency (2.2 GHz). Formula: `Cycles/Byte = 2200 / Decompression Speed (MB/s)`.*
 
-**Effective Throughput (Ratio-normalized decode)**
+**Throughput over a link**
 
-| Compressor | Decode (MB/s) | Ratio (%) | Effective (MB/s) | vs LZ4 |
-| :--- | ---: | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** |  8 155 | 61.76 | **13 204** | **1.62x** |
-| **zxc 0.15.0 -2** |  6 807 | 53.86 | **12 638** | **1.55x** |
-| **zxc 0.15.0 -3** |  5 252 | 46.65 | **11 258** | **1.38x** |
-| **zxc 0.15.0 -4** |  4 952 | 43.43 | **11 402** | **1.40x** |
-| **zxc 0.15.0 -5** |  4 779 | 40.83 | **11 705** | **1.43x** |
-| **zxc 0.15.0 -6** |  4 290 | 36.28 | **11 825** | **1.45x** |
-| **zxc 0.15.0 -7** |  3 188 | 33.09 | **9 634** | **1.18x** |
-| lz4 1.10.0 (Ref) | 3 883 | 47.60 | 8 158 | 1.00x |
-| lz4 1.10.0 --fast -17 | 4 485 | 62.15 | 7 216 | 0.88x |
-| lz4hc 1.10.0 -9 | 3 731 | 36.75 | 10 152 | 1.24x |
-| lzav 5.17 -1 | 2 955 | 39.91 | 7 404 | 0.91x |
-| snappy 1.3.1 | 1 837 | 47.89 | 3 836 | 0.47x |
-| zstd 1.5.7 --fast --1 | 1 784 | 41.01 | 4 350 | 0.53x |
-| zstd 1.5.7 -1 | 1 339 | 34.53 | 3 878 | 0.48x |
-| zstd 1.5.7 -3 | 1 178 | 31.20 | 3 776 | 0.46x |
-| zlib 1.3.2 -1 | 358 | 36.45 | 982 | 0.12x |
+| Link bandwidth | ZXC | LZ4 / LZ4HC | Zstandard |
+| :--- | ---: | ---: | ---: |
+| 125 MB/s (1 GbE) | 3.02x (`zxc -7`) | 2.72x (`lz4hc -9`) | **3.21x** (`zstd -3`) |
+| 1.25 GB/s (10 GbE) | **2.76x** (`zxc -6`) | 2.72x (`lz4hc -9`) | 1.43x (`zstd --fast --1`) |
+| 3 GB/s | **1.86x** (`zxc -2`) | 1.50x (`lz4 --fast -17`) | 0.59x (`zstd --fast --1`) |
+| 7 GB/s (NVMe) | **1.17x** (`zxc -1`) | 0.64x (`lz4 --fast -17`) | 0.25x (`zstd --fast --1`) |
 
-*Higher is better. Captures how much *original* data is delivered per unit of compressed input bandwidth. Formula: `Effective (MB/s) = Decompression Speed × 100 / Compression Ratio (%)`.*
+*Higher is better. Speed-up over sending the data uncompressed: `min(Decode, Bandwidth × 100 / Ratio (%)) / Bandwidth`, each codec family at its best level for that bandwidth (Figure D). One decoding thread, transfer and decoding overlapped; compression time is left out, as it is paid once.*
 
-*Reading: on EPYC 7B13 (Zen 3), ZXC levels -1 through -6 deliver between **1.38x** and **1.62x** LZ4 effective bandwidth. On this older Zen 3 microarchitecture ZXC -6 (11 825 MB/s, **1.45x** LZ4) leads `lz4hc -9` (10 152 MB/s, 1.24x) on effective bandwidth, and its raw decode is now ~15% ahead (4 290 vs 3 731 MB/s) on top of the ratio advantage (36.28 vs 36.75). The ULTRA level -7 reaches a 33.09% ratio at 1.18x LZ4.*
+*Reading: on AMD EPYC 7B13, the ratio of `zstd -3` leads below 390 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.05 GB/s, then the faster levels in turn, up to 8.15 GB/s, where one decoding thread falls behind the link and compression stops paying (4.49 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
 
 
 ### 7.5 Benchmarks Results
@@ -885,9 +835,9 @@ This metric expresses how much *original* data is delivered per unit of compress
 
 ![Benchmark Cycles Per Byte](./images/bench-cycles.svg)
 
-**Figure D**: Effective Throughput — Ratio-Normalized Decode (vs LZ4 baseline = 1.00x)
+**Figure D**: Throughput over a link — Speed-up over an Uncompressed Transfer, by Link Bandwidth
 
-![Effective Throughput vs LZ4](./images/bench-effective.svg)
+![Speed-up over an uncompressed transfer by link bandwidth](./images/bench-link-throughput.svg)
 
 
 #### 7.5.1 ARM64 Architecture (Apple Silicon M2)

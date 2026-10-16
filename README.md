@@ -142,15 +142,17 @@ Apple M2 (ARM64)
 
 </details>
 
-### Effective throughput
+### Throughput over a link
 
-![Effective throughput of each codec relative to LZ4, on four CPUs](docs/images/bench-effective.svg)
+![Speed-up over an uncompressed transfer as a function of link bandwidth, for ZXC, LZ4 and Zstandard, on four CPUs](docs/images/bench-link-throughput.svg)
 
-> **What is Effective Throughput?**
+> **Reading the chart**
 >
-> Raw decode speed misses half the picture: in real workloads (asset streaming, container pulls, microservice payloads), the decoder is fed by a compressed-byte source - disk, network, inter-core - whose bandwidth is the bottleneck. The right question is *how much original data is delivered per MB of compressed input*.
+> Data compressed once is read many times over a link: disk, network, another core. With transfer and decoding overlapped, a reader gets `min(decode speed, bandwidth ÷ ratio)` of original data per second. The chart divides that by the bandwidth, so 1x is sending the data uncompressed, and draws each codec at its best level for the link. Compression time is left out, as it is paid once.
 >
-> Formula: `Effective (MB/s) = Decode × 100 / Ratio (%)`: combines decode speed and ratio in one number. **Every ZXC level from -1 to -7 sits above LZ4** on every architecture, peaking at **2.18x on Apple Silicon** and ranging **1.38x–1.81x** on x86 and ARM cloud platforms for levels -1 to -6. The density-optimized ULTRA level -7 clears LZ4 as well (**1.18x–1.52x**), at a 33.09% ratio.
+> - **Below 0.4–0.6 GB/s the ratio decides**, and `zstd -3` is ahead.
+> - **From there on, a ZXC level delivers the most data**: -7 up to 1.1–1.7 GB/s, then the faster levels in turn. No LZ4 or LZ4HC level is ever above the ZXC curve.
+> - **Compression stops paying** once one decoding thread is slower than the link: past 8.2–13.5 GB/s for `zxc -1`, 4.5–5.6 GB/s for LZ4.
 
 ## Features
 
