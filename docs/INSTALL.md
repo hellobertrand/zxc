@@ -3,7 +3,7 @@
 Package managers are covered in the [README](../README.md#installation). This
 document is for the cases that need more room: verifying a **release archive**,
 **vendoring** zxc into another build, and **building it from source**.
-Vendoring into a libc-less target (a kernel module, a firmware) has its own tree: [contrib/linux-kernel](../contrib/linux-kernel/README.md).
+Vendoring into a libc-less target (a kernel module, a firmware) has its own tree: [contrib/linux-kernel](../contrib/linux-kernel/README.md). A Windows driver links the kernel-mode library from [contrib/windows-kernel](../contrib/windows-kernel/README.md).
 
 ## Release archives
 
