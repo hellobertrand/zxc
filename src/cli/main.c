@@ -605,9 +605,52 @@ static void print_help(const char* app) {
         "  --progress MODE   Progress display: auto, always, never {auto}\n");
 }
 
+/** @brief Target architecture shown by -V. */
+#if defined(_M_ARM64EC)  // also defines _M_X64: test first
+#define ZXC_CLI_ARCH "arm64ec"
+#elif defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+#define ZXC_CLI_ARCH "x86_64"
+#elif defined(__i386__) || defined(_M_IX86)
+#define ZXC_CLI_ARCH "x86"
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define ZXC_CLI_ARCH "arm64"
+#elif defined(__arm__) || defined(_M_ARM)
+#define ZXC_CLI_ARCH "arm"
+#elif defined(__riscv)
+#if __riscv_xlen == 64
+#define ZXC_CLI_ARCH "riscv64"
+#else
+#define ZXC_CLI_ARCH "riscv32"
+#endif
+#elif defined(__powerpc64__) || defined(__ppc64__)
+#if defined(__LITTLE_ENDIAN__)
+#define ZXC_CLI_ARCH "ppc64le"
+#else
+#define ZXC_CLI_ARCH "ppc64"
+#endif
+#elif defined(__powerpc__) || defined(__ppc__)
+#define ZXC_CLI_ARCH "ppc"
+#elif defined(__s390x__)
+#define ZXC_CLI_ARCH "s390x"
+#elif defined(__loongarch64)
+#define ZXC_CLI_ARCH "loongarch64"
+#elif defined(__mips64)
+#define ZXC_CLI_ARCH "mips64"
+#elif defined(__mips__)
+#define ZXC_CLI_ARCH "mips"
+#elif defined(__sparc__)
+#define ZXC_CLI_ARCH "sparc"
+#elif defined(__wasm32__)
+#define ZXC_CLI_ARCH "wasm32"
+#elif defined(__wasm64__)
+#define ZXC_CLI_ARCH "wasm64"
+#else
+#define ZXC_CLI_ARCH "unknown"
+#endif
+
 static void print_version(void) {
-    printf("ZXC CLI (%zu-bit) v%s, by Bertrand Lebonnois\nBSD 3-Clause License\n",
-           sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
+    printf("ZXC CLI (%s %zu-bit) v%s, by Bertrand Lebonnois\n",
+           ZXC_CLI_ARCH, sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
 }
 
 /**
