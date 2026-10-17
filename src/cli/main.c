@@ -36,6 +36,74 @@
 #define ZXC_PATH_SEP '/'
 #endif
 
+/** @brief Target architecture shown by -V. */
+#if defined(_M_ARM64EC) || defined(__arm64ec__)  // also defines x86_64 macros: test first
+#define ZXC_CLI_ARCH "arm64ec"
+#elif defined(__x86_64__) && defined(__ILP32__)
+#define ZXC_CLI_ARCH "x32"
+#elif defined(__x86_64__) || defined(_M_X64) || defined(_M_AMD64)
+#define ZXC_CLI_ARCH "x86_64"
+#elif defined(__i386__) || defined(_M_IX86)
+#define ZXC_CLI_ARCH "x86"
+#elif defined(__aarch64__) || defined(_M_ARM64)
+#define ZXC_CLI_ARCH "arm64"
+#elif defined(__arm__) || defined(_M_ARM)
+#define ZXC_CLI_ARCH "arm"
+#elif defined(__riscv)
+#if __riscv_xlen == 64
+#define ZXC_CLI_ARCH "riscv64"
+#else
+#define ZXC_CLI_ARCH "riscv32"
+#endif
+#elif defined(__powerpc64__) || defined(__ppc64__)
+#define ZXC_CLI_ARCH "ppc64"
+#elif defined(__powerpc__) || defined(__ppc__)
+#define ZXC_CLI_ARCH "ppc"
+#elif defined(__s390x__)
+#define ZXC_CLI_ARCH "s390x"
+#elif defined(__loongarch64)
+#define ZXC_CLI_ARCH "loongarch64"
+#elif defined(__loongarch__)
+#define ZXC_CLI_ARCH "loongarch32"
+#elif defined(__mips64)
+#define ZXC_CLI_ARCH "mips64"
+#elif defined(__mips__)
+#define ZXC_CLI_ARCH "mips"
+#elif defined(__sparc__) && defined(__arch64__)
+#define ZXC_CLI_ARCH "sparc64"
+#elif defined(__sparc__)
+#define ZXC_CLI_ARCH "sparc"
+#elif defined(__alpha__)
+#define ZXC_CLI_ARCH "alpha"
+#elif defined(__hppa__)
+#define ZXC_CLI_ARCH "hppa"
+#elif defined(__ia64__)
+#define ZXC_CLI_ARCH "ia64"
+#elif defined(__m68k__)
+#define ZXC_CLI_ARCH "m68k"
+#elif defined(__sh__)
+#define ZXC_CLI_ARCH "sh"
+#elif defined(__wasm32__)
+#define ZXC_CLI_ARCH "wasm32"
+#elif defined(__wasm64__)
+#define ZXC_CLI_ARCH "wasm64"
+#else
+#define ZXC_CLI_ARCH "unknown"
+#endif
+
+/** @brief Byte order shown by -V. */
+#if defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+#define ZXC_CLI_ENDIAN "LE"
+#elif defined(__BYTE_ORDER__) && __BYTE_ORDER__ == __ORDER_BIG_ENDIAN__
+#define ZXC_CLI_ENDIAN "BE"
+#elif defined(__LITTLE_ENDIAN__) || defined(_WIN32)
+#define ZXC_CLI_ENDIAN "LE"
+#elif defined(__BIG_ENDIAN__)
+#define ZXC_CLI_ENDIAN "BE"
+#else
+#define ZXC_CLI_ENDIAN "unknown"
+#endif
+
 #ifdef _WIN32
 // Windows Implementation
 #include <direct.h>
@@ -606,7 +674,7 @@ static void print_help(const char* app) {
 }
 
 static void print_version(void) {
-    printf("ZXC CLI (%zu-bit) v%s, by Bertrand Lebonnois\nBSD 3-Clause License\n",
+    printf("ZXC CLI (" ZXC_CLI_ARCH " %zu-bit " ZXC_CLI_ENDIAN ") v%s, by Bertrand Lebonnois\n",
            sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
 }
 

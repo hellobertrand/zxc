@@ -221,6 +221,24 @@ else
     log_fail "Version flag failed"
 fi
 
+# The banner names the target: "(<arch> <32|64>-bit <LE|BE>)", never "unknown".
+VER_TARGET_RE='^ZXC CLI \(([a-z0-9_]+) (32|64)-bit (LE|BE)\) v'
+if [[ "$OUT_VER" =~ $VER_TARGET_RE ]]; then
+    VER_ARCH=${BASH_REMATCH[1]}
+    VER_ENDIAN=${BASH_REMATCH[3]}
+    # The test runs natively, so the shell shares the binary's byte order.
+    if [[ $(printf 'AB' | od -An -tx2 | tr -d ' \n') == "4241" ]]; then HOST_ENDIAN=LE; else HOST_ENDIAN=BE; fi
+    if [[ "$VER_ARCH" == "unknown" ]]; then
+        log_fail "Version banner has no architecture: $OUT_VER"
+    elif [[ "$VER_ENDIAN" != "$HOST_ENDIAN" ]]; then
+        log_fail "Version banner says $VER_ENDIAN, host is $HOST_ENDIAN: $OUT_VER"
+    else
+        log_pass "Version banner names the target ($VER_ARCH $VER_ENDIAN)"
+    fi
+else
+    log_fail "Version banner lacks arch, width or byte order: $OUT_VER"
+fi
+
 # 8. Checksum
 echo "Testing Checksum..."
 "$ZXC_BIN" -C -k -f "$TEST_FILE_ARG"
