@@ -637,6 +637,47 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
  * 32-byte store covers it. The escape path always yields more, so comparing
  * against this recovers "was the ml nibble inline". */
 #define ZXC_SPL_MAX_INLINE_ML (ZXC_SPL_INLINE_ML_CODE + ZXC_LZ_MIN_MATCH_LEN) /* 19 */
+/** @name Per-block match splitting (zxc_spl_match_split_block)
+ *
+ *  Escaped matches go out as inline pieces at the same offset, so the decoder
+ *  skips their ML escape. Two policies: by default, up to the level's
+ *  split_max and only in blocks whose escape branch looks mispredicted (levels
+ *  3-5); with favor_decode_speed, every SPL level splits up to
+ *  ZXC_SPL_MATCH_SPLIT_MAX under a per-block growth budget.
+ *  @{ */
+/** @brief Longest escape history a context keys on; small blocks shorten it
+ *         (down to 2 bits) towards 16 samples per context. Sizes the histograms. */
+#define ZXC_SPL_MATCH_SPLIT_CTX_BITS 8
+/** @brief Mispredict rate, in percent of a block's escapes, from which the
+ *         default policy splits the block. */
+#define ZXC_SPL_MATCH_SPLIT_MIN_MISPREDICT_PCT 80
+/** @brief zxc_spl_match_split_analyze's escape histograms: four rotating lanes of
+ *         [escape][context] counts, carved from the compression workspace. */
+typedef uint32_t zxc_spl_match_split_hist_t[4][2][1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS];
+static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
+              "a context is recorded in one byte of buf_split");
+/** @brief Longest match favor_decode_speed re-emits as inline pieces
+ *         (zxc_spl_match_split_block), as a length code: 128 bytes.
+ *
+ * Measured knee on silesia (M3, 2026-10-17): splitting every match up to
+ * 128 bytes leaves 0.3 percent of the sequences escaped and decodes 14 (L3)
+ * to 26 (L5) percent faster for 4 to 6 percent more size; a higher cap only
+ * adds sequences, the rare escapes left are the long, predictable ones.
+ * Opt-in: favor_decode_speed. */
+#define ZXC_SPL_MATCH_SPLIT_MAX (128U - ZXC_LZ_MIN_MATCH_LEN) /* 123 */
+/** @brief Growth a block may take from splitting, in percent of its size
+ *         before entropy coding (tokens, offsets, extras, literals).
+ *
+ * Each piece costs a token and an offset; on data that compresses well the
+ * blocks are small and long matches many, so an unbounded split inflates them
+ * (JSON records: +45 percent for a cap of 128 bytes). The budget caps each
+ * block on its own, shortest escapes first: the decode gain per escape is the
+ * same, the cost grows with the pieces. 10 is the speed knee on silesia
+ * (L3 +10 percent of decode for +1.8 of size). Overridable for a sweep. */
+#ifndef ZXC_SPL_MATCH_SPLIT_BUDGET_PCT
+#define ZXC_SPL_MATCH_SPLIT_BUDGET_PCT 10
+#endif
+/** @} */
 #define ZXC_PAK_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
 /** @brief Base bias added to encoded offsets (stored = actual - bias). */
@@ -934,27 +975,6 @@ static inline int zxc_level_clamp(const int level) {
 #define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level != 0) ? (o)->level : (dflt))
 /** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
-/** @name Per-block match splitting (zxc_spl_match_split_block), a level-table policy
- *
- *  Escaped matches up to split_max (a length code; 14 is the inline reach) go
- *  out as inline pieces at the same offset, so the decoder skips its ML escape.
- *  Two gates: the block's escape branch must look mispredicted, then only the
- *  escapes of mispredicted contexts split; a predictable one would only add
- *  sequences. A split_max at or below the inline reach (levels 1, 2, 6, 7 in
- *  the level table) turns the pass off.
- *  @{ */
-/** @brief Longest escape history a context keys on; small blocks shorten it
- *         (down to 2 bits) towards 16 samples per context. Sizes the histograms. */
-#define ZXC_SPL_MATCH_SPLIT_CTX_BITS 8
-/** @brief Mispredict rate, in percent of a block's escapes, from which the
- *         block is split. */
-#define ZXC_SPL_MATCH_SPLIT_MIN_MISPREDICT_PCT 80
-/** @brief zxc_spl_match_split_analyze's escape histograms: four rotating lanes of
- *         [escape][context] counts, carved from the compression workspace. */
-typedef uint32_t zxc_spl_match_split_hist_t[4][2][1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS];
-static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
-              "a context is recorded in one byte of buf_split");
-/** @} */
 
 /** @brief Encoder Huffman code-length cap for a compression @p level: levels below
  *         ::ZXC_LEVEL_ULTRA use ::ZXC_HUF_MAX_CODE_LEN_DENSITY, ::ZXC_LEVEL_ULTRA uses
@@ -1145,8 +1165,10 @@ typedef struct {
     uint32_t min_offset;
 
     /** Longest match re-emitted as inline pieces (zxc_spl_match_split_block), in the
-     *  token's units (length - ZXC_LZ_MIN_MATCH_LEN); <= ZXC_SPL_INLINE_ML_CODE
-     *  disables. SPL levels only. */
+     *  token's units (length - ZXC_LZ_MIN_MATCH_LEN): escaped matches up to it
+     *  split in a block whose escapes look mispredicted; <= ZXC_SPL_INLINE_ML_CODE
+     *  disables. SPL levels only. favor_decode_speed replaces it by
+     *  @ref ZXC_SPL_MATCH_SPLIT_MAX under a growth budget. */
     uint8_t split_max;
 } zxc_lz77_params_t;
 
@@ -1161,7 +1183,8 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     // The distance floor stops at level 5: the slow levels keep every distance.
-    // Match splitting at levels 3-5 only: 1-2 are PAK, 6-7 keep every escape.
+    // Match splitting by default at levels 3-5 only: 1-2 are PAK, 6-7 keep every
+    // escape; favor_decode_speed overrides split_max at every SPL level.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {
@@ -1921,6 +1944,7 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
+    int favor_decode_speed;         /**< Enables the match split (levels 3-7). */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */

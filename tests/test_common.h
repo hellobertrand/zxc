@@ -63,6 +63,8 @@ uint32_t zxc_test_rand(void);
 
 void gen_random_data(uint8_t* buf, size_t size);
 void gen_lz_data(uint8_t* buf, size_t size);
+/* Matches of 6-120 bytes with a few literals between: what the split re-emits inline. */
+void gen_split_data(uint8_t* buf, size_t size);
 
 /* --- File footer (FORMAT.md Sec 8) ------------------------------------- */
 
@@ -143,6 +145,7 @@ int test_context_api_seekable_compress(void);
 int test_cctx_level_raise_reinit(void);
 int test_cctx_zero_opts_defaults(void);
 int test_cctx_zero_opts_creation_values(void);
+int test_cctx_favor_decode_speed_sticky(void);
 int test_estimate_cctx_size(void);
 
 /* Static Context API */
@@ -159,6 +162,7 @@ int test_static_dctx_inplace(void);
 /* Stream API */
 int test_null_output_decompression(void);
 int test_stream_level_clamp(void);
+int test_stream_favor_decode_speed(void);
 int test_stream_corrupt_block_header(void);
 int test_stream_dry_run_size(void);
 int test_stream_oversized_dict(void);

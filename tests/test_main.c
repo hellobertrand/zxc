@@ -77,6 +77,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_cctx_level_raise_reinit),
     TEST_CASE(test_cctx_zero_opts_defaults),
     TEST_CASE(test_cctx_zero_opts_creation_values),
+    TEST_CASE(test_cctx_favor_decode_speed_sticky),
     TEST_CASE(test_estimate_cctx_size),
 
     /* --- Static Context API --- */
@@ -93,6 +94,7 @@ static const test_entry_t g_tests[] = {
     /* --- Stream API --- */
     TEST_CASE(test_null_output_decompression),
     TEST_CASE(test_stream_level_clamp),
+    TEST_CASE(test_stream_favor_decode_speed),
     TEST_CASE(test_stream_corrupt_block_header),
     TEST_CASE(test_stream_dry_run_size),
     TEST_CASE(test_stream_oversized_dict),

@@ -98,6 +98,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const zxc_progress_callback_t cb = ((data[1] >> 4) & 1) ? on_progress : NULL;
     const size_t block_size = kBlockSizes[(data[1] >> 5) & 3];
     const size_t tiles = (size_t)(data[2] & 7) + 1;
+    const int favor_decode_speed = (data[2] >> 3) & 1;
     const size_t dict_cap = ((size_t)data[3] + 1) * 256;
 
     fuzz_raw(data, size, n_threads, checksum);
@@ -125,7 +126,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
                                     .seekable = seekable,
                                     .dict = dict_size ? data : NULL,
                                     .dict_size = dict_size,
-                                    .progress_cb = cb};
+                                    .progress_cb = cb,
+                                    .favor_decode_speed = favor_decode_speed};
     const zxc_decompress_opts_t dopts = {.n_threads = n_threads,
                                          .checksum_enabled = checksum,
                                          .dict = co.dict,

@@ -942,3 +942,87 @@ int test_context_api_empty_input(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* favor_decode_speed is sticky like checksum_enabled: NULL opts keep it,
+ * zeroed opts drop it, a static context pins it at init; both outputs decode. */
+int test_cctx_favor_decode_speed_sticky(void) {
+    printf("=== TEST: Opaque Context API - favor_decode_speed is sticky ===\n");
+
+    const zxc_compress_opts_t off = {.level = 3};
+    const zxc_compress_opts_t on = {.level = 3, .favor_decode_speed = 1};
+    const size_t src_sz = 300000;
+    const uint64_t fb = zxc_compress_bound(src_sz), bb = zxc_compress_block_bound(src_sz);
+    const size_t cap = (size_t)(fb > bb ? fb : bb);
+    uint8_t* const src = malloc(src_sz);
+    uint8_t* const ref[2] = {malloc(cap), malloc(cap)}; /* off, on */
+    uint8_t* const out = malloc(cap);
+    uint8_t* const back = malloc(src_sz);
+    int ok = 0;
+    if (!src || !ref[0] || !ref[1] || !out || !back) goto done;
+    gen_split_data(src, src_sz);
+
+    for (int block_api = 0; block_api <= 1; block_api++) {
+        const char* const api = block_api ? "block" : "frame";
+        zxc_cctx* const c = zxc_create_cctx(NULL);
+        if (!c) goto done;
+        const int64_t n_off = cctx_compress(c, block_api, src, src_sz, ref[0], cap, &off);
+        const int64_t n_on = cctx_compress(c, block_api, src, src_sz, ref[1], cap, &on);
+        const int64_t n_null = cctx_compress(c, block_api, src, src_sz, out, cap, NULL);
+        const int sticky = n_null == n_on && memcmp(out, ref[1], (size_t)n_on) == 0;
+        const int64_t n_back = cctx_compress(c, block_api, src, src_sz, out, cap, &off);
+        const int dropped = n_back == n_off && memcmp(out, ref[0], (size_t)n_off) == 0;
+        zxc_free_cctx(c);
+        if (n_off <= 0 || n_on <= 0 ||
+            (n_off == n_on && memcmp(ref[0], ref[1], (size_t)n_off) == 0)) {
+            printf("  [FAIL] %s: the flag must change the output (%lld vs %lld)\n", api,
+                   (long long)n_off, (long long)n_on);
+            goto done;
+        }
+        if (!sticky || !dropped) {
+            printf("  [FAIL] %s: NULL opts %s the flag, zeroed opts %s it\n", api,
+                   sticky ? "keep" : "lose", dropped ? "drop" : "keep");
+            goto done;
+        }
+        zxc_dctx* const dc = block_api ? zxc_create_dctx() : NULL;
+        if (block_api && !dc) goto done;
+        for (int k = 0; k < 2; k++) {
+            const int64_t n = k ? n_on : n_off;
+            const int64_t d = block_api
+                                  ? zxc_decompress_block(dc, ref[k], (size_t)n, back, src_sz, NULL)
+                                  : zxc_decompress(ref[k], (size_t)n, back, src_sz, NULL);
+            if (k == 1) zxc_free_dctx(dc);
+            if (d != (int64_t)src_sz || memcmp(back, src, src_sz) != 0) {
+                printf("  [FAIL] %s: flag %d output does not decode (%lld)\n", api, k,
+                       (long long)d);
+                goto done;
+            }
+        }
+        printf("  [PASS] %s API: sticky under NULL opts, dropped by zeroed opts\n", api);
+    }
+
+    /* A static context takes it from its creation options. */
+    const size_t ws_sz = zxc_static_cctx_workspace_size(ZXC_BLOCK_SIZE_DEFAULT, on.level);
+    void* const ws = ws_sz ? test_aligned_alloc(64, ws_sz) : NULL;
+    zxc_cctx* const sc = ws ? zxc_init_static_cctx(ws, ws_sz, &on) : NULL;
+    const int64_t n_static = sc ? zxc_compress_cctx(sc, src, src_sz, out, cap, NULL) : -1;
+    zxc_cctx* const hc = zxc_create_cctx(&on);
+    const int64_t n_ref = hc ? zxc_compress_cctx(hc, src, src_sz, ref[1], cap, NULL) : -1;
+    zxc_free_cctx(hc);
+    test_aligned_free(ws);
+    if (n_static <= 0 || n_static != n_ref || memcmp(out, ref[1], (size_t)n_ref) != 0) {
+        printf("  [FAIL] static context: %lld bytes, heap %lld\n", (long long)n_static,
+               (long long)n_ref);
+        goto done;
+    }
+    printf("  [PASS] static context pins it at init\n");
+    ok = 1;
+    printf("PASS\n\n");
+
+done:
+    free(src);
+    free(ref[0]);
+    free(ref[1]);
+    free(out);
+    free(back);
+    return ok;
+}

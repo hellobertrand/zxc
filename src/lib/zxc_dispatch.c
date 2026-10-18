@@ -646,6 +646,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
+    const int favor_decode_speed = opts ? opts->favor_decode_speed : 0;
     const int level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
@@ -673,6 +674,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(zxc_cctx_init(&ctx, eff_chunk, 1, level, checksum_enabled, dict_size) != ZXC_OK))
         return ZXC_ERROR_MEMORY;
     // LCOV_EXCL_STOP
+    ctx.favor_decode_speed = favor_decode_speed;
     if (UNLIKELY(zxc_cctx_attach_dict_huf(&ctx, dict_huf) != ZXC_OK)) {
         // LCOV_EXCL_START
         zxc_cctx_free(&ctx);
@@ -1100,6 +1102,7 @@ typedef struct {
     int level;
     int checksum;
     int seekable;
+    int favor_decode_speed;
     size_t block_size;
 } zxc_cctx_opts_t;
 
@@ -1153,6 +1156,7 @@ static zxc_cctx_opts_t zxc_cctx_base(const zxc_compress_opts_t* opts) {
     return (zxc_cctx_opts_t){.level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT),
                              .checksum = opts ? opts->checksum_enabled : 0,
                              .seekable = opts ? opts->seekable : 0,
+                             .favor_decode_speed = opts ? opts->favor_decode_speed : 0,
                              .block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT)};
 }
 
@@ -1162,6 +1166,7 @@ static zxc_cctx_opts_t zxc_cctx_resolve(const zxc_cctx* cctx, const zxc_compress
     return (zxc_cctx_opts_t){.level = ZXC_OPTS_LEVEL(opts, cctx->base_level),
                              .checksum = opts->checksum_enabled,
                              .seekable = opts->seekable,
+                             .favor_decode_speed = opts->favor_decode_speed,
                              .block_size = ZXC_OPTS_BLOCK_SIZE(opts, cctx->base_block_size)};
 }
 
@@ -1183,6 +1188,7 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
             return NULL;
         }
         // LCOV_EXCL_STOP
+        cctx->inner.favor_decode_speed = o.favor_decode_speed;
         cctx->last_block_size = o.block_size;
         cctx->initialized = 1;
     }
@@ -1269,6 +1275,7 @@ static int64_t zxc_compress_cctx_resolved(zxc_cctx* cctx, const void* RESTRICT s
     }
 
     zxc_cctx_t* const ctx = &cctx->inner;
+    ctx->favor_decode_speed = o.favor_decode_speed;
     ctx->dict_size = dict_size;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, cctx->huf_cache, &cctx->huf_cached, dict_huf) !=
                  ZXC_OK))
@@ -1740,6 +1747,7 @@ static int64_t zxc_compress_block_resolved(zxc_cctx* cctx, const void* RESTRICT 
         cctx->inner.checksum_enabled = o.checksum;
     }
 
+    cctx->inner.favor_decode_speed = o.favor_decode_speed;
     cctx->inner.dict_size = b_dict_size;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(&cctx->inner, cctx->huf_cache, &cctx->huf_cached,
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))
@@ -2037,6 +2045,7 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, o.block_size, 1,
                                             o.level, o.checksum, 0, 0) != ZXC_OK))
         return NULL;
+    cctx->inner.favor_decode_speed = o.favor_decode_speed;
 
     cctx->owns_workspace = 1;
     cctx->initialized = 1;

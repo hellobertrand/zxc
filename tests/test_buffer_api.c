@@ -1323,9 +1323,34 @@ done:
     return ok;
 }
 
+// Buffer round trip with favor_decode_speed: the split must stay within the
+// bound and remain an encoder policy the default decoder reads.
+static int split_round_trip(const char* what, const uint8_t* buf, const size_t n, const int level) {
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const comp = malloc(cap);
+    uint8_t* const back = malloc(n);
+    int ok = 0;
+    if (!comp || !back) goto done;
+    const zxc_compress_opts_t co = {.level = level, .favor_decode_speed = 1};
+    const zxc_decompress_opts_t dop = {0};
+    const int64_t c = zxc_compress(buf, n, comp, cap, &co);
+    const int64_t d = c > 0 ? zxc_decompress(comp, (size_t)c, back, n, &dop) : -1;
+    if (c <= 0 || d != (int64_t)n || memcmp(back, buf, n) != 0) {
+        printf("  [FAIL] %s, level %d: compress %lld, decompress %lld\n", what, level, (long long)c,
+               (long long)d);
+        goto done;
+    }
+    ok = 1;
+done:
+    free(comp);
+    free(back);
+    return ok;
+}
+
 // Round trips through zxc_spl_match_split_block, where a rewrite regression shows:
-// escaped matches (20-38 bytes) mixed irregularly with inline ones (6-19 bytes),
-// which levels 3-5 split within their caps.
+// escaped matches (20-160 bytes, on both sides of the 128-byte cap) mixed
+// irregularly with inline ones (6-19 bytes), which levels 3-5 split within
+// their cap.
 int test_spl_match_split(void) {
     printf("=== TEST: Unit - SPL match splitting round trip ===\n");
     const size_t cap = 512 * 1024;
@@ -1349,19 +1374,21 @@ int test_spl_match_split(void) {
             buf[n++] = (uint8_t)(st >> 16);
         }
         st = st * 1103515245U + 12345U;
-        // ~1 in 4 matches escapes the ML field (20-38 bytes); the rest stay inline.
+        // ~1 in 4 matches escapes the ML field (20-160 bytes); the rest stay inline.
         const size_t m =
-            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 19U) : 6U + ((st >> 18) % 14U);
+            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 141U) : 6U + ((st >> 18) % 14U);
         for (size_t k = 0; k < m && n < cap; k++) buf[n++] = src[k % sizeof(src)];
     }
 
-    // Levels 3-5 run the split; 1-2 (PAK) and 6-7 must round-trip cleanly too.
+    // The split is opt-in at levels 3-7; the default and 1-2 (PAK) round-trip too.
     for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++)
-        if (!test_round_trip("spl split", buf, n, lvl, 0)) goto done;
+        if (!test_round_trip("spl split", buf, n, lvl, 0) ||
+            !split_round_trip("spl split, decode speed", buf, n, lvl))
+            goto done;
     // Text-like data reaches the split by a different route (irregular escapes).
     fill_text_like(buf, cap);
-    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_DENSITY; lvl++)
-        if (!test_round_trip("spl split text", buf, cap, lvl, 0)) goto done;
+    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_ULTRA; lvl++)
+        if (!split_round_trip("spl split text, decode speed", buf, cap, lvl)) goto done;
 
     printf("PASS\n\n");
     ok = 1;

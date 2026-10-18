@@ -2179,3 +2179,80 @@ int test_stream_block_batches(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* The FILE* path carries favor_decode_speed to its workers: level 1 is
+ * identical, levels 3 and 7 differ, grow by little and decode back. */
+int test_stream_favor_decode_speed(void) {
+    printf("=== TEST: Stream - favor_decode_speed reaches the workers ===\n");
+
+    const size_t size = 512 * 1024;
+    uint8_t* const input = malloc(size);
+    uint8_t* const back = malloc(size);
+    uint8_t* out[2] = {NULL, NULL};
+    int ok = 0;
+    if (!input || !back) goto done;
+    gen_split_data(input, size);
+
+    static const int levels[] = {1, 3, 7};
+    for (size_t li = 0; li < sizeof(levels) / sizeof(levels[0]); li++) {
+        long sz[2] = {0, 0};
+        for (int k = 0; k < 2; k++) {
+            FILE* const f_in = tmpfile();
+            FILE* const f_comp = tmpfile();
+            FILE* const f_dec = tmpfile();
+            if (!f_in || !f_comp || !f_dec) {
+                printf("  [SKIP] tmpfile failed\n");
+                if (f_in) fclose(f_in);
+                if (f_comp) fclose(f_comp);
+                if (f_dec) fclose(f_dec);
+                ok = 1;
+                goto done;
+            }
+            fwrite(input, 1, size, f_in);
+            fseek(f_in, 0, SEEK_SET);
+            const zxc_compress_opts_t co = {
+                .n_threads = 2, .level = levels[li], .favor_decode_speed = k};
+            const int64_t c = zxc_stream_compress(f_in, f_comp, &co);
+            fseek(f_comp, 0, SEEK_END);
+            sz[k] = ftell(f_comp);
+            fseek(f_comp, 0, SEEK_SET);
+            free(out[k]);
+            out[k] = malloc((size_t)sz[k]);
+            const int read_ok = out[k] && fread(out[k], 1, (size_t)sz[k], f_comp) == (size_t)sz[k];
+            fseek(f_comp, 0, SEEK_SET);
+            const int64_t d = zxc_stream_decompress(f_comp, f_dec, NULL);
+            fseek(f_dec, 0, SEEK_SET);
+            const int back_ok = d == (int64_t)size && fread(back, 1, size, f_dec) == size &&
+                                memcmp(back, input, size) == 0;
+            fclose(f_in);
+            fclose(f_comp);
+            fclose(f_dec);
+            if (c <= 0 || !read_ok || !back_ok) {
+                printf("  [FAIL] level %d, flag %d: compress %lld, decompress %lld\n", levels[li],
+                       k, (long long)c, (long long)d);
+                goto done;
+            }
+        }
+        const int same = sz[0] == sz[1] && memcmp(out[0], out[1], (size_t)sz[0]) == 0;
+        if (levels[li] <= 2 ? !same : same) {
+            printf("  [FAIL] level %d: streams %s (%ld vs %ld bytes)\n", levels[li],
+                   same ? "identical" : "differ", sz[0], sz[1]);
+            goto done;
+        }
+        if (sz[1] > sz[0] + sz[0] / 5) {
+            printf("  [FAIL] level %d: the flag grew the stream by more than 20%% (%ld -> %ld)\n",
+                   levels[li], sz[0], sz[1]);
+            goto done;
+        }
+        printf("  [PASS] level %d: %ld -> %ld bytes\n", levels[li], sz[0], sz[1]);
+    }
+    ok = 1;
+    printf("PASS\n\n");
+
+done:
+    free(out[0]);
+    free(out[1]);
+    free(input);
+    free(back);
+    return ok;
+}

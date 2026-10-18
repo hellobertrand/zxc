@@ -381,13 +381,16 @@ SPL/PAK block and any conforming decoder reads it.
 
 A third encoder-side policy re-emits long matches inline. A SPL token holds
 the match length in its 4-bit ML field and escapes any match longer than 19
-bytes (`ML == 15`) to a varint. At levels 3 to 5 the reference encoder instead
-re-emits such a match, up to a per-level cap, as a chain of inline matches of
-at most 19 bytes at the same offset (a 24-byte match as 19 + 5, a 38-byte match
-as 19 + 19), so the decoder never takes its ML escape. It does this per
-block and only when that escape looks poorly predicted: on regular data the
-branch is already predictable and splitting would only add sequences for no
-decode gain. Levels 1 and 2 (PAK) and levels 6 and 7 keep every escape. Like
+bytes (`ML == 15`) to a varint. The reference encoder instead re-emits such
+a match, up to a cap, as a chain of inline matches of at most 19 bytes at the
+same offset (a 24-byte match as 19 + 5, a 38-byte match as 19 + 19), so the
+decoder never takes its ML escape. By default it does this at levels 3 to 5,
+per block and only when that escape looks poorly predicted: on regular data
+the branch is already predictable and splitting would only add sequences.
+When asked to favor decode speed (`favor_decode_speed`), it splits at
+levels 3 to 7 every such match of up to 128 bytes, shortest first, within a
+budget on the block's growth, so that data which compresses very well keeps
+most of its long matches whole. Levels 1 and 2 (PAK) never split. Like
 the distance floor, this changes which sequences an encoder emits, never how
 they are encoded, so the archive stays an ordinary SPL block and any
 conforming decoder reads it.

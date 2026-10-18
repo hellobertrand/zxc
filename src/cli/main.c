@@ -397,6 +397,8 @@ static int g_progress_mode = ZXC_PROGRESS_AUTO;
 static void* g_dict_huf = NULL;
 // --no-preserve clears it
 static int g_preserve = 1;
+// --favor-decode-speed sets it
+static int g_favor_decode_speed = 0;
 
 /* Enables printf-style format/argument checking by the compiler on GCC/Clang
  * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
@@ -456,7 +458,14 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE };
+enum {
+    OPT_VERSION = 1000,
+    OPT_HELP,
+    OPT_TRAIN_DICT,
+    OPT_PROGRESS,
+    OPT_NO_PRESERVE,
+    OPT_FAVOR_DECODE_SPEED
+};
 
 // dir + separator + name in a malloc'd string, so no fixed limit; NULL if out of memory.
 static char* zxc_path_join(const char* dir, const char* name) {
@@ -663,6 +672,8 @@ static void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
+        "  --favor-decode-speed\n"
+        "                    Favor decode speed over size (levels 3-7)\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
@@ -1458,6 +1469,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (g_verbose && mode != MODE_INTEGRITY)
         zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
     if (g_verbose && seekable) zxc_log("Seekable: enabled\n");
+    if (g_verbose && g_favor_decode_speed && mode == MODE_COMPRESS)
+        zxc_log("Priority: decode speed\n");
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
@@ -1483,6 +1496,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             .dict_huf = g_dict_huf,
             .progress_cb = show_progress ? &cli_progress_callback : NULL,
             .user_data = &pctx,
+            .favor_decode_speed = g_favor_decode_speed,
         };
         bytes = zxc_stream_compress(f_in, f_out, &copts);
     } else if (pass_through) {
@@ -1654,32 +1668,34 @@ int main(int argc, char** argv) {
     const char* dict_path = NULL;
     const char* output_path = NULL;
 
-    static const struct option long_options[] = {{"train", no_argument, 0, OPT_TRAIN_DICT},
-                                                 {"progress", required_argument, 0, OPT_PROGRESS},
-                                                 {"no-preserve", no_argument, 0, OPT_NO_PRESERVE},
-                                                 {"output", required_argument, 0, 'o'},
-                                                 {"dict", required_argument, 0, 'D'},
-                                                 {"compress", no_argument, 0, 'z'},
-                                                 {"decompress", no_argument, 0, 'd'},
-                                                 {"list", no_argument, 0, 'l'},
-                                                 {"test", no_argument, 0, 't'},
-                                                 {"bench", optional_argument, 0, 'b'},
-                                                 {"threads", required_argument, 0, 'T'},
-                                                 {"keep", no_argument, 0, 'k'},
-                                                 {"force", no_argument, 0, 'f'},
-                                                 {"stdout", no_argument, 0, 'c'},
-                                                 {"verbose", no_argument, 0, 'v'},
-                                                 {"quiet", no_argument, 0, 'q'},
-                                                 {"checksum", no_argument, 0, 'C'},
-                                                 {"no-checksum", no_argument, 0, 'N'},
-                                                 {"json", no_argument, 0, 'j'},
-                                                 {"version", no_argument, 0, 'V'},
-                                                 {"help", no_argument, 0, 'h'},
-                                                 {"multiple", no_argument, 0, 'm'},
-                                                 {"recursive", no_argument, 0, 'r'},
-                                                 {"block-size", required_argument, 0, 'B'},
-                                                 {"seekable", no_argument, 0, 'S'},
-                                                 {0, 0, 0, 0}};
+    static const struct option long_options[] = {
+        {"train", no_argument, 0, OPT_TRAIN_DICT},
+        {"progress", required_argument, 0, OPT_PROGRESS},
+        {"no-preserve", no_argument, 0, OPT_NO_PRESERVE},
+        {"favor-decode-speed", no_argument, 0, OPT_FAVOR_DECODE_SPEED},
+        {"output", required_argument, 0, 'o'},
+        {"dict", required_argument, 0, 'D'},
+        {"compress", no_argument, 0, 'z'},
+        {"decompress", no_argument, 0, 'd'},
+        {"list", no_argument, 0, 'l'},
+        {"test", no_argument, 0, 't'},
+        {"bench", optional_argument, 0, 'b'},
+        {"threads", required_argument, 0, 'T'},
+        {"keep", no_argument, 0, 'k'},
+        {"force", no_argument, 0, 'f'},
+        {"stdout", no_argument, 0, 'c'},
+        {"verbose", no_argument, 0, 'v'},
+        {"quiet", no_argument, 0, 'q'},
+        {"checksum", no_argument, 0, 'C'},
+        {"no-checksum", no_argument, 0, 'N'},
+        {"json", no_argument, 0, 'j'},
+        {"version", no_argument, 0, 'V'},
+        {"help", no_argument, 0, 'h'},
+        {"multiple", no_argument, 0, 'm'},
+        {"recursive", no_argument, 0, 'r'},
+        {"block-size", required_argument, 0, 'B'},
+        {"seekable", no_argument, 0, 'S'},
+        {0, 0, 0, 0}};
 
     int opt;
     int multiple_mode = 0;
@@ -1791,6 +1807,9 @@ int main(int argc, char** argv) {
                 break;
             case OPT_NO_PRESERVE:
                 g_preserve = 0;
+                break;
+            case OPT_FAVOR_DECODE_SPEED:
+                g_favor_decode_speed = 1;
                 break;
             case OPT_PROGRESS:
                 if (optarg != NULL && strcmp(optarg, "auto") == 0)
@@ -2146,7 +2165,8 @@ int main(int argc, char** argv) {
                                                  .checksum_enabled = checksum,
                                                  .dict = dict,
                                                  .dict_size = dict_size,
-                                                 .dict_huf = g_dict_huf};
+                                                 .dict_huf = g_dict_huf,
+                                                 .favor_decode_speed = g_favor_decode_speed};
         const zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
                                                    .checksum_enabled = checksum,
                                                    .dict = dict,
@@ -2300,6 +2320,7 @@ int main(int argc, char** argv) {
                 "  \"threads\": %d,\n"
                 "  \"level\": %d,\n"
                 "  \"checksum_enabled\": %s,\n"
+                "  \"favor_decode_speed\": %s,\n"
                 "  \"compress_speed_mbps\": %.3f,\n"
                 "  \"decompress_speed_mbps\": %.3f,\n"
                 "  \"compress_time_seconds\": %.6f,\n"
@@ -2307,7 +2328,8 @@ int main(int argc, char** argv) {
                 "}\n",
                 in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
                 decompress_iters, num_threads, level, checksum ? "true" : "false",
-                compress_speed_mbps, decompress_speed_mbps, best_compress, best_decompress);
+                g_favor_decode_speed ? "true" : "false", compress_speed_mbps, decompress_speed_mbps,
+                best_compress, best_decompress);
         else
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"

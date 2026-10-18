@@ -192,6 +192,9 @@ pub struct zxc_compress_opts_t {
     pub progress_cb: *const c_void,
     /// User context pointer passed to progress_cb.
     pub user_data: *mut c_void,
+    /// 1 to favor decode speed over size at levels 3-7 (a few percent larger,
+    /// 10-25 percent faster to decode; format unchanged), 0 for the smallest output.
+    pub favor_decode_speed: c_int,
 }
 
 impl Default for zxc_compress_opts_t {
@@ -207,6 +210,7 @@ impl Default for zxc_compress_opts_t {
             dict_huf: std::ptr::null(),
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
+            favor_decode_speed: 0,
         }
     }
 }

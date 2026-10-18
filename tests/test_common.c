@@ -55,6 +55,28 @@ void gen_lz_data(uint8_t* const buf, const size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = pattern[i % pat_len];
 }
 
+void gen_split_data(uint8_t* const buf, const size_t size) {
+    uint32_t st = 0x9E3779B9U;
+    uint8_t src[96];
+    for (size_t k = 0; k < sizeof(src); k++) {
+        st = st * 1103515245U + 12345U;
+        src[k] = (uint8_t)(st >> 16);
+    }
+    size_t n = 0;
+    while (n < size) {
+        st = st * 1103515245U + 12345U;
+        const size_t lit = (st >> 16) % 8U;
+        for (size_t k = 0; k < lit && n < size; k++) {
+            st = st * 1103515245U + 12345U;
+            buf[n++] = (uint8_t)(st >> 16);
+        }
+        st = st * 1103515245U + 12345U;
+        const size_t m =
+            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 101U) : 6U + ((st >> 18) % 14U);
+        for (size_t k = 0; k < m && n < size; k++) buf[n++] = src[k % sizeof(src)];
+    }
+}
+
 // Generates a regular numeric sequence (integer-pattern round-trip input)
 void gen_num_data(uint8_t* const buf, const size_t size) {
     // Fill with 32-bit integers

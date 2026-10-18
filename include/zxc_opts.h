@@ -71,6 +71,9 @@ typedef struct {
                                Becomes part of the archive's dict_id binding. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
+    int favor_decode_speed;              /**< 1 to favor decode speed over size at levels 3-7: a few
+                                                 percent larger, 10-25 percent faster to decode; the format
+                                                 is unchanged. 0 = smallest output. */
 } zxc_compress_opts_t;
 
 /**
