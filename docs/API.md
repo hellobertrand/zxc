@@ -727,7 +727,7 @@ for integrations whose output buffer cannot be oversized (page-aligned
 decoding into mapped pages, fixed-size slots in a columnar layout, etc.).
 
 Output is **bit-identical** to `zxc_decompress_block()`. RAW blocks
-transparently forward to the fast path; only GLO/GHI blocks use the
+transparently forward to the fast path; only SPL/PAK blocks use the
 strict-tail decoder, which is slightly slower than the wild-copy fast path
 (see the performance table in `EXAMPLES.md`).
 

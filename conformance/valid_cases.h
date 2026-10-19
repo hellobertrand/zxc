@@ -42,14 +42,14 @@ static const valid_case_t VALID_CASES[] = {
     {"all_zeros_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
     {"max_offset_128k", NULL, {.level = 3, .block_size = VC_KB(512)}},
 
-    /* Block types and literal encodings: the only GHI, the only RLE literals
+    /* Block types and literal encodings: the only PAK, the only RLE literals
      * (enc_lit = 1), the only PivCo literals (enc_lit = 2). */
     {"text_64k_level1", NULL, {.level = 1, .block_size = VC_KB(512)}},
-    {"glo_rle_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
-    {"glo_pivco_wide_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
+    {"spl_rle_4k", NULL, {.level = 3, .block_size = VC_KB(512)}},
+    {"spl_pivco_wide_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
 
     /* Token section: the only enc_tok = 2. */
-    {"glo_tok_huffman_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
+    {"spl_tok_huffman_l7", NULL, {.level = 7, .block_size = VC_KB(512)}},
 
     /* Checksums on their own, so a failure here is not confounded with the
      * dictionary vectors below (the only other place they are exercised).

@@ -442,7 +442,7 @@ ZXC_EXPORT int64_t zxc_decompress_block(zxc_dctx* dctx, const void* src, size_t 
  *
  * Slightly slower than zxc_decompress_block() since it gives up the wild-copy
  * overshoot the fast decoder relies on; output is bit-identical. RAW blocks
- * forward straight to zxc_decompress_block(), only GLO/GHI take the
+ * forward straight to zxc_decompress_block(), only SPL/PAK take the
  * strict-tail path.
  *
  * @param[in,out] dctx         Reusable decompression context.

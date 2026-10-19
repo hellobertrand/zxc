@@ -27,7 +27,7 @@ ZXC utilizes a computationally intensive encoder to generate a bitstream specifi
 ZXC employs a Producer-Consumer architecture to decouple I/O operations from CPU-intensive tasks. This allows for parallel processing where input reading, compression/decompression, and output writing occur simultaneously, effectively hiding I/O latency.
 
 ### 3.2 Modular Architecture
-The ZXC file format is inherently modular. **Each block is independent and is encoded with whichever of ZXC's block codecs yields the smallest output** — GLO or GHI (the LZ paths) or RAW (stored). Independent blocks keep the format simple and enable O(1) seekable random access.
+The ZXC file format is inherently modular. **Each block is independent and is encoded with whichever of ZXC's block codecs yields the smallest output** — SPL or PAK (the LZ paths) or RAW (stored). Independent blocks keep the format simple and enable O(1) seekable random access.
 
 > **ZXC is a pure LZ byte codec.** It compresses byte streams via LZ77 matching plus entropy coding; it has no type-aware or numeric block codec. Numeric and columnar data (timestamps, IDs, float columns) compress best when a **reversible pre-filter** — delta or byte-shuffle — is applied *before* compression and inverted *after* decompression. ZXC keeps such transforms **out of the codec and the format on purpose**: the caller, which knows the element type, owns the filter. See the *Compressing Numeric Data* example in [`EXAMPLES.md`](EXAMPLES.md).
 
@@ -210,20 +210,20 @@ Each data block consists of an **8-byte** generic header that precedes the speci
 
 **Note**: The Checksum (if enabled in File Header) is **4 bytes** (32-bit), is always located **at the end** of the compressed data, and is calculated **on the block's decompressed bytes**, seeded with the block's position in the frame (§5.8).
 
-* **Type**: Block encoding type (0=RAW, 1=GLO, 2=GHI, 254=SEK, 255=EOF).
+* **Type**: Block encoding type (0=RAW, 1=SPL, 2=PAK, 254=SEK, 255=EOF).
 * **Flags**: No flag is defined (must be 0).
 * **Rsrvd**: Reserved for future use (must be 0).
 * **Comp Size**: Compressed payload size (excluding header and optional checksum).
 * **Checksum**: 1-byte Header Checksum (located at the end of the header). Calculated on the 8-byte header (with the checksum byte set to 0) using `zxc_hash8`.
 
-> **Note**: The decompressed size is not stored in the block header. For GLO/GHI blocks it falls out of decoding the sequences themselves; for RAW blocks it equals `Comp Size`.
+> **Note**: The decompressed size is not stored in the block header. For SPL/PAK blocks it falls out of decoding the sequences themselves; for RAW blocks it equals `Comp Size`.
 
 > **Note**: While the format is designed for threaded execution, a single-threaded API is also available for constrained environments or simple integration cases.
 
-### 5.3 Specific Header: GLO (Generic Low)
+### 5.3 Specific Header: SPL (Split streams)
 (Present immediately after the Block Header)
 
-**GLO Header (12 bytes):**
+**SPL Header (12 bytes):**
 
 ```
   Offset:  0               4               8   9  10  11  12
@@ -281,7 +281,7 @@ without any header field to describe it.
 **Data Flow Example:**
 
 ```
-GLO Block Data Layout:
+SPL Block Data Layout:
 +------------------------------------------------------------------------+
 | Literals Stream | Tokens Stream | Offsets Stream | Extras Stream       |
 |                 |                |                | (+ slack padding)  |
@@ -308,12 +308,12 @@ saved against the earlier fixed table, worth about 2 % of a 4 KB block.
 > intended mechanism rather than a pool of reserved bytes.
 
 
-### 5.4 Specific Header: GHI (Generic High)
+### 5.4 Specific Header: PAK (Packed sequences)
 (Present immediately after the Block Header)
 
-The **GHI** (Generic High-Velocity) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
+The **PAK** (Packed sequences) block format is optimized for maximum decompression speed. It uses a **packed 32-bit sequence** format that allows 4-byte aligned reads, reducing memory access latency and enabling efficient SIMD processing.
 
-**GHI Header (12 bytes):**
+**PAK Header (12 bytes):**
 
 ```
   Offset:  0               4               8   9  10  11  12
@@ -327,14 +327,14 @@ The **GHI** (Generic High-Velocity) block format is optimized for maximum decomp
 * **N Literals**: Total count of literal bytes.
 * **Encoding Types**
   - `Lit Enc`: Literal stream encoding (0=RAW).
-  - `Tok Enc`, `ML Enc`: Reserved, written 0. GHI has no token section.
+  - `Tok Enc`, `ML Enc`: Reserved, written 0. PAK has no token section.
   - `Off Enc`: Unused. Written as `0` and ignored on decode (see FORMAT.md §5.3).
 
 **Section Descriptors: none.**
 
-Every GHI size follows from the header, so the block writes no descriptor at
+Every PAK size follows from the header, so the block writes no descriptor at
 all: literals are `N Literals` (always RAW), sequences are `N Sequences × 4`,
-and the extras take the payload residue — slack padding included, as in GLO.
+and the extras take the payload residue — slack padding included, as in SPL.
 
 **Section Contents:**
 
@@ -346,7 +346,7 @@ and the extras take the payload residue — slack padding included, as in GLO.
 
 **Packed Sequence Format (32 bits):**
 
-Unlike GLO which uses separate token and offset streams, GHI packs all sequence data into a single 32-bit word for cache-friendly sequential access:
+Unlike SPL which uses separate token and offset streams, PAK packs all sequence data into a single 32-bit word for cache-friendly sequential access:
 
 ```
   32-bit Sequence Word (Little Endian):
@@ -370,7 +370,7 @@ Unlike GLO which uses separate token and offset streams, GHI packs all sequence 
 **Data Flow Example:**
 
 ```
-GHI Block Data Layout:
+PAK Block Data Layout:
 +------------------------------------------------------------+
 | Literals Stream | Sequences Stream       | Extras Stream   |
 | (N Literals)    | (N Sequences × 4)      | (residue + pad) |
@@ -379,9 +379,9 @@ GHI Block Data Layout:
    Raw bytes        32-bit seq read         Length overflow
 ```
 
-**Key Differences: GLO vs GHI**
+**Key Differences: SPL vs PAK**
 
-| Feature            | GLO (Global)                    | GHI (High-Velocity)              |
+| Feature            | SPL (Split streams)             | PAK (Packed sequences)           |
 |--------------------|---------------------------------|----------------------------------|
 | **Sections**       | 4 (Lit, Tokens, Offsets, Extras)| 3 (Lit, Sequences, Extras)       |
 | **Sequence Format**| 1-byte token + separate offset  | Packed 32-bit word               |
@@ -448,7 +448,7 @@ identity and catches a block silently replaced by a valid one at its position.
 
 The efficiency of ZXC relies on specialized algorithmic pipelines for each block type.
 
-#### Type 1: GLO (Global)
+#### Type 1: SPL (Split streams)
 This format is used for standard data. It employs a **multi-stage encoding pipeline**:
 
 **Encoding Process**:
@@ -485,11 +485,11 @@ This format is used for standard data. It employs a **multi-stage encoding pipel
     *   *Matches*: Copied using 32-byte stores. Overlapping matches (e.g., repeating pattern "ABC" for 100 bytes) are handled naturally by the CPU's store forwarding or by specific overlapped-copy primitives.
     *   **Safety**: A "Safe Zone" at the end of the buffer forces a switch to a cautious byte-by-byte loop, allowing the main loop to run without bounds checks.
 
-#### Type 2: GHI (High-Velocity)
+#### Type 2: PAK (Packed sequences)
 This format prioritizes decompression throughput over compression ratio. It uses a **unified sequence stream**:
 
 **Encoding Process**:
-1.  **LZ77 Parsing**: Same as GLO, with aggressive lazy matching and step skipping for optimal matches.
+1.  **LZ77 Parsing**: Same as SPL, with aggressive lazy matching and step skipping for optimal matches.
 2.  **Sequence Packing**: Each match is packed into a 32-bit word:
     *   Bits [31:24]: Literal Length (8 bits)
     *   Bits [23:16]: Match Length - 5 (8 bits)
@@ -506,8 +506,8 @@ This format prioritizes decompression throughput over compression ratio. It uses
     *   Pre-reads 4 sequences into registers
     *   Copies literals and matches with 32-byte SIMD operations
     *   Minimal branching for maximum instruction-level parallelism
-3.  **Offset Validation Threshold**: offsets are validated until the output *plus any dictionary prefix* exceeds 65536 bytes — with a dictionary the validated window shrinks by its size, since it counts as already written. Past that point no encodable offset can reach below the buffer, a GHI offset being a 16-bit field, so validation is dropped.
-4.  **Wild Copy**: Same 32-byte SIMD copies as GLO, with special handling for overlapping matches (offset < 32).
+3.  **Offset Validation Threshold**: offsets are validated until the output *plus any dictionary prefix* exceeds 65536 bytes — with a dictionary the validated window shrinks by its size, since it counts as already written. Past that point no encodable offset can reach below the buffer, a PAK offset being a 16-bit field, so validation is dropped.
+4.  **Wild Copy**: Same 32-byte SIMD copies as SPL, with special handling for overlapping matches (offset < 32).
 
 ### 5.8 Data Integrity
 Every compressed block can optionally be protected by a **32-bit checksum** to ensure data reliability.

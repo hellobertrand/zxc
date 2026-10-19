@@ -10,7 +10,7 @@ version byte for exact equality and rejects anything else with
 | **v9** | ZXC **0.15.x** | v9 only | Multiplicative header and block checksums; block checksums cover the decoded bytes and the footer carries an optional archive digest; seek table rebuilt as self-validating groups, announced by `HAS_SEEK_TABLE`; dictionaries move to `.zxd` version 2 |
 | **v8** | ZXC 0.14.x | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
 | **v7** | ZXC 0.13.x | v7 only | Huffman bits use the **PivCo** wire layout; new **level 7 (ULTRA)** adds Huffman-coded tokens |
-| **v6** | ZXC 0.12.x | v6 only | **NUM** block removed; **GHI** renumbered type 3 → 2 |
+| **v6** | ZXC 0.12.x | v6 only | **NUM** block removed; **PAK** renumbered type 3 → 2 |
 | **v5** | earlier | v5 only | — |
 
 Because each decoder rejects other versions outright, migrating an archive means
@@ -94,12 +94,12 @@ Format **v8** is a deliberate, non-backward-compatible break with **v7**. Nothin
 about the compression changed — the break is entirely in how a block describes
 itself:
 
-- The GLO/GHI **sub-header shrank from 16 to 12 bytes**: the four reserved bytes
+- The SPL/PAK **sub-header shrank from 16 to 12 bytes**: the four reserved bytes
   are gone.
 - **Section descriptors** no longer form a fixed table. Only the two sizes the
   header cannot imply are written — the literal section's compressed size when it
   is RLE- or entropy-coded, and the token section's at level 7 — so a block
-  carries 0, 4 or 8 descriptor bytes instead of 32 (GLO) or 24 (GHI). Everything
+  carries 0, 4 or 8 descriptor bytes instead of 32 (SPL) or 24 (PAK). Everything
   else is derived, and the extras section is the payload residue.
 - The field formerly called `enc_litlen` is **`enc_tok`**: it always described the
   token section, never literal lengths.
@@ -127,7 +127,7 @@ Format **v7** is a deliberate, non-backward-compatible break with **v6**:
   literals.
 - The file-header version byte changed from `6` to `7`.
 
-Block **types** are unchanged from v6 (GHI stays type 2, and so on) — the break is
+Block **types** are unchanged from v6 (PAK stays type 2, and so on) — the break is
 the Huffman wire layout plus the new token encoding. A **v7 decoder rejects v6
 archives** with `ZXC_ERROR_BAD_VERSION` rather than misinterpret them, and a v6
 decoder likewise cannot read v7 archives.
@@ -252,7 +252,7 @@ Format **v6** was the previous break, with **v5**:
 
 - The **NUM** block (v5 type 2 — a numeric delta/ZigZag/bit-packed codec) was
   removed.
-- **GHI** was renumbered from type 3 to **type 2**.
+- **PAK** was renumbered from type 3 to **type 2**.
 - The file-header version byte changed from `5` to `6`.
 
 Because v5 and v6 number their block types differently, a v6 decoder rejects v5

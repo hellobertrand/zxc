@@ -17,8 +17,8 @@ typedef struct {
 static const test_entry_t g_tests[] = {
     /* --- Streaming round-trip coverage (patterns x sizes x levels x checksum) --- */
     TEST_CASE(test_roundtrip_raw_random),
-    TEST_CASE(test_roundtrip_ghi_text),
-    TEST_CASE(test_roundtrip_glo_text),
+    TEST_CASE(test_roundtrip_pak_text),
+    TEST_CASE(test_roundtrip_spl_text),
     TEST_CASE(test_roundtrip_num_seq),
     TEST_CASE(test_roundtrip_num_zero),
     TEST_CASE(test_roundtrip_num_small),
@@ -50,7 +50,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_api),
     TEST_CASE(test_buffer_api_scratch_buf),
     TEST_CASE(test_min_dist_policy),
-    TEST_CASE(test_glo_match_split),
+    TEST_CASE(test_spl_match_split),
     TEST_CASE(test_buffer_error_codes),
     TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),

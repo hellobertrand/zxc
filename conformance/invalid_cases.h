@@ -24,7 +24,7 @@
 
 /* Offset of the first block header; blocks follow the file header. */
 #define BLK0 ZXC_FILE_HEADER_SIZE
-/* Offset of the first block's payload (its GLO/GHI sub-header). */
+/* Offset of the first block's payload (its SPL/PAK sub-header). */
 #define PAY0 (BLK0 + ZXC_BLOCK_HEADER_SIZE)
 
 /* Expected rejection reason, per vector.
@@ -55,9 +55,9 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"bad_version", .expected = ZXC_ERROR_BAD_VERSION},
     {"corrupt_payload", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
     {"dict_required", ZXC_ERROR_DICT_REQUIRED, .generated = 1},
-    {"ghi_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
-    {"glo_forged_enc_off", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
-    {"glo_insufficient_slack", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"pak_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
+    {"spl_forged_enc_off", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"spl_insufficient_slack", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"magic_then_zeros", .expected = ZXC_ERROR_BAD_VERSION},
     {"too_short_4bytes", .expected = ZXC_ERROR_SRC_TOO_SMALL},
     {"truncated_header_only", ZXC_ERROR_SRC_TOO_SMALL, .generated = 1},
@@ -73,8 +73,8 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"bad_block_header_checksum", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_footer_size", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"bad_footer_digest", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
-    {"glo_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
-    {"glo_output_overflow", ZXC_ERROR_OVERFLOW, .generated = 1},
+    {"spl_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
+    {"spl_output_overflow", ZXC_ERROR_OVERFLOW, .generated = 1},
     {"varint_too_long", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
     {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "dict_http.zxd", 0, .generated = 1},
 };
@@ -99,7 +99,7 @@ static size_t find_eof_block(const uint8_t* d, size_t n, int has_checksum) {
     return 0;
 }
 
-/* Compressible, deterministic, and long enough to make a GLO block. */
+/* Compressible, deterministic, and long enough to make a SPL block. */
 static size_t make_text(uint8_t** out) {
     static const char unit[] = "the quick brown fox jumps over the lazy dog. ";
     const size_t ulen = sizeof(unit) - 1, reps = 40, n = ulen * reps;
@@ -137,21 +137,21 @@ static size_t varint_len(uint8_t b0) {
     return 4; /* out of spec: no legitimate value needs it */
 }
 
-/* Section offsets inside block 0's GLO payload, read off the wire. Returns 0
+/* Section offsets inside block 0's SPL payload, read off the wire. Returns 0
  * unless the block has the shape the patches assume, so a heuristic change
  * makes the generator complain instead of shipping vectors that test nothing. */
 typedef struct {
     size_t tok, off, extras;
-} glo_layout_t;
+} spl_layout_t;
 
-static int glo_layout(const uint8_t* d, size_t n, glo_layout_t* L) {
-    if (d[BLK0] != ZXC_BLOCK_GLO) return 0;
+static int spl_layout(const uint8_t* d, size_t n, spl_layout_t* L) {
+    if (d[BLK0] != ZXC_BLOCK_SPL) return 0;
     const uint32_t comp = zxc_le32(d + BLK0 + 3);
     const uint32_t n_seq = zxc_le32(d + PAY0);
     const uint32_t n_lit = zxc_le32(d + PAY0 + 4);
     const uint8_t enc_lit = d[PAY0 + 8], enc_tok = d[PAY0 + 9], enc_off = d[PAY0 + 11];
     if (enc_lit != 0 || enc_tok != 0 || n_seq == 0) return 0; /* RAW sections only */
-    L->tok = PAY0 + ZXC_GLO_HEADER_BINARY_SIZE + n_lit;
+    L->tok = PAY0 + ZXC_SPL_HEADER_BINARY_SIZE + n_lit;
     L->off = L->tok + n_seq;
     L->extras = L->off + (size_t)n_seq * (enc_off ? 1U : 2U);
     if (L->extras + 8 > PAY0 + comp || L->extras + 8 > n) return 0;
@@ -164,8 +164,8 @@ static int glo_layout(const uint8_t* d, size_t n, glo_layout_t* L) {
 
 /* The four well-formed archives every vector is patched from. Built once. */
 typedef struct {
-    uint8_t *plain, *chk, *ghi, *seek;
-    size_t n_plain, n_chk, n_ghi, n_seek;
+    uint8_t *plain, *chk, *pak, *seek;
+    size_t n_plain, n_chk, n_pak, n_seek;
     int state; /* 0 unbuilt, 1 ready, -1 failed (do not retry, do not leak) */
 } invalid_bases_t;
 
@@ -190,29 +190,29 @@ static int invalid_bases(invalid_bases_t* b) {
     zxc_compress_opts_t chk = plain;
     chk.checksum_enabled = 1;
 
-    zxc_compress_opts_t ghi = plain;
-    ghi.level = 1; /* levels 1-2 emit GHI blocks */
+    zxc_compress_opts_t pak = plain;
+    pak.level = 1; /* levels 1-2 emit PAK blocks */
 
     zxc_compress_opts_t seek = plain;
     seek.seekable = 1; /* appends the SEK block sek_forged_entry patches */
 
     b->n_plain = build_base(text, text_n, &plain, &b->plain);
     b->n_chk = build_base(text, text_n, &chk, &b->chk);
-    b->n_ghi = build_base(text, text_n, &ghi, &b->ghi);
+    b->n_pak = build_base(text, text_n, &pak, &b->pak);
     b->n_seek = build_base(text, text_n, &seek, &b->seek);
     free(text);
 
-    if (!b->n_plain || !b->n_chk || !b->n_ghi || !b->n_seek) {
+    if (!b->n_plain || !b->n_chk || !b->n_pak || !b->n_seek) {
         invalid_bases_free(b);
         b->state = -1;
         return 0;
     }
 
-    /* Every GLO patch below addresses a fixed offset inside block 0's sub-header.
+    /* Every SPL patch below addresses a fixed offset inside block 0's sub-header.
      * If a heuristic change ever made that block RAW, the patches would land on
      * literal bytes and the vectors would quietly stop testing anything. */
-    if (b->plain[BLK0] != ZXC_BLOCK_GLO || b->chk[BLK0] != ZXC_BLOCK_GLO) {
-        fprintf(stderr, "  block 0 is type %u/%u, expected GLO - vectors would test nothing\n",
+    if (b->plain[BLK0] != ZXC_BLOCK_SPL || b->chk[BLK0] != ZXC_BLOCK_SPL) {
+        fprintf(stderr, "  block 0 is type %u/%u, expected SPL - vectors would test nothing\n",
                 b->plain[BLK0], b->chk[BLK0]);
         invalid_bases_free(b);
         b->state = -1;
@@ -235,9 +235,9 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         !strcmp(name, "bad_footer_digest")) {
         n = b->n_chk;
         src = b->chk;
-    } else if (!strcmp(name, "ghi_forged_offset")) {
-        n = b->n_ghi;
-        src = b->ghi;
+    } else if (!strcmp(name, "pak_forged_offset")) {
+        n = b->n_pak;
+        src = b->pak;
     } else if (!strcmp(name, "sek_forged_entry") || !strcmp(name, "sek_table_no_flag") ||
                !strcmp(name, "sek_reserved_set") || !strcmp(name, "sek_flags_set")) {
         n = b->n_seek;
@@ -310,21 +310,21 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         /* --- Payload defects (nothing covers the sub-header without checksums) */
     } else if (!strcmp(name, "bad_enc_lit")) {
         d[PAY0 + 8] = 9; /* enc_lit outside {0,1,2,3} */
-    } else if (!strcmp(name, "glo_forged_enc_off")) {
+    } else if (!strcmp(name, "spl_forged_enc_off")) {
         d[PAY0 + 11] = 7; /* enc_off outside {0,1} */
-    } else if (!strcmp(name, "glo_insufficient_slack")) {
+    } else if (!strcmp(name, "spl_insufficient_slack")) {
         /* Leave fewer than ZXC_BLOCK_LIT_SLACK bytes behind the literal section
          * by claiming more literals than the payload can carry behind them. */
         const uint32_t comp = zxc_le32(d + BLK0 + 3);
-        const uint32_t want = comp - ZXC_GLO_HEADER_BINARY_SIZE - (ZXC_BLOCK_LIT_SLACK - 1);
+        const uint32_t want = comp - ZXC_SPL_HEADER_BINARY_SIZE - (ZXC_BLOCK_LIT_SLACK - 1);
         zxc_store_le32(d + PAY0 + 4, want);
-    } else if (!strcmp(name, "ghi_forged_offset")) {
+    } else if (!strcmp(name, "pak_forged_offset")) {
         /* Force the 16-bit offset far behind the output start. seq0 is derived
          * from the wire, so guard the shape: a patch landing in the extras
          * padding would ship a vector that decodes cleanly. */
-        const size_t seq0 = PAY0 + ZXC_GHI_HEADER_BINARY_SIZE + zxc_le32(d + PAY0 + 4);
-        if (d[BLK0] != ZXC_BLOCK_GHI || zxc_le32(d + PAY0) == 0 || seq0 + 4 > len) {
-            fprintf(stderr, "  cannot forge a GHI offset (type %u, n_seq %u, seq0 %zu of %zu)\n",
+        const size_t seq0 = PAY0 + ZXC_PAK_HEADER_BINARY_SIZE + zxc_le32(d + PAY0 + 4);
+        if (d[BLK0] != ZXC_BLOCK_PAK || zxc_le32(d + PAY0) == 0 || seq0 + 4 > len) {
+            fprintf(stderr, "  cannot forge a PAK offset (type %u, n_seq %u, seq0 %zu of %zu)\n",
                     d[BLK0], zxc_le32(d + PAY0), seq0, len);
             ok = 0;
         } else {
@@ -380,11 +380,11 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         }
     } else if (!strcmp(name, "corrupt_payload")) {
         /* A raw literal, past tok_comp when present (Sec 5.2): only the checksum catches it. */
-        const size_t lit = PAY0 + ZXC_GLO_HEADER_BINARY_SIZE +
+        const size_t lit = PAY0 + ZXC_SPL_HEADER_BINARY_SIZE +
                            (d[PAY0 + 9] == ZXC_SECTION_ENCODING_HUFFMAN ? 4U : 0U);
-        if (d[BLK0] != ZXC_BLOCK_GLO || d[PAY0 + 8] != ZXC_SECTION_ENCODING_RAW ||
+        if (d[BLK0] != ZXC_BLOCK_SPL || d[PAY0 + 8] != ZXC_SECTION_ENCODING_RAW ||
             zxc_le32(d + PAY0 + 4) <= 4 || lit + 4 >= len) {
-            fprintf(stderr, "  block 0 is not GLO with raw literals\n");
+            fprintf(stderr, "  block 0 is not SPL with raw literals\n");
             ok = 0;
         } else {
             d[lit + 4] ^= 0xFFU; /* a raw literal byte */
@@ -410,22 +410,22 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         } else {
             d[len - sizes - ZXC_FILE_DIGEST_SIZE] ^= 0xFFU; /* checksummed base */
         }
-    } else if (!strcmp(name, "glo_forged_offset")) {
-        /* GHI has its own vector. The first sequence has only its literal run
+    } else if (!strcmp(name, "spl_forged_offset")) {
+        /* PAK has its own vector. The first sequence has only its literal run
          * behind it, so any large offset reaches before the output start. */
-        glo_layout_t L;
-        if (!glo_layout(d, len, &L)) {
-            fprintf(stderr, "  block 0 is not a RAW-section GLO - cannot forge an offset\n");
+        spl_layout_t L;
+        if (!spl_layout(d, len, &L)) {
+            fprintf(stderr, "  block 0 is not a RAW-section SPL - cannot forge an offset\n");
             ok = 0;
         } else {
             d[L.off] = 0xFFU;
         }
-    } else if (!strcmp(name, "glo_output_overflow")) {
+    } else if (!strcmp(name, "spl_output_overflow")) {
         /* Saturated LL reads a varint from extras; this legal 3-byte one
          * (Sec 6's own example, 100003) asks for more than the chunk holds. */
-        glo_layout_t L;
-        if (!glo_layout(d, len, &L)) {
-            fprintf(stderr, "  block 0 is not a RAW-section GLO - cannot forge extras\n");
+        spl_layout_t L;
+        if (!spl_layout(d, len, &L)) {
+            fprintf(stderr, "  block 0 is not a RAW-section SPL - cannot forge extras\n");
             ok = 0;
         } else {
             d[L.extras] = 0xC3;
@@ -436,9 +436,9 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
         /* A first byte >= 0xE0 announces four bytes, out of spec per Sec 6.
          * Patch the ML varint: LL and the offset stay valid, so the read gets
          * this far instead of failing earlier. */
-        glo_layout_t L;
-        if (!glo_layout(d, len, &L)) {
-            fprintf(stderr, "  block 0 is not a RAW-section GLO - cannot forge extras\n");
+        spl_layout_t L;
+        if (!spl_layout(d, len, &L)) {
+            fprintf(stderr, "  block 0 is not a RAW-section SPL - cannot forge extras\n");
             ok = 0;
         } else {
             const size_t ml = L.extras + varint_len(d[L.extras]);
@@ -464,7 +464,7 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
 static void invalid_bases_free(invalid_bases_t* b) {
     free(b->plain);
     free(b->chk);
-    free(b->ghi);
+    free(b->pak);
     free(b->seek);
     memset(b, 0, sizeof *b);
 }

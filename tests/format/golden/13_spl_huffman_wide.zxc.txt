@@ -1,4 +1,4 @@
-file:             13_glo_huffman_wide
+file:             13_spl_huffman_wide
 size:             12819 bytes
 
 [file header]
@@ -11,7 +11,7 @@ header_checksum:  0x80ED
 
 [block 0 @16]
 raw:              01 00 00 EE 31 00 00 EE
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        12782
 header_checksum:  0xEE
 raw_range:        [0, 16384)

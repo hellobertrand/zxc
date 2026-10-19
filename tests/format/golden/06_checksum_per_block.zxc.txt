@@ -11,7 +11,7 @@ header_checksum:  0x866D
 
 [block 0 @16]
 raw:              01 00 00 A7 00 00 00 BE
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        167
 header_checksum:  0xBE
 raw_range:        [0, 8192)

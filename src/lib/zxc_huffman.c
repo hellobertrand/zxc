@@ -8,10 +8,10 @@
 
 /**
  * @file zxc_huffman.c
- * @brief Canonical, length-limited Huffman codec in the PivCo layout (GLO
+ * @brief Canonical, length-limited Huffman codec in the PivCo layout (SPL
  *        entropy sections, wire values enc 2/3).
  *
- * Covers the whole entropy pipeline for GLO literal sections (level >= 6)
+ * Covers the whole entropy pipeline for SPL literal sections (level >= 6)
  * and level-7 token sections:
  *  - boundary package-merge -> optimal length-limited code lengths
  *    (<= ZXC_HUF_MAX_CODE_LEN_DENSITY at level 6, <= _ULTRA at level 7);

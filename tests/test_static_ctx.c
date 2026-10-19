@@ -546,7 +546,7 @@ int test_static_dctx_block_bounds(void) {
         NB
     };
     const size_t cap = (size_t)zxc_compress_block_bound(SEQ);
-    uint8_t* lz = (uint8_t*)malloc(XL);   /* compressible: GLO */
+    uint8_t* lz = (uint8_t*)malloc(XL);   /* compressible: SPL */
     uint8_t* rnd = (uint8_t*)malloc(XL);  /* incompressible: RAW */
     uint8_t* lit = (uint8_t*)malloc(LIT); /* 16-symbol text, then a repeat: many literals */
     uint8_t* seq = (uint8_t*)malloc(SEQ); /* 23 fixed bytes + 1 random: thousands of matches */
@@ -586,9 +586,9 @@ int test_static_dctx_block_bounds(void) {
             const zxc_compress_opts_t* opts;
         } plan[NB] = {{"fit", lz, PIN, &l3},
                       {"fit+checksum", lz, PIN, &l3ck},
-                      {"GLO 5000", lz, MID, &l3},
+                      {"SPL 5000", lz, MID, &l3},
                       {"RAW 5000", rnd, MID, &l3},
-                      {"GLO 8000", lz, XL, &l3},
+                      {"SPL 8000", lz, XL, &l3},
                       {"RAW 8000", rnd, XL, &l3},
                       {"literals L6", lit, LIT, &l6},
                       {"literals L1", lit, LIT, &l1},
@@ -618,8 +618,8 @@ int test_static_dctx_block_bounds(void) {
             zxc_store_le32(blocks[i].comp + ZXC_BLOCK_HEADER_SIZE + 4, PIN + 1);
         }
         if (blocks[B_RAW_MID].comp[0] != ZXC_BLOCK_RAW ||
-            blocks[B_RAW_XL].comp[0] != ZXC_BLOCK_RAW || blocks[B_LIT6].comp[0] != ZXC_BLOCK_GLO ||
-            blocks[B_LIT1].comp[0] != ZXC_BLOCK_GHI) {
+            blocks[B_RAW_XL].comp[0] != ZXC_BLOCK_RAW || blocks[B_LIT6].comp[0] != ZXC_BLOCK_SPL ||
+            blocks[B_LIT1].comp[0] != ZXC_BLOCK_PAK) {
             printf("  [FAIL] block types: RAW %u %u, literals %u %u\n", blocks[B_RAW_MID].comp[0],
                    blocks[B_RAW_XL].comp[0], blocks[B_LIT6].comp[0], blocks[B_LIT1].comp[0]);
             break;

@@ -65,11 +65,11 @@ compression level, only the block type and the encodings it selects:
 | `empty`              | No data block: EOF only, `src_size = 0`                 |
 | `all_256_values`     | RAW block; all 256 byte values                          |
 | `all_zeros_4k`       | Offset-1 overlap run (long match at minimum distance)   |
-| `max_offset_128k`    | Maximum back-reference distance; GLO `enc_off=0`        |
-| `text_64k_level1`    | The GHI block type                                      |
-| `glo_rle_4k`         | RLE literals, `enc_lit=1`                               |
-| `glo_pivco_wide_l7`  | PivCo literals, `enc_lit=2`                             |
-| `glo_tok_huffman_l7` | Huffman-coded token section, `enc_tok=2`                |
+| `max_offset_128k`    | Maximum back-reference distance; SPL `enc_off=0`        |
+| `text_64k_level1`    | The PAK block type                                      |
+| `spl_rle_4k`         | RLE literals, `enc_lit=1`                               |
+| `spl_pivco_wide_l7`  | PivCo literals, `enc_lit=2`                             |
+| `spl_tok_huffman_l7` | Huffman-coded token section, `enc_tok=2`                |
 | `random_4k_checksum` | Checksums on their own, clear of the dictionary path    |
 | `multiblock_checksum`| Checksums past block 0, where the seed is the block index |
 | `multiblock_mixed`   | 16 data blocks; the 4 KB minimum chunk size             |

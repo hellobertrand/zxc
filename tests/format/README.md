@@ -22,17 +22,17 @@ golden.sha256      Byte-stability manifest (sha256sum format)
 |----------------------------|-------------------------------------------------------|
 | `01_empty_eof_only.zxc`    | EOF block only + footer (zero-length source)          |
 | `02_block_raw.zxc`         | RAW block                                             |
-| `03_block_ghi.zxc`         | GHI block (level <= 2)                                |
-| `04_block_glo.zxc`         | GLO block (level >= 3)                                |
-| `05_block_glo_huffman.zxc` | Huffman literals, `enc_lit == 2` (§5.2.1)             |
+| `03_block_pak.zxc`         | PAK block (level <= 2)                                |
+| `04_block_spl.zxc`         | SPL block (level >= 3)                                |
+| `05_block_spl_huffman.zxc` | Huffman literals, `enc_lit == 2` (§5.2.1)             |
 | `06_checksum_per_block.zxc`| Per-block checksum (§7.2)                             |
 | `07_multiple_blocks.zxc`   | Several blocks → position-seeded checksums (§7.2)     |
 | `08_seekable_table.zxc`    | SEK seek-table block (§5.5)                           |
 | `09_block_dict.zxc`        | Raw in-memory dictionary, content-only `dict_id`      |
-| `10_glo_offset16.zxc`      | 16-bit offsets, `enc_off == 0`                        |
-| `11_glo_rle.zxc`           | RLE literals, `enc_lit == 1`                          |
-| `12_glo_huffman_dict.zxc`  | Shared-table Huffman literals, `enc_lit == 3` (§5.2.2)|
-| `13_glo_huffman_wide.zxc`  | Level 7 (ULTRA) Huffman literals                      |
+| `10_spl_offset16.zxc`      | 16-bit offsets, `enc_off == 0`                        |
+| `11_spl_rle.zxc`           | RLE literals, `enc_lit == 1`                          |
+| `12_spl_huffman_dict.zxc`  | Shared-table Huffman literals, `enc_lit == 3` (§5.2.2)|
+| `13_spl_huffman_wide.zxc`  | Level 7 (ULTRA) Huffman literals                      |
 
 `test_golden.c` walks each file against `docs/FORMAT.md` — headers, block
 structure, section descriptors, the SEK entries, the block checksums (recomputed
@@ -56,7 +56,7 @@ header bytes next to their decoded meaning:
 ```
 [block 0 @16]
 raw:              01 00 00 A7 00 00 00 17
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        167
 header_checksum:  0x17
   n_sequences:    1

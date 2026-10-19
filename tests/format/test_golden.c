@@ -15,7 +15,7 @@
  *     and the 16-bit header checksum (zxc_hash16, Sec 3 / Sec 7.1).
  *   - Generic block container: type, flags, reserved, comp_size bounds and the
  *     8-bit header checksum (zxc_hash8, Sec 4 / Sec 7.1).
- *   - Every block type in Sec 5: RAW, GLO and GHI (header + section descriptors,
+ *   - Every block type in Sec 5: RAW, SPL and PAK (header + section descriptors,
  *     incl. the Huffman literal section), EOF (zero comp_size) and the optional
  *     SEK seek table. (Type 2 is reserved/removed.)
  *   - Optional per-block checksum over the block's decoded bytes, seeded with
@@ -121,14 +121,14 @@ static void emit_hex(const char* label, const uint8_t* p, size_t n) {
 /* Per-payload sub-header validation (FORMAT.md Sec 5)                          */
 /* ------------------------------------------------------------------------- */
 
-/* Shared validator for the GLO (Sec 5.2) and GHI (Sec 5.3) section model: a
- * 12-byte header, GLO's 0/4/8-byte section descriptors (GHI has none), then the
+/* Shared validator for the SPL (Sec 5.2) and PAK (Sec 5.3) section model: a
+ * 12-byte header, SPL's 0/4/8-byte section descriptors (PAK has none), then the
  * sections. Sizes absent from the table come from the header, and extras take
  * the residue - so the tiling check is an inequality, plus the
  * ZXC_BLOCK_LIT_SLACK guarantee behind the literals. */
-static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_glo,
+static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp, int is_spl,
                                int expect_enc_lit) {
-    const uint32_t hdr = ZXC_GLO_HEADER_BINARY_SIZE;
+    const uint32_t hdr = ZXC_SPL_HEADER_BINARY_SIZE;
     CHECK(comp >= hdr + ZXC_BLOCK_LIT_SLACK, "LZ payload too small for header+slack (%u)", comp);
 
     uint32_t n_sequences = zxc_le32(p);
@@ -137,10 +137,10 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
     uint8_t enc_tok = p[9];
     uint8_t enc_off = p[11];
     CHECK(enc_lit <= 3, "enc_lit = %u out of range", enc_lit);
-    /* GLO: offset stream width, 0 or 1. GHI has no offset stream and the encoder
+    /* SPL: offset stream width, 0 or 1. PAK has no offset stream and the encoder
      * pins the field to 0 -- decoders must ignore it there (FORMAT.md 5.3). */
-    if (!is_glo)
-        CHECK(enc_off == 0, "GHI enc_off = %u, expected 0", enc_off);
+    if (!is_spl)
+        CHECK(enc_off == 0, "PAK enc_off = %u, expected 0", enc_off);
     else
         CHECK(enc_off <= 1, "enc_off = %u out of range", enc_off);
     /* enc_mlen is reserved: match lengths ride the token byte. Frozen at 0 so a
@@ -161,24 +161,24 @@ static int validate_lz_payload(const char* ctx, const uint8_t* p, uint32_t comp,
     uint32_t table = 0;
     uint64_t sect_total = 0;
     uint32_t lit_comp = n_literals;
-    if (is_glo) {
+    if (is_spl) {
         /* Only the sizes the header cannot imply are on the wire. */
         uint32_t tok_comp = n_sequences;
         if (enc_lit != 0) {
-            CHECK(comp >= hdr + table + 4, "GLO table truncated");
+            CHECK(comp >= hdr + table + 4, "SPL table truncated");
             lit_comp = zxc_le32(p + hdr + table);
             table += 4;
         }
         if (enc_tok == 2) {
-            CHECK(comp >= hdr + table + 4, "GLO table truncated");
+            CHECK(comp >= hdr + table + 4, "SPL table truncated");
             tok_comp = zxc_le32(p + hdr + table);
             table += 4;
         } else {
-            CHECK(enc_tok == 0, "GLO enc_tok = %u out of range", enc_tok);
+            CHECK(enc_tok == 0, "SPL enc_tok = %u out of range", enc_tok);
         }
         sect_total = (uint64_t)lit_comp + tok_comp + (uint64_t)n_sequences * (enc_off ? 1U : 2U);
     } else {
-        CHECK(enc_lit == 0, "GHI enc_lit = %u, expected RAW", enc_lit);
+        CHECK(enc_lit == 0, "PAK enc_lit = %u, expected RAW", enc_lit);
         sect_total = (uint64_t)n_literals + (uint64_t)n_sequences * 4U;
     }
 
@@ -284,8 +284,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         EMIT("type:             %s (%u)\n",
              type == GC_BLOCK_EOF   ? "EOF"
              : type == GC_BLOCK_RAW ? "RAW"
-             : type == GC_BLOCK_GLO ? "GLO"
-             : type == GC_BLOCK_GHI ? "GHI"
+             : type == GC_BLOCK_SPL ? "SPL"
+             : type == GC_BLOCK_PAK ? "PAK"
                                     : "?",
              type);
         if (type != GC_BLOCK_EOF) EMIT("comp_size:        %u\n", comp);
@@ -299,8 +299,8 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
             break;
         }
 
-        /* Data block (RAW/GLO/GHI). */
-        CHECK(type == GC_BLOCK_RAW || type == GC_BLOCK_GLO || type == GC_BLOCK_GHI,
+        /* Data block (RAW/SPL/PAK). */
+        CHECK(type == GC_BLOCK_RAW || type == GC_BLOCK_SPL || type == GC_BLOCK_PAK,
               "unexpected block type %u at %zu", type, off);
         if (gc->expect_data_type != GC_ANY_TYPE)
             CHECK(type == gc->expect_data_type, "block type %u, expected %u at %zu", type,
@@ -319,9 +319,9 @@ static int validate_structure(const char* ctx, const golden_case_t* gc, const ui
         const uint8_t* payload = bh + ZXC_BLOCK_HEADER_SIZE;
         CHECK(off + ZXC_BLOCK_HEADER_SIZE + comp <= size, "payload overruns file at %zu", off);
 
-        if (type == GC_BLOCK_GLO) {
+        if (type == GC_BLOCK_SPL) {
             if (!validate_lz_payload(ctx, payload, comp, 1, gc->expect_enc_lit)) return 0;
-        } else if (type == GC_BLOCK_GHI) {
+        } else if (type == GC_BLOCK_PAK) {
             if (!validate_lz_payload(ctx, payload, comp, 0, -1)) return 0;
         }
 
@@ -471,7 +471,7 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
 }
 
 /* golden.sha256 proves the bytes have not moved; only this proves the encoder
- * still produces them. 11_glo_rle drifted four commits unnoticed without it. */
+ * still produces them. 11_spl_rle drifted four commits unnoticed without it. */
 static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8_t* have,
                            size_t have_size, const uint8_t* input, size_t in_size) {
     g_checks++;

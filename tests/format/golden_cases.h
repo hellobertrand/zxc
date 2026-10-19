@@ -41,8 +41,8 @@
 /* Block-type ids, mirrored from docs/FORMAT.md Sec 4.1 so this header stays
  * decoupled from the private src/lib/zxc_internal.h enum. */
 #define GC_BLOCK_RAW 0U
-#define GC_BLOCK_GLO 1U
-#define GC_BLOCK_GHI 2U
+#define GC_BLOCK_SPL 1U
+#define GC_BLOCK_PAK 2U
 #define GC_BLOCK_SEK 254U
 #define GC_BLOCK_EOF 255U
 
@@ -66,7 +66,7 @@ static size_t gc_make_empty(uint8_t** out) {
     return 0;
 }
 
-/* Incompressible high-entropy bytes -> forces a RAW block (GHI/GLO expand). */
+/* Incompressible high-entropy bytes -> forces a RAW block (PAK/SPL expand). */
 static size_t gc_make_raw(uint8_t** out) {
     const size_t n = 4096;
     uint8_t* b = (uint8_t*)malloc(n);
@@ -138,8 +138,8 @@ static size_t gc_make_multiblock(uint8_t** out) {
 }
 
 /* A pseudo-random 1 KB block repeated -> matches at distance 1024 (> 256),
- * forcing 16-bit offsets (enc_off == 0). The other GLO cases use small offsets
- * (enc_off == 1), so this freezes the 16-bit offset path. GHI always writes 0.
+ * forcing 16-bit offsets (enc_off == 0). The other SPL cases use small offsets
+ * (enc_off == 1), so this freezes the 16-bit offset path. PAK always writes 0.
  */
 static size_t gc_make_offset16(uint8_t** out) {
     const size_t period = 1024;
@@ -154,8 +154,8 @@ static size_t gc_make_offset16(uint8_t** out) {
 
 /* A varying byte followed by a 4-byte run of one value, repeated. The runs are
  * shorter than the LZ minimum match, so they survive LZ as literals; RLE then
- * beats raw literals and the GLO block uses RLE literal encoding (enc_lit == 1).
- * The other GLO cases use raw (0) or Huffman (2) literals. */
+ * beats raw literals and the SPL block uses RLE literal encoding (enc_lit == 1).
+ * The other SPL cases use raw (0) or Huffman (2) literals. */
 static size_t gc_make_rle_literals(uint8_t** out) {
     const size_t n = 16384;
     uint8_t* b = (uint8_t*)malloc(n);
@@ -174,7 +174,7 @@ static size_t gc_make_rle_literals(uint8_t** out) {
  *     Huffman table) -- the buffer-API path. The header dict_id is the
  *     content-only binding: checksum(content). No enc_lit == 3 block can
  *     appear in such an archive.
- *   - 12_glo_huffman_dict: dictionary WITH the shared literal Huffman table
+ *   - 12_spl_huffman_dict: dictionary WITH the shared literal Huffman table
  *     (the .zxd / CLI path, where the table is always present). The header
  *     dict_id binds the (content, table) pair (FORMAT.md Sec 12.3) and blocks
  *     may use enc_lit == 3 (Sec 5.2.2).
@@ -254,7 +254,7 @@ typedef struct {
     size_t (*make_input)(uint8_t** out);
     zxc_compress_opts_t opts; /* level / block_size / checksum / seekable */
     uint8_t expect_data_type; /* every data block must equal this, or GC_ANY_TYPE */
-    int expect_enc_lit;       /* GLO literal encoding (-1 = no constraint;
+    int expect_enc_lit;       /* SPL literal encoding (-1 = no constraint;
                                  2 = HUFFMAN, 3 = HUFFMAN_DICT) */
     int min_data_blocks;      /* lower bound on data-block count */
     int expect_seek;          /* a SEK block must be present */
@@ -267,13 +267,13 @@ static const golden_case_t GOLDEN_CASES[] = {
        type    enc_lit min seek dhuf */
     {"01_empty_eof_only", gc_make_empty, {.level = 1}, GC_ANY_TYPE, -1, 0, 0, 0},
     {"02_block_raw", gc_make_raw, {.level = 1}, GC_BLOCK_RAW, -1, 1, 0, 0},
-    {"03_block_ghi", gc_make_text, {.level = 1}, GC_BLOCK_GHI, -1, 1, 0, 0},
-    {"04_block_glo", gc_make_text, {.level = 3}, GC_BLOCK_GLO, -1, 1, 0, 0},
-    {"05_block_glo_huffman", gc_make_huffman, {.level = 6}, GC_BLOCK_GLO, 2, 1, 0, 0},
+    {"03_block_pak", gc_make_text, {.level = 1}, GC_BLOCK_PAK, -1, 1, 0, 0},
+    {"04_block_spl", gc_make_text, {.level = 3}, GC_BLOCK_SPL, -1, 1, 0, 0},
+    {"05_block_spl_huffman", gc_make_huffman, {.level = 6}, GC_BLOCK_SPL, 2, 1, 0, 0},
     {"06_checksum_per_block",
      gc_make_text,
      {.level = 3, .checksum_enabled = 1},
-     GC_BLOCK_GLO,
+     GC_BLOCK_SPL,
      -1,
      1,
      0,
@@ -281,7 +281,7 @@ static const golden_case_t GOLDEN_CASES[] = {
     {"07_multiple_blocks",
      gc_make_multiblock,
      {.level = 3, .block_size = 4096, .checksum_enabled = 1},
-     GC_BLOCK_GLO,
+     GC_BLOCK_SPL,
      -1,
      5,
      0,
@@ -289,7 +289,7 @@ static const golden_case_t GOLDEN_CASES[] = {
     {"08_seekable_table",
      gc_make_multiblock,
      {.level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1},
-     GC_BLOCK_GLO,
+     GC_BLOCK_SPL,
      -1,
      5,
      1,
@@ -297,25 +297,25 @@ static const golden_case_t GOLDEN_CASES[] = {
     {"09_block_dict",
      gc_make_dict_payload,
      {.level = 3, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE},
-     GC_BLOCK_GLO,
+     GC_BLOCK_SPL,
      -1,
      1,
      0,
      0},
-    {"10_glo_offset16", gc_make_offset16, {.level = 3}, GC_BLOCK_GLO, -1, 1, 0, 0},
-    {"11_glo_rle", gc_make_rle_literals, {.level = 3}, GC_BLOCK_GLO, 1, 1, 0, 0},
-    {"12_glo_huffman_dict",
+    {"10_spl_offset16", gc_make_offset16, {.level = 3}, GC_BLOCK_SPL, -1, 1, 0, 0},
+    {"11_spl_rle", gc_make_rle_literals, {.level = 3}, GC_BLOCK_SPL, 1, 1, 0, 0},
+    {"12_spl_huffman_dict",
      gc_make_huffman_dict_payload,
      {.level = 6, .dict = gc_dict_content, .dict_size = GC_DICT_SIZE},
-     GC_BLOCK_GLO,
+     GC_BLOCK_SPL,
      3,
      1,
      0,
      1},
-    {"13_glo_huffman_wide",
+    {"13_spl_huffman_wide",
      gc_make_huffman_wide,
      {.level = 7 /* ULTRA */},
-     GC_BLOCK_GLO,
+     GC_BLOCK_SPL,
      2,
      1,
      0,

@@ -1947,7 +1947,7 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
  * @brief Safe-variant block decompressor: accepts dst_capacity == uncompressed_size.
  *
  * Static dctx: shared static path. Heap dctx: dict inputs and RAW route to
- * @ref zxc_decompress_block, plain GLO/GHI use the strict decoder (no bounce
+ * @ref zxc_decompress_block, plain SPL/PAK use the strict decoder (no bounce
  * buffer, no +ZXC_DECOMPRESS_TAIL_PAD).
  *
  * Public API; full contract in @c zxc_buffer.h.
@@ -1976,7 +1976,7 @@ int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* RESTRICT src, cons
         return zxc_decompress_block(dctx, src, src_size, dst, dst_capacity, opts);
     }
 
-    // GLO/GHI: use the strict-tail decoder (no bounce buffer required).
+    // SPL/PAK: use the strict-tail decoder (no bounce buffer required).
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int rc = zxc_dctx_prepare(dctx, zxc_block_size_ceil(dst_capacity), 0, checksum_enabled);
     if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE

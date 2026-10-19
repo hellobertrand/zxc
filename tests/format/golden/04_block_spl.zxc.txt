@@ -1,4 +1,4 @@
-file:             03_block_ghi
+file:             04_block_spl
 size:             203 bytes
 
 [file header]
@@ -10,21 +10,21 @@ flags:            0x00  (checksum=0 dict=0 seek=0)
 header_checksum:  0x80ED
 
 [block 0 @16]
-raw:              02 00 00 A7 00 00 00 98
-type:             GHI (2)
+raw:              01 00 00 A7 00 00 00 BE
+type:             SPL (1)
 comp_size:        167
-header_checksum:  0x98
+header_checksum:  0xBE
 raw_range:        [0, 8192)
-  raw:            01 00 00 00 7B 00 00 00 00 00 00 00
+  raw:            01 00 00 00 7B 00 00 00 00 00 00 01
   n_sequences:    1
   n_literals:     123
   enc_lit:        0
   enc_tok:        0
   enc_mlen:       0  (reserved)
-  enc_off:        0
+  enc_off:        1
   lit_comp:       123
-  sect_total:     127
-payload_hash:     0x1D85E71E
+  sect_total:     125
+payload_hash:     0x9B5CCFC1
 
 [block 1 @191]
 raw:              FF 00 00 00 00 00 00 83

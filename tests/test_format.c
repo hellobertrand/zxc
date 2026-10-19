@@ -694,7 +694,7 @@ int test_header_checksum(void) {
     printf("Running test_header_checksum...\n");
 
     uint8_t header_buf[ZXC_BLOCK_HEADER_SIZE];
-    zxc_block_header_t bh_in = {.block_type = ZXC_BLOCK_GLO,
+    zxc_block_header_t bh_in = {.block_type = ZXC_BLOCK_SPL,
                                 .block_flags = 0,
                                 .reserved = 0,
                                 .header_checksum = 0,
@@ -1669,11 +1669,11 @@ int test_rle_section_trailing_bytes(void) {
     zxc_compress_opts_t co = {0};
     co.level = ZXC_LEVEL_DEFAULT;
     const int64_t csz = zxc_compress_block(cctx, src, n, comp, bound, &co);
-    const size_t glo = ZXC_BLOCK_HEADER_SIZE;
-    const size_t desc = glo + ZXC_GLO_HEADER_BINARY_SIZE;
-    if (csz <= 0 || comp[0] != ZXC_BLOCK_GLO || comp[glo + 8] != ZXC_SECTION_ENCODING_RLE ||
-        comp[glo + 9] != ZXC_SECTION_ENCODING_RAW) {
-        printf("  [FAIL] expected a GLO block with RLE literals and RAW tokens\n");
+    const size_t spl = ZXC_BLOCK_HEADER_SIZE;
+    const size_t desc = spl + ZXC_SPL_HEADER_BINARY_SIZE;
+    if (csz <= 0 || comp[0] != ZXC_BLOCK_SPL || comp[spl + 8] != ZXC_SECTION_ENCODING_RLE ||
+        comp[spl + 9] != ZXC_SECTION_ENCODING_RAW) {
+        printf("  [FAIL] expected a SPL block with RLE literals and RAW tokens\n");
         goto done;
     }
     if (zxc_decompress_block(dctx, comp, (size_t)csz, out, (size_t)zxc_decompress_block_bound(n),

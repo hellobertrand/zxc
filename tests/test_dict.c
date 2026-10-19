@@ -639,7 +639,7 @@ int test_dict_large_dict_roundtrip(void) {
 }
 
 /*
- * Regression test for the GLO SAFE-loop dictionary back-reference path.
+ * Regression test for the SPL SAFE-loop dictionary back-reference path.
  *
  * The other dict roundtrip tests use gen_dict_friendly_data(), which scatters
  * dict-derived BYTES but never forms long matches, so the decoder never emits a
@@ -1970,7 +1970,7 @@ int test_dict_block_huf_roundtrip(void) {
                 break;
             }
             /* enc_lit sits at sub-header offset 8, right after the block header. */
-            const int table_used = comp[0] == ZXC_BLOCK_GLO && comp[ZXC_BLOCK_HEADER_SIZE + 8] == 3;
+            const int table_used = comp[0] == ZXC_BLOCK_SPL && comp[ZXC_BLOCK_HEADER_SIZE + 8] == 3;
             n_table += table_used;
             int64_t r = zxc_decompress_block(dctx, comp, (size_t)cs, out,
                                              BLK + ZXC_DECOMPRESS_TAIL_PAD, &d_tab);

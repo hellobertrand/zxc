@@ -1,5 +1,5 @@
-file:             04_block_glo
-size:             203 bytes
+file:             10_spl_offset16
+size:             4177 bytes
 
 [file header]
 raw:              F5 2E B0 9C 09 13 00 00 00 00 00 00 00 00 ED 80
@@ -10,28 +10,28 @@ flags:            0x00  (checksum=0 dict=0 seek=0)
 header_checksum:  0x80ED
 
 [block 0 @16]
-raw:              01 00 00 A7 00 00 00 BE
-type:             GLO (1)
-comp_size:        167
-header_checksum:  0xBE
+raw:              01 00 00 2C 10 00 00 6A
+type:             SPL (1)
+comp_size:        4140
+header_checksum:  0x6A
 raw_range:        [0, 8192)
-  raw:            01 00 00 00 7B 00 00 00 00 00 00 01
+  raw:            01 00 00 00 00 10 00 00 00 00 00 00
   n_sequences:    1
-  n_literals:     123
+  n_literals:     4096
   enc_lit:        0
   enc_tok:        0
   enc_mlen:       0  (reserved)
-  enc_off:        1
-  lit_comp:       123
-  sect_total:     125
-payload_hash:     0x9B5CCFC1
+  enc_off:        0
+  lit_comp:       4096
+  sect_total:     4099
+payload_hash:     0x9311BB5C
 
-[block 1 @191]
+[block 1 @4164]
 raw:              FF 00 00 00 00 00 00 83
 type:             EOF (255)
 header_checksum:  0x83
 
 [footer]
-raw:              00 20 CB 01
+raw:              00 20 51 10 11
 src_size:         8192 (2 bytes)
-compressed_size:  203 (1 bytes)
+compressed_size:  4177 (2 bytes)

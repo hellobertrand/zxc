@@ -11,7 +11,7 @@ header_checksum:  0x27CC
 
 [block 0 @16]
 raw:              01 00 00 A7 00 00 00 BE
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        167
 header_checksum:  0xBE
 raw_range:        [0, 4096)
@@ -29,7 +29,7 @@ block_checksum:   0x978E2C98
 
 [block 1 @195]
 raw:              01 00 00 9C 00 00 00 B6
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        156
 header_checksum:  0xB6
 raw_range:        [4096, 8192)
@@ -47,7 +47,7 @@ block_checksum:   0x1EACD52B
 
 [block 2 @363]
 raw:              01 00 00 A7 00 00 00 BE
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        167
 header_checksum:  0xBE
 raw_range:        [8192, 12288)
@@ -65,7 +65,7 @@ block_checksum:   0x776EB629
 
 [block 3 @542]
 raw:              01 00 00 9C 00 00 00 B6
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        156
 header_checksum:  0xB6
 raw_range:        [12288, 16384)
@@ -83,7 +83,7 @@ block_checksum:   0x68C8FA21
 
 [block 4 @710]
 raw:              01 00 00 97 00 00 00 56
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        151
 header_checksum:  0x56
 raw_range:        [16384, 20480)
@@ -101,7 +101,7 @@ block_checksum:   0x359E4258
 
 [block 5 @873]
 raw:              01 00 00 A7 00 00 00 BE
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        167
 header_checksum:  0xBE
 raw_range:        [20480, 21257)

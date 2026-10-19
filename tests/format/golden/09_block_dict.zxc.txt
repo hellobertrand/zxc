@@ -12,7 +12,7 @@ header_checksum:  0xE859
 
 [block 0 @16]
 raw:              01 00 00 38 00 00 00 AD
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        56
 header_checksum:  0xAD
 raw_range:        [0, 4096)

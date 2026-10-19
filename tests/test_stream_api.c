@@ -1015,8 +1015,8 @@ int test_stream_engine_errors(void) {
 
 /* Encoder path coverage */
 RT_WRAPPER(test_roundtrip_raw_random, "RAW Block (Random Data)", gen_random_data, RT_BUF, 3, 0)
-RT_WRAPPER(test_roundtrip_ghi_text, "GHI Block (Text Pattern)", gen_lz_data, RT_BUF, 2, 0)
-RT_WRAPPER(test_roundtrip_glo_text, "GLO Block (Text Pattern)", gen_lz_data, RT_BUF, 4, 0)
+RT_WRAPPER(test_roundtrip_pak_text, "PAK Block (Text Pattern)", gen_lz_data, RT_BUF, 2, 0)
+RT_WRAPPER(test_roundtrip_spl_text, "SPL Block (Text Pattern)", gen_lz_data, RT_BUF, 4, 0)
 RT_WRAPPER(test_roundtrip_num_seq, "Numeric data (integer sequence)", gen_num_data, RT_BUF, 3, 0)
 RT_WRAPPER(test_roundtrip_num_zero, "Numeric data (zero deltas)", gen_num_data_zero, RT_BUF, 3, 0)
 RT_WRAPPER(test_roundtrip_num_small, "Numeric data (small deltas)", gen_num_data_small, RT_BUF, 3,

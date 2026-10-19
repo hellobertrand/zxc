@@ -1,4 +1,4 @@
-file:             12_glo_huffman_dict
+file:             12_spl_huffman_dict
 size:             541 bytes
 
 [file header]
@@ -12,7 +12,7 @@ header_checksum:  0x2719
 
 [block 0 @16]
 raw:              01 00 00 F8 01 00 00 8D
-type:             GLO (1)
+type:             SPL (1)
 comp_size:        504
 header_checksum:  0x8D
 raw_range:        [0, 3969)

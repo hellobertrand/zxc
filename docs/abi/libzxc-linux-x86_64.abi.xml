@@ -226,7 +226,7 @@
     <typedef-decl name='zxc_gnr_header_t' type-id='type-id-35' filepath='/src/lib/zxc_internal.h' line='1233' column='1' id='type-id-46'/>
     <typedef-decl name='zxc_gnr_header_t' type-id='type-id-35' filepath='/src/lib/zxc_internal.h' line='1233' column='1' id='type-id-48'/>
     <typedef-decl name='zxc_gnr_header_t' type-id='type-id-35' filepath='/src/lib/zxc_internal.h' line='1233' column='1' id='type-id-50'/>
-    <function-decl name='zxc_write_glo_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1636' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_write_spl_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1636' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-29'/>
       <parameter type-id='type-id-19'/>
       <parameter type-id='type-id-55'/>
@@ -234,7 +234,7 @@
       <parameter type-id='type-id-20'/>
       <return type-id='type-id-2'/>
     </function-decl>
-    <function-decl name='zxc_write_ghi_header' filepath='/src/lib/zxc_internal.h' line='1665' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_write_pak_header' filepath='/src/lib/zxc_internal.h' line='1665' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-29'/>
       <parameter type-id='type-id-19'/>
       <parameter type-id='type-id-55'/>
@@ -400,7 +400,7 @@
     <typedef-decl name='zxc_gnr_header_t' type-id='type-id-35' filepath='/src/lib/zxc_internal.h' line='1233' column='1' id='type-id-92'/>
     <typedef-decl name='zxc_gnr_header_t' type-id='type-id-35' filepath='/src/lib/zxc_internal.h' line='1233' column='1' id='type-id-94'/>
     <typedef-decl name='zxc_gnr_header_t' type-id='type-id-35' filepath='/src/lib/zxc_internal.h' line='1233' column='1' id='type-id-96'/>
-    <function-decl name='zxc_read_glo_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1653' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_read_spl_header_and_desc' filepath='/src/lib/zxc_internal.h' line='1653' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-25'/>
       <parameter type-id='type-id-19'/>
       <parameter type-id='type-id-98'/>
@@ -408,7 +408,7 @@
       <parameter type-id='type-id-27'/>
       <return type-id='type-id-2'/>
     </function-decl>
-    <function-decl name='zxc_read_ghi_header' filepath='/src/lib/zxc_internal.h' line='1676' column='1' visibility='default' binding='global' size-in-bits='64'>
+    <function-decl name='zxc_read_pak_header' filepath='/src/lib/zxc_internal.h' line='1676' column='1' visibility='default' binding='global' size-in-bits='64'>
       <parameter type-id='type-id-25'/>
       <parameter type-id='type-id-19'/>
       <parameter type-id='type-id-98'/>

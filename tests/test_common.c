@@ -41,7 +41,7 @@ void gen_random_data(uint8_t* const buf, const size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = zxc_test_rand() & 0xFF;
 }
 
-// Generates repetitive data (To force GLO/GHI/LZ)
+// Generates repetitive data (To force SPL/PAK/LZ)
 void gen_lz_data(uint8_t* const buf, const size_t size) {
     const char* const pattern =
         "Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod "

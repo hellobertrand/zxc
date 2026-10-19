@@ -1323,11 +1323,11 @@ done:
     return ok;
 }
 
-// Round trips through zxc_glo_split_block, where a rewrite regression shows:
+// Round trips through zxc_spl_match_split_block, where a rewrite regression shows:
 // escaped matches (20-38 bytes) mixed irregularly with inline ones (6-19 bytes),
 // which levels 3-5 split within their caps.
-int test_glo_match_split(void) {
-    printf("=== TEST: Unit - GLO match splitting round trip ===\n");
+int test_spl_match_split(void) {
+    printf("=== TEST: Unit - SPL match splitting round trip ===\n");
     const size_t cap = 512 * 1024;
     uint8_t* buf = malloc(cap);
     int ok = 0;
@@ -1355,13 +1355,13 @@ int test_glo_match_split(void) {
         for (size_t k = 0; k < m && n < cap; k++) buf[n++] = src[k % sizeof(src)];
     }
 
-    // Levels 3-5 run the split; 1-2 (GHI) and 6-7 must round-trip cleanly too.
+    // Levels 3-5 run the split; 1-2 (PAK) and 6-7 must round-trip cleanly too.
     for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++)
-        if (!test_round_trip("glo split", buf, n, lvl, 0)) goto done;
+        if (!test_round_trip("spl split", buf, n, lvl, 0)) goto done;
     // Text-like data reaches the split by a different route (irregular escapes).
     fill_text_like(buf, cap);
     for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_DENSITY; lvl++)
-        if (!test_round_trip("glo split text", buf, cap, lvl, 0)) goto done;
+        if (!test_round_trip("spl split text", buf, cap, lvl, 0)) goto done;
 
     printf("PASS\n\n");
     ok = 1;
