@@ -107,9 +107,9 @@ when checksums are enabled, a digest of the whole frame. A file is one
 or more frames back to back, so archives concatenated as they are
 decode as one.
 
-Three payload encodings are defined: RAW (uncompressed), GLO
+Three payload encodings are defined: RAW (uncompressed), SPL
 (general LZ at higher ratio, with separated streams and optional
-Huffman coding of literals), and GHI (general LZ at higher
+Huffman coding of literals), and PAK (general LZ at higher
 throughput, with packed 32-bit sequence words).
 
 This document specifies the on-disk binary format only. It does not
@@ -292,8 +292,8 @@ The following Block Type values are assigned by this document:
 | Value | Mnemonic | Reference          |
 |------:|----------|--------------------|
 |   0   | RAW      | {{raw-block}}      |
-|   1   | GLO      | {{glo-block}}      |
-|   2   | GHI      | {{ghi-block}}      |
+|   1   | SPL      | {{spl-block}}      |
+|   2   | PAK      | {{pak-block}}      |
 |  254  | SEK      | {{sek-block}}      |
 |  255  | EOF      | {{eof-block}}      |
 
@@ -317,7 +317,7 @@ Compressed Payload Size:
   include the 8-byte block header nor the OPTIONAL trailing 4-byte
   checksum.
 
-  For a data block (RAW, GLO, GHI) this size MUST NOT exceed the block
+  For a data block (RAW, SPL, PAK) this size MUST NOT exceed the block
   size selected by the File Header's Chunk Size Code ({{file-header}}).
   A block that would grow under compression falls back to RAW, whose
   payload equals its content, so the block size is reached exactly and
@@ -341,7 +341,7 @@ Header Checksum (u8):
 [ 4-byte Trailing Checksum (only if HAS_CHECKSUM=1, data blocks) ]
 ~~~
 
-Only data blocks (RAW, GLO, GHI) carry the trailing checksum. The EOF
+Only data blocks (RAW, SPL, PAK) carry the trailing checksum. The EOF
 block (type 255) and the SEK block (type 254) MUST NOT carry one, even
 when HAS_CHECKSUM=1 is set in the file header.
 
@@ -359,19 +359,19 @@ Encoders MAY emit a RAW block whenever a compressed encoding would
 not yield a worthwhile size reduction. A conforming decoder MUST
 support RAW blocks.
 
-# GLO Block (Type 1) {#glo-block}
+# SPL Block (Type 1) {#spl-block}
 
-The GLO block ("General LZ, LOw throughput") is the primary
+The SPL block ("SPLit streams") is the primary
 compressed encoding.
 It uses an LZ77-style sequence stream with literal, token, offset,
 and extras streams stored contiguously, and OPTIONAL Huffman coding
 of the literal stream.
 
-## GLO Payload Layout
+## SPL Payload Layout
 
 ~~~
 +-------------------------------+
-| GLO Header (12 bytes)         |
+| SPL Header (12 bytes)         |
 | Section descriptors (0/4/8 B) |
 | Literals stream               |
 | Tokens stream                 |
@@ -380,7 +380,7 @@ of the literal stream.
 +-------------------------------+
 ~~~
 
-## GLO Header
+## SPL Header
 
 ~~~
  Offset  Size  Field
@@ -413,14 +413,14 @@ Offset Encoding:
 : 0 = 16-bit offsets, 1 = 8-bit offsets.
 
 Literal Encoding, Token Encoding, and Offset Encoding are closed value
-sets: a GLO decoder MUST reject any value outside those listed above
+sets: a SPL decoder MUST reject any value outside those listed above
 rather than fall back to a default, so that unused values stay available
 to a later format version.
 
 Match-Length Encoding is RESERVED: encoders MUST write 0, and decoders
 MUST ignore it ({{compatibility-rules}}).
 
-## Section Descriptors {#glo-section-descriptors}
+## Section Descriptors {#spl-section-descriptors}
 
 Only the two section sizes that the header cannot imply are stored.
 Each present descriptor is a little-endian u32, and they appear in
@@ -434,7 +434,7 @@ Tokens Section Size:
 : Present when Token Encoding = 2. The compressed size, in bytes, of the
   Tokens section.
 
-A GLO block therefore carries 0, 4, or 8 bytes of descriptors.
+A SPL block therefore carries 0, 4, or 8 bytes of descriptors.
 Every other section size is derived from the header, and so cannot
 be forged inconsistently with it:
 
@@ -468,7 +468,7 @@ zero padding, which falls inside the Extras residue and so needs no
 wire field of its own; its contents are unconstrained and MUST NOT
 be validated.
 
-The same rule applies to GHI ({{ghi-block}}), where the Sequences
+The same rule applies to PAK ({{pak-block}}), where the Sequences
 and Extras sections play the role of Tokens, Offsets, and Extras.
 
 ## Stream Content
@@ -503,9 +503,9 @@ Offsets:
 
 Extras:
 : A sequence of prefix-varints ({{varint}}) carrying the overflow
-  values of {{glo-overflow-rules}}.
+  values of {{spl-overflow-rules}}.
 
-## Overflow Rules {#glo-overflow-rules}
+## Overflow Rules {#spl-overflow-rules}
 
 When LL == 15 is read from a token, the decoder MUST read a varint
 from the Extras stream and add it to LL.
@@ -626,13 +626,13 @@ Three further encoder-side choices are named here only because they are
 easily mistaken for wire requirements. The reference encoder nudges
 fitted code lengths toward a flatter tree at levels 6-7. At levels 1-5
 it may refuse matches closer than 32 bytes. At levels 3-5 it may re-emit
-a match longer than 19 bytes, which a GLO token would otherwise escape
+a match longer than 19 bytes, which a SPL token would otherwise escape
 to an Extras varint, as a chain of inline matches of at most 19 bytes at
 the same offset, so that the decoder never takes that escape; it does so
 within a per-level cap, and only in blocks where the escape looks poorly
 predicted. These choices change which sequences an encoder emits, never
 how they are encoded. The nudged lengths remain an ordinary canonical,
-Kraft-exact code, the result is an ordinary GLO or GHI block, and none
+Kraft-exact code, the result is an ordinary SPL or PAK block, and none
 of the choices is observable on the wire.
 
 ## Shared-Table Huffman Literal Section {#shared-huffman-literal-section}
@@ -658,40 +658,40 @@ The level-7 token section reuses the {{huffman-literal-section}}
 layout (Token Encoding = 2, including the inline 128-byte code-length
 header) over the token byte alphabet.
 
-# GHI Block (Type 2) {#ghi-block}
+# PAK Block (Type 2) {#pak-block}
 
-The GHI block ("General LZ, HIgh throughput") is an alternate
+The PAK block ("PAcKed sequences") is an alternate
 compressed encoding optimised for raw decompression speed. It uses
 packed 32-bit sequence words rather than separated streams.
 
-## GHI Payload Layout
+## PAK Payload Layout
 
 ~~~
 +-------------------------------+
-| GHI Header (12 bytes)         |
+| PAK Header (12 bytes)         |
 | Literals stream               |
 | Sequences stream (N x 4 B)    |
 | Extras stream (+ slack pad)   |
 +-------------------------------+
 ~~~
 
-## GHI Header
+## PAK Header
 
-The GHI header is binary-identical to the GLO header. In a GHI block
+The PAK header is binary-identical to the SPL header. In a PAK block
 Literal Encoding and Token Encoding MUST be 0, and a decoder MUST reject
 any other value; the Literals section therefore holds raw literals and
 occupies Literal Count bytes. Match-Length Encoding is written as 0 and
 ignored. Offset Encoding is written as 0 and MUST be ignored by
-decoders: GHI has no offset stream, and sequence words always store
+decoders: PAK has no offset stream, and sequence words always store
 16-bit offsets.
 
-## Section Descriptors {#ghi-section-descriptors}
+## Section Descriptors {#pak-section-descriptors}
 
-A GHI block carries no section descriptors at all. Every size
+A PAK block carries no section descriptors at all. Every size
 follows from the header:
 
 - The Literals section occupies Literal Count bytes, literals being
-  always RAW in a GHI block.
+  always RAW in a PAK block.
 - The Sequences section occupies 4 * Sequence Count bytes.
 - The Extras section occupies whatever payload remains, including
   any slack padding.
@@ -1004,7 +1004,7 @@ corresponding header.
 
 When the File Header has HAS_CHECKSUM = 1:
 
-- Every data block (RAW, GLO, GHI) MUST carry a 4-byte trailing
+- Every data block (RAW, SPL, PAK) MUST carry a 4-byte trailing
   checksum.
 - The checksum input is the block's decompressed bytes, excluding any
   dictionary prefix ({{dictionary}}). For a RAW block these are its
@@ -1312,7 +1312,7 @@ following procedure:
    c. Validate Compressed Payload Size against the block size
       ({{block-container}}), then read that many bytes of payload.
    d. Decode the payload according to the Block Type
-      ({{raw-block}}, {{glo-block}}, {{ghi-block}}).
+      ({{raw-block}}, {{spl-block}}, {{pak-block}}).
    e. If HAS_CHECKSUM = 1, read the 4-byte trailing checksum, verify it
       against the decoded bytes seeded with the block's position
       ({{per-block-checksum}}), and fold it into the Archive Digest
@@ -1357,7 +1357,7 @@ correctly requires a version bump:
 |------------------------------------------|--------------|---------------------------------|
 | New block type added                     | Version bump | Adding a hypothetical GLR block |
 | Reserved field or flag bit given meaning | Version bump | Defining a reserved flag bit    |
-| Existing block encoding changed          | Version bump | Changing GLO token layout       |
+| Existing block encoding changed          | Version bump | Changing SPL token layout       |
 | Header or footer layout changed          | Version bump | Resizing the File Header        |
 | Checksum algorithm changed               | Version bump | Replacing RapidHash             |
 
@@ -1387,10 +1387,10 @@ A minimum conforming decoder for Format Version 9 MUST support:
 
 - File header parsing and checksum validation.
 - RAW blocks (type 0): passthrough copy.
-- GLO blocks (type 1): full LZ decoding with extras varints,
+- SPL blocks (type 1): full LZ decoding with extras varints,
   including the Huffman entropy sections ({{huffman-literal-section}},
   PivCo layout) with code lengths up to 11 bits.
-- GHI blocks (type 2): full LZ decoding with extras varints.
+- PAK blocks (type 2): full LZ decoding with extras varints.
 - EOF block (type 255): stream termination.
 - SEK block (type 254): header check and table skip when
   HAS_SEEK_TABLE = 1 ({{sek-block}}).
@@ -1489,7 +1489,7 @@ Source Size) before allocating large output buffers.
 
 ## Memory Safety in LZ Decoding
 
-The LZ decoders for GLO and GHI MUST validate that every match
+The LZ decoders for SPL and PAK MUST validate that every match
 reference stays strictly within the bounds of the currently
 produced output. A negative offset or an offset greater than the
 number of bytes already produced MUST be rejected as corrupt data.
@@ -1632,8 +1632,8 @@ with the following initial assignments:
 | Value      | Mnemonic   | Reference        |
 |-----------:|------------|------------------|
 | 0          | RAW        | {{raw-block}}    |
-| 1          | GLO        | {{glo-block}}    |
-| 2          | GHI        | {{ghi-block}}    |
+| 1          | SPL        | {{spl-block}}    |
+| 2          | PAK        | {{pak-block}}    |
 | 3..253     | Unassigned | -                |
 | 254        | SEK        | {{sek-block}}    |
 | 255        | EOF        | {{eof-block}}    |
