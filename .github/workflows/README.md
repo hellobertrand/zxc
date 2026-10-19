@@ -72,6 +72,11 @@ The field-level structural validation runs separately, as the `format_golden` an
 
 Builds [`contrib/linux-kernel`](../../contrib/linux-kernel/README.md) - the dependency header, the shims, the Kbuild and the self-test module - against the runner kernel's headers, under `-Werror`. The module's init round-trips a block and a frame at levels 3 and 7 and refuses to load on a mismatch. Off the PR path on purpose.
 
+### kernel-windows.yml - Windows Kernel Library
+**Triggers:** Changes to `contrib/windows-kernel/`, `include/` or `src/lib/`; weekly; manual dispatch
+
+Builds [`contrib/windows-kernel`](../../contrib/windows-kernel/README.md) - the dependency header, the property sheets, the kernel-mode static library and the self-test driver that links it - for x64 and ARM64 at the Windows 10 2004 target, then asserts with `check-image.ps1` that the image imports `ntoskrnl.exe` only and is a Native image of the right machine and subsystem version. The runner image has Visual Studio 2026 with the WDK's Visual Studio extension but no kit, so the job installs the 28000 SDK and WDK, the kit line built for Visual Studio 2026, with Microsoft's installers first, each pinned to a versioned URL and checked against its SHA-256 and Authenticode signature. `check-image.ps1` also fails on any `ymm` or `zmm` register in the disassembly, so no AVX instruction reaches the image. Nothing is loaded; that is a manual step on a test-signed VM, as for the Linux module.
+
 ### scorecard.yml - OSSF Scorecard
 **Triggers:** Push to main, scheduled (weekly), manual dispatch
 

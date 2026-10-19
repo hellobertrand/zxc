@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- SPDX-License-Identifier: BSD-3-Clause -->
+<!-- ZXC - High-performance lossless compression -->
+<!-- Copyright (c) Jean Gautier and contributors. -->
+<!--
+  Imported by both projects after Microsoft.Cpp.props, and by a consumer that
+  vendors the units. Rules only: no output directories, no paths into this
+  tree; the projects set those before importing it. What a kernel-mode build
+  of zxc needs beyond the toolset's defaults, and why:
+
+  - Include order. The toolset puts the kit's legacy km\crt CRT headers first;
+    with them, <stdint.h> cannot be included at all (crtdefs.h and the
+    compiler's vcruntime.h redefine each other's macros, C4005/C4083). The
+    public zxc headers need <stdint.h>. So the standard path is ignored and
+    the compiler's headers, the UCRT, km and shared are named in that order.
+  - /std:c17: the core's C standard. The toolset's CL rule drops the
+    LanguageStandard_C property, hence AdditionalOptions. /Zc:preprocessor-:
+    the kit's wdm.h ARM64 macros fail the conforming preprocessor (C5103).
+  - ZXC_ONLY_DEFAULT, not ZXC_DISABLE_SIMD: baseline SSE2 (x64) and NEON
+    (ARM64) are legal in kernel mode; the CPUID probes compile out.
+  - /Z7 so the library carries its own debug info, /Zl so no default-library
+    directive leaks into the objects, /O2 because this is a codec.
+  - /kernel, spelled out: the toolset passes it to Driver configurations
+    only; a StaticLibrary gets the kernel include and library paths without
+    the compiler switch, and zxc_deps.h refuses to build without it.
+-->
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemDefinitionGroup>
+    <ClCompile>
+      <IgnoreStandardIncludePath>true</IgnoreStandardIncludePath>
+      <AdditionalIncludeDirectories>$(VC_IncludePath);$(UniversalCRT_IncludePath);$(KM_IncludePath);$(KIT_SHARED_IncludePath);%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalOptions>/kernel /std:c17 /Zc:preprocessor- %(AdditionalOptions)</AdditionalOptions>
+      <PreprocessorDefinitions>ZXC_STATIC_DEFINE;ZXC_ONLY_DEFAULT;ZXC_FUNCTION_SUFFIX=_default;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <WarningLevel>Level4</WarningLevel>
+      <TreatWarningAsError>true</TreatWarningAsError>
+      <DisableSpecificWarnings>4244;4310;%(DisableSpecificWarnings)</DisableSpecificWarnings>
+      <DebugInformationFormat>OldStyle</DebugInformationFormat>
+      <OmitDefaultLibName>true</OmitDefaultLibName>
+      <!-- No /GL: the toolset turns whole-program optimization on for ARM64,
+           and an LTCG archive links only with the compiler that built it. -->
+      <WholeProgramOptimization>false</WholeProgramOptimization>
+    </ClCompile>
+  </ItemDefinitionGroup>
+
+  <ItemDefinitionGroup Condition="'$(Configuration)' == 'Release'">
+    <ClCompile>
+      <Optimization>MaxSpeed</Optimization>
+      <FavorSizeOrSpeed>Speed</FavorSizeOrSpeed>
+    </ClCompile>
+  </ItemDefinitionGroup>
+</Project>

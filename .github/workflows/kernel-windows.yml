@@ -1,0 +1,121 @@
+name: Windows Kernel Library
+
+# Builds contrib/windows-kernel: the kernel-mode static library and the
+# self-test driver that links it, then asserts the image's imports, machine
+# and subsystem. Like kernel.yml, off the PR path unless the tree or the
+# library change.
+#
+# The runner image carries Visual Studio 2026 with the WDK's Visual Studio
+# extension (the kernel-mode toolset) but not a kit (km headers and
+# libraries), so the job installs the 28000 SDK and WDK, the Visual Studio
+# 2026 line, with Microsoft's installers first.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 5 * * 2'
+  push:
+    branches: [ main ]
+    paths:
+      - 'contrib/windows-kernel/**'
+      - 'include/**'
+      - 'src/lib/**'
+      - '.github/workflows/kernel-windows.yml'
+  pull_request:
+    branches: [ main, candidate ]
+    paths:
+      - 'contrib/windows-kernel/**'
+      - 'include/**'
+      - 'src/lib/**'
+      - '.github/workflows/kernel-windows.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+
+jobs:
+  library:
+    name: "Kernel library (${{ matrix.platform }}, Windows 10 2004)"
+    runs-on: windows-2025
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [x64, ARM64]
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # SDK and WDK 10.0.28000.2526, the Visual Studio 2026 line: its MSBuild
+      # task assemblies are the 18.0 ones that instance loads. Skipped when the
+      # kit is already there. The installers are pinned to their versioned
+      # download URLs (what the fwlinks go.microsoft.com/fwlink/?linkid=2372508
+      # and ?LinkId=2371554 resolved to) and checked against their SHA-256 and
+      # Microsoft's Authenticode signature before they run; the bootstrappers
+      # verify the signed payloads they fetch.
+      - name: Install the 28000 SDK and WDK
+        shell: pwsh
+        run: |
+          $km = "${env:ProgramFiles(x86)}\Windows Kits\10\Include\10.0.28000.0\km\ntddk.h"
+          if (Test-Path $km) { "kit 28000 already present: $km"; exit 0 }
+          $kits = @(
+            @("winsdksetup.exe", "https://download.microsoft.com/download/06fc99ac-527e-451e-a536-8866695a2e7e/KIT_BUNDLE_WINDOWSSDK_MEDIACREATION/winsdksetup.exe", "02988EA51EAB2A2DB53E19735E51C97A6D221ADA74B9174FA0868870B9403BA0"),
+            @("wdksetup.exe", "https://download.microsoft.com/download/eb29e759-d7ad-4541-b60c-e9774ad8c593/KIT_BUNDLE_WDK_MEDIACREATION/wdksetup.exe", "C80040A9DBA50460CAE149580A41C05B32742FB0463683945905F55949CAEF78")
+          )
+          foreach ($kit in $kits) {
+            $exe = "$env:RUNNER_TEMP\$($kit[0])"
+            Invoke-WebRequest -Uri $kit[1] -OutFile $exe
+            $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash
+            if ($sha -ne $kit[2]) { Write-Host "::error::$($kit[0]) SHA-256 is $sha, expected $($kit[2])"; exit 1 }
+            $sig = Get-AuthenticodeSignature $exe
+            if ($sig.Status -ne 'Valid' -or $sig.SignerCertificate.Subject -notmatch '\bO=Microsoft Corporation\b') {
+              Write-Host "::error::$($kit[0]) signature is $($sig.Status), signer '$($sig.SignerCertificate.Subject)'"; exit 1
+            }
+            $p = Start-Process -FilePath $exe -ArgumentList "/features", "+", "/quiet", "/norestart" -Wait -PassThru
+            if ($p.ExitCode) { Write-Host "::error::$($kit[0]) exited $($p.ExitCode)"; exit 1 }
+          }
+          if (-not (Test-Path $km)) { Write-Host "::error::kit 28000 kernel headers missing after the install"; exit 1 }
+
+      - name: Locate the toolchain
+        id: tools
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          # Visual Studio 2026 with the WDK extension, the instance the 28000 kit's
+          # MSBuild task assemblies are built for.
+          $vs = & $vswhere -latest -products * -version '[18.0,19.0)' -requires Component.Microsoft.Windows.DriverKit -property installationPath | Select-Object -First 1
+          $msbuild = if ($vs) { Get-ChildItem "$vs\MSBuild\*\Bin\MSBuild.exe" | Select-Object -First 1 -ExpandProperty FullName }
+          $dumpbin = if ($vs) { Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName }
+          $km = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\Include\10.0.28000.0\km\ntddk.h" -ErrorAction SilentlyContinue
+          foreach ($pair in @(@("Visual Studio with the WDK extension", $vs), @("MSBuild", $msbuild), @("dumpbin", $dumpbin), @("kernel headers (km\ntddk.h)", $km))) {
+            if (-not $pair[1]) {
+              Write-Host "::error::$($pair[0]) not found on this runner image"
+              # What the image does carry, so the next fix is informed.
+              Write-Host "::group::Visual Studio instances"
+              & $vswhere -all -prerelease -products * -format json | ConvertFrom-Json | ForEach-Object { "$($_.installationVersion)  $($_.displayName)  $($_.installationPath)" }
+              "with the WDK extension: " + ((& $vswhere -all -prerelease -products * -requires Component.Microsoft.Windows.DriverKit -property installationPath) -join '; ')
+              Write-Host "::endgroup::"
+              Write-Host "::group::Kit build task assemblies"
+              Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\build\*\bin\Microsoft.DriverKit.Build.Tasks*.dll" -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName }
+              Write-Host "::endgroup::"
+              exit 1
+            }
+            "$($pair[0]): $($pair[1])"
+          }
+          "msbuild=$msbuild" >> $env:GITHUB_OUTPUT
+          "dumpbin=$dumpbin" >> $env:GITHUB_OUTPUT
+
+      - name: Build the library and the self-test driver
+        shell: pwsh
+        run: |
+          & "${{ steps.tools.outputs.msbuild }}" contrib\windows-kernel\zxc_selftest.vcxproj /nologo /m /p:Configuration=Release /p:Platform=${{ matrix.platform }} /p:SignMode=Off /p:WindowsTargetPlatformVersion=10.0.28000.0
+          exit $LASTEXITCODE
+
+      - name: Check the image
+        shell: pwsh
+        run: |
+          .\contrib\windows-kernel\check-image.ps1 -Image contrib\windows-kernel\build\${{ matrix.platform }}\Release\zxc_selftest.sys -Machine ${{ matrix.platform }} -SubsystemVersion 10.00 -Dumpbin "${{ steps.tools.outputs.dumpbin }}"
