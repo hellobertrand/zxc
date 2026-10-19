@@ -27,7 +27,7 @@ ZXC utilizes a computationally intensive encoder to generate a bitstream specifi
 ZXC employs a Producer-Consumer architecture to decouple I/O operations from CPU-intensive tasks. This allows for parallel processing where input reading, compression/decompression, and output writing occur simultaneously, effectively hiding I/O latency.
 
 ### 3.2 Modular Architecture
-The ZXC file format is inherently modular. **Each block is independent and is encoded with whichever of ZXC's block codecs yields the smallest output** — SPL or PAK (the LZ paths) or RAW (stored). Independent blocks keep the format simple and enable O(1) seekable random access.
+The ZXC file format is inherently modular. **Each block is independent and is encoded by the block codec its compression level selects**: levels 1 and 2 emit PAK, higher levels emit SPL, and the encoder falls back to RAW (stored) when the coded form would not shrink the data. Independent blocks keep the format simple and enable O(1) seekable random access.
 
 > **ZXC is a pure LZ byte codec.** It compresses byte streams via LZ77 matching plus entropy coding; it has no type-aware or numeric block codec. Numeric and columnar data (timestamps, IDs, float columns) compress best when a **reversible pre-filter** — delta or byte-shuffle — is applied *before* compression and inverted *after* decompression. ZXC keeps such transforms **out of the codec and the format on purpose**: the caller, which knows the element type, owns the filter. See the *Compressing Numeric Data* example in [`EXAMPLES.md`](EXAMPLES.md).
 
