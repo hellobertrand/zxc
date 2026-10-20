@@ -1962,5 +1962,139 @@ else
     log_fail "-dcf on input starting with 0xF5: file rc=$RC_FILE (want 0), stdin rc=$RC_STDIN (want != 0)"
 fi
 
+# 38. Outputs inherit the input's mode and mtime, as with gzip and zstd
+echo "Testing metadata preservation..."
+META="$TEST_DIR/meta"
+IS_WINDOWS=0
+case "$(uname -s 2>/dev/null)" in MINGW*|MSYS*|CYGWIN*) IS_WINDOWS=1 ;; esac
+file_attrs() {  # "<mode> <mtime>"; Windows has no mode bits: mtime only. "missing" under set -e
+    if [[ $IS_WINDOWS -eq 1 ]]; then
+        stat -c '%Y' "$1" 2>/dev/null || echo missing
+    else
+        stat -c '%a %Y' "$1" 2>/dev/null || stat -f '%Lp %m' "$1" 2>/dev/null || echo missing
+    fi
+}
+head -c 100000 "$TEST_FILE" > "$META"
+chmod 600 "$META"
+touch -t 202001011200 "$META"
+WANT=$(file_attrs "$META")
+
+# 38.1 Round trip: the archive, then the restored file, carry the original's
+"$ZXC_BIN" -q "$META"
+GOT_XC=$(file_attrs "$META.zxc")
+"$ZXC_BIN" -d -q "$META.zxc"
+GOT_DEC=$(file_attrs "$META")
+if [[ "$GOT_XC" == "$WANT" && "$GOT_DEC" == "$WANT" ]]; then
+    log_pass "Mode and mtime survive compression and decompression"
+else
+    log_fail "Metadata lost: want '$WANT', archive '$GOT_XC', restored '$GOT_DEC'"
+fi
+
+# 38.2 -f onto an existing, wider file still yields the input's mode
+printf 'old\n' > "$META.zxc"
+chmod 644 "$META.zxc"
+"$ZXC_BIN" -q -k -f "$META"
+GOT=$(file_attrs "$META.zxc")
+if [[ "$GOT" == "$WANT" ]]; then
+    log_pass "-f overwrite takes the input's mode and mtime"
+else
+    log_fail "-f overwrite: want '$WANT', got '$GOT'"
+fi
+rm -f "$META.zxc"
+
+# 38.3 --no-preserve leaves the output's mtime current
+"$ZXC_BIN" -q -k --no-preserve "$META"
+GOT=$(file_attrs "$META.zxc")
+if [[ "${GOT##* }" != "${WANT##* }" ]]; then
+    log_pass "--no-preserve keeps a fresh mtime"
+else
+    log_fail "--no-preserve copied the input's mtime"
+fi
+rm -f "$META.zxc"
+
+# 38.4 -m and -r keep each file's own attributes; --no-preserve reaches them too
+META_DIR="$TEST_DIR/meta_tree"
+mkdir -p "$META_DIR/sub"
+head -c 50000 "$TEST_FILE" > "$META_DIR/a"
+head -c 60000 "$TEST_FILE" > "$META_DIR/sub/b"
+chmod 600 "$META_DIR/a"
+chmod 640 "$META_DIR/sub/b"
+touch -t 202001011200 "$META_DIR/a"
+touch -t 201806150930 "$META_DIR/sub/b"
+WANT_A=$(file_attrs "$META_DIR/a")
+WANT_B=$(file_attrs "$META_DIR/sub/b")
+"$ZXC_BIN" -q -m "$META_DIR/a" "$META_DIR/sub/b"
+GOT_A=$(file_attrs "$META_DIR/a.zxc")
+GOT_B=$(file_attrs "$META_DIR/sub/b.zxc")
+"$ZXC_BIN" -d -q -r "$META_DIR"
+GOT_DEC="$(file_attrs "$META_DIR/a") $(file_attrs "$META_DIR/sub/b")"
+if [[ "$GOT_A $GOT_B" == "$WANT_A $WANT_B" && "$GOT_DEC" == "$WANT_A $WANT_B" ]]; then
+    log_pass "-m and -r keep each file's mode and mtime"
+else
+    log_fail "-m/-r metadata: want '$WANT_A $WANT_B', archives '$GOT_A $GOT_B', restored '$GOT_DEC'"
+fi
+"$ZXC_BIN" -q -r -k --no-preserve "$META_DIR"
+GOT_A=$(file_attrs "$META_DIR/a.zxc")
+GOT_B=$(file_attrs "$META_DIR/sub/b.zxc")
+if [[ "${GOT_A##* }" != "${WANT_A##* }" && "${GOT_B##* }" != "${WANT_B##* }" ]]; then
+    log_pass "-r --no-preserve keeps fresh mtimes"
+else
+    log_fail "-r --no-preserve copied an input's mtime"
+fi
+
+if [[ $IS_WINDOWS -eq 1 ]]; then
+    echo "  [SKIP] read-only and link outputs: POSIX only"
+else
+    # 38.5 A read-only output, inherited from a read-only input, is still replaced by -f
+    META_RO="$TEST_DIR/meta_ro"
+    head -c 50000 "$TEST_FILE" > "$META_RO"
+    chmod 444 "$META_RO"
+    set +e
+    "$ZXC_BIN" -q -k "$META_RO" && "$ZXC_BIN" -q -k -f "$META_RO" &&
+        "$ZXC_BIN" -q -d -k -f "$META_RO.zxc"
+    RC=$?
+    set -e
+    GOT="$(file_attrs "$META_RO") $(file_attrs "$META_RO.zxc")"
+    if [[ $RC -eq 0 && "${GOT%% *}" == "444" ]] && cmp -s "$META_RO" <(head -c 50000 "$TEST_FILE"); then
+        log_pass "-f replaces read-only outputs"
+    else
+        log_fail "-f onto a read-only output: rc=$RC, attrs '$GOT'"
+    fi
+
+    # 38.6 A link at the output path is replaced, never written through
+    META_LN="$TEST_DIR/meta_ln"
+    head -c 50000 "$TEST_FILE" > "$META_LN"
+    cp "$META_LN" "$META_LN.orig"
+    ln -s "$TEST_DIR/meta_victim" "$META_LN.zxc"
+    set +e
+    "$ZXC_BIN" -q -k "$META_LN" 2>/dev/null
+    RC_NOF=$?
+    "$ZXC_BIN" -q -k -f "$META_LN"
+    RC_F=$?
+    set -e
+    if [[ $RC_NOF -ne 0 && $RC_F -eq 0 && ! -e "$TEST_DIR/meta_victim" && ! -L "$META_LN.zxc" ]]; then
+        log_pass "A dangling symlink output is refused, then replaced by -f"
+    else
+        log_fail "Symlink output: rc=$RC_NOF/$RC_F (want !=0/0), target created or link kept"
+    fi
+    rm -f "$META_LN.zxc"
+    ln -s "$(basename "$META_LN")" "$META_LN.zxc"  # output links to the input
+    "$ZXC_BIN" -q -f "$META_LN"
+    if "$ZXC_BIN" -dc "$META_LN.zxc" | cmp -s - "$META_LN.orig"; then
+        log_pass "An output symlinked to the input does not destroy it"
+    else
+        log_fail "Compressing onto a symlink to the input lost the data"
+    fi
+    cp "$META_LN.orig" "$META_LN"
+    rm -f "$META_LN.zxc"
+    ln "$META_LN" "$META_LN.zxc"  # output hard-linked to the input
+    "$ZXC_BIN" -q -k -f "$META_LN"
+    if cmp -s "$META_LN" "$META_LN.orig" && "$ZXC_BIN" -dc "$META_LN.zxc" | cmp -s - "$META_LN.orig"; then
+        log_pass "An output hard-linked to the input does not overwrite it"
+    else
+        log_fail "Compressing onto a hard link to the input overwrote it"
+    fi
+fi
+
 echo "All tests passed!"
 exit 0

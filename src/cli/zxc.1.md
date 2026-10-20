@@ -82,8 +82,11 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-k**, **--keep**
 : Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.
 
+**--no-preserve**
+: Do not copy the input's attributes to the output. By default, when the input is a regular file, the output takes its permission bits (no setuid, setgid or sticky), access and modification times, group and, as root, owner; decompression thus restores the original's. The output is created `0600` and gets its final mode once complete; a group that cannot be kept loses its permission bits. If the mode or times cannot be set, zxc warns and keeps the input. On Windows only the times are copied. The format stores none of these.
+
 **-f**, **--force**
-: Force overwrite of the *OUTPUT-FILE* if it already exists. When decompressing to standard output (with **-c**, or from standard input without an *OUTPUT-FILE*), also copy input that is not a ZXC archive unchanged. A named file is decoded only if it starts with the 4-byte magic word. Standard input can't be rewound, so there only its first byte counts: input that starts with `0xF5`, which never starts UTF-8 text, is decoded as an archive.
+: Force overwrite of the *OUTPUT-FILE* if it already exists. An existing file or symbolic link is removed and a new file created, so a link at the output path is replaced, never followed; a device such as `/dev/null` is written as is. When decompressing to standard output (with **-c**, or from standard input without an *OUTPUT-FILE*), also copy input that is not a ZXC archive unchanged. A named file is decoded only if it starts with the 4-byte magic word. Standard input can't be rewound, so there only its first byte counts: input that starts with `0xF5`, which never starts UTF-8 text, is decoded as an archive.
 
 **-c**, **--stdout**
 : Force writing to standard output (`stdout`), even if it is the console.

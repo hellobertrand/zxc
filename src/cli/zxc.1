@@ -206,8 +206,23 @@ When the output is named explicitly \(em with \f[B]\-o\f[R] or a
 positional \f[I]OUTPUT\-FILE\f[R] \(em the input is always kept, so this
 flag is only needed for the in\-place case.
 .TP
+\f[B]\-\-no\-preserve\f[R]
+Do not copy the input\(aqs attributes to the output.
+By default, when the input is a regular file, the output takes its
+permission bits (no setuid, setgid or sticky), access and modification
+times, group and, as root, owner; decompression thus restores the
+original\(aqs.
+The output is created \f[CR]0600\f[R] and gets its final mode once
+complete; a group that cannot be kept loses its permission bits.
+If the mode or times cannot be set, zxc warns and keeps the input.
+On Windows only the times are copied.
+The format stores none of these.
+.TP
 \f[B]\-f\f[R], \f[B]\-\-force\f[R]
 Force overwrite of the \f[I]OUTPUT\-FILE\f[R] if it already exists.
+An existing file or symbolic link is removed and a new file created, so
+a link at the output path is replaced, never followed; a device such as
+\f[CR]/dev/null\f[R] is written as is.
 When decompressing to standard output (with \f[B]\-c\f[R], or from
 standard input without an \f[I]OUTPUT\-FILE\f[R]), also copy input that
 is not a ZXC archive unchanged.
