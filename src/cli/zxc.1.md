@@ -37,7 +37,7 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : List archive information: compressed size, uncompressed size, compression ratio, checksum and seek table (`enabled`, `disabled`, or `mixed` across concatenated frames), dictionary ID (if any) and frame count; the file name is shown when several files are listed. Also accepts a `.zxd` dictionary file, in which case it prints the dictionary's `dict_id`.
 
 **--train**
-: Train a dictionary from the input *FILE*s given as training samples. The output path is set with **-o** (see **--output**); when **-o** is omitted, the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory. See **DICTIONARIES**.
+: Train a dictionary from the input *FILE*s given as training samples. The output path is set with **-o** (see **--output**); when **-o** is omitted, the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory. An existing file there is replaced only with **-f**. See **DICTIONARIES**.
 
 **-t**, **--test**
 : Test the integrity of a compressed FILE. It decodes the file and verifies its checksum (if present) without writing any output.

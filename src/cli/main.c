@@ -1165,6 +1165,32 @@ static int zxc_archive_has_checksum(FILE* f) {
     return c.checksummed == 0 ? 0 : c.checksummed == c.frames ? 1 : 2;
 }
 
+#ifndef _WIN32
+/**
+ * @brief Opens @p path for writing, never through a link.
+ *
+ * Anything already at @p path, even a dangling link, is refused, or with
+ * @p force replaced: neither a link's target, the input itself nor a read-only
+ * file is written through. Devices and FIFOs (/dev/null) are opened as they are.
+ *
+ * @param[out] special Set to 1 for a device or FIFO, 0 for a new file.
+ * @return The descriptor, or -1 with errno set.
+ */
+static int zxc_open_output(const char* path, int force, mode_t mode, int* special) {
+    struct stat st;
+    const int exists = lstat(path, &st) == 0;
+    *special = exists && !S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode);
+    if (exists && !force) {
+        errno = EEXIST;
+        return -1;
+    }
+    if (*special) return open(path, O_WRONLY | O_TRUNC | O_NOFOLLOW);
+    if (exists && unlink(path) != 0) return -1;
+    // O_EXCL: a link planted since is refused, not followed
+    return open(path, O_CREAT | O_EXCL | O_WRONLY, mode);
+}
+#endif
+
 /** @brief Input attributes copied to the output, as gzip and zstd do. */
 typedef struct {
     int valid;  // 0: input is not a regular file
@@ -1227,6 +1253,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     int use_stdin = 1;
     int use_stdout = 0;
     int created_out_file = 0;
+    int out_special = 0;  // device or FIFO: never unlinked
     int overall_ret = 0;
     zxc_file_attrs_t in_attrs = {0};
 
@@ -1317,24 +1344,12 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 #ifdef _WIN32
         f_out = fopen(resolved_out_path, "wb");
 #else
-        // -f replaces a file or link instead of writing through it, which would
-        // reach the link's target, the input itself, or a read-only file.
-        // Devices and FIFOs (/dev/null) are written as they are.
-        struct stat out_st;
-        const int out_exists = lstat(resolved_out_path, &out_st) == 0;
-        const int out_special = out_exists && !S_ISREG(out_st.st_mode) && !S_ISLNK(out_st.st_mode);
-        if (force && out_exists && !out_special && unlink(resolved_out_path) != 0) {
-            zxc_log("Error replacing output %s: %s\n", resolved_out_path, strerror(errno));
-            if (!use_stdin) fclose(f_in);
-            return 1;
-        }
+        // Private while written if the input's mode is restored at the end
+        const int fd = zxc_open_output(
+            resolved_out_path, force,
+            in_attrs.valid ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
+            &out_special);
         if (out_special) in_attrs.valid = 0;
-        // O_EXCL: a link planted since is refused, not followed. Private while
-        // written if the input's mode is restored at the end.
-        const int fd = out_special ? open(resolved_out_path, O_WRONLY | O_TRUNC | O_NOFOLLOW)
-                                   : open(resolved_out_path, O_CREAT | O_EXCL | O_WRONLY,
-                                          in_attrs.valid ? S_IRUSR | S_IWUSR
-                                                         : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         if (fd == -1) {
             zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
@@ -1509,7 +1524,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (bytes >= 0 && write_error) {
         zxc_log("Error: %s: write failed: %s\n", created_out_file ? resolved_out_path : "<stdout>",
                 strerror(errno));
-        if (created_out_file) unlink(resolved_out_path);
+        if (created_out_file && !out_special) unlink(resolved_out_path);
         return 1;
     }
 
@@ -1581,7 +1596,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             }
         } else {
             zxc_log("Error: %s: %s\n", in_path ? in_path : "<stdin>", zxc_error_name((int)bytes));
-            if (created_out_file) unlink(resolved_out_path);
+            if (created_out_file && !out_special) unlink(resolved_out_path);
         }
         overall_ret = 1;
     }
@@ -2060,13 +2075,20 @@ int main(int argc, char** argv) {
             }
         }
 
+        if (!force && access(final_path, F_OK) == 0) {
+            fprintf(stderr, "Output exists. Use -f to overwrite '%s'.\n", final_path);
+            free(zxd);
+            free(dict);
+            return 1;
+        }
         FILE* out;
+        int special = 0;  // device or FIFO: never unlinked
 #ifdef _WIN32
         out = fopen(final_path, "wb");
 #else
         {
-            const int fd = open(final_path, O_CREAT | O_WRONLY | O_TRUNC,
-                                S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+            const int fd =
+                zxc_open_output(final_path, force, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &special);
             out = (fd != -1) ? fdopen(fd, "wb") : NULL;
         }
 #endif
@@ -2081,7 +2103,7 @@ int main(int argc, char** argv) {
         free(zxd);
         if (nwritten != (size_t)zxd_sz || close_rc != 0) {
             fprintf(stderr, "Error: failed to write '%s': %s\n", final_path, strerror(errno));
-            unlink(final_path);
+            if (!special) unlink(final_path);
             free(dict);
             return 1;
         }

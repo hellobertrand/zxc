@@ -1176,6 +1176,37 @@ else
     log_fail "Train to directory should create dictionary_<dict_id>.zxd"
 fi
 
+# 25.10b An existing dictionary, or a link at its path, needs -f and is then replaced
+set +e
+"$ZXC_BIN" --train -o "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
+RC_NOF=$?
+"$ZXC_BIN" --train -f -o "$DICT_FILE" "$TEST_DIR"/sample_*.txt 2>/dev/null
+RC_F=$?
+set -e
+if [[ $RC_NOF -ne 0 && $RC_F -eq 0 && -s "$DICT_FILE" ]]; then
+    log_pass "--train refuses an existing output without -f"
+else
+    log_fail "--train onto an existing output: rc=$RC_NOF/$RC_F (want !=0/0)"
+fi
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] --train link output: POSIX only" ;;
+    *)
+        DICT_LN="$TEST_DIR/dict_ln.zxd"
+        ln -s "$TEST_DIR/dict_victim" "$DICT_LN"
+        set +e
+        "$ZXC_BIN" --train -o "$DICT_LN" "$TEST_DIR"/sample_*.txt 2>/dev/null
+        RC_NOF=$?
+        "$ZXC_BIN" --train -f -o "$DICT_LN" "$TEST_DIR"/sample_*.txt 2>/dev/null
+        RC_F=$?
+        set -e
+        if [[ $RC_NOF -ne 0 && $RC_F -eq 0 && ! -e "$TEST_DIR/dict_victim" && ! -L "$DICT_LN" ]]; then
+            log_pass "--train replaces a link at its output, never follows it"
+        else
+            log_fail "--train link output: rc=$RC_NOF/$RC_F (want !=0/0), target created or link kept"
+        fi
+        ;;
+esac
+
 # 25.11 -D is mandatory on decompression: no auto-lookup, even if the .zxd sits
 # right next to the archive.
 echo "  Testing -D is mandatory (no auto-lookup)..."
