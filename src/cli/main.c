@@ -1165,31 +1165,47 @@ static int zxc_archive_has_checksum(FILE* f) {
     return c.checksummed == 0 ? 0 : c.checksummed == c.frames ? 1 : 2;
 }
 
-#ifndef _WIN32
 /**
- * @brief Opens @p path for writing, never through a link.
+ * @brief Creates the output file at @p path, never through a link.
  *
- * Anything already at @p path, even a dangling link, is refused, or with
- * @p force replaced: neither a link's target, the input itself nor a read-only
- * file is written through. Devices and FIFOs (/dev/null) are opened as they are.
+ * Anything already there, even a dangling link, fails with EEXIST unless
+ * @p force replaces it: neither a link's target, the input itself nor a
+ * read-only file is written through. Devices and FIFOs (/dev/null) are
+ * written as they are.
  *
+ * @param owner_only 1 creates the file 0600 instead of 0644 (ignored on Windows).
  * @param[out] special Set to 1 for a device or FIFO, 0 for a new file.
- * @return The descriptor, or -1 with errno set.
+ * @return The stream, or NULL with errno set.
  */
-static int zxc_open_output(const char* path, int force, mode_t mode, int* special) {
+static FILE* zxc_create_output(const char* path, int force, int owner_only, int* special) {
+    *special = 0;
+#ifdef _WIN32
+    (void)owner_only;
+    if (!force && access(path, F_OK) == 0) {
+        errno = EEXIST;
+        return NULL;
+    }
+    return fopen(path, "wb");
+#else
     struct stat st;
     const int exists = lstat(path, &st) == 0;
-    *special = exists && !S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode);
     if (exists && !force) {
         errno = EEXIST;
-        return -1;
+        return NULL;
     }
-    if (*special) return open(path, O_WRONLY | O_TRUNC | O_NOFOLLOW);
-    if (exists && unlink(path) != 0) return -1;
+    *special = exists && !S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode);
+    if (!*special && exists && unlink(path) != 0) return NULL;
     // O_EXCL: a link planted since is refused, not followed
-    return open(path, O_CREAT | O_EXCL | O_WRONLY, mode);
-}
+    const int fd =
+        *special ? open(path, O_WRONLY | O_TRUNC | O_NOFOLLOW)
+                 : open(path, O_CREAT | O_EXCL | O_WRONLY,
+                        owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    if (fd == -1) return NULL;
+    FILE* const f = fdopen(fd, "wb");
+    if (!f) close(fd);
+    return f;
 #endif
+}
 
 /** @brief Input attributes copied to the output, as gzip and zstd do. */
 typedef struct {
@@ -1334,38 +1350,18 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             return 1;
         }
 
-        if (!force && access(resolved_out_path, F_OK) == 0) {
-            zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
-            if (!use_stdin) fclose(f_in);
-            return 1;
-        }
-
         if (g_preserve && !use_stdin) zxc_get_file_attrs(f_in, &in_attrs);
-#ifdef _WIN32
-        f_out = fopen(resolved_out_path, "wb");
-#else
         // Private while written if the input's mode is restored at the end
-        const int fd = zxc_open_output(
-            resolved_out_path, force,
-            in_attrs.valid ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH,
-            &out_special);
-        if (out_special) in_attrs.valid = 0;
-        if (fd == -1) {
-            zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
-            if (!use_stdin) fclose(f_in);
-            return 1;
-        }
-        f_out = fdopen(fd, "wb");
-#endif
-
+        f_out = zxc_create_output(resolved_out_path, force, in_attrs.valid, &out_special);
         if (!f_out) {
-            zxc_log("Error open output %s: %s\n", resolved_out_path, strerror(errno));
+            if (errno == EEXIST && !force)
+                zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
+            else
+                zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
-#ifndef _WIN32
-            if (fd != -1) close(fd);
-#endif
             return 1;
         }
+        if (out_special) in_attrs.valid = 0;
         created_out_file = 1;
     }
 
@@ -2075,25 +2071,13 @@ int main(int argc, char** argv) {
             }
         }
 
-        if (!force && access(final_path, F_OK) == 0) {
-            fprintf(stderr, "Output exists. Use -f to overwrite '%s'.\n", final_path);
-            free(zxd);
-            free(dict);
-            return 1;
-        }
-        FILE* out;
-        int special = 0;  // device or FIFO: never unlinked
-#ifdef _WIN32
-        out = fopen(final_path, "wb");
-#else
-        {
-            const int fd =
-                zxc_open_output(final_path, force, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH, &special);
-            out = (fd != -1) ? fdopen(fd, "wb") : NULL;
-        }
-#endif
+        int special;  // device or FIFO: never unlinked
+        FILE* const out = zxc_create_output(final_path, force, 0, &special);
         if (!out) {
-            fprintf(stderr, "Error: cannot create '%s': %s\n", final_path, strerror(errno));
+            if (errno == EEXIST && !force)
+                fprintf(stderr, "Output exists. Use -f to overwrite '%s'.\n", final_path);
+            else
+                fprintf(stderr, "Error: cannot create '%s': %s\n", final_path, strerror(errno));
             free(zxd);
             free(dict);
             return 1;
