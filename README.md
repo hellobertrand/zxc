@@ -220,8 +220,10 @@ zxc -d < archive.tar.zxc | tar xf -
 
 ### 2. API
 
-The API is **thread-safe** and stateless: buffers are caller-allocated with explicit bounds, and
-parameters go through options structs, so call sites stay readable and forward-compatible.
+The one-shot calls are stateless and **thread-safe**: buffers are caller-allocated with explicit
+bounds, and parameters go through options structs, so call sites stay readable and
+forward-compatible. Reusable contexts are per-thread: never share a `zxc_cctx` / `zxc_dctx`
+between threads.
 
 ```c
 #include "zxc.h"
@@ -242,8 +244,9 @@ int64_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, &d_
 
 The same structs drive `zxc_stream_compress()` / `zxc_stream_decompress()` (multi-threaded file
 streaming, one worker per core by default), reusable `zxc_cctx` / `zxc_dctx` contexts that skip
-per-call allocation in tight loops (settings are **sticky**: `NULL` reuses the last successful
-call's), and `.seekable = 1`, which appends a seek table for O(1) random access.
+per-call allocation in tight loops (`zxc_cctx` compression settings are **sticky**: `NULL` reuses
+the last successful call's, except dictionary options), and `.seekable = 1`, which appends a seek
+table for O(1) random access.
 
 **[👉 See complete examples and advanced usage](docs/EXAMPLES.md)** — stream API, reusable contexts,
 seekable readers, dictionaries and numeric pre-filters, as full compilable programs.

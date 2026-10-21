@@ -452,7 +452,7 @@ size the buffer with this function rather than re-deriving the formula.
 
 In practice the margin is one block, plus 8–12 bytes per block of framing, plus
 ~2 KB of tail; a static context (`zxc_decompress_inplace_dctx`) is three to four
-blocks. The block size (`-B`) decides both:
+blocks. The block size (`-B`) decides both (archives without a seek table):
 
 | Block size (`-B`) | Margin, 8 MB payload | Static context |
 | ---: | ---: | ---: |
@@ -460,8 +460,10 @@ blocks. The block size (`-B`) decides both:
 | 64 KB | 67–68 KB (0.8 %) | 208 KB |
 | 512 KB (default) | 514 KB (6.3 %) | 1.6 MB |
 
-The higher margin is with block checksums, which the CLI writes by default.
-Smaller blocks cost some ratio and decode speed; measure on your data.
+The higher margin is with block checksums, which the CLI writes by default. A
+seek table (`-S`) adds its ~4.1 bytes per block: +8 KB at 4 KB blocks, under
+1 KB above. Smaller blocks cost some ratio and decode speed; measure on your
+data.
 
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
 
@@ -1033,12 +1035,16 @@ free(dws);
 
 ### Sizing notes
 
+Values returned by `zxc_static_cctx_workspace_size` /
+`zxc_static_dctx_workspace_size` (arm64; the dctx column is the whole static
+workspace, work, literal, token and PivCo buffers included):
+
 | `block_size` | level 1-5 cctx | level 6-7 cctx | dctx |
 |---|---|---|---|
-| 4 KB        | ~280 KB         | ~320 KB       | ~9 KB  |
-| 64 KB       | ~410 KB         | ~930 KB       | ~129 KB |
-| 512 KB      | ~1.5 MB         | ~5.7 MB       | ~1 MB  |
-| 2 MB        | ~5.0 MB         | ~21 MB        | ~4 MB  |
+| 4 KB        | ~307 KB         | ~519 KB       | ~16 KB  |
+| 64 KB       | ~489 KB         | ~1.0 MB       | ~208 KB |
+| 512 KB      | ~1.8 MB         | ~5.9 MB       | ~1.6 MB |
+| 2 MB        | ~6.3 MB         | ~22.5 MB      | ~6.4 MB |
 
 (Exact figures depend on architecture and alignment padding; always query
 `zxc_static_*_workspace_size` rather than hard-coding.)
