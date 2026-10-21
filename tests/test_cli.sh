@@ -2116,6 +2116,15 @@ else
     else
         log_fail "Compressing onto a symlink to the input lost the data"
     fi
+    # A link to a device (/dev/stdout -> fd/1) is written through and kept
+    if [[ -L /dev/stdout ]]; then
+        if "$ZXC_BIN" -q -f -o /dev/stdout "$META_LN.orig" | "$ZXC_BIN" -dc | cmp -s - "$META_LN.orig" &&
+           [[ -L /dev/stdout ]]; then
+            log_pass "-f -o /dev/stdout writes through the device link"
+        else
+            log_fail "-f -o /dev/stdout: output wrong or /dev/stdout replaced"
+        fi
+    fi
     cp "$META_LN.orig" "$META_LN"
     rm -f "$META_LN.zxc"
     ln "$META_LN" "$META_LN.zxc"  # output hard-linked to the input

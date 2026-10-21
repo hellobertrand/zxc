@@ -1166,15 +1166,14 @@ static int zxc_archive_has_checksum(FILE* f) {
 }
 
 /**
- * @brief Creates the output file at @p path, never through a link.
+ * @brief Creates the output file at @p path.
  *
- * Anything already there, even a dangling link, fails with EEXIST unless
- * @p force replaces it: neither a link's target, the input itself nor a
- * read-only file is written through. Devices and FIFOs (/dev/null) are
- * written as they are.
+ * Anything already there fails with EEXIST unless @p force replaces it, so a
+ * link's target, the input or a read-only file is never written through. A
+ * device, FIFO or socket, even behind a link (/dev/stdout), is written as is.
  *
- * @param owner_only 1 creates the file 0600 instead of 0644 (ignored on Windows).
- * @param[out] special Set to 1 for a device or FIFO, 0 for a new file.
+ * @param owner_only 1 for 0600, 0 for 0644 (ignored on Windows).
+ * @param[out] special 1 when writing to a device, FIFO or socket.
  * @return The stream, or NULL with errno set.
  */
 static FILE* zxc_create_output(const char* path, int force, int owner_only, int* special) {
@@ -1193,13 +1192,24 @@ static FILE* zxc_create_output(const char* path, int force, int owner_only, int*
         errno = EEXIST;
         return NULL;
     }
-    *special = exists && !S_ISREG(st.st_mode) && !S_ISLNK(st.st_mode);
-    if (!*special && exists && unlink(path) != 0) return NULL;
-    // O_EXCL: a link planted since is refused, not followed
-    const int fd =
-        *special ? open(path, O_WRONLY | O_TRUNC | O_NOFOLLOW)
-                 : open(path, O_CREAT | O_EXCL | O_WRONLY,
-                        owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    struct stat target;  // stat fails on a dangling link: replaced below
+    *special = exists && stat(path, &target) == 0 && !S_ISREG(target.st_mode);
+    int fd;
+    if (*special) {
+        // No O_TRUNC: the link may have been swapped since, so recheck the fd
+        fd = open(path, O_WRONLY);
+        struct stat opened;
+        if (fd != -1 && (fstat(fd, &opened) != 0 || S_ISREG(opened.st_mode))) {
+            close(fd);
+            errno = EEXIST;
+            return NULL;
+        }
+    } else {
+        if (exists && unlink(path) != 0) return NULL;
+        // O_EXCL: a link planted since is refused, not followed
+        fd = open(path, O_CREAT | O_EXCL | O_WRONLY,
+                  owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
+    }
     if (fd == -1) return NULL;
     FILE* const f = fdopen(fd, "wb");
     if (!f) close(fd);
