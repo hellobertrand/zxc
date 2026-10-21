@@ -212,7 +212,7 @@ Levels 1..5 produce data decompressible at essentially the **same speed**;
 levels 6 and 7 add a per-block Huffman decode step — literals at level 6,
 literals *and* sequence tokens at level 7 — trading some decode throughput for
 denser output (level 7 is the densest and carries the largest decode cost).
-Pass `0` for level to use `ZXC_LEVEL_DEFAULT`.
+Pass `0` for level to use `ZXC_LEVEL_DEFAULT`. Other levels are clamped to 1–7.
 
 ### 5.4 Error Codes
 

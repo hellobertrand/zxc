@@ -111,8 +111,8 @@ ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
  * @param[in]  opts         Compression options, or NULL for defaults.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
- * @note Levels above @ref ZXC_LEVEL_ULTRA are silently clamped to it;
- *       levels <= 0 select @ref ZXC_LEVEL_DEFAULT.
+ * @note Level 0 selects @ref ZXC_LEVEL_DEFAULT; others are silently clamped
+ *       to 1..7.
  *
  * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t
  *         (e.g. @ref ZXC_ERROR_DST_TOO_SMALL).

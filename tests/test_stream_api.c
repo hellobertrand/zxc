@@ -1075,32 +1075,29 @@ int test_roundtrip_offset_mixed(void) {
 }
 
 /**
- * @brief An out-of-range level on the streaming path behaves as the maximum one.
- *
- * Level 99 must produce byte-for-byte what ZXC_LEVEL_ULTRA produces.
+ * @brief On the streaming path, 99 must produce ULTRA's bytes and -5 FASTEST's.
  */
 int test_stream_level_clamp(void) {
-    printf("=== TEST: Stream - Out-of-range level clamps to ULTRA ===\n");
+    printf("=== TEST: Stream - Out-of-range level clamps to ULTRA / FASTEST ===\n");
 
     const size_t size = 96 * 1024;
     uint8_t* input = malloc(size);
     if (!input) return 0;
     gen_lz_data(input, size);
 
-    uint8_t* out[2] = {NULL, NULL};
-    long sz[2] = {0, 0};
-    const int levels[2] = {ZXC_LEVEL_ULTRA, 99};
+    uint8_t* out[4] = {NULL, NULL, NULL, NULL};
+    long sz[4] = {0, 0, 0, 0};
+    const int levels[4] = {ZXC_LEVEL_ULTRA, 99, ZXC_LEVEL_FASTEST, -5};
     int ok = 1;
 
-    for (int i = 0; i < 2 && ok; i++) {
+    for (int i = 0; i < 4 && ok; i++) {
         FILE* f_in = tmpfile();
         FILE* f_comp = tmpfile();
         if (!f_in || !f_comp) {
             printf("  [SKIP] tmpfile failed\n");
             if (f_in) fclose(f_in);
             if (f_comp) fclose(f_comp);
-            free(out[0]);
-            free(out[1]);
+            for (int j = 0; j < 4; j++) free(out[j]);
             free(input);
             return 1;
         }
@@ -1123,14 +1120,15 @@ int test_stream_level_clamp(void) {
         fclose(f_comp);
     }
 
-    if (ok && (sz[0] != sz[1] || memcmp(out[0], out[1], (size_t)sz[0]) != 0)) {
-        printf("Failed: level 99 produced a different stream than level %d (%ld vs %ld bytes)\n",
-               ZXC_LEVEL_ULTRA, sz[0], sz[1]);
-        ok = 0;
+    for (int i = 0; i < 4 && ok; i += 2) {
+        if (sz[i] != sz[i + 1] || memcmp(out[i], out[i + 1], (size_t)sz[i]) != 0) {
+            printf("Failed: level %d produced a different stream than level %d (%ld vs %ld bytes)\n",
+                   levels[i + 1], levels[i], sz[i], sz[i + 1]);
+            ok = 0;
+        }
     }
 
-    free(out[0]);
-    free(out[1]);
+    for (int i = 0; i < 4; i++) free(out[i]);
     free(input);
     if (ok) printf("PASS\n\n");
     return ok;

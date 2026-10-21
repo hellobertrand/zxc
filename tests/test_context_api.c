@@ -170,6 +170,35 @@ int test_cctx_level_raise_reinit(void) {
     zxc_free_cctx(cctx99);
     printf("  [PASS] level 99 silently clamped to ULTRA across entry points\n");
 
+    /* 4. Negative levels clamp to FASTEST, not the default: -5 must produce
+     * the level-1 archive. */
+    zxc_compress_opts_t lvl1 = {.level = ZXC_LEVEL_FASTEST, .checksum_enabled = 0};
+    zxc_compress_opts_t lvlneg = {.level = -5, .checksum_enabled = 0};
+    uint8_t* comp1 = malloc(comp_cap);
+    if (!comp1) goto fail;
+    const int64_t c1 = zxc_compress(src, src_sz, comp1, comp_cap, &lvl1);
+    const int64_t cneg = zxc_compress(src, src_sz, comp, comp_cap, &lvlneg);
+    if (c1 <= 0 || cneg != c1 || memcmp(comp, comp1, (size_t)c1) != 0) {
+        printf("  [FAIL] zxc_compress(level=-5) must clamp to FASTEST (c1=%lld cneg=%lld)\n",
+               (long long)c1, (long long)cneg);
+        free(comp1);
+        goto fail;
+    }
+    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvlneg) != c1 ||
+        memcmp(comp, comp1, (size_t)c1) != 0) {
+        printf("  [FAIL] zxc_compress_cctx(level=-5) must clamp to FASTEST\n");
+        free(comp1);
+        goto fail;
+    }
+    free(comp1);
+    zxc_cctx* cctxneg = zxc_create_cctx(&lvlneg);
+    if (!cctxneg) {
+        printf("  [FAIL] zxc_create_cctx(level=-5) must clamp, not fail\n");
+        goto fail;
+    }
+    zxc_free_cctx(cctxneg);
+    printf("  [PASS] level -5 silently clamped to FASTEST across entry points\n");
+
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
     free(src);
