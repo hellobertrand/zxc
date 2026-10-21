@@ -450,6 +450,19 @@ anchor per 64 blocks plus a `u32` per block, about 4.1 bytes per block) counts
 only when the header's `HAS_SEEK_TABLE` announces it. Always
 size the buffer with this function rather than re-deriving the formula.
 
+In practice the margin is one block, plus 8–12 bytes per block of framing, plus
+~2 KB of tail; a static context (`zxc_decompress_inplace_dctx`) is three to four
+blocks. The block size (`-B`) decides both:
+
+| Block size (`-B`) | Margin, 8 MB payload | Static context |
+| ---: | ---: | ---: |
+| 4 KB | 22–30 KB (0.3–0.4 %) | 16 KB |
+| 64 KB | 67–68 KB (0.8 %) | 208 KB |
+| 512 KB (default) | 514 KB (6.3 %) | 1.6 MB |
+
+The higher margin is with block checksums, which the CLI writes by default.
+Smaller blocks cost some ratio and decode speed; measure on your data.
+
 **Returns**: required buffer size, or `0` if `src` is not a valid archive.
 
 ### `zxc_decompress_inplace`

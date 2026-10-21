@@ -34,13 +34,11 @@ ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.65 % vs 47.6
   </a>
 </p>
 
-Measured with [lzbench](https://github.com/inikep/lzbench) 2.4.1 (from
-[@inikep](https://github.com/inikep)) built with `MOREFLAGS="-march=native"`, on four reference
-machines: Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45
-/ Zen 5 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D) — both x86 with SMT disabled. Re-run on every
-commit ([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)); every
-number is reproducible with lzbench or [TurboBench](https://github.com/powturbo/TurboBench), where
-ZXC is merged alongside 70+ other codecs. Cycles per byte and memory figures live in the
+Measured with lzbench 2.4.1 (by [@inikep](https://github.com/inikep)), `MOREFLAGS="-march=native"`:
+Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45 / Zen 5
+(GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D), x86 with SMT disabled. Re-run on every commit
+([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)). TurboBench
+carries ZXC alongside 70+ other codecs. Cycles per byte and memory:
 **[whitepaper](docs/WHITEPAPER.md#7-performance-analysis-benchmarks)**.
 
 ### Every level, on every CPU
@@ -156,8 +154,7 @@ Apple M2 (ARM64)
 
 ## Features
 
-- **1.1x to 2.4x faster decode than LZ4** at levels -1 to -6, at an equal or better ratio. Level -7 trades that lead for density: it decodes 2.2x to 2.8x faster than `zstd -1`, at a better ratio ([benchmarks](#benchmarks)).
-- **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern CPUs.
+- **Write once, read many.** The encoder does the heavy lifting, so every device that reads the data decodes faster: content delivery, game assets, app bundles, firmware. Gains are largest on modern CPUs ([benchmarks](#benchmarks)).
 - **O(1) random access.** An optional seek table (`-S`) decompresses any block without reading the rest.
 - **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
 - **Small payloads too.** A trained dictionary recovers ratio on 4–128 KB blocks ([details](#dictionary-compression)).
@@ -168,17 +165,15 @@ Apple M2 (ARM64)
 
 ## Compression Levels
 
-*   **Level 1, 2 (Fast):** Optimized for real-time assets (Gaming, UI).
-*   **Level 3, 4 (Balanced):** A strong middle-ground offering efficient compression speed and a ratio superior to LZ4.
-*   **Level 5 (Compact):** A good choice for Embedded and Firmware. Better compression than LZ4 and significantly faster decoding than Zstandard.
-*   **Level 6 (Density):** Beats LZ4HC on both axes — better ratio *and* faster decode on every measured platform — while staying in the multi-GB/s decode class. Best for Archival and write-once / read-many workloads where compression time is amortized over many reads.
-*   **Level 7 (Ultra):** Maximum density. Deep parse plus Huffman-coded literals *and* tokens (11-bit codes) push the ratio past `zstd -1` while decoding more than twice as fast. Choose it when storage or bandwidth dominates but decode must remain fast; compression is the slowest tier.
+*   **Levels 1–2 (Fast):** real-time assets: games, UI.
+*   **Levels 3–4 (Balanced, 3 is the default):** a better ratio than LZ4 at efficient compression speed.
+*   **Level 5 (Compact):** embedded and firmware: a better ratio than LZ4, much faster decode than Zstandard.
+*   **Level 6 (Density):** a better ratio *and* faster decode than LZ4HC on every measured platform; for archival, where compression time is amortized over many reads.
+*   **Level 7 (Ultra):** maximum density, past `zstd -1` while decoding more than twice as fast. Compression is the slowest tier.
 
 ## Usage
 
 ### 1. CLI
-
-The CLI is perfect for benchmarking or manually compressing assets.
 
 ```bash
 # Compress. -z is implied, and the output name defaults to <input>.zxc
@@ -225,11 +220,8 @@ zxc -d < archive.tar.zxc | tar xf -
 
 ### 2. API
 
-ZXC provides a **thread-safe API** with two usage patterns. Parameters are passed through dedicated
-options structs, making call sites self-documenting and forward-compatible. Buffers are
-caller-allocated with explicit bounds, calls are stateless, checksum validation is optional, block
-sizes run from 4 KB to 2 MB (powers of two), and streaming is multi-threaded with auto-detection of
-the CPU core count.
+The API is **thread-safe** and stateless: buffers are caller-allocated with explicit bounds, and
+parameters go through options structs, so call sites stay readable and forward-compatible.
 
 ```c
 #include "zxc.h"
@@ -248,19 +240,17 @@ zxc_decompress_opts_t d_opts = { .checksum_enabled = 1 };
 int64_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, &d_opts);
 ```
 
-The same options structs drive the other entry points: `zxc_stream_compress()` /
-`zxc_stream_decompress()` for multi-threaded file streaming, reusable `zxc_cctx` / `zxc_dctx`
-contexts for tight loops where per-call `malloc`/`free` overhead matters (settings are **sticky**:
-passing `NULL` reuses the last successful call's, starting from those given at creation), and
-`.seekable = 1` to append a seek table for
-O(1) random-access decompression.
+The same structs drive `zxc_stream_compress()` / `zxc_stream_decompress()` (multi-threaded file
+streaming, one worker per core by default), reusable `zxc_cctx` / `zxc_dctx` contexts that skip
+per-call allocation in tight loops (settings are **sticky**: `NULL` reuses the last successful
+call's), and `.seekable = 1`, which appends a seek table for O(1) random access.
 
 **[👉 See complete examples and advanced usage](docs/EXAMPLES.md)** — stream API, reusable contexts,
 seekable readers, dictionaries and numeric pre-filters, as full compilable programs.
 
 ## Installation
 
-ZXC is packaged across major ecosystems and kept current by their maintainers:
+ZXC is packaged in the major ecosystems:
 
 [![ConanCenter](https://repology.org/badge/version-for-repo/conancenter/zxc.svg)](https://repology.org/project/zxc/versions)
 [![Vcpkg](https://repology.org/badge/version-for-repo/vcpkg/zxc.svg)](https://repology.org/project/zxc/versions)
@@ -274,10 +264,10 @@ ZXC is packaged across major ecosystems and kept current by their maintainers:
 | [Conan](https://conan.io/) | `conan install -r conancenter --requires="zxc/[*]" --build=missing`, or `zxc/[*]` under `[requires]` in `conanfile.txt` |
 | [Homebrew](https://formulae.brew.sh/formula/zxc) | `brew install zxc` |
 | winget (Windows 10 1709+) | `winget install hellobertrand.zxc` |
-| Rust / Python / Node.js | `cargo add zxc-compress` &middot; `pip install zxc-compress` &middot; `npm install zxc-compress` |
 
-The vcpkg, Conan Center and winget recipes are maintained by their respective communities, so they
-can lag a release behind; if one does, open an issue on that registry's index repository.
+The vcpkg, Conan Center and winget recipes are community-maintained and can lag a release behind;
+if one does, open an issue on that registry's index repository. Rust, Python, Node.js, Go and WASM
+packages: [Language Bindings](#language-bindings).
 
 ### From a release archive
 
@@ -299,10 +289,6 @@ cc myapp.c $(pkg-config --cflags --libs libzxc) -o myapp
 Vendoring zxc instead — CMake `FetchContent` or `add_subdirectory()`, a Meson subproject or WrapDB —
 and building from source, with the full option table and the PGO workflow:
 **[docs/INSTALL.md](docs/INSTALL.md)**.
-
-### Packaging Status
-
-[![Packaging status](https://repology.org/badge/vertical-allrepos/zxc.svg)](https://repology.org/project/zxc/versions)
 
 ## Language Bindings
 
@@ -330,16 +316,14 @@ Community-maintained bindings:
 
 ## In-Place Decompression
 
-A normal decode needs two buffers: the archive and the output, so peak memory is *compressed + decompressed*. ZXC can decode **inside a single buffer**: you place the archive at its end, and the decoder writes the output from its start.
+A normal decode needs two buffers, so peak memory is *compressed + decompressed*. ZXC can decode **inside a single buffer**: place the archive at its end, and the decoder writes the output from its start.
 
 ```
 buffer:  [ output → → →          | archive → → → ]
            ^ write cursor           ^ read cursor
 ```
 
-Both cursors move right, and a ZXC block never expands, so with a small safety margin the write cursor provably never catches the read cursor. Peak memory drops to roughly *decompressed* alone. This is the shape of firmware images, FOTA payloads, bootloaders, game assets: anything read-only that already sits in RAM.
-
-**One buffer:**
+Both cursors move right and a ZXC block never expands, so with a small margin the write cursor provably never catches the read cursor: peak memory drops to roughly *decompressed* alone. This is the shape of firmware images, FOTA payloads, bootloaders, game assets: anything read-only that already sits in RAM.
 
 ```c
 size_t need = zxc_decompress_inplace_bound(archive, archive_size);   // reads header + footer only
@@ -349,48 +333,18 @@ int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode f
 // buf[0 .. n) now holds the decompressed data
 ```
 
-**One buffer, zero allocations.** `zxc_decompress_inplace` still allocates its decode context for the duration of the call. Where the library must not touch an allocator at all (kernel code, heapless targets, fixed memory budgets), hand it a context living in memory you own:
-
-```c
-// Once, up front: sized for the block size your archives use.
-size_t ws_size = zxc_static_dctx_workspace_size(64 * 1024);
-void* ws = aligned_alloc(64, ws_size);                                // or .bss, kmalloc, vmalloc
-zxc_dctx* dctx = zxc_init_static_dctx(ws, ws_size, 64 * 1024);
-
-// Per archive: no allocation inside the library.
-int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size, NULL);
-```
-
-A static context accepts only archives compressed with its block size (`-B`), and no dictionary; anything else is refused with an error before decoding.
-
-**What it costs.** The margin is one block, plus 8–12 bytes per block of framing, plus ~2 KB of tail; the static context is three to four blocks. So the block size decides both, and small payloads want small blocks:
-
-| Block size (`-B`) | Margin, 8 MB payload | Static context |
-| ---: | ---: | ---: |
-| 4 KB | 22–30 KB (0.3–0.4 %) | 16 KB |
-| 64 KB | 67–68 KB (0.8 %) | 208 KB |
-| 512 KB (default) | 514 KB (6.3 %) | 1.6 MB |
-
-The higher margin is with block checksums, which the CLI writes by default. Smaller blocks cost some ratio and decode speed; measure on your data. Always size the buffer with `zxc_decompress_inplace_bound` rather than the formula.
-
-**What it guarantees.** An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`. An archive whose output would reach input not yet read (padding, forged block sizes) is rejected with `ZXC_ERROR_CORRUPT_DATA`. Never silent corruption: both entry points are covered by a dedicated fuzzer.
+The margin is about one block, so small payloads want small blocks (`-B`). An undersized buffer, or an archive whose output would reach input not yet read, is rejected with an error, never silent corruption; both entry points are fuzzed. For kernel code and heapless targets, `zxc_decompress_inplace_dctx` with a static context touches no allocator at all. Margin and context sizes per block size, and the static-context API: [API.md](docs/API.md#zxc_decompress_inplace_bound).
 
 ## Dictionary Compression
 
-For workloads compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary dramatically
-improves compression ratio. It prefills the LZ77 sliding window at the *start of each block*, so the
-benefit is per-block: the smaller the block, the less history of its own it has and the more it
-leans on the dictionary. That holds for a single small payload as much as for a large one split into
-many small blocks — anywhere early bytes would otherwise have nothing to match against.
-
-A `.zxd` also carries a **shared literal Huffman table**, trained on the post-LZ literal
-distribution of the corpus: blocks it encodes well drop their own 128-byte table header, a fixed
-cost small blocks cannot amortize. It codes literals at levels 6-7 only, and the CLI handles it end
-to end — `--train` always writes one, `-D` always loads it.
+For data compressed in **small blocks** (4 KB–128 KB), a pre-trained dictionary substantially
+improves the ratio. It prefills the LZ77 window at the *start of each block*, so the smaller the
+block, the more it gains: a single small payload, or a large corpus split into small blocks for
+random access. A `.zxd` also carries a shared literal Huffman table (levels 6–7), which spares small
+blocks their own 128-byte table header.
 
 **Typical use cases:** JSON API responses, small game assets, structured logs, key-value store
-records, RPC messages, and any large but homogeneous corpus compressed in small blocks for random
-access (e.g. seekable archives).
+records, RPC messages, seekable archives with small blocks.
 
 ```bash
 # Train from a corpus of similar files. Without -o: ./dictionary_<dict_id>.zxd
@@ -402,19 +356,15 @@ zxc -z -D corpus.zxd input.json
 zxc -d -D corpus.zxd input.json.zxc
 ```
 
-The dictionary is an external `.zxd` file — content plus shared literal table — referenced by a
-32-bit `dict_id` in the archive header that covers both parts. Decompressing an archive that needs
-one without supplying it returns `ZXC_ERROR_DICT_REQUIRED`; supplying the wrong one returns
-`ZXC_ERROR_DICT_MISMATCH`. Training and attaching a dictionary from C:
+The archive records only the dictionary's `dict_id`: decompressing without it returns
+`ZXC_ERROR_DICT_REQUIRED`, with the wrong one `ZXC_ERROR_DICT_MISMATCH`. From C:
 [EXAMPLES.md](docs/EXAMPLES.md#using-a-pre-trained-dictionary) and
 [API.md §11b](docs/API.md#11b-dictionary-api). Wire format:
 [FORMAT.md §12](docs/FORMAT.md#12-pre-trained-dictionary-support).
 
 ## Block Size Tuning
 
-The default block size is **512 KB**, tuned for bulk/archival workloads where ratio and decompression throughput matter most. For **memory-constrained or streaming use cases**, **256 KB blocks** halve the decompression context and cut the compression context by ~40 % at a small cost in ratio and decompression speed.
-
-**Why larger blocks help:** Each block starts with a cold hash table, so the LZ match-finder has no history and produces more literals until the table warms up. Doubling the block size halves the number of cold-start penalties, improving both ratio and decompression speed.
+Blocks are powers of two from 4 KB to 2 MB. The default, **512 KB**, favours ratio and decode speed: each block starts with a cold match history, so larger blocks mean fewer cold starts. For **streaming, embedded or memory-constrained** use, **256 KB** blocks halve the decompression context and cut the compression context by ~40 %, at a small cost in ratio and decode speed.
 
 | Block Size | cctx memory | dctx memory | Ratio (level -3) | Decompression gain vs 256 KB |
 |:----------:|:-----------:|:-----------:|:----------------:|:----------------------------:|
@@ -432,30 +382,20 @@ zxc_compress_opts_t opts = {
 };
 ```
 
-**Guideline:** Stick with 512 KB (default) for bulk compression pipelines, CI/CD asset packaging, and high-throughput servers. Use 256 KB (`-B 256K`) for streaming, embedded, or memory-constrained environments.
-
 ## Format & Conformance
 
-The ZXC on-disk wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 9), so any third party can build an independent, interoperable decoder.
+The wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 9), so any third party can build an independent, interoperable decoder. Each format break is clean: v9 tools reject v8 archives, and [`docs/MIGRATION.md`](docs/MIGRATION.md) lists what changed and how to convert.
 
-> **Upgrading?** The current format is **v9** — block checksums now cover the decoded bytes and are seeded by block position, the footer carries an optional archive digest, and the seek table became self-validating groups announced by a header flag. Like every break before it, this one is clean: v9 tools reject v8 archives (see [`docs/MIGRATION.md`](docs/MIGRATION.md) to convert).
+Two byte-frozen suites guard the format:
 
-Two complementary, byte-frozen suites guard that format:
-
-* **Decoder conformance** — [`conformance/`](conformance/README.md) ships public reference vectors, frozen per format version: `valid/*.zxc` streams paired with their expected decompressed output, plus `invalid/*.zxc` streams that a correct decoder **must** reject, at least one per row of the format's error table. Point your own decoder at them to prove interoperability — no dependency on this implementation. Run locally via the `conformance` CTest.
-* **Wire-format stability** — [`tests/format/`](tests/format/README.md) pins the exact bytes the encoder emits for every block type and integrity field. A CI job ([`vector-stability.yml`](.github/workflows/vector-stability.yml)) fails on any single-byte drift, so an encoder change can only ever be deliberate.
-
-The distinction: conformance freezes decoder *behaviour* (`decode(x) == expected`), while the golden suite freezes the encoder's *bytes*. Together they make the format both interoperable and stable.
+* **Decoder conformance** — [`conformance/`](conformance/README.md) ships public vectors per format version: `valid/*.zxc` streams with their expected output, and `invalid/*.zxc` streams a correct decoder **must** reject, at least one per row of the format's error table. Point your own decoder at them; locally, run the `conformance` CTest.
+* **Encoder stability** — [`tests/format/`](tests/format/README.md) pins the exact bytes the encoder emits for every block type and integrity field; [`vector-stability.yml`](.github/workflows/vector-stability.yml) fails CI on any single-byte drift.
 
 ## Safety & Quality
-* **Unit Tests**: Comprehensive test suite with CTest integration.
-* **Continuous Fuzzing**: Enrolled in Google [OSS-Fuzz](https://github.com/google/oss-fuzz), which fuzzes eight harnesses (roundtrip, decompress, block, in-place, push streaming, multi-threaded FILE* streaming, seekable, dictionary) around the clock, covering over 80 % of the library's lines ([coverage history](https://introspector.oss-fuzz.com/project-profile?project=zxc)). The same harnesses run under ClusterFuzzLite (ASan + UBSan) on every pull request touching the library.
-* **Static Analysis**: Checked with Cppcheck & Clang Static Analyzer.
-* **CodeQL Analysis**: GitHub Advanced Security scanning for vulnerabilities.
-* **Snyk**: Continuous security and code analysis for dependencies and source.
-* **Code Coverage**: Automated tracking with Codecov integration.
-* **Dynamic Analysis**: Validated with Valgrind and ASan/UBSan in CI pipelines.
-* **Safe API**: Explicit buffer capacity is required for all operations.
+* **Continuous fuzzing**: Google [OSS-Fuzz](https://github.com/google/oss-fuzz) runs eight harnesses (roundtrip, decompress, block, in-place, push streaming, multi-threaded FILE* streaming, seekable, dictionary) around the clock, covering over 80 % of the library's lines ([coverage history](https://introspector.oss-fuzz.com/project-profile?project=zxc)). The same harnesses run under ClusterFuzzLite (ASan + UBSan) on every pull request touching the library.
+* **Dynamic analysis**: the CTest suite runs under ASan, UBSan and Valgrind in CI, with coverage tracked on Codecov.
+* **Static analysis**: Cppcheck, Clang Static Analyzer, CodeQL and Snyk.
+* **Safe API**: every operation takes an explicit buffer capacity.
 
 ## License & Credits
 
