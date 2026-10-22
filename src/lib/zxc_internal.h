@@ -673,7 +673,8 @@ static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
  * (JSON records: +45 percent for a cap of 128 bytes). The budget caps each
  * block on its own, shortest escapes first: the decode gain per escape is the
  * same, the cost grows with the pieces. 10 is the speed knee on silesia
- * (L3 +10 percent of decode for +1.8 of size). Overridable for a sweep. */
+ * (L3 +10 percent of decode for +1.8 of size). The default the encoder puts
+ * in zxc_lz77_params_t::split_budget_pct; overridable for a sweep. */
 #ifndef ZXC_SPL_MATCH_SPLIT_BUDGET_PCT
 #define ZXC_SPL_MATCH_SPLIT_BUDGET_PCT 10
 #endif
@@ -1170,6 +1171,11 @@ typedef struct {
      *  disables. SPL levels only. favor_decode_speed replaces it by
      *  @ref ZXC_SPL_MATCH_SPLIT_MAX under a growth budget. */
     uint8_t split_max;
+
+    /** Growth a block may take from splitting, in percent of its size before
+     *  entropy coding; 0 selects the gated policy above. Set by the encoder from
+     *  @ref ZXC_SPL_MATCH_SPLIT_BUDGET_PCT with favor_decode_speed. */
+    uint8_t split_budget_pct;
 } zxc_lz77_params_t;
 
 /**
@@ -1186,18 +1192,18 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
     // Match splitting by default at levels 3-5 only: 1-2 are PAK, 6-7 keep every
     // escape; favor_decode_speed overrides split_max at every SPL level.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift, min_offset, split_max
+    // step_shift, min_offset, split_max, split_budget_pct
     static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // fallback
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // level 1
-        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST, 0},        // level 2
-        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST, 33},     // level 3
-        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST, 24},     // level 4
-        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST, 23},  // level 5
-        {64, 256, 0, 0, 0, 1, 8, 1, 0}                    // level 6
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0, 0},        // fallback
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0, 0},        // level 1
+        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST, 0, 0},        // level 2
+        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST, 33, 0},     // level 3
+        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST, 24, 0},     // level 4
+        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST, 23, 0},  // level 5
+        {64, 256, 0, 0, 0, 1, 8, 1, 0, 0}                    // level 6
     };
     return (level >= ZXC_LEVEL_ULTRA)
-               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1, 0}
+               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1, 0, 0}
                : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
