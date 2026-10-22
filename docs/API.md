@@ -1,7 +1,7 @@
 # ZXC API & ABI Reference
 
 **Library version**: 0.15.0
-**SOVERSION**: 5  
+**SOVERSION**: 6  
 **License**: BSD-3-Clause
 
 This document is the authoritative reference for the public API surface and ABI
@@ -139,7 +139,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 
 | Field | Description | Current |
 |-------|-------------|---------|
-| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **5** |
+| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **6** |
 | `VERSION` | Tracks the library release. | **0.15.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
@@ -149,7 +149,7 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.5` -> `libzxc.so.0.15.0` |
+| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.0.15.0` |
 | macOS | `libzxc.dylib` -> `libzxc.5.dylib` -> `libzxc.0.15.0.dylib` |
 | Windows | `libzxc.dll` + `zxc.lib` (MSVC import, built from the shipped `libzxc.def`) or `libzxc.dll.a` (MinGW import) |
 
@@ -270,7 +270,8 @@ typedef struct {
     void*  user_data;                     // Passed through to progress_cb.
     int    favor_decode_speed; // 1 = favor decode speed over size, levels 3-7.
     int    split_budget_pct;   // With it, how much a block may grow for decode
-                               // speed, 1-100 percent (0 = 10, the knee).
+                               // speed, 1 to ZXC_SPLIT_BUDGET_MAX (100) percent
+                               // (0 = ZXC_SPLIT_BUDGET_DEFAULT, 10, the knee).
 } zxc_compress_opts_t;
 ```
 

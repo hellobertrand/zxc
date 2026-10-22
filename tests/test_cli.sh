@@ -2160,17 +2160,24 @@ else
 fi
 # 39.2 Levels 1-2 (PAK) never split
 "$ZXC_BIN" -1 -c "$PDS" > "$TEST_DIR/pds_off1.zxc"
-"$ZXC_BIN" -1 --favor-decode-speed -c "$PDS" > "$TEST_DIR/pds_on1.zxc"
+"$ZXC_BIN" -1 --favor-decode-speed -c "$PDS" > "$TEST_DIR/pds_on1.zxc" 2>/dev/null
 if cmp -s "$TEST_DIR/pds_off1.zxc" "$TEST_DIR/pds_on1.zxc"; then
     log_pass "--favor-decode-speed has no effect at level 1"
 else
     log_fail "--favor-decode-speed changed the level 1 archive"
 fi
-# 39.3 Benchmark mode reports it
-if "$ZXC_BIN" -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null | grep -q '"favor_decode_speed": true'; then
-    log_pass "-b -j reports favor_decode_speed"
+# 39.3 Benchmark mode reports it, with the budget the library applies
+BJ=$("$ZXC_BIN" -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null)
+if echo "$BJ" | grep -q '"favor_decode_speed": true' && echo "$BJ" | grep -q '"split_budget_pct": 10,'; then
+    log_pass "-b -j reports favor_decode_speed and the default budget"
 else
-    log_fail "-b -j does not report favor_decode_speed"
+    log_fail "-b -j does not report favor_decode_speed with budget 10"
+fi
+# 39.3.1 Levels 1-2 warn that the option does nothing there
+if "$ZXC_BIN" -1 --favor-decode-speed -c "$PDS" 2>&1 >/dev/null | grep -q "no effect at levels 1 and 2"; then
+    log_pass "--favor-decode-speed warns at level 1"
+else
+    log_fail "--favor-decode-speed silent at level 1"
 fi
 # 39.4 =PCT widens the budget: a different archive that still decodes
 "$ZXC_BIN" -3 --favor-decode-speed=100 -c "$PDS" > "$TEST_DIR/pds_on100.zxc"

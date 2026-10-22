@@ -164,11 +164,11 @@ async function main() {
       const dstPtr = Module._malloc(bound);
       Module.HEAPU8.set(input, srcPtr);
 
-      // Build opts struct (full 40-byte zxc_compress_opts_t so the
+      // Build opts struct (full 48-byte zxc_compress_opts_t so the
       // dict/progress fields the library reads are zeroed, not heap
       // garbage): {n_threads=0, level, block_size=0, checksum=1, ...}
-      const optsPtr = Module._malloc(40);
-      for (let i = 0; i < 40; i++) Module.HEAPU8[optsPtr + i] = 0;
+      const optsPtr = Module._malloc(48);
+      for (let i = 0; i < 48; i++) Module.HEAPU8[optsPtr + i] = 0;
       Module.HEAP32[(optsPtr >> 2) + 1] = level; // level
       Module.HEAP32[(optsPtr >> 2) + 3] = 1; // checksum_enabled
 

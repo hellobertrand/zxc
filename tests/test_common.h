@@ -63,7 +63,8 @@ uint32_t zxc_test_rand(void);
 
 void gen_random_data(uint8_t* buf, size_t size);
 void gen_lz_data(uint8_t* buf, size_t size);
-/* Matches of 6-120 bytes with a few literals between: what the split re-emits inline. */
+/* Inline matches (6-19 bytes) mixed irregularly with escaped ones (20-160, on both
+ * sides of the 128-byte split cap), a few literals between. */
 void gen_split_data(uint8_t* buf, size_t size);
 
 /* --- File footer (FORMAT.md Sec 8) ------------------------------------- */

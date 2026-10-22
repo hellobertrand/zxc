@@ -345,44 +345,45 @@ static int zxc_spl_match_split_analyze(const uint8_t* RESTRICT tokens, const uin
 }
 
 /**
- * @brief The longest length code a block splits under its growth budget.
+ * @brief The longest length code whose escapes, shortest first, all fit the
+ *        block's growth budget.
  *
- * Every escape is worth removing (about 20 cycles when taken, a piece about
- * 4), so size is what bounds the split: the block may grow by @p budget_pct
- * percent of its estimated size (tokens, offsets, extras, literals), and the
- * cap is the longest length code, shortest escapes first, whose matches all
- * fit what is left of that budget. A split match drops its varint (one byte:
- * the code is below 128) for pieces - 1 extra sequences.
+ * Every escape is worth removing (about 20 cycles taken, a piece about 4), so
+ * only size bounds the split: @p budget_pct percent of the block's size before
+ * entropy coding. A split match trades its 1-byte varint for pieces - 1
+ * sequences.
  *
- * @param[in] tokens     The block's tokens.
- * @param[in] extras     Its extras.
- * @param[in] extras_sz  Bytes used in @p extras.
- * @param[in] n_seq      Sequence count of the block.
- * @param[in] lit_c      Its literal bytes.
- * @param[in] off_bytes  Bytes per offset on the wire, 1 or 2.
- * @param[in] cap_max    Longest length code considered.
- * @param[in] budget_pct zxc_cctx_t::split_budget_pct, non-zero.
- * @return The cap; ZXC_SPL_INLINE_ML_CODE when nothing fits.
+ * @param[in]  tokens     The block's tokens.
+ * @param[in]  extras     Its extras.
+ * @param[in]  extras_sz  Bytes used in @p extras.
+ * @param[in]  n_seq      Sequence count.
+ * @param[in]  lit_c      Literal bytes.
+ * @param[in]  off_bytes  Bytes per offset on the wire, 1 or 2.
+ * @param[out] hist       Scratch, ZXC_SPL_MATCH_SPLIT_MAX + 1 counters.
+ * @param[in]  budget_pct zxc_cctx_t::split_budget_pct, non-zero.
+ * @return The cap, at most ZXC_SPL_MATCH_SPLIT_MAX; ZXC_SPL_INLINE_ML_CODE
+ *         when nothing fits.
  */
 static uint32_t zxc_spl_match_split_budget_cap(const uint8_t* RESTRICT tokens,
                                                const uint8_t* RESTRICT extras,
                                                const size_t extras_sz, const uint32_t n_seq,
                                                const size_t lit_c, const size_t off_bytes,
-                                               const uint32_t cap_max, const uint32_t budget_pct) {
+                                               uint32_t* RESTRICT hist, const uint32_t budget_pct) {
     const uint8_t* const extras_end = extras + extras_sz;
-    uint32_t hist[UINT8_MAX + 1] = {0};
+    ZXC_MEMSET(hist, 0, (ZXC_SPL_MATCH_SPLIT_MAX + 1) * sizeof(uint32_t));
     const uint8_t* p = extras;
     for (uint32_t i = 0; i < n_seq; i++) {
         const uint8_t tok = tokens[i];
         if ((tok >> ZXC_TOKEN_LIT_BITS) == ZXC_TOKEN_LL_MASK) (void)zxc_read_varint(&p, extras_end);
         if ((tok & ZXC_TOKEN_ML_MASK) != ZXC_TOKEN_ML_MASK) continue;
         const uint32_t code = zxc_read_varint(&p, extras_end) + ZXC_TOKEN_ML_MASK;
-        if (code <= cap_max) hist[code]++;
+        if (code <= ZXC_SPL_MATCH_SPLIT_MAX) hist[code]++;
     }
     const size_t seq_bytes = 1 + off_bytes;
     size_t budget = (n_seq * seq_bytes + extras_sz + lit_c) * budget_pct / 100;
     uint32_t cap = ZXC_SPL_INLINE_ML_CODE;
-    for (uint32_t c = ZXC_TOKEN_ML_MASK; c <= cap_max; c++) {
+    for (uint32_t c = ZXC_TOKEN_ML_MASK; c <= ZXC_SPL_MATCH_SPLIT_MAX; c++) {
+        if (hist[c] == 0) continue;
         const size_t cost = hist[c] * ((zxc_spl_match_split_pieces(c) - 1) * seq_bytes - 1);
         if (cost > budget) break;
         budget -= cost;
@@ -394,23 +395,22 @@ static uint32_t zxc_spl_match_split_budget_cap(const uint8_t* RESTRICT tokens,
 /**
  * @brief Per-block match splitting: escaped matches re-emitted as inline pieces.
  *
- * A match whose length code exceeds the inline reach but not the cap becomes a
+ * A match whose length code exceeds the inline reach but not a cap becomes a
  * chain of inline matches at the same offset: the decoder never takes its ML
- * escape. Each piece costs a token and an offset, less the varint it replaces.
+ * escape. Each extra piece costs a token and an offset, less the varint it
+ * replaces.
  *
- * Two policies. By default (@p budget_pct == 0) two gates apply
+ * A match splits under either cap. @p gate_max has two gates
  * (zxc_spl_match_split_analyze): the block must look mispredicted, which
- * leaves regular data whole, then only escapes of mispredicted contexts split,
- * up to @p cap_max. With favor_decode_speed (@p budget_pct > 0) every escape
- * splits, up to the cap the growth budget allows
- * (zxc_spl_match_split_budget_cap).
+ * leaves regular data whole, then only escapes of mispredicted contexts split.
+ * With @p budget_pct, every escape splits up to the budget's cap
+ * (zxc_spl_match_split_budget_cap), so the option never splits less.
  *
- * In place: pass 0 gates the block or picks its cap; pass 1 turns @p side
- * into each sequence's length code to split (0 = keep) and
- * compacts the kept extras forward; pass 2 expands tokens and offsets
- * backward, each write at or past its read. A piece consumes at least
- * ZXC_LZ_MIN_MATCH_LEN input bytes, so the count fits the block's sequence
- * buffers.
+ * In place: pass 1 turns @p side from each sequence's context into its length
+ * code to split (0 = keep) and compacts the kept extras forward; pass 2 expands
+ * tokens and offsets backward, each write at or past its read. A piece
+ * consumes at least ZXC_LZ_MIN_MATCH_LEN input bytes, so the count fits the
+ * block's sequence buffers.
  *
  * @param[in,out] tokens    The block's tokens, rewritten in place.
  * @param[in,out] offsets   Its offsets, rewritten in place.
@@ -421,8 +421,8 @@ static uint32_t zxc_spl_match_split_budget_cap(const uint8_t* RESTRICT tokens,
  * @param[in]     n_seq     Sequence count of the block.
  * @param[in]     lit_c     Its literal bytes.
  * @param[in]     off_bytes Bytes per offset on the wire, 1 or 2.
- * @param[in]     cap_max   zxc_lz77_params_t::split_max.
- * @param[in]     budget_pct zxc_cctx_t::split_budget_pct; 0 = gated policy.
+ * @param[in]     gate_max  zxc_lz77_params_t::split_max.
+ * @param[in]     budget_pct zxc_cctx_t::split_budget_pct; 0 = none.
  * @return The new sequence count (unchanged when the block is not split).
  */
 static uint32_t zxc_spl_match_split_block(uint8_t* RESTRICT tokens, uint16_t* RESTRICT offsets,
@@ -430,35 +430,36 @@ static uint32_t zxc_spl_match_split_block(uint8_t* RESTRICT tokens, uint16_t* RE
                                           uint8_t* RESTRICT side,
                                           zxc_spl_match_split_hist_t* RESTRICT hist_buf,
                                           const uint32_t n_seq, const size_t lit_c,
-                                          const size_t off_bytes, const uint8_t cap_max,
+                                          const size_t off_bytes, const uint8_t gate_max,
                                           const uint8_t budget_pct) {
-    if (cap_max <= ZXC_SPL_INLINE_ML_CODE || n_seq == 0) return n_seq;
+    if (n_seq == 0) return n_seq;
     const uint8_t* const extras_end = extras + *extras_sz;
     uint8_t ctx_bad[1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS];
 
-    // 0. Pick the cap under the growth budget, or gate the block.
-    uint32_t cap = cap_max;
+    // 0. The caps: the budget's, then the gate's (same scratch, in turn).
+    uint32_t all_cap = ZXC_SPL_INLINE_ML_CODE, gate_cap = ZXC_SPL_INLINE_ML_CODE;
     if (budget_pct)
-        cap = zxc_spl_match_split_budget_cap(tokens, extras, *extras_sz, n_seq, lit_c, off_bytes,
-                                             cap_max, budget_pct);
-    else if (!zxc_spl_match_split_analyze(tokens, n_seq, hist_buf, ctx_bad, side))
-        return n_seq;
-    if (cap <= ZXC_SPL_INLINE_ML_CODE) return n_seq;
+        all_cap = zxc_spl_match_split_budget_cap(tokens, extras, *extras_sz, n_seq, lit_c,
+                                                 off_bytes, (*hist_buf)[0][0], budget_pct);
+    if (gate_max > ZXC_SPL_INLINE_ML_CODE &&
+        zxc_spl_match_split_analyze(tokens, n_seq, hist_buf, ctx_bad, side))
+        gate_cap = gate_max;
+    if (all_cap == ZXC_SPL_INLINE_ML_CODE && gate_cap == ZXC_SPL_INLINE_ML_CODE) return n_seq;
 
-    // 1. Mark the matches to split (eligible, within the cap) and drop their
-    // varints; the other extras move forward.
+    // 1. Mark the matches to split and drop their varints; the other extras
+    // move forward.
     size_t r = 0, w = 0;
     uint32_t extra = 0;
     for (uint32_t i = 0; i < n_seq; i++) {
         const uint8_t tok = tokens[i];
-        const int eligible = budget_pct ? 1 : ctx_bad[side[i]];
+        const int bad = gate_cap != ZXC_SPL_INLINE_ML_CODE && ctx_bad[side[i]];
         side[i] = 0;
         if ((tok >> ZXC_TOKEN_LIT_BITS) == ZXC_TOKEN_LL_MASK)
             zxc_varint_keep(extras, &w, &r, extras_end);
         if ((tok & ZXC_TOKEN_ML_MASK) != ZXC_TOKEN_ML_MASK) continue;
         const uint8_t* p = extras + r;
         const uint32_t code = zxc_read_varint(&p, extras_end) + ZXC_TOKEN_ML_MASK;
-        if (eligible && code <= cap) {
+        if (code <= all_cap || (bad && code <= gate_cap)) {
             side[i] = (uint8_t)code;
             extra += zxc_spl_match_split_pieces(code) - 1;
             r = (size_t)(p - extras);
@@ -1490,8 +1491,6 @@ static int zxc_encode_block_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     // The floor is a candidate until the block itself clears it.
     if (lzp.min_offset > 1 && zxc_block_is_short_dist_bound(src + dict_sz, src_sz - dict_sz))
         lzp.min_offset = 1;
-    // Favoring decode speed: every SPL level splits up to the cap, under the budget.
-    if (ctx->split_budget_pct) lzp.split_max = ZXC_SPL_MATCH_SPLIT_MAX;
 
     ctx->epoch++;
     if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {

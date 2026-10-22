@@ -640,10 +640,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 /** @name Per-block match splitting (zxc_spl_match_split_block)
  *
  *  Escaped matches go out as inline pieces at the same offset, so the decoder
- *  skips their ML escape. Two policies: by default, up to the level's
- *  split_max and only in blocks whose escape branch looks mispredicted (levels
- *  3-5); with favor_decode_speed, every SPL level splits up to
- *  ZXC_SPL_MATCH_SPLIT_MAX under a per-block growth budget.
+ *  skips their ML escape: by default up to the level's split_max where the
+ *  escape looks mispredicted (levels 3-5), and with favor_decode_speed also
+ *  every escape up to ZXC_SPL_MATCH_SPLIT_MAX within a growth budget.
  *  @{ */
 /** @brief Longest escape history a context keys on; small blocks shorten it
  *         (down to 2 bits) towards 16 samples per context. Sizes the histograms. */
@@ -656,42 +655,28 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 typedef uint32_t zxc_spl_match_split_hist_t[4][2][1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS];
 static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
               "a context is recorded in one byte of buf_split");
-/** @brief Longest match favor_decode_speed re-emits as inline pieces
- *         (zxc_spl_match_split_block), as a length code: 128 bytes.
+/** @brief Longest match favor_decode_speed splits, as a length code: 128 bytes.
  *
- * Measured knee on silesia (M3, 2026-10-17): splitting every match up to
- * 128 bytes leaves 0.3 percent of the sequences escaped and decodes 14 (L3)
- * to 26 (L5) percent faster for 4 to 6 percent more size; a higher cap only
- * adds sequences, the rare escapes left are the long, predictable ones.
- * Opt-in: favor_decode_speed. */
+ * Knee on silesia (M3, 2026-10-17): 0.3 percent of the sequences stay
+ * escaped; a higher cap only adds sequences, the escapes left being long and
+ * predictable. */
 #define ZXC_SPL_MATCH_SPLIT_MAX (128U - ZXC_LZ_MIN_MATCH_LEN) /* 123 */
-/** @brief Growth a block may take from splitting, in percent of its size
- *         before entropy coding (tokens, offsets, extras, literals).
- *
- * Each piece costs a token and an offset; on data that compresses well the
- * blocks are small and long matches many, so an unbounded split inflates them
- * (JSON records: +45 percent for a cap of 128 bytes). The budget caps each
- * block on its own, shortest escapes first: the decode gain per escape is the
- * same, the cost grows with the pieces. 10 is the speed knee on silesia
- * (L3 +10 percent of decode for +1.8 of size). The default for a zero
- * zxc_compress_opts_t::split_budget_pct; see zxc_split_budget_resolve. */
-#define ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT 10
-/** @brief Widest budget: the block may double. */
-#define ZXC_SPL_MATCH_SPLIT_BUDGET_MAX 100
-
+static_assert(ZXC_SPL_MATCH_SPLIT_MAX < (1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS),
+              "the budget's histogram is one lane of zxc_spl_match_split_hist_t");
 /**
- * @brief The split budget a zxc_compress_opts_t asks for, in percent.
+ * @brief The growth budget @p opts asks for, in percent: 0 without
+ *        favor_decode_speed, else split_budget_pct clamped to
+ *        [1, ZXC_SPLIT_BUDGET_MAX], 0 or less meaning ZXC_SPLIT_BUDGET_DEFAULT.
  *
- * 0 without favor_decode_speed (the gated policy); otherwise its
- * split_budget_pct clamped to [1, ZXC_SPL_MATCH_SPLIT_BUDGET_MAX], a zero or
- * negative one reading as ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT. What every
- * compression entry point stores in zxc_cctx_t::split_budget_pct.
+ * An unbounded split inflates blocks that compress well (JSON records: +45
+ * percent at 128 bytes), so each block may grow by this share of its size
+ * before entropy coding. 10 is the knee on silesia: L3 decodes 10 percent
+ * faster for 1.8 percent more size.
  */
 static ZXC_ALWAYS_INLINE uint8_t zxc_split_budget_resolve(const zxc_compress_opts_t* opts) {
     if (!opts || !opts->favor_decode_speed) return 0;
-    if (opts->split_budget_pct <= 0) return ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT;
-    if (opts->split_budget_pct > ZXC_SPL_MATCH_SPLIT_BUDGET_MAX)
-        return ZXC_SPL_MATCH_SPLIT_BUDGET_MAX;
+    if (opts->split_budget_pct <= 0) return ZXC_SPLIT_BUDGET_DEFAULT;
+    if (opts->split_budget_pct > ZXC_SPLIT_BUDGET_MAX) return ZXC_SPLIT_BUDGET_MAX;
     return (uint8_t)opts->split_budget_pct;
 }
 /** @} */
@@ -1182,11 +1167,8 @@ typedef struct {
     uint32_t min_offset;
 
     /** Longest match re-emitted as inline pieces (zxc_spl_match_split_block), in the
-     *  token's units (length - ZXC_LZ_MIN_MATCH_LEN): escaped matches up to it
-     *  split in a block whose escapes look mispredicted; <= ZXC_SPL_INLINE_ML_CODE
-     *  disables. SPL levels only. favor_decode_speed replaces it by
-     *  @ref ZXC_SPL_MATCH_SPLIT_MAX under a growth budget
-     *  (zxc_cctx_t::split_budget_pct). */
+     *  token's units (length - ZXC_LZ_MIN_MATCH_LEN); <= ZXC_SPL_INLINE_ML_CODE
+     *  disables. SPL levels only. */
     uint8_t split_max;
 } zxc_lz77_params_t;
 
@@ -1201,8 +1183,7 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     // The distance floor stops at level 5: the slow levels keep every distance.
-    // Match splitting by default at levels 3-5 only: 1-2 are PAK, 6-7 keep every
-    // escape; favor_decode_speed overrides split_max at every SPL level.
+    // Match splitting at levels 3-5 only: 1-2 are PAK, 6-7 keep every escape.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {
@@ -1962,8 +1943,8 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
-    uint8_t split_budget_pct;       /**< favor_decode_speed's growth budget in percent
-                                         (zxc_split_budget_resolve); 0 = gated split. */
+    uint8_t split_budget_pct;       /**< Growth budget in percent, 0 = off
+                                         (zxc_split_budget_resolve). */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */

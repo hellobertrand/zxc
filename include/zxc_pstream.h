@@ -116,9 +116,9 @@ typedef struct zxc_dstream_s zxc_dstream;
  *
  * @p opts is copied into the context and may be freed or reused afterwards.
  *
- * Only @c level, @c block_size and @c checksum_enabled are honoured, and they
- * must be valid (an unsupported @c block_size fails creation); levels above
- * @ref ZXC_LEVEL_ULTRA are clamped. @c n_threads is ignored, this API being
+ * Only @c level, @c block_size, @c checksum_enabled and the decode-speed fields
+ * are honoured, and they must be valid (an unsupported @c block_size fails
+ * creation); levels above @ref ZXC_LEVEL_ULTRA are clamped. @c n_threads is ignored, this API being
  * single-threaded, see @ref zxc_stream_compress for the multi-threaded
  * @c FILE* pipeline. Dictionary options are rejected outright: push streams
  * take no dictionary yet (support can be added if a need arises), so @c dict /

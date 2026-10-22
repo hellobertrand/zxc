@@ -397,7 +397,7 @@ static int g_progress_mode = ZXC_PROGRESS_AUTO;
 static void* g_dict_huf = NULL;
 // --no-preserve clears it
 static int g_preserve = 1;
-// --favor-decode-speed[=PCT] sets them; a zero budget means the library default
+// --favor-decode-speed[=PCT]
 static int g_favor_decode_speed = 0;
 static int g_split_budget_pct = 0;
 
@@ -1471,12 +1471,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (g_verbose && mode != MODE_INTEGRITY)
         zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
     if (g_verbose && seekable) zxc_log("Seekable: enabled\n");
-    if (g_verbose && g_favor_decode_speed && mode == MODE_COMPRESS) {
-        if (g_split_budget_pct)
-            zxc_log("Priority: decode speed, budget %d%%\n", g_split_budget_pct);
-        else
-            zxc_log("Priority: decode speed\n");
-    }
+    if (g_verbose && g_favor_decode_speed && mode == MODE_COMPRESS && level > ZXC_LEVEL_FAST)
+        zxc_log("Priority: decode speed, budget %d%%\n", g_split_budget_pct);
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
@@ -1817,11 +1813,13 @@ int main(int argc, char** argv) {
                 break;
             case OPT_FAVOR_DECODE_SPEED: {
                 g_favor_decode_speed = 1;
+                g_split_budget_pct = ZXC_SPLIT_BUDGET_DEFAULT;
                 if (optarg == NULL) break;
                 char* end = NULL;
                 const long pct = strtol(optarg, &end, 10);
-                if (end == optarg || *end != '\0' || pct < 1 || pct > 100) {
-                    fprintf(stderr, "Error: --favor-decode-speed budget must be 1 to 100\n");
+                if (end == optarg || *end != '\0' || pct < 1 || pct > ZXC_SPLIT_BUDGET_MAX) {
+                    fprintf(stderr, "Error: --favor-decode-speed budget must be 1 to %d\n",
+                            ZXC_SPLIT_BUDGET_MAX);
                     return 1;
                 }
                 g_split_budget_pct = (int)pct;
@@ -1891,6 +1889,10 @@ int main(int argc, char** argv) {
     if (checksum == -1) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
+
+    if (g_favor_decode_speed && level <= ZXC_LEVEL_FAST &&
+        (mode == MODE_COMPRESS || mode == MODE_BENCHMARK))
+        zxc_log("Warning: --favor-decode-speed has no effect at levels 1 and 2\n");
 
     // -f only if no mode flag took over
     if (cat_mode && mode == MODE_DECOMPRESS) force = 1;

@@ -57,22 +57,24 @@ void gen_lz_data(uint8_t* const buf, const size_t size) {
 
 void gen_split_data(uint8_t* const buf, const size_t size) {
     uint32_t st = 0x9E3779B9U;
-    uint8_t src[96];
+    uint8_t src[96];  // shared match source; back-references clear the distance floor
     for (size_t k = 0; k < sizeof(src); k++) {
         st = st * 1103515245U + 12345U;
         src[k] = (uint8_t)(st >> 16);
     }
     size_t n = 0;
+    for (size_t k = 0; k < sizeof(src) && n < size; k++) buf[n++] = src[k];
     while (n < size) {
         st = st * 1103515245U + 12345U;
-        const size_t lit = (st >> 16) % 8U;
+        const size_t lit = (st >> 16) % 8U;  // 0-7 literals, LL mostly inline
         for (size_t k = 0; k < lit && n < size; k++) {
             st = st * 1103515245U + 12345U;
             buf[n++] = (uint8_t)(st >> 16);
         }
         st = st * 1103515245U + 12345U;
+        // ~1 in 4 matches escapes the ML field (20-160 bytes); the rest stay inline.
         const size_t m =
-            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 101U) : 6U + ((st >> 18) % 14U);
+            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 141U) : 6U + ((st >> 18) % 14U);
         for (size_t k = 0; k < m && n < size; k++) buf[n++] = src[k % sizeof(src)];
     }
 }

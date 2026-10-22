@@ -64,6 +64,11 @@
 #define ZXC_BLOCK_SIZE_MAX (1U << ZXC_BLOCK_SIZE_MAX_LOG2)
 /** @} */ /* end of block_size */
 
+/** @brief zxc_compress_opts_t::split_budget_pct for 0: the decode-speed knee. */
+#define ZXC_SPLIT_BUDGET_DEFAULT 10
+/** @brief Largest zxc_compress_opts_t::split_budget_pct; above reads as it. */
+#define ZXC_SPLIT_BUDGET_MAX 100
+
 /**
  * @defgroup dictionary Dictionary
  * @brief Constants for pre-trained dictionary support.

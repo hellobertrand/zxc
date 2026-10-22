@@ -943,9 +943,8 @@ int test_context_api_empty_input(void) {
     return ok;
 }
 
-/* favor_decode_speed and its budget are sticky like checksum_enabled: NULL opts
- * keep them, zeroed opts drop them, a static context pins them at init; both
- * outputs decode. */
+/* The decode-speed fields are sticky like checksum_enabled: NULL opts keep
+ * them, zeroed opts drop them, a static context pins them; both outputs decode. */
 int test_cctx_favor_decode_speed_sticky(void) {
     printf("=== TEST: Opaque Context API - favor_decode_speed is sticky ===\n");
 
@@ -968,17 +967,18 @@ int test_cctx_favor_decode_speed_sticky(void) {
         if (!c) goto done;
         const int64_t n_off = cctx_compress(c, block_api, src, src_sz, ref[0], cap, &off);
         const int64_t n_on = cctx_compress(c, block_api, src, src_sz, ref[1], cap, &on);
+        if (n_off <= 0 || n_on <= 0 ||
+            (n_off == n_on && memcmp(ref[0], ref[1], (size_t)n_off) == 0)) {
+            printf("  [FAIL] %s: the flag must change the output (%lld vs %lld)\n", api,
+                   (long long)n_off, (long long)n_on);
+            zxc_free_cctx(c);
+            goto done;
+        }
         const int64_t n_null = cctx_compress(c, block_api, src, src_sz, out, cap, NULL);
         const int sticky = n_null == n_on && memcmp(out, ref[1], (size_t)n_on) == 0;
         const int64_t n_back = cctx_compress(c, block_api, src, src_sz, out, cap, &off);
         const int dropped = n_back == n_off && memcmp(out, ref[0], (size_t)n_off) == 0;
         zxc_free_cctx(c);
-        if (n_off <= 0 || n_on <= 0 ||
-            (n_off == n_on && memcmp(ref[0], ref[1], (size_t)n_off) == 0)) {
-            printf("  [FAIL] %s: the flag must change the output (%lld vs %lld)\n", api,
-                   (long long)n_off, (long long)n_on);
-            goto done;
-        }
         if (!sticky || !dropped) {
             printf("  [FAIL] %s: NULL opts %s the flag, zeroed opts %s it\n", api,
                    sticky ? "keep" : "lose", dropped ? "drop" : "keep");
@@ -986,18 +986,19 @@ int test_cctx_favor_decode_speed_sticky(void) {
         }
         zxc_dctx* const dc = block_api ? zxc_create_dctx() : NULL;
         if (block_api && !dc) goto done;
-        for (int k = 0; k < 2; k++) {
+        int decoded = 1;
+        for (int k = 0; k < 2 && decoded; k++) {
             const int64_t n = k ? n_on : n_off;
             const int64_t d = block_api
                                   ? zxc_decompress_block(dc, ref[k], (size_t)n, back, src_sz, NULL)
                                   : zxc_decompress(ref[k], (size_t)n, back, src_sz, NULL);
-            if (k == 1) zxc_free_dctx(dc);
-            if (d != (int64_t)src_sz || memcmp(back, src, src_sz) != 0) {
+            decoded = d == (int64_t)src_sz && memcmp(back, src, src_sz) == 0;
+            if (!decoded)
                 printf("  [FAIL] %s: flag %d output does not decode (%lld)\n", api, k,
                        (long long)d);
-                goto done;
-            }
         }
+        zxc_free_dctx(dc);
+        if (!decoded) goto done;
         printf("  [PASS] %s API: sticky under NULL opts, dropped by zeroed opts\n", api);
     }
 

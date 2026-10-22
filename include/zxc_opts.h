@@ -71,13 +71,11 @@ typedef struct {
                                Becomes part of the archive's dict_id binding. */
     zxc_progress_callback_t progress_cb; /**< Optional progress callback (NULL to disable). */
     void* user_data;                     /**< User context pointer passed to progress_cb. */
-    int favor_decode_speed;              /**< 1 to favor decode speed over size at levels 3-7: a few
-                                                 percent larger, 10-25 percent faster to decode; the format
-                                                 is unchanged. 0 = smallest output. */
-    int split_budget_pct;                /**< With favor_decode_speed, how much a block may grow for
-                                                 decode speed, in percent of its size: 1-100 (0 = 10,
-                                                 the measured knee; above 100 reads as 100). Ignored
-                                                 without favor_decode_speed. */
+    int favor_decode_speed;              /**< 1 to favor decode speed at levels 3-7: a few percent
+                                                 larger, 10-25 percent faster to decode, same format. */
+    int split_budget_pct;                /**< With favor_decode_speed, how much a block may grow, in
+                                                 percent: 1 to ZXC_SPLIT_BUDGET_MAX, 0 for
+                                                 ZXC_SPLIT_BUDGET_DEFAULT. */
 } zxc_compress_opts_t;
 
 /**

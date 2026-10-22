@@ -1102,7 +1102,7 @@ typedef struct {
     int level;
     int checksum;
     int seekable;
-    uint8_t split_budget_pct; /* favor_decode_speed resolved: 0 = off */
+    uint8_t split_budget_pct; /* resolved, 0 = off */
     size_t block_size;
 } zxc_cctx_opts_t;
 

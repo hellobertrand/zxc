@@ -187,8 +187,7 @@ typedef struct {
  * @var zxc_stream_ctx_t::compression_level
  *      The configured level of compression (trading off speed vs. ratio).
  * @var zxc_stream_ctx_t::split_budget_pct
- *      favor_decode_speed's growth budget in percent, 0 when off
- *      (zxc_split_budget_resolve); handed to each worker's context.
+ *      Growth budget in percent, 0 = off; copied to each worker.
  * @var zxc_stream_ctx_t::chunk_size
  *      The size of each data chunk to be processed.
  * @var zxc_stream_ctx_t::checksum_enabled
