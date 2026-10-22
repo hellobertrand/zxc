@@ -687,12 +687,12 @@ static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
  * negative one reading as ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT. What every
  * compression entry point stores in zxc_cctx_t::split_budget_pct.
  */
-static ZXC_ALWAYS_INLINE int zxc_split_budget_resolve(const zxc_compress_opts_t* opts) {
+static ZXC_ALWAYS_INLINE uint8_t zxc_split_budget_resolve(const zxc_compress_opts_t* opts) {
     if (!opts || !opts->favor_decode_speed) return 0;
     if (opts->split_budget_pct <= 0) return ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT;
     if (opts->split_budget_pct > ZXC_SPL_MATCH_SPLIT_BUDGET_MAX)
         return ZXC_SPL_MATCH_SPLIT_BUDGET_MAX;
-    return opts->split_budget_pct;
+    return (uint8_t)opts->split_budget_pct;
 }
 /** @} */
 #define ZXC_PAK_MAX_INLINE_OUT_PER_SEQ \
@@ -1185,13 +1185,9 @@ typedef struct {
      *  token's units (length - ZXC_LZ_MIN_MATCH_LEN): escaped matches up to it
      *  split in a block whose escapes look mispredicted; <= ZXC_SPL_INLINE_ML_CODE
      *  disables. SPL levels only. favor_decode_speed replaces it by
-     *  @ref ZXC_SPL_MATCH_SPLIT_MAX under a growth budget. */
+     *  @ref ZXC_SPL_MATCH_SPLIT_MAX under a growth budget
+     *  (zxc_cctx_t::split_budget_pct). */
     uint8_t split_max;
-
-    /** Growth a block may take from splitting, in percent of its size before
-     *  entropy coding; 0 selects the gated policy above. Set by the encoder from
-     *  zxc_cctx_t::split_budget_pct with favor_decode_speed. */
-    uint8_t split_budget_pct;
 } zxc_lz77_params_t;
 
 /**
@@ -1208,18 +1204,18 @@ static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) 
     // Match splitting by default at levels 3-5 only: 1-2 are PAK, 6-7 keep every
     // escape; favor_decode_speed overrides split_max at every SPL level.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
-    // step_shift, min_offset, split_max, split_budget_pct
+    // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0, 0},        // fallback
-        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0, 0},        // level 1
-        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST, 0, 0},        // level 2
-        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST, 33, 0},     // level 3
-        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST, 24, 0},     // level 4
-        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST, 23, 0},  // level 5
-        {64, 256, 0, 0, 0, 1, 8, 1, 0, 0}                    // level 6
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // fallback
+        {3, 16, 0, 0, 0, 4, 4, ZXC_LZ_MINDIST, 0},        // level 1
+        {3, 18, 0, 0, 0, 3, 6, ZXC_LZ_MINDIST, 0},        // level 2
+        {3, 16, 1, 4, 128, 1, 4, ZXC_LZ_MINDIST, 33},     // level 3
+        {3, 18, 1, 4, 128, 1, 5, ZXC_LZ_MINDIST, 24},     // level 4
+        {64, 256, 1, 16, 128, 1, 8, ZXC_LZ_MINDIST, 23},  // level 5
+        {64, 256, 0, 0, 0, 1, 8, 1, 0}                    // level 6
     };
     return (level >= ZXC_LEVEL_ULTRA)
-               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1, 0, 0}
+               ? (zxc_lz77_params_t){128, 256, 0, 0, 0, 1, 8, 1, 0}
                : table[level < ZXC_LEVEL_FASTEST ? ZXC_LEVEL_FASTEST : level];
 }
 
@@ -1966,7 +1962,7 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
-    int split_budget_pct;           /**< favor_decode_speed's growth budget in percent
+    uint8_t split_budget_pct;       /**< favor_decode_speed's growth budget in percent
                                          (zxc_split_budget_resolve); 0 = gated split. */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block

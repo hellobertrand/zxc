@@ -1431,12 +1431,12 @@ int test_split_budget_pct(void) {
     const int widens = sz[2] < sz[1] && sz[1] < sz[3];
     if (!def_is_10 || !clamped || !widens) {
         printf("  [FAIL] 0 %s 10, 255 %s 100, sizes 1/10/100: %lld/%lld/%lld\n",
-               def_is_10 ? "==" : "!=", clamped ? "==" : "!=", (long long)sz[2],
-               (long long)sz[1], (long long)sz[3]);
+               def_is_10 ? "==" : "!=", clamped ? "==" : "!=", (long long)sz[2], (long long)sz[1],
+               (long long)sz[3]);
         goto done;
     }
-    printf("  [PASS] budget 1/10/100: %lld/%lld/%lld bytes\n", (long long)sz[2],
-           (long long)sz[1], (long long)sz[3]);
+    printf("  [PASS] budget 1/10/100: %lld/%lld/%lld bytes\n", (long long)sz[2], (long long)sz[1],
+           (long long)sz[3]);
     printf("PASS\n\n");
     ok = 1;
 done:

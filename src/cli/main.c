@@ -2347,8 +2347,7 @@ int main(int argc, char** argv) {
                 in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
                 decompress_iters, num_threads, level, checksum ? "true" : "false",
                 g_favor_decode_speed ? "true" : "false", g_split_budget_pct, compress_speed_mbps,
-                decompress_speed_mbps,
-                best_compress, best_decompress);
+                decompress_speed_mbps, best_compress, best_decompress);
         else
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"

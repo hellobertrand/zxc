@@ -646,7 +646,7 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
 
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
-    const int split_budget_pct = zxc_split_budget_resolve(opts);
+    const uint8_t split_budget_pct = zxc_split_budget_resolve(opts);
     const int level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
@@ -1102,7 +1102,7 @@ typedef struct {
     int level;
     int checksum;
     int seekable;
-    int split_budget_pct; /* favor_decode_speed resolved: 0 = off */
+    uint8_t split_budget_pct; /* favor_decode_speed resolved: 0 = off */
     size_t block_size;
 } zxc_cctx_opts_t;
 
@@ -1188,7 +1188,6 @@ zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts) {
             return NULL;
         }
         // LCOV_EXCL_STOP
-        cctx->inner.split_budget_pct = o.split_budget_pct;
         cctx->last_block_size = o.block_size;
         cctx->initialized = 1;
     }
@@ -2045,7 +2044,6 @@ zxc_cctx* zxc_init_static_cctx(void* RESTRICT workspace, const size_t workspace_
     if (UNLIKELY(zxc_cctx_init_in_workspace(&cctx->inner, inner_ws, inner_sz, o.block_size, 1,
                                             o.level, o.checksum, 0, 0) != ZXC_OK))
         return NULL;
-    cctx->inner.split_budget_pct = o.split_budget_pct;
 
     cctx->owns_workspace = 1;
     cctx->initialized = 1;

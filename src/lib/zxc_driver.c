@@ -247,7 +247,7 @@ typedef struct {
     int fail_code;
     int write_idx;
     int compression_level;
-    int split_budget_pct;
+    uint8_t split_budget_pct;
     size_t chunk_size;
     int checksum_enabled;
     int file_has_checksum;
@@ -1234,7 +1234,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
-    const int split_budget_pct = zxc_split_budget_resolve(opts);
+    const uint8_t split_budget_pct = zxc_split_budget_resolve(opts);
     const int level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
