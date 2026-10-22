@@ -1122,8 +1122,9 @@ int test_stream_level_clamp(void) {
 
     for (int i = 0; i < 4 && ok; i += 2) {
         if (sz[i] != sz[i + 1] || memcmp(out[i], out[i + 1], (size_t)sz[i]) != 0) {
-            printf("Failed: level %d produced a different stream than level %d (%ld vs %ld bytes)\n",
-                   levels[i + 1], levels[i], sz[i], sz[i + 1]);
+            printf(
+                "Failed: level %d produced a different stream than level %d (%ld vs %ld bytes)\n",
+                levels[i + 1], levels[i], sz[i], sz[i + 1]);
             ok = 0;
         }
     }
