@@ -269,6 +269,8 @@ typedef struct {
     zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
     void*  user_data;                     // Passed through to progress_cb.
     int    favor_decode_speed; // 1 = favor decode speed over size, levels 3-7.
+    int    split_budget_pct;   // With it, how much a block may grow for decode
+                               // speed, 1-100 percent (0 = 10, the knee).
 } zxc_compress_opts_t;
 ```
 
@@ -386,7 +388,8 @@ ZXC_EXPORT int64_t zxc_compress(
 ```
 
 Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`,
-`seekable`, `favor_decode_speed` and the dictionary fields of `opts` are used.
+`seekable`, `favor_decode_speed`, `split_budget_pct` and the dictionary fields
+of `opts` are used.
 `n_threads` is ignored (always single-threaded).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
@@ -832,8 +835,9 @@ appends the seek table as `zxc_compress()` does, without allocating, static
 contexts included.
 
 Options are **sticky**: `NULL` reuses the last successful call's `level`,
-`block_size`, `checksum_enabled`, `favor_decode_speed` and `seekable` (all
-but `seekable` for `zxc_compress_block()`), starting from the creation options. A zero `level` or
+`block_size`, `checksum_enabled`, `favor_decode_speed`, `split_budget_pct` and
+`seekable` (all but `seekable` for `zxc_compress_block()`), starting from the
+creation options. A zero `level` or
 `block_size` in a non-NULL `opts` means the value the context was created
 with, never an earlier call's. A failed call leaves them untouched.
 

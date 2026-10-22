@@ -312,9 +312,10 @@ export default async function createZXC(moduleOverrides, factory) {
   //   int checksum_enabled (12) | int seekable (16)
   //   const void* dict (20) | size_t dict_size (24) | const void* dict_huf (28)
   //   ptr progress_cb (32) | ptr user_data (36)
-  //   int favor_decode_speed (40), left at 0: not exposed yet
-  // Total: 44 bytes in WASM32
-  const COMPRESS_OPTS_SIZE = 44;
+  //   int favor_decode_speed (40) | int split_budget_pct (44), left at 0:
+  //   not exposed yet
+  // Total: 48 bytes in WASM32
+  const COMPRESS_OPTS_SIZE = 48;
 
   // zxc_decompress_opts_t:
   //   int n_threads (0) | int checksum_enabled (4)

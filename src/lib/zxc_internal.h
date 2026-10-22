@@ -673,11 +673,27 @@ static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
  * (JSON records: +45 percent for a cap of 128 bytes). The budget caps each
  * block on its own, shortest escapes first: the decode gain per escape is the
  * same, the cost grows with the pieces. 10 is the speed knee on silesia
- * (L3 +10 percent of decode for +1.8 of size). The default the encoder puts
- * in zxc_lz77_params_t::split_budget_pct; overridable for a sweep. */
-#ifndef ZXC_SPL_MATCH_SPLIT_BUDGET_PCT
-#define ZXC_SPL_MATCH_SPLIT_BUDGET_PCT 10
-#endif
+ * (L3 +10 percent of decode for +1.8 of size). The default for a zero
+ * zxc_compress_opts_t::split_budget_pct; see zxc_split_budget_resolve. */
+#define ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT 10
+/** @brief Widest budget: the block may double. */
+#define ZXC_SPL_MATCH_SPLIT_BUDGET_MAX 100
+
+/**
+ * @brief The split budget a zxc_compress_opts_t asks for, in percent.
+ *
+ * 0 without favor_decode_speed (the gated policy); otherwise its
+ * split_budget_pct clamped to [1, ZXC_SPL_MATCH_SPLIT_BUDGET_MAX], a zero or
+ * negative one reading as ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT. What every
+ * compression entry point stores in zxc_cctx_t::split_budget_pct.
+ */
+static ZXC_ALWAYS_INLINE int zxc_split_budget_resolve(const zxc_compress_opts_t* opts) {
+    if (!opts || !opts->favor_decode_speed) return 0;
+    if (opts->split_budget_pct <= 0) return ZXC_SPL_MATCH_SPLIT_BUDGET_DEFAULT;
+    if (opts->split_budget_pct > ZXC_SPL_MATCH_SPLIT_BUDGET_MAX)
+        return ZXC_SPL_MATCH_SPLIT_BUDGET_MAX;
+    return opts->split_budget_pct;
+}
 /** @} */
 #define ZXC_PAK_MAX_INLINE_OUT_PER_SEQ \
     ((ZXC_SEQ_LL_MASK - 1U) + (ZXC_SEQ_ML_MASK - 1U) + ZXC_LZ_MIN_MATCH_LEN) /* 513 */
@@ -1174,7 +1190,7 @@ typedef struct {
 
     /** Growth a block may take from splitting, in percent of its size before
      *  entropy coding; 0 selects the gated policy above. Set by the encoder from
-     *  @ref ZXC_SPL_MATCH_SPLIT_BUDGET_PCT with favor_decode_speed. */
+     *  zxc_cctx_t::split_budget_pct with favor_decode_speed. */
     uint8_t split_budget_pct;
 } zxc_lz77_params_t;
 
@@ -1950,7 +1966,8 @@ typedef struct {
     size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
     int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
     int compression_level;          /**< Compression level. */
-    int favor_decode_speed;         /**< Enables the match split (levels 3-7). */
+    int split_budget_pct;           /**< favor_decode_speed's growth budget in percent
+                                         (zxc_split_budget_resolve); 0 = gated split. */
     size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
     uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
                                          when dict_size > 0 (NULL otherwise). */

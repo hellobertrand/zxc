@@ -2172,6 +2172,28 @@ if "$ZXC_BIN" -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null | grep -q
 else
     log_fail "-b -j does not report favor_decode_speed"
 fi
+# 39.4 =PCT widens the budget: a different archive that still decodes
+"$ZXC_BIN" -3 --favor-decode-speed=100 -c "$PDS" > "$TEST_DIR/pds_on100.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/pds_on100.zxc" > "$TEST_DIR/pds_on100.dec"
+if cmp -s "$PDS" "$TEST_DIR/pds_on100.dec" && ! cmp -s "$TEST_DIR/pds_on.zxc" "$TEST_DIR/pds_on100.zxc"; then
+    log_pass "--favor-decode-speed=100 round trip, differs from the default budget"
+else
+    log_fail "--favor-decode-speed=100 round trip or budget ignored"
+fi
+# 39.5 The budget is 1 to 100
+if ! "$ZXC_BIN" -3 --favor-decode-speed=0 -c "$PDS" > /dev/null 2>&1 && \
+   ! "$ZXC_BIN" -3 --favor-decode-speed=101 -c "$PDS" > /dev/null 2>&1 && \
+   ! "$ZXC_BIN" -3 --favor-decode-speed=x -c "$PDS" > /dev/null 2>&1; then
+    log_pass "--favor-decode-speed rejects a budget outside 1-100"
+else
+    log_fail "--favor-decode-speed accepted a bad budget"
+fi
+# 39.6 Benchmark mode reports the budget
+if "$ZXC_BIN" -b1 -j --favor-decode-speed=25 "$TEST_FILE_ARG" 2>/dev/null | grep -q '"split_budget_pct": 25'; then
+    log_pass "-b -j reports split_budget_pct"
+else
+    log_fail "-b -j does not report split_budget_pct"
+fi
 rm -f "$TEST_DIR"/pds_*
 
 echo "All tests passed!"

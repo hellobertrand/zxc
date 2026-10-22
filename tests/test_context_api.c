@@ -943,13 +943,14 @@ int test_context_api_empty_input(void) {
     return ok;
 }
 
-/* favor_decode_speed is sticky like checksum_enabled: NULL opts keep it,
- * zeroed opts drop it, a static context pins it at init; both outputs decode. */
+/* favor_decode_speed and its budget are sticky like checksum_enabled: NULL opts
+ * keep them, zeroed opts drop them, a static context pins them at init; both
+ * outputs decode. */
 int test_cctx_favor_decode_speed_sticky(void) {
     printf("=== TEST: Opaque Context API - favor_decode_speed is sticky ===\n");
 
     const zxc_compress_opts_t off = {.level = 3};
-    const zxc_compress_opts_t on = {.level = 3, .favor_decode_speed = 1};
+    const zxc_compress_opts_t on = {.level = 3, .favor_decode_speed = 1, .split_budget_pct = 100};
     const size_t src_sz = 300000;
     const uint64_t fb = zxc_compress_bound(src_sz), bb = zxc_compress_block_bound(src_sz);
     const size_t cap = (size_t)(fb > bb ? fb : bb);

@@ -74,6 +74,10 @@ typedef struct {
     int favor_decode_speed;              /**< 1 to favor decode speed over size at levels 3-7: a few
                                                  percent larger, 10-25 percent faster to decode; the format
                                                  is unchanged. 0 = smallest output. */
+    int split_budget_pct;                /**< With favor_decode_speed, how much a block may grow for
+                                                 decode speed, in percent of its size: 1-100 (0 = 10,
+                                                 the measured knee; above 100 reads as 100). Ignored
+                                                 without favor_decode_speed. */
 } zxc_compress_opts_t;
 
 /**

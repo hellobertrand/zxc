@@ -186,6 +186,9 @@ typedef struct {
  *      The index of the next job slot to be written to by the main thread.
  * @var zxc_stream_ctx_t::compression_level
  *      The configured level of compression (trading off speed vs. ratio).
+ * @var zxc_stream_ctx_t::split_budget_pct
+ *      favor_decode_speed's growth budget in percent, 0 when off
+ *      (zxc_split_budget_resolve); handed to each worker's context.
  * @var zxc_stream_ctx_t::chunk_size
  *      The size of each data chunk to be processed.
  * @var zxc_stream_ctx_t::checksum_enabled
@@ -244,7 +247,7 @@ typedef struct {
     int fail_code;
     int write_idx;
     int compression_level;
-    int favor_decode_speed;
+    int split_budget_pct;
     size_t chunk_size;
     int checksum_enabled;
     int file_has_checksum;
@@ -532,7 +535,7 @@ static void* zxc_stream_worker(void* arg) {
     }
 
     cctx.compression_level = ctx->compression_level;
-    cctx.favor_decode_speed = ctx->favor_decode_speed;
+    cctx.split_budget_pct = ctx->split_budget_pct;
 
     // Per-worker dict buffer for assembling [dict | block_data]
     const size_t dsz = ctx->dict_size;
@@ -1231,7 +1234,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
-    const int favor_decode_speed = opts ? opts->favor_decode_speed : 0;
+    const int split_budget_pct = zxc_split_budget_resolve(opts);
     const int level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
@@ -1249,7 +1252,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     zxc_stream_ctx_t* const ctx = &e.ctx;
     ctx->compression_mode = 1;
     ctx->compression_level = level;
-    ctx->favor_decode_speed = favor_decode_speed;
+    ctx->split_budget_pct = split_budget_pct;
     ctx->chunk_size = block_size;
     ctx->checksum_enabled = checksum_enabled;
     ctx->file_has_checksum = checksum_enabled;

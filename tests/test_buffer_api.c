@@ -1397,6 +1397,55 @@ done:
     return ok;
 }
 
+// split_budget_pct: 0 is the library default (10), anything above 100 reads
+// as 100, a wider budget never shrinks the output, and every budget decodes.
+int test_split_budget_pct(void) {
+    printf("=== TEST: Unit - favor_decode_speed split budget ===\n");
+    static const int pcts[] = {0, 10, 1, 100, 255};
+    enum { N = sizeof(pcts) / sizeof(pcts[0]) };
+    const size_t n = 300000;
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const src = malloc(n);
+    uint8_t* const back = malloc(n);
+    uint8_t* out[N] = {NULL};
+    int64_t sz[N] = {0};
+    int ok = 0;
+    if (!src || !back) goto done;
+    gen_split_data(src, n);
+
+    for (int i = 0; i < N; i++) {
+        out[i] = malloc(cap);
+        if (!out[i]) goto done;
+        const zxc_compress_opts_t co = {
+            .level = 3, .favor_decode_speed = 1, .split_budget_pct = pcts[i]};
+        sz[i] = zxc_compress(src, n, out[i], cap, &co);
+        const int64_t d = sz[i] > 0 ? zxc_decompress(out[i], (size_t)sz[i], back, n, NULL) : -1;
+        if (sz[i] <= 0 || d != (int64_t)n || memcmp(back, src, n) != 0) {
+            printf("  [FAIL] budget %d: compress %lld, decompress %lld\n", pcts[i],
+                   (long long)sz[i], (long long)d);
+            goto done;
+        }
+    }
+    const int def_is_10 = sz[0] == sz[1] && memcmp(out[0], out[1], (size_t)sz[0]) == 0;
+    const int clamped = sz[3] == sz[4] && memcmp(out[3], out[4], (size_t)sz[3]) == 0;
+    const int widens = sz[2] < sz[1] && sz[1] < sz[3];
+    if (!def_is_10 || !clamped || !widens) {
+        printf("  [FAIL] 0 %s 10, 255 %s 100, sizes 1/10/100: %lld/%lld/%lld\n",
+               def_is_10 ? "==" : "!=", clamped ? "==" : "!=", (long long)sz[2],
+               (long long)sz[1], (long long)sz[3]);
+        goto done;
+    }
+    printf("  [PASS] budget 1/10/100: %lld/%lld/%lld bytes\n", (long long)sz[2],
+           (long long)sz[1], (long long)sz[3]);
+    printf("PASS\n\n");
+    ok = 1;
+done:
+    for (int i = 0; i < N; i++) free(out[i]);
+    free(src);
+    free(back);
+    return ok;
+}
+
 /* zxc_get_frame_info and its FILE* twin: every field against what the archive
  * was built with, the same answer from both, and nothing written on failure. */
 /* Every byte of @p x is a field or zero: no stack bytes leak through the padding. */

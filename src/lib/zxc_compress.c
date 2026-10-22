@@ -1468,9 +1468,9 @@ static int zxc_encode_block_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (lzp.min_offset > 1 && zxc_block_is_short_dist_bound(src + dict_sz, src_sz - dict_sz))
         lzp.min_offset = 1;
     // Favoring decode speed: every SPL level splits up to the cap, under the budget.
-    if (ctx->favor_decode_speed) {
+    if (ctx->split_budget_pct) {
         lzp.split_max = ZXC_SPL_MATCH_SPLIT_MAX;
-        lzp.split_budget_pct = ZXC_SPL_MATCH_SPLIT_BUDGET_PCT;
+        lzp.split_budget_pct = (uint8_t)ctx->split_budget_pct;
     }
 
     ctx->epoch++;

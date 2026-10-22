@@ -79,8 +79,8 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 **-S**, **--seekable**
 : Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
-**--favor-decode-speed**
-: Favor decompression speed over size. At levels 3 to 7 long matches are re-emitted as chains of short inline matches, within a per-block size budget: a few percent larger, 10 to 25 percent faster to decompress. The format is unchanged, any decoder reads the result. No effect at levels 1 and 2.
+**--favor-decode-speed**[=*PCT*]
+: Favor decompression speed over size. At levels 3 to 7 long matches are re-emitted as chains of short inline matches, within a per-block size budget: a few percent larger, 10 to 25 percent faster to decompress. *PCT* sets that budget, how much a block may grow for it, from 1 to 100 percent (default 10, the point beyond which decompression barely speeds up). The format is unchanged, any decoder reads the result. No effect at levels 1 and 2.
 
 **-k**, **--keep**
 : Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.

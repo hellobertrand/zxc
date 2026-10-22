@@ -195,6 +195,9 @@ pub struct zxc_compress_opts_t {
     /// 1 to favor decode speed over size at levels 3-7 (a few percent larger,
     /// 10-25 percent faster to decode; format unchanged), 0 for the smallest output.
     pub favor_decode_speed: c_int,
+    /// With favor_decode_speed, how much a block may grow for decode speed, in
+    /// percent: 1-100 (0 = the library default of 10). Ignored otherwise.
+    pub split_budget_pct: c_int,
 }
 
 impl Default for zxc_compress_opts_t {
@@ -211,6 +214,7 @@ impl Default for zxc_compress_opts_t {
             progress_cb: std::ptr::null(),
             user_data: std::ptr::null_mut(),
             favor_decode_speed: 0,
+            split_budget_pct: 0,
         }
     }
 }

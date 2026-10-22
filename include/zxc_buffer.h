@@ -537,8 +537,9 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
  * grow.
  *
  * Options are **sticky**: NULL @p opts reuses the last successful call's level,
- * block_size, checksum_enabled, favor_decode_speed and seekable (all but
- * seekable for zxc_compress_block()), starting from zxc_create_cctx(). In a non-NULL
+ * block_size, checksum_enabled, favor_decode_speed, split_budget_pct and
+ * seekable (all but seekable for zxc_compress_block()), starting from
+ * zxc_create_cctx(). In a non-NULL
  * @p opts, a zero level or block_size means the creation value (the library
  * default for a NULL zxc_create_cctx()), never an earlier call's. A failed call
  * leaves them untouched, workspace re-carving aside. Levels above
@@ -715,7 +716,7 @@ ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const 
  * later @ref zxc_compress_cctx call asking for a different @c block_size
  * returns @ref ZXC_ERROR_BAD_BLOCK_SIZE without re-initialising; a zero
  * @c block_size or @c level means the pinned one. A different @c level /
- * @c checksum_enabled / @c favor_decode_speed is honoured per call without
+ * @c checksum_enabled / @c favor_decode_speed / @c split_budget_pct is honoured per call without
  * re-partitioning, except a
  * raise into @ref ZXC_LEVEL_DENSITY on a workspace carved below it: the
  * optimal-parser scratch is absent, so the call returns

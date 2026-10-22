@@ -198,11 +198,14 @@ Archive), allowing the decoder to instantly locate and decompress
 specific blocks in \f[CR]O(1)\f[R] time without reading the entire file.
 Ideal for compressed filesystems, game assets, and log analysis.
 .TP
-\f[B]\-\-favor\-decode\-speed\f[R]
+\f[B]\-\-favor\-decode\-speed\f[R][=\f[I]PCT\f[R]]
 Favor decompression speed over size.
 At levels 3 to 7 long matches are re\-emitted as chains of short inline
 matches, within a per\-block size budget: a few percent larger, 10 to 25
 percent faster to decompress.
+\f[I]PCT\f[R] sets that budget, how much a block may grow for it, from 1
+to 100 percent (default 10, the point beyond which decompression barely
+speeds up).
 The format is unchanged, any decoder reads the result.
 No effect at levels 1 and 2.
 .TP

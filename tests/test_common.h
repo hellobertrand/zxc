@@ -119,6 +119,7 @@ int test_buffer_api(void);
 int test_buffer_api_scratch_buf(void);
 int test_min_dist_policy(void);
 int test_spl_match_split(void);
+int test_split_budget_pct(void);
 int test_buffer_error_codes(void);
 int test_get_decompressed_size(void);
 int test_frame_info(void);

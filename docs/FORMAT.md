@@ -389,8 +389,8 @@ per block and only when that escape looks poorly predicted: on regular data
 the branch is already predictable and splitting would only add sequences.
 When asked to favor decode speed (`favor_decode_speed`), it splits at
 levels 3 to 7 every such match of up to 128 bytes, shortest first, within a
-budget on the block's growth, so that data which compresses very well keeps
-most of its long matches whole. Levels 1 and 2 (PAK) never split. Like
+budget on the block's growth (`split_budget_pct`, 10 percent by default), so
+that data which compresses very well keeps most of its long matches whole. Levels 1 and 2 (PAK) never split. Like
 the distance floor, this changes which sequences an encoder emits, never how
 they are encoded, so the archive stays an ordinary SPL block and any
 conforming decoder reads it.
