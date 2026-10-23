@@ -14,14 +14,14 @@ on:
       - 'contrib/linux-kernel/**'
       - 'include/**'
       - 'src/lib/**'
-      - '.github/workflows/kernel.yml'
+      - '.github/workflows/kernel-linux.yml'
   pull_request:
     branches: [ main, candidate ]
     paths:
       - 'contrib/linux-kernel/**'
       - 'include/**'
       - 'src/lib/**'
-      - '.github/workflows/kernel.yml'
+      - '.github/workflows/kernel-linux.yml'
 
 permissions:
   contents: read

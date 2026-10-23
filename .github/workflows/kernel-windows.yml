@@ -2,8 +2,8 @@ name: Windows Kernel Library
 
 # Builds contrib/windows-kernel: the kernel-mode static library and the
 # self-test driver that links it, then asserts the image's imports, machine
-# and subsystem. Like kernel.yml, off the PR path unless the tree or the
-# library change.
+# and subsystem. Like kernel-linux.yml, off the PR path unless the tree or
+# the library change.
 #
 # The runner image carries Visual Studio 2026 with the WDK's Visual Studio
 # extension (the kernel-mode toolset) but not a kit (km headers and

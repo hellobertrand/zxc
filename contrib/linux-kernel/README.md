@@ -64,8 +64,8 @@ The `Kbuild` flags, and why:
   path, measured below.
 
 CI builds this module against the runner's kernel under `-Werror`
-(`.github/workflows/kernel.yml`) when this directory or the library change, and
-weekly.
+(`.github/workflows/kernel-linux.yml`) when this directory or the library
+change, and weekly.
 
 ## No FPU region
 

@@ -9,7 +9,7 @@ name: Packaging (Consumer Integration)
 # a relocated install prefix.
 #
 # A fifth path consumes no install at all: kernel ports vendor the sources;
-# kernel.yml builds contrib/linux-kernel.
+# kernel-linux.yml builds contrib/linux-kernel.
 
 on:
   workflow_dispatch:
