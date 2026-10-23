@@ -33,6 +33,7 @@ jobs:
   build-compat:
     name: "${{ matrix.name }}"
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ matrix.kind == 'bsd' && 20 || 10 }}
     strategy:
       fail-fast: false
       matrix:
@@ -52,17 +53,22 @@ jobs:
             kind: container
             runner: ubuntu-latest
             image: archlinux:latest
-            setup: >-
-              pacman -Syu --noconfirm --needed gcc cmake make &&
-              set +u && . /etc/makepkg.conf && set -u &&
-              export CFLAGS="$CFLAGS ${LTOFLAGS:-}" LDFLAGS="$LDFLAGS ${LTOFLAGS:-}"
+            setup: |
+              pacman -Syu --noconfirm --needed gcc cmake make
+              set +u
+              . /etc/makepkg.conf
+              set -u
+              export CFLAGS="$CFLAGS $LTOFLAGS" LDFLAGS="$LDFLAGS $LTOFLAGS"
           - name: Linux x86_64 (AlmaLinux 9 / RHEL 9)
             kind: container
             runner: ubuntu-latest
             image: almalinux:9
-            setup: >-
-              dnf -y install gcc cmake make redhat-rpm-config annobin-plugin-gcc &&
-              export CFLAGS="$(rpm --eval %optflags)"
+            # The CFLAGS/LDFLAGS that %cmake builds with.
+            setup: |
+              dnf -y install gcc cmake make redhat-rpm-config annobin
+              set +u
+              eval "$(rpm --eval %set_build_flags)"
+              set -u
           - name: Linux arm64 (Amazon Linux 2023)
             kind: container
             runner: ubuntu-24.04-arm
@@ -74,14 +80,14 @@ jobs:
             os: freebsd
             arch: x86-64
             version: "14.4"
-            install: sudo pkg install -y cmake ninja
+            install: sudo env IGNORE_OSVERSION=yes pkg install -y cmake ninja
           - name: FreeBSD 15.1 x86_64
             kind: bsd
             runner: ubuntu-latest
             os: freebsd
             arch: x86-64
             version: "15.1"
-            install: sudo pkg install -y cmake ninja
+            install: sudo env IGNORE_OSVERSION=yes pkg install -y cmake ninja
 
     steps:
       - name: Checkout Repository
@@ -93,6 +99,11 @@ jobs:
         run: |
           docker run --rm -v "${{ github.workspace }}:/src" -w /src ${{ matrix.image }} sh -euc '
             ${{ matrix.setup }}
+            # -Werror by flags: CMAKE_COMPILE_WARNING_AS_ERROR needs CMake 3.24
+            # (Amazon Linux has 3.22) and misses the link-time warnings of LTO.
+            # No CMAKE_BUILD_TYPE: distro CFLAGS keep their -O2, others get
+            # the Release default.
+            export CFLAGS="${CFLAGS:-} -Werror" LDFLAGS="${LDFLAGS:-} -Werror"
             echo "=== Toolchain ==="
             cc --version
             cmake --version
@@ -107,8 +118,6 @@ jobs:
                 if [ "$LIB_TYPE" = SHARED ]; then SHARED_FLAG=ON; fi
 
                 cmake -S . -B "$BUILD_DIR" \
-                    -DCMAKE_BUILD_TYPE=Release \
-                    -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
                     -DZXC_NATIVE_ARCH=OFF \
                     -DBUILD_SHARED_LIBS="$SHARED_FLAG"
 

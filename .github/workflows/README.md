@@ -12,7 +12,17 @@ Builds and tests ZXC across multiple platforms (Linux x86_64/ARM64, macOS ARM64,
 ### multiarch.yml - Multi-Architecture Build
 **Triggers:** Push to main, pull requests, manual dispatch
 
-Comprehensive build matrix testing across multiple architectures including 32-bit and 64-bit variants for Linux (x64, x86, ARM64, ARM) and Windows (x64, x86). Validates compilation compatibility across different platforms.
+Builds and tests ZXC across CPU architectures, Debian's included (GNU/Hurd aside: an OS, not a CPU), in three tiers:
+- **Tier 1** (native runners): Linux x86_64/i386/arm64, Windows x86_64/i386/arm64, macOS x86_64/arm64; Linux armhf is cross-compiled, build only.
+- **Tier 2** (Debian release architectures, cross-compiled in `debian:trixie`, tested under QEMU): armhf, ppc64le, s390x, riscv64, loong64; plus x86_64 under Intel SDE, one job per SIMD dispatch tier (SSE2, AVX2, AVX-512).
+- **Tier 3** (Debian ports and retired architectures, same setup): armv6, mipsel, powerpc, ppc64, sparc64, alpha, hppa, m68k, sh4, and x32, run natively through its loader.
+
+Tier 1 and Tier 2 are required checks on `main`; Tier 3 is not.
+
+### compat-os.yml - OS (libc) Compatibility
+**Triggers:** Push to main, pull requests, manual dispatch
+
+Covers the OS and libc axis that multiarch.yml, all glibc Linux, does not: Alpine (musl, x86_64 and arm64), Arch Linux and AlmaLinux 9 (RHEL 9) built with their distro packaging flags, Amazon Linux 2023 (arm64), and FreeBSD 14 and 15 in a VM. Warnings are errors at compile and at LTO link time.
 
 ### multicomp.yml - Compiler Compatibility
 **Triggers:** Push to main, pull requests, manual dispatch
