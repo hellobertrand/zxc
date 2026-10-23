@@ -63,6 +63,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_max_level"
         "_zxc_default_level"
         "_zxc_version_string"
+        "_zxc_version_number"
         "_zxc_error_name"
         # Options-struct layout guards
         "_zxc_compress_opts_size"

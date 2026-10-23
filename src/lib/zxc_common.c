@@ -1027,21 +1027,19 @@ int zxc_read_pak_header(const uint8_t* RESTRICT src, const size_t len,
  * guarantee the bound holds for all valid block sizes and seekable mode.
  */
 size_t zxc_compress_bound(const size_t input_size) {
-    // Guard against uint64 overflow when summing per-block overhead
-    // across very large inputs (input_size approaching SIZE_MAX).
-    if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
-    uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE_MIN - 1) / ZXC_BLOCK_SIZE_MIN;
+    // n <= 2^52 even for a 64-bit size_t, so the overhead sum fits a uint64.
+    uint64_t n = (uint64_t)input_size / ZXC_BLOCK_SIZE_MIN + (input_size % ZXC_BLOCK_SIZE_MIN != 0);
     if (n == 0) n = 1;
-    const uint64_t bound =
+    const uint64_t overhead =
         ZXC_FILE_HEADER_SIZE +
         (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_FORMAT_OVERHEAD)) +
-        (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
-        ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
-        zxc_seek_table_bytes(n) +                      /* SEK groups (seekable) */
-        ZXC_FOOTER_MAX_SIZE_WITH_DIGEST;               /* optional digest + footer */
-    // The bound is a buffer size: on 32-bit targets it must fit a size_t.
-    if (UNLIKELY(bound > (uint64_t)SIZE_MAX)) return 0;
-    return (size_t)bound;
+        ZXC_BLOCK_HEADER_SIZE +          /* EOF block */
+        ZXC_BLOCK_HEADER_SIZE +          /* SEK block header (seekable) */
+        zxc_seek_table_bytes(n) +        /* SEK groups (seekable) */
+        ZXC_FOOTER_MAX_SIZE_WITH_DIGEST; /* optional digest + footer */
+    // The bound is a buffer size: input + overhead must fit a size_t.
+    if (UNLIKELY(overhead > (uint64_t)(SIZE_MAX - input_size))) return 0;
+    return input_size + (size_t)overhead;
 }
 
 /**
@@ -1054,8 +1052,7 @@ size_t zxc_compress_block_bound(const size_t input_size) {
     if (UNLIKELY(input_size == 0 || input_size > ZXC_BLOCK_SIZE_MAX)) return 0;
     // Outer block header + payload (worst case: incompressible, raw bytes)
     // + inner format overhead + optional checksum.
-    return (uint64_t)ZXC_BLOCK_HEADER_SIZE + (uint64_t)input_size + ZXC_BLOCK_FORMAT_OVERHEAD +
-           ZXC_BLOCK_CHECKSUM_SIZE;
+    return ZXC_BLOCK_HEADER_SIZE + input_size + ZXC_BLOCK_FORMAT_OVERHEAD + ZXC_BLOCK_CHECKSUM_SIZE;
 }
 
 /**

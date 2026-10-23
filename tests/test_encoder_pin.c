@@ -173,7 +173,7 @@ int test_encoder_output_pinned(void) {
 
     static const size_t k_block_sizes[] = {0 /* default */, 32 * 1024};
     static const size_t k_dict_block_size[] = {4096};
-    const size_t cap = (size_t)zxc_compress_bound(PIN_INPUT_SIZE);
+    const size_t cap = zxc_compress_bound(PIN_INPUT_SIZE);
 
     uint8_t* const src = (uint8_t*)malloc((size_t)PIN_N_INPUTS * PIN_INPUT_SIZE);
     uint8_t* const comp = (uint8_t*)malloc(cap);

@@ -229,7 +229,7 @@ between threads.
 #include "zxc.h"
 
 // Compression
-uint64_t bound = zxc_compress_bound(src_size);
+size_t bound = zxc_compress_bound(src_size);
 zxc_compress_opts_t c_opts = {
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,

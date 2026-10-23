@@ -75,7 +75,7 @@ int test_seekable_roundtrip(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 42);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -250,7 +250,7 @@ int test_seekable_open_query(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 99);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -326,7 +326,7 @@ int test_seekable_random_access(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 77);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -446,7 +446,7 @@ int test_seekable_non_seekable_reject(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 11);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE);
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE);
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -485,7 +485,7 @@ int test_seekable_single_block(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 55);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -541,7 +541,7 @@ int test_seekable_all_levels(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 33);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -611,7 +611,7 @@ int test_seekable_many_blocks(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 77);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 4096;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 4096;
     uint8_t* dst = malloc(dst_cap);
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -707,7 +707,7 @@ int test_seekable_open_file(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 99);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -825,7 +825,7 @@ int test_seekable_cross_boundary(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 123);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -909,7 +909,7 @@ int test_seekable_truncated_input(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 44);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -990,7 +990,7 @@ int test_seekable_corrupted_sek(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 66);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -1040,7 +1040,7 @@ int test_seekable_range_out_of_bounds(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 22);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -1101,7 +1101,7 @@ int test_seekable_dst_too_small(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 91);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -1148,7 +1148,7 @@ int test_seekable_dst_too_small(void) {
 int test_seekable_empty_file(void) {
     printf("=== TEST: Seekable - Empty File ===\n");
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(0) + 256;
+    const size_t dst_cap = zxc_compress_bound(0) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) return 0;
 
@@ -1214,7 +1214,7 @@ int test_seekable_no_checksum(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 31);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -1359,7 +1359,7 @@ int test_seekable_open_reader(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 211);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -1547,7 +1547,7 @@ int test_seekable_open_reader_mt(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 137);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     uint8_t* dec = malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -1613,7 +1613,7 @@ int test_seekable_range_reports_short_reads(void) {
         rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     uint8_t out[2048];
     int ok = 0;
@@ -1751,7 +1751,7 @@ int test_seekable_corrupted_block_checksum(void) {
         src[i] = (uint8_t)(rng >> 16);
     }
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -1888,7 +1888,7 @@ int test_seekable_with_checksum(void) {
     if (!src) return 0;
     fill_seek_data(src, SRC_SIZE, 47);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 1024;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);
@@ -1976,7 +1976,7 @@ int test_seekable_work_buf_tail_pad(void) {
     }
     gen_lz_data(src, SRC_SIZE);
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 4096;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 4096;
     uint8_t* const dst = (uint8_t*)malloc(dst_cap);
     uint8_t* const dec = (uint8_t*)malloc(SRC_SIZE);
     if (!dst || !dec) {
@@ -2098,7 +2098,7 @@ int test_seekable_eof_with_payload(void) {
     printf("=== TEST: Seekable - EOF Header With Non-Zero comp_size ===\n");
     enum { SRC_SIZE = 64 * 1024 };
     uint8_t* const src = malloc(SRC_SIZE);
-    const size_t cap = (size_t)zxc_compress_bound(SRC_SIZE);
+    const size_t cap = zxc_compress_bound(SRC_SIZE);
     uint8_t* const arc = malloc(cap);
     int ok = 0;
     if (!src || !arc) goto done;
@@ -2283,7 +2283,7 @@ int test_seekable_mt_group_boundary(void) {
     enum { BS = 4096, NB = 3 * ZXC_SEEK_GROUP };
     const size_t SRC_SIZE = (size_t)BS * NB;
     uint8_t* const src = malloc(SRC_SIZE);
-    const size_t cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* const arc = malloc(cap);
     uint8_t* const st_out = malloc(2 * BS);
     uint8_t* const mt_out = malloc(2 * BS);
@@ -2355,7 +2355,7 @@ int test_seekable_forged_table_entry(void) {
     for (size_t b = 0; b < NB; b++)
         for (size_t i = 0; i < BS; i++) src[b * BS + i] = (uint8_t)('A' + b % 23 + (i % 7 == 0));
 
-    const size_t dst_cap = (size_t)zxc_compress_bound(SRC_SIZE) + 256;
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 256;
     uint8_t* dst = malloc(dst_cap);
     if (!dst) {
         free(src);

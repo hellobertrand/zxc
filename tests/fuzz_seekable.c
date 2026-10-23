@@ -50,9 +50,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     /* Phase 1: Compress with seekable=1                                  */
     /* ------------------------------------------------------------------ */
-    const uint64_t bound64 = zxc_compress_bound(size);
-    if (bound64 == 0 || bound64 > SIZE_MAX) return 0;
-    const size_t bound = (size_t)bound64;
+    const size_t bound = zxc_compress_bound(size);
+    if (bound == 0) return 0;
     if (bound > comp_cap) {
         void* new_buf = realloc(comp_buf, bound);
         if (!new_buf) return 0;

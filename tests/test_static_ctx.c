@@ -26,7 +26,7 @@ int test_static_ctx_roundtrip_all_levels(void) {
     }
     fill_payload(src, src_sz);
 
-    const size_t cap = (size_t)zxc_compress_bound(src_sz);
+    const size_t cap = zxc_compress_bound(src_sz);
     uint8_t* const enc = (uint8_t*)malloc(cap);
     uint8_t* const dec = (uint8_t*)malloc(src_sz);
     if (!enc || !dec) {
@@ -545,7 +545,7 @@ int test_static_dctx_block_bounds(void) {
         B_HDR_LIT_CK,
         NB
     };
-    const size_t cap = (size_t)zxc_compress_block_bound(SEQ);
+    const size_t cap = zxc_compress_block_bound(SEQ);
     uint8_t* lz = (uint8_t*)malloc(XL);   /* compressible: SPL */
     uint8_t* rnd = (uint8_t*)malloc(XL);  /* incompressible: RAW */
     uint8_t* lit = (uint8_t*)malloc(LIT); /* 16-symbol text, then a repeat: many literals */
@@ -767,7 +767,7 @@ int test_static_dctx_block_bounds(void) {
 /* Round trip, then the documented refusals. */
 static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig, size_t n,
                              int level, int checksum, size_t block_size) {
-    const size_t cbound = (size_t)zxc_compress_bound(n);
+    const size_t cbound = zxc_compress_bound(n);
     uint8_t* const comp = (uint8_t*)malloc(cbound);
     if (!comp) return 0;
     const zxc_compress_opts_t co = {
@@ -841,7 +841,7 @@ static int inplace_dctx_case(zxc_dctx* d, const char* label, const uint8_t* orig
 static int64_t inplace_refusal(zxc_dctx* d, const uint8_t* src, size_t n, size_t block_size,
                                const zxc_decompress_opts_t* dop) {
     const zxc_compress_opts_t co = {.level = 3, .block_size = block_size};
-    const size_t cb = (size_t)zxc_compress_bound(n);
+    const size_t cb = zxc_compress_bound(n);
     uint8_t* const comp = (uint8_t*)malloc(cb);
     const int64_t c = comp ? zxc_compress(src, n, comp, cb, &co) : -1;
     const size_t need = c > 0 ? zxc_decompress_inplace_bound(comp, (size_t)c) : 0;

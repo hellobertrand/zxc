@@ -452,7 +452,7 @@ int zxc_dict_train_huf(const void* const* RESTRICT samples, const size_t* RESTRI
     uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
     cctx.lit_freq_acc = freq;
 
-    const size_t out_cap = (size_t)zxc_compress_bound(eff_chunk);
+    const size_t out_cap = zxc_compress_bound(eff_chunk);
     uint8_t* out_scratch = (uint8_t*)ZXC_MALLOC(out_cap);
     if (UNLIKELY(!out_scratch)) {
         // LCOV_EXCL_START

@@ -10,7 +10,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::ffi::c_int;
-use std::os::raw::{c_char, c_void};
+use std::os::raw::{c_char, c_uint, c_void};
 
 // =============================================================================
 // ZXC Version Constants
@@ -302,6 +302,12 @@ unsafe extern "C" {
     ///
     /// The returned pointer is a compile-time constant and must not be freed.
     pub fn zxc_version_string() -> *const c_char;
+
+    /// Returns the library version as `MAJOR * 10000 + MINOR * 100 + PATCH`.
+    ///
+    /// Compare with the crate's `ZXC_VERSION_*` constants to detect a runtime
+    /// library older than the one compiled against.
+    pub fn zxc_version_number() -> c_uint;
 }
 
 // =============================================================================
@@ -485,7 +491,11 @@ unsafe extern "C" {
     /// - `huf_lengths` must be null or valid for 128 bytes (`ZXC_HUF_TABLE_SIZE`).
     ///
     /// Returns 0 if `dict` is NULL or `dict_size` is 0.
-    pub fn zxc_dict_compute_id(dict: *const c_void, dict_size: usize, huf_lengths: *const c_void) -> u32;
+    pub fn zxc_dict_compute_id(
+        dict: *const c_void,
+        dict_size: usize,
+        huf_lengths: *const c_void,
+    ) -> u32;
 
     /// Returns the dictionary ID stored in a `.zxd` file buffer.
     ///
@@ -1161,6 +1171,12 @@ mod tests {
     }
 
     #[test]
+    fn test_version_number() {
+        let header = ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH;
+        assert_eq!(unsafe { zxc_version_number() }, header);
+    }
+
+    #[test]
     fn test_roundtrip() {
         // Use highly repetitive data that definitely compresses well
         let input: Vec<u8> = (0..4096)
@@ -1169,7 +1185,7 @@ mod tests {
 
         unsafe {
             // Allocate compression buffer
-            let bound = zxc_compress_bound(input.len()) as usize;
+            let bound = zxc_compress_bound(input.len());
             let mut compressed = vec![0u8; bound];
 
             // Compress
@@ -1232,7 +1248,7 @@ mod tests {
             ZXC_LEVEL_ULTRA,
         ] {
             unsafe {
-                let bound = zxc_compress_bound(input.len()) as usize;
+                let bound = zxc_compress_bound(input.len());
                 let mut compressed = vec![0u8; bound];
 
                 let copts = zxc_compress_opts_t {

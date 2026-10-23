@@ -179,14 +179,14 @@ static int cs_set_error(zxc_cstream* cs, const int code) {
  * @return @ref ZXC_OK on success, negative @ref zxc_error_t on failure.
  */
 static int cs_compress_block_from(zxc_cstream* cs, const uint8_t* RESTRICT src, const size_t len) {
-    const uint64_t bound = zxc_compress_block_bound(len);
+    const size_t bound = zxc_compress_block_bound(len);
     // LCOV_EXCL_START
-    if (UNLIKELY(bound == 0 || bound > SIZE_MAX)) return ZXC_ERROR_OVERFLOW;
+    if (UNLIKELY(bound == 0)) return ZXC_ERROR_OVERFLOW;
     if (UNLIKELY(bound > cs->pending_cap)) {
-        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, (size_t)bound);
+        uint8_t* nb = (uint8_t*)ZXC_REALLOC(cs->pending, bound);
         if (UNLIKELY(!nb)) return ZXC_ERROR_MEMORY;
         cs->pending = nb;
-        cs->pending_cap = (size_t)bound;
+        cs->pending_cap = bound;
     }
     // LCOV_EXCL_STOP
     const int64_t csize = zxc_compress_block_at(cs->cctx, src, len, cs->pending, cs->pending_cap,
@@ -401,12 +401,12 @@ size_t zxc_cstream_in_size(const zxc_cstream* cs) { return cs ? cs->block_size :
  *
  * Sized to hold one full compressed block plus framing overhead, i.e.
  * @ref zxc_compress_block_bound applied to the configured block size.
- * Falls back to @c block_size when the bound overflows @c size_t.
+ * Falls back to @c block_size when the bound is 0 (unusable block size).
  */
 size_t zxc_cstream_out_size(const zxc_cstream* cs) {
     if (UNLIKELY(!cs)) return 0;  // LCOV_EXCL_LINE
-    const uint64_t b = zxc_compress_block_bound(cs->block_size);
-    return (b == 0 || b > SIZE_MAX) ? cs->block_size : (size_t)b;
+    const size_t b = zxc_compress_block_bound(cs->block_size);
+    return b == 0 ? cs->block_size : b;
 }
 
 /**
@@ -836,8 +836,8 @@ int zxc_dstream_finished(const zxc_dstream* ds) { return (ds && ds->state == DS_
 size_t zxc_dstream_in_size(const zxc_dstream* ds) {
     if (UNLIKELY(!ds)) return 0;  // LCOV_EXCL_LINE
     if (ds->block_size == 0) return ZXC_BLOCK_SIZE_DEFAULT;
-    const uint64_t b = zxc_compress_block_bound(ds->block_size);
-    return (b == 0 || b > SIZE_MAX) ? ds->block_size : (size_t)b;
+    const size_t b = zxc_compress_block_bound(ds->block_size);
+    return b == 0 ? ds->block_size : b;
 }
 
 /**
@@ -899,11 +899,11 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     // block size of the one before keeps them.
     if (ds->alloc_block_size != ds->block_size) {
         ds_free_buffers(ds);
-        const uint64_t pb = zxc_compress_block_bound(ds->block_size);
+        const size_t pb = zxc_compress_block_bound(ds->block_size);
         // LCOV_EXCL_START
-        if (UNLIKELY(pb == 0 || pb > SIZE_MAX)) return ds_set_error(ds, ZXC_ERROR_OVERFLOW);
+        if (UNLIKELY(pb == 0)) return ds_set_error(ds, ZXC_ERROR_OVERFLOW);
         // LCOV_EXCL_STOP
-        ds->payload_cap = (size_t)pb;
+        ds->payload_cap = pb;
         ds->payload = (uint8_t*)ZXC_MALLOC(ds->payload_cap);
 
         ds->decoded_cap = ds->block_size + ZXC_DECOMPRESS_TAIL_PAD;

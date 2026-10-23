@@ -32,7 +32,7 @@ static int cb_put(cbuf_t* b, const void* src, const size_t n) {
 }
 
 static int cb_frame(cbuf_t* b, const uint8_t* src, const size_t n, const zxc_compress_opts_t* co) {
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const arc = malloc(cap);
     const int64_t len = arc ? zxc_compress(src, n, arc, cap, co) : -1;
     const int ok = len > 0 && cb_put(b, arc, (size_t)len);

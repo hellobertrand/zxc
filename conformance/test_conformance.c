@@ -479,7 +479,7 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
     }
 
     if (dict_ok) {
-        size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+        size_t cap = zxc_compress_bound(in_size) + 4096;
         uint8_t* out = (uint8_t*)malloc(cap);
         if (!out) {
             fprintf(stderr, "FAIL: %s  OOM\n", vc->name);

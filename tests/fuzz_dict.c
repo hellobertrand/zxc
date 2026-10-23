@@ -209,9 +209,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* Phase 3: real compress -> decompress roundtrip with the trained    */
     /* dict (also keeps the in-memory dict bounce path covered).          */
     /* ------------------------------------------------------------------ */
-    const uint64_t bound64 = zxc_compress_bound(size);
-    if (bound64 == 0 || bound64 > SIZE_MAX) return 0;
-    const size_t bound = (size_t)bound64;
+    const size_t bound = zxc_compress_bound(size);
+    if (bound == 0) return 0;
     if (bound > comp_cap) {
         void* nb = realloc(comp_buf, bound);
         if (!nb) return 0;

@@ -37,6 +37,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "zxc_constants.h"
 #include "zxc_export.h"
 #include "zxc_opts.h"
 

@@ -1,7 +1,7 @@
 # ZXC API & ABI Reference
 
 **Library version**: 0.15.0
-**SOVERSION**: 5  
+**SOVERSION**: 6  
 **License**: BSD-3-Clause
 
 This document is the authoritative reference for the public API surface and ABI
@@ -179,7 +179,11 @@ Defined in `zxc_constants.h`:
 #define ZXC_VERSION_MINOR     15
 #define ZXC_VERSION_PATCH     0
 #define ZXC_LIB_VERSION_STR   "0.15.0"
+#define ZXC_VERSION_NUMBER    (ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH)
 ```
+
+`ZXC_VERSION_NUMBER` gates code at compile time (`#if ZXC_VERSION_NUMBER >= 10000`);
+`zxc_version_number()` returns the loaded library's value for the runtime check.
 
 ### 5.2 Block Size Constraints
 

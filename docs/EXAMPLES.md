@@ -30,7 +30,7 @@ int main(void) {
     size_t original_size = strlen(original) + 1;  // Include null terminator
 
     // Step 1: Calculate maximum compressed size
-    uint64_t max_compressed_size = zxc_compress_bound(original_size);
+    size_t max_compressed_size = zxc_compress_bound(original_size);
 
     // Step 2: Allocate buffers
     void* compressed   = malloc(max_compressed_size);
@@ -263,7 +263,7 @@ int main(void) {
         return 1;
     }
 
-    const size_t comp_cap = (size_t)zxc_compress_bound(BLOCK_SIZE);
+    const size_t comp_cap = zxc_compress_bound(BLOCK_SIZE);
     uint8_t* comp = malloc(comp_cap);
     uint8_t* src  = malloc(BLOCK_SIZE);
     uint8_t* dec  = malloc(BLOCK_SIZE);
@@ -488,7 +488,7 @@ int main(void) {
     for (size_t i = 0; i < n; i++) { t += 1000000 + (int64_t)(i % 7); ts[i] = t; }
 
     const size_t raw = n * sizeof *ts;
-    size_t cap = (size_t)zxc_compress_bound(raw);
+    size_t cap = zxc_compress_bound(raw);
     void *comp = malloc(cap);
     zxc_compress_opts_t opts = { .level = 3 };
 
@@ -596,7 +596,7 @@ int main(void) {
     /* 3. Compress WITH the dictionary (level 6 to engage the shared table). */
     const char *msg  = "{\"event\":\"login\",\"user_id\":2003,\"ok\":true}";
     size_t      n    = strlen(msg) + 1;
-    size_t      cap  = (size_t)zxc_compress_bound(n);
+    size_t      cap  = zxc_compress_bound(n);
     uint8_t    *comp = malloc(cap);
 
     zxc_compress_opts_t copts = { .level = 6, .dict = content,

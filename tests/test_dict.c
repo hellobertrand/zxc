@@ -124,7 +124,7 @@ int test_dict_get_id_apis(void) {
     /* Compress with dict and verify zxc_get_dict_id reads it back */
     const uint8_t src[] = "some data to compress with dict for id test purposes";
     const size_t src_size = sizeof(src) - 1;
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {.level = 1, .dict = dict, .dict_size = dict_size};
@@ -206,7 +206,7 @@ int test_dict_buffer_roundtrip(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict_content, dict_size);
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
     uint8_t* decompressed = (uint8_t*)malloc(src_size);
 
@@ -272,7 +272,7 @@ int test_dict_block_roundtrip(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict_content, dict_size);
 
-    const size_t comp_bound = (size_t)zxc_compress_block_bound(src_size);
+    const size_t comp_bound = zxc_compress_block_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
     uint8_t* decompressed = (uint8_t*)malloc(src_size);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
@@ -357,7 +357,7 @@ int test_dict_block_safe_roundtrip(void) {
         src[(size_t)k * (PLEN + 1) + PLEN] = (uint8_t)k;
     }
 
-    const size_t comp_bound = (size_t)zxc_compress_block_bound(src_size);
+    const size_t comp_bound = zxc_compress_block_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
     uint8_t* decompressed = (uint8_t*)malloc(src_size);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
@@ -411,7 +411,7 @@ int test_dict_mismatch_error(void) {
     const uint8_t src[] = "some data to compress with dict";
     const size_t src_size = sizeof(src) - 1;
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {.level = 3, .dict = dict, .dict_size = dict_size};
@@ -447,7 +447,7 @@ int test_dict_required_error(void) {
     const uint8_t src[] = "data needing a dict";
     const size_t src_size = sizeof(src) - 1;
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {.level = 3, .dict = dict, .dict_size = dict_size};
@@ -480,7 +480,7 @@ int test_dict_no_dict_compat(void) {
     const uint8_t src[] = "data compressed without any dictionary at all, just normal data";
     const size_t src_size = sizeof(src) - 1;
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {.level = 3, .checksum_enabled = 1};
@@ -594,7 +594,7 @@ int test_dict_large_dict_roundtrip(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict, dict_size);
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
     uint8_t* decompressed = (uint8_t*)malloc(src_size);
 
@@ -683,7 +683,7 @@ int test_dict_safe_loop_backref(void) {
         src[(size_t)k * (PLEN + 1) + PLEN] = (uint8_t)k;  // literal separator (anti-merge)
     }
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
     uint8_t* decompressed = (uint8_t*)malloc(src_size);
 
@@ -751,7 +751,7 @@ int test_dict_train_roundtrip(void) {
         "{\"id\":99,\"name\":\"zara\",\"email\":\"zara@example.com\",\"active\":true}";
     const size_t src_size = strlen(test_input);
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {
@@ -850,7 +850,7 @@ int test_dict_seekable_roundtrip(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict_content, dict_size);
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {
@@ -925,7 +925,7 @@ int test_dict_seekable_mt_roundtrip(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict_content, dict_size);
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
 
     zxc_compress_opts_t copts = {
@@ -1065,7 +1065,7 @@ int test_dict_seekable_dict_id_checks(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
 
-    size_t comp_bound = (size_t)zxc_compress_bound(src_size);
+    size_t comp_bound = zxc_compress_bound(src_size);
     uint8_t* compressed = (uint8_t*)malloc(comp_bound);
     zxc_compress_opts_t copts = {.level = ZXC_LEVEL_DEFAULT,
                                  .checksum_enabled = 1,
@@ -1293,7 +1293,7 @@ int test_dict_huf_table_roundtrip(void) {
             break;
         }
 
-        const size_t cap = (size_t)zxc_compress_bound(hsz);
+        const size_t cap = zxc_compress_bound(hsz);
         c1 = (uint8_t*)malloc(cap);
         c2 = (uint8_t*)malloc(cap);
         out = (uint8_t*)malloc(hsz + 64);
@@ -1420,7 +1420,7 @@ int test_dict_huf_degenerate_corpus(void) {
             }
 
             /* Volet 2: the empty table must be usable end-to-end. */
-            const size_t cap = (size_t)zxc_compress_bound(SAMPLE_SIZE);
+            const size_t cap = zxc_compress_bound(SAMPLE_SIZE);
             comp = (uint8_t*)malloc(cap);
             out = (uint8_t*)malloc(SAMPLE_SIZE + 64);
             zxc_compress_opts_t co = {.level = 6,
@@ -1515,7 +1515,7 @@ int test_dict_dctx_roundtrip(void) {
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
     build_test_huf_lengths(k_dctx_dict, dict_size, huf);
 
-    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    const size_t cap = zxc_compress_bound(src_size);
     uint8_t* a3 = (uint8_t*)malloc(cap);
     uint8_t* a7 = (uint8_t*)malloc(cap);
     uint8_t* a0 = (uint8_t*)malloc(cap);
@@ -1572,7 +1572,7 @@ int test_dict_static_dctx_rejected(void) {
     uint8_t* src = (uint8_t*)malloc(src_size);
     gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
 
-    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    const size_t cap = zxc_compress_bound(src_size);
     uint8_t* a3 = (uint8_t*)malloc(cap);
     uint8_t* a0 = (uint8_t*)malloc(cap);
     uint8_t* dec = (uint8_t*)malloc(src_size);
@@ -1616,7 +1616,7 @@ int test_dict_cctx_roundtrip(void) {
     gen_dict_friendly_data(src, src_size, k_dctx_dict, dict_size);
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
     build_test_huf_lengths(k_dctx_dict, dict_size, huf);
-    const size_t cap = (size_t)zxc_compress_bound(src_size);
+    const size_t cap = zxc_compress_bound(src_size);
     uint8_t* comp = (uint8_t*)malloc(cap);
     uint8_t* dec = (uint8_t*)malloc(src_size);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
@@ -1712,7 +1712,7 @@ int test_dict_block_cctx_dict_reinit(void) {
     const size_t n = 3000;
     uint8_t* src = (uint8_t*)malloc(n);
     gen_dict_friendly_data(src, n, k_dctx_dict, dict_size);
-    const size_t cap = (size_t)zxc_compress_block_bound(n);
+    const size_t cap = zxc_compress_block_bound(n);
     uint8_t* comp = (uint8_t*)malloc(cap);
     uint8_t* out = (uint8_t*)malloc(n + ZXC_DECOMPRESS_TAIL_PAD);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
@@ -1770,7 +1770,7 @@ int test_dict_ctx_table_cache_recovers(void) {
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
     uint8_t bad[ZXC_HUF_TABLE_SIZE];
     memset(bad, 0x11, sizeof(bad)); /* every code one bit long: over-subscribed */
-    const size_t cap = (size_t)zxc_compress_bound(hsz);
+    const size_t cap = zxc_compress_bound(hsz);
     uint8_t* c1 = (uint8_t*)malloc(cap);
     uint8_t* c3 = (uint8_t*)malloc(cap);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
@@ -1831,7 +1831,7 @@ int test_dict_ctx_table_without_dict(void) {
     uint8_t dict_buf[64];
     memset(dict_buf, 'x', sizeof(dict_buf));
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    const size_t cap = (size_t)zxc_compress_bound(PSZ);
+    const size_t cap = zxc_compress_bound(PSZ);
     uint8_t* comp = (uint8_t*)malloc(cap);
     uint8_t* ref = (uint8_t*)malloc(cap);
     uint8_t* out = (uint8_t*)malloc(PSZ + 64);
@@ -1944,7 +1944,7 @@ int test_dict_block_huf_roundtrip(void) {
     const size_t hsz = gen_structured_sample(heldout, HCAP, 0xC0DEU);
     uint8_t dict_buf[8192];
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    const size_t cap = (size_t)zxc_compress_block_bound(BLK);
+    const size_t cap = zxc_compress_block_bound(BLK);
     uint8_t* comp = (uint8_t*)malloc(cap);
     uint8_t* out = (uint8_t*)malloc(BLK + ZXC_DECOMPRESS_TAIL_PAD);
     zxc_cctx* cctx = zxc_create_cctx(NULL);
