@@ -1533,7 +1533,7 @@ parse_done:;
     seq_c = zxc_spl_match_split_block(buf_tokens, buf_offsets, buf_extras, &extras_sz,
                                       ctx->buf_split, ctx->buf_split_hist, seq_c, lzp.split_max);
     // Dictionary-table trainer hook: accumulate the REAL post-LZ literal
-    // frequencies (see zxc_train_dict_huf). Cold path, NULL outside training.
+    // frequencies (see zxc_dict_train_huf). Cold path, NULL outside training.
     if (UNLIKELY(ctx->lit_freq_acc)) {
         for (size_t i = 0; i < lit_c; i++) ctx->lit_freq_acc[literals[i]]++;
     }

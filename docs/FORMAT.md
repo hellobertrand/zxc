@@ -955,10 +955,10 @@ When `HAS_DICTIONARY` (flag bit 6) is set, the reserved bytes at offsets
 2. Verify that the dictionary id matches `header.dict_id`
    ; reject on mismatch. For a raw in-memory dictionary without
    a shared table, the id is `fold32(rapidhash(content))`
-   (`zxc_dict_id(dict, dict_size, NULL)`). When a shared literal table is
+   (`zxc_dict_compute_id(dict, dict_size, NULL)`). When a shared literal table is
    attached, the id also binds the table:
    `id = fold32(rapidhash(table_128_bytes, seed = fold32(rapidhash(content))))`
-   (`zxc_dict_id(content, size, table)`). The seed is the **folded 32-bit**
+   (`zxc_dict_compute_id(content, size, table)`). The seed is the **folded 32-bit**
    content hash, zero-extended to rapidhash's 64-bit seed. `rapidhash` and
    `fold32` are defined in [7.2](#72-per-block-checksum-optional).
 
@@ -1003,7 +1003,7 @@ Offset  Size  Field
 
 ### 12.5 Dictionary training
 
-The `zxc_train_dict()` function analyzes a corpus of representative samples to
+The `zxc_dict_train_content()` function analyzes a corpus of representative samples to
 select byte segments that maximize LZ77 match coverage. The most frequently
 matched segments are placed at the end of the dictionary so they produce the
 shortest offsets (closest to the block start in the virtual window).

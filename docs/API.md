@@ -139,7 +139,7 @@ libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
 
 | Field | Description | Current |
 |-------|-------------|---------|
-| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **5** |
+| `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **6** |
 | `VERSION` | Tracks the library release. | **0.15.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
@@ -149,8 +149,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.5` -> `libzxc.so.0.15.0` |
-| macOS | `libzxc.dylib` -> `libzxc.5.dylib` -> `libzxc.0.15.0.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.0.15.0` |
+| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.0.15.0.dylib` |
 | Windows | `libzxc.dll` + `zxc.lib` (MSVC import, built from the shipped `libzxc.def`) or `libzxc.dll.a` (MinGW import) |
 
 ---
@@ -363,14 +363,26 @@ ZXC_EXPORT const char* zxc_version_string(void);
 Returns the library version as a null-terminated string (e.g. `"0.15.0"`).
 The returned pointer is a compile-time constant and must not be freed.
 
+#### `zxc_version_number`
+
+```c
+ZXC_EXPORT unsigned zxc_version_number(void);
+```
+
+Returns the version of the loaded library as one integer,
+`MAJOR * 10000 + MINOR * 100 + PATCH` (e.g. `1500` for 0.15.0). The header
+defines the same packing as `ZXC_VERSION_NUMBER`; comparing the two detects a
+runtime library older than the one the program was compiled against.
+
 ### `zxc_compress_bound`
 
 ```c
-ZXC_EXPORT uint64_t zxc_compress_bound(size_t input_size);
+ZXC_EXPORT size_t zxc_compress_bound(size_t input_size);
 ```
 
 Returns the worst-case compressed size for `input_size` bytes.
-Use to allocate the destination buffer before compression.
+Use to allocate the destination buffer before compression. Returns 0 when
+that size would not fit a `size_t` on the platform, i.e. no buffer could hold it.
 
 ### `zxc_compress`
 
@@ -626,7 +638,7 @@ its position), so it is verified after decoding.
 ### `zxc_compress_block_bound`
 
 ```c
-ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
+ZXC_EXPORT size_t zxc_compress_block_bound(size_t input_size);
 ```
 
 Returns the maximum compressed size for a single block.  
@@ -641,7 +653,7 @@ or would overflow the computation.
 ### `zxc_decompress_block_bound`
 
 ```c
-ZXC_EXPORT uint64_t zxc_decompress_block_bound(size_t uncompressed_size);
+ZXC_EXPORT size_t zxc_decompress_block_bound(size_t uncompressed_size);
 ```
 
 Returns the minimum `dst_capacity` required by `zxc_decompress_block()` for
@@ -761,7 +773,7 @@ fields; a dictionary routes through its bounce path.
 ### `zxc_estimate_cctx_size`
 
 ```c
-ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size, int level);
+ZXC_EXPORT size_t zxc_estimate_cctx_size(size_t src_size, int level);
 ```
 
 Returns an accurate estimate of the peak memory used when compressing a single
@@ -1673,10 +1685,10 @@ ZXC_EXPORT int64_t zxc_dict_train(
 
 **One-call dictionary creation.** Trains the content, trains the shared literal Huffman table from it, and serializes both into ready-to-write `.zxd` bytes. Hides the (otherwise sequential) train-content → train-table → save pipeline. Returns the number of `.zxd` bytes written, or a negative `zxc_error_t` code.
 
-### `zxc_train_dict`
+### `zxc_dict_train_content`
 
 ```c
-ZXC_EXPORT int64_t zxc_train_dict(
+ZXC_EXPORT int64_t zxc_dict_train_content(
     const void* const* samples,
     const size_t*       sample_sizes,
     size_t              n_samples,
@@ -1687,14 +1699,14 @@ ZXC_EXPORT int64_t zxc_train_dict(
 
 Trains a dictionary from a corpus of representative samples. Returns the size of the trained dictionary, or a negative `zxc_error_t` code.
 
-### `zxc_train_dict_huf`
+### `zxc_dict_train_huf`
 
 ```c
-ZXC_EXPORT int zxc_train_dict_huf(
+ZXC_EXPORT int zxc_dict_train_huf(
     const void* const* samples,
     const size_t*       sample_sizes,
     size_t              n_samples,
-    const void*         dict,        // content from zxc_train_dict
+    const void*         dict,        // content from zxc_dict_train_content
     size_t              dict_size,
     uint8_t*            huf_lengths_out  // ZXC_HUF_TABLE_SIZE (128) bytes
 );
@@ -1702,10 +1714,10 @@ ZXC_EXPORT int zxc_train_dict_huf(
 
 Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. It only codes literals at levels 6-7, but binds into `dict_id` at every level (see the note at the top of this section). Returns `ZXC_OK` or a negative error code.
 
-### `zxc_dict_id`
+### `zxc_dict_compute_id`
 
 ```c
-ZXC_EXPORT uint32_t zxc_dict_id(const void* dict, size_t dict_size, const void* huf_lengths);
+ZXC_EXPORT uint32_t zxc_dict_compute_id(const void* dict, size_t dict_size, const void* huf_lengths);
 ```
 
 Returns the deterministic 32-bit dictionary ID. With `huf_lengths` NULL it
@@ -1720,12 +1732,12 @@ content.
 ```c
 ZXC_EXPORT int64_t zxc_dict_save(
     const void* content, size_t content_size,
-    const void* huf_lengths,    // 128-byte table from zxc_train_dict_huf (required)
+    const void* huf_lengths,    // 128-byte table from zxc_dict_train_huf (required)
     void* buf, size_t buf_capacity
 );
 ```
 
-Serializes dictionary content **and its shared Huffman table** to the `.zxd` file format. The table is mandatory (pass the 128 bytes from `zxc_train_dict_huf()`); the stored `dict_id` covers both. Use `zxc_dict_save_bound(content_size)` to size `buf`.
+Serializes dictionary content **and its shared Huffman table** to the `.zxd` file format. The table is mandatory (pass the 128 bytes from `zxc_dict_train_huf()`); the stored `dict_id` covers both. Use `zxc_dict_save_bound(content_size)` to size `buf`.
 
 ### `zxc_dict_load`
 
@@ -1830,7 +1842,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **74 symbols** (verified with `nm -gU`):
+The shared library exports **75 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1886,13 +1898,13 @@ The shared library exports **74 symbols** (verified with `nm -gU`):
 | 50 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
 | 51 | `zxc_error_name` | Error | `zxc_error.h` |
 | 52 | `zxc_dict_train` | Dictionary | `zxc_dict.h` |
-| 53 | `zxc_train_dict` | Dictionary | `zxc_dict.h` |
-| 54 | `zxc_train_dict_huf` | Dictionary | `zxc_dict.h` |
-| 55 | `zxc_dict_id` | Dictionary | `zxc_dict.h` |
+| 53 | `zxc_dict_train_content` | Dictionary | `zxc_dict.h` |
+| 54 | `zxc_dict_train_huf` | Dictionary | `zxc_dict.h` |
+| 55 | `zxc_dict_compute_id` | Dictionary | `zxc_dict.h` |
 | 56 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
 | 57 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
 | 58 | `zxc_dict_huf` | Dictionary | `zxc_dict.h` |
-| 59 | `zxc_dict_get_id` | Dictionary | `zxc_dict.h` |
+| 59 | `zxc_dict_read_id` | Dictionary | `zxc_dict.h` |
 | 60 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
 | 61 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
 | 62 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
@@ -1908,6 +1920,7 @@ The shared library exports **74 symbols** (verified with `nm -gU`):
 | 72 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
 | 73 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
 | 74 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
+| 75 | `zxc_version_number` | Info | `zxc_buffer.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with

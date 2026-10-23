@@ -201,18 +201,18 @@ export default async function createZXC(moduleOverrides, factory) {
     ["number", "number"],
   );
 
-  // Dictionary API. zxc_train_dict / zxc_dict_save / zxc_dict_load return
+  // Dictionary API. zxc_dict_train_content / zxc_dict_save / zxc_dict_load return
   // int64_t; on wasm32 cwrap('number') reads the low 32 bits, which is
   // sufficient since results are bounded by ZXC_DICT_SIZE_MAX (65535) and
   // pointers are 32-bit.
-  const _train_dict = Module.cwrap("zxc_train_dict", "number", [
+  const _train_dict = Module.cwrap("zxc_dict_train_content", "number", [
     "number",
     "number",
     "number",
     "number",
     "number",
   ]);
-  const _dict_id = Module.cwrap("zxc_dict_id", "number", [
+  const _dict_id = Module.cwrap("zxc_dict_compute_id", "number", [
     "number",
     "number",
     "number",
@@ -221,7 +221,7 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     "number",
   ]);
-  const _dict_get_id = Module.cwrap("zxc_dict_get_id", "number", [
+  const _dict_get_id = Module.cwrap("zxc_dict_read_id", "number", [
     "number",
     "number",
   ]);
@@ -232,7 +232,7 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     "number",
   ]);
-  const _train_dict_huf = Module.cwrap("zxc_train_dict_huf", "number", [
+  const _train_dict_huf = Module.cwrap("zxc_dict_train_huf", "number", [
     "number",
     "number",
     "number",

@@ -297,7 +297,7 @@ static Napi::Value TrainDict(const Napi::CallbackInfo& info) {
     }
 
     std::vector<uint8_t> dict_buf(capacity);
-    int64_t r = zxc_train_dict(samples.data(), sizes.data(), n, dict_buf.data(), capacity);
+    int64_t r = zxc_dict_train_content(samples.data(), sizes.data(), n, dict_buf.data(), capacity);
     if (r < 0) {
         return ThrowZxcError(env, static_cast<int>(r));
     }
@@ -312,7 +312,7 @@ static Napi::Value DictId(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
     Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
-    uint32_t id = zxc_dict_id(b.Data(), b.Length(), nullptr);
+    uint32_t id = zxc_dict_compute_id(b.Data(), b.Length(), nullptr);
     return Napi::Number::New(env, static_cast<double>(id));
 }
 
@@ -336,7 +336,7 @@ static Napi::Value DictGetId(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
     Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
-    uint32_t id = zxc_dict_get_id(b.Data(), b.Length());
+    uint32_t id = zxc_dict_read_id(b.Data(), b.Length());
     return Napi::Number::New(env, static_cast<double>(id));
 }
 
@@ -396,7 +396,7 @@ static Napi::Value TrainDictHuf(const Napi::CallbackInfo& info) {
     Napi::Buffer<uint8_t> dict = info[1].As<Napi::Buffer<uint8_t>>();
     std::array<uint8_t, ZXC_HUF_TABLE_SIZE> huf;
     int r =
-        zxc_train_dict_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(), huf.data());
+        zxc_dict_train_huf(samples.data(), sizes.data(), n, dict.Data(), dict.Length(), huf.data());
     if (r < 0) {
         return ThrowZxcError(env, r);
     }

@@ -624,8 +624,8 @@ int main(void) {
 
 > The `content` and `table` pointers returned by `zxc_dict_load()` aim **into**
 > `zxd` (zero-copy), so keep `zxd` alive until you're done compressing or
-> decompressing. The lower-level primitives (`zxc_train_dict` +
-> `zxc_train_dict_huf` + `zxc_dict_save`, and `zxc_dict_huf`) remain available
+> decompressing. The lower-level primitives (`zxc_dict_train_content` +
+> `zxc_dict_train_huf` + `zxc_dict_save`, and `zxc_dict_huf`) remain available
 > for advanced use — e.g. a **raw content-only dictionary** with no table
 > (`dict` set, `dict_huf = NULL`) for ad-hoc window priming where a trained
 > table adds nothing.
@@ -639,10 +639,10 @@ static int64_t build_zxd(const void* const* samples, const size_t* sizes, size_t
     uint8_t* content = malloc(ZXC_DICT_SIZE_MAX);   /* 64 KB: too big for the stack */
     if (!content) return ZXC_ERROR_MEMORY;
 
-    const int64_t csize = zxc_train_dict(samples, sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
+    const int64_t csize = zxc_dict_train_content(samples, sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
     if (csize <= 0) { free(content); return csize; }
 
-    const int rc = zxc_train_dict_huf(samples, sizes, n_samples, content, (size_t)csize, table);
+    const int rc = zxc_dict_train_huf(samples, sizes, n_samples, content, (size_t)csize, table);
     if (rc != ZXC_OK) { free(content); return rc; }
 
     const int64_t zsize = zxc_dict_save(content, (size_t)csize, table, zxd_buf, zxd_cap);
