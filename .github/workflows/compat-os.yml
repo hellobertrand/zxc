@@ -5,11 +5,14 @@ name: OS (libc) Compatibility
 #   - musl libc (Alpine): catches non-glibc bugs the rest of CI can't see
 #     (e.g. the 128 KB default thread stack vs glibc's 8 MB). Native on both
 #     x86_64 and ARM64 runners via an Alpine container.
+#   - Arch Linux / AlmaLinux 9 (RHEL 9): newest vs enterprise GCC, each with
+#     its distro's packaging flags (makepkg.conf, %optflags).
+#   - Amazon Linux 2023: the Graviton (ARM64) cloud target.
 #   - FreeBSD: non-glibc / clang-default portability canary, and the BSD that
 #     matters for packaging (ports, TrueNAS/ZFS, pfSense). Built in a VM via
 #     cross-platform-actions (no native BSD runners exist); x86_64 only, as
 #     FreeBSD arm64 would be QEMU-emulated and slow.
-# Both run the full STATIC+SHARED ctest suite and exercise runtime SIMD
+# All run the full STATIC+SHARED ctest suite and exercise runtime SIMD
 # dispatch (ZXC_NATIVE_ARCH=OFF).
 
 on:
@@ -35,32 +38,66 @@ jobs:
       matrix:
         include:
           - name: Linux x86_64 (Alpine musl)
-            kind: musl
+            kind: container
             runner: ubuntu-latest
+            image: alpine:latest
+            setup: apk add --no-cache build-base cmake
           - name: Linux ARM64 (Alpine musl)
-            kind: musl
+            kind: container
             runner: ubuntu-24.04-arm
-          - name: FreeBSD x86_64
+            image: alpine:latest
+            setup: apk add --no-cache build-base cmake
+          # makepkg.conf references unset variables.
+          - name: Linux x86_64 (Arch Linux)
+            kind: container
+            runner: ubuntu-latest
+            image: archlinux:latest
+            setup: >-
+              pacman -Syu --noconfirm --needed gcc cmake make &&
+              set +u && . /etc/makepkg.conf && set -u &&
+              export CFLAGS="$CFLAGS ${LTOFLAGS:-}" LDFLAGS="$LDFLAGS ${LTOFLAGS:-}"
+          - name: Linux x86_64 (AlmaLinux 9 / RHEL 9)
+            kind: container
+            runner: ubuntu-latest
+            image: almalinux:9
+            setup: >-
+              dnf -y install gcc cmake make redhat-rpm-config annobin-plugin-gcc &&
+              export CFLAGS="$(rpm --eval %optflags)"
+          - name: Linux ARM64 (Amazon Linux 2023)
+            kind: container
+            runner: ubuntu-24.04-arm
+            image: amazonlinux:2023
+            setup: dnf -y install gcc cmake make
+          - name: FreeBSD 14.4 x86_64
             kind: bsd
             runner: ubuntu-latest
             os: freebsd
             arch: x86-64
-            version: "14.3"
+            version: "14.4"
+            install: sudo pkg install -y cmake ninja
+          - name: FreeBSD 15.1 x86_64
+            kind: bsd
+            runner: ubuntu-latest
+            os: freebsd
+            arch: x86-64
+            version: "15.1"
             install: sudo pkg install -y cmake ninja
 
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # musl: build & test inside an Alpine container.
-      - name: Configure, Build & Test under musl (Static & Shared)
-        if: matrix.kind == 'musl'
+      # Linux distros: build & test inside a container.
+      - name: Configure, Build & Test in ${{ matrix.image }} (Static & Shared)
+        if: matrix.kind == 'container'
         run: |
-          docker run --rm -v "${{ github.workspace }}:/src" -w /src alpine:latest sh -euc '
-            apk add --no-cache build-base cmake
+          docker run --rm -v "${{ github.workspace }}:/src" -w /src ${{ matrix.image }} sh -euc '
+            ${{ matrix.setup }}
             echo "=== Toolchain ==="
             cc --version
             cmake --version
+            echo "CFLAGS=${CFLAGS:-}"
+            echo "LDFLAGS=${LDFLAGS:-}"
 
             for LIB_TYPE in STATIC SHARED; do
                 echo ">>> Starting Build: $LIB_TYPE"
