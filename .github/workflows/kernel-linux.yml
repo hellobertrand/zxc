@@ -1,4 +1,4 @@
-name: Kernel Module
+name: Linux Kernel Module
 
 # Builds contrib/linux-kernel against the runner kernel's headers. Off the PR
 # path: it runs when that tree or the library change, and weekly, so the
@@ -32,9 +32,15 @@ concurrency:
 
 jobs:
   kernel-module:
-    name: "Kernel module (contrib/linux-kernel)"
-    runs-on: ubuntu-latest
+    name: "Kernel module ${{ matrix.arch }} (>= linux 4.19)"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: x86_64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
 
     steps:
       - name: Checkout Repository
@@ -50,3 +56,19 @@ jobs:
           # -Werror stands in for CONFIG_WERROR.
           make -C contrib/linux-kernel KCFLAGS=-Werror
           modinfo contrib/linux-kernel/build/zxc_selftest.ko
+
+      # The supported minimum: Debian 10's 4.19 headers and GCC 8. Buster is
+      # archived (expired Release files); its headers need the security suite.
+      - name: Build the module against Linux 4.19
+        run: |
+          docker run --rm -v "$PWD:/src:ro" debian:buster sh -euc '
+            printf "%s\n" "deb http://archive.debian.org/debian buster main" \
+                "deb http://archive.debian.org/debian-security buster/updates main" > /etc/apt/sources.list
+            apt-get -o Acquire::Check-Valid-Until=false update -qq
+            ARCH=$(dpkg --print-architecture)
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+                gcc make libc6-dev "linux-headers-$ARCH" kmod > /dev/null
+            KDIR=$(ls -d /usr/src/linux-headers-*-"$ARCH" | sort -V | tail -n 1)
+            make -C /src/contrib/linux-kernel KDIR="$KDIR" BUILD=/tmp/build KCFLAGS=-Werror
+            modinfo /tmp/build/zxc_selftest.ko
+          '

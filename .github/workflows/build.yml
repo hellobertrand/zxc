@@ -28,14 +28,14 @@ jobs:
       matrix:
         include:
           - name: Linux x86_64
-            os: ubuntu-latest
+            os: ubuntu-24.04
             platform: linux-x86_64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
-          - name: Linux ARM64
+          - name: Linux arm64
             os: ubuntu-24.04-arm
             platform: linux-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
-          - name: macOS ARM64
+          - name: macOS arm64
             os: macos-26
             platform: macos-arm64
             cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
@@ -132,7 +132,7 @@ jobs:
             machine: x64
             platform: windows-x86_64
           # No GCC for Windows ARM64: Clang on the same runtime.
-          - name: ARM64
+          - name: arm64
             os: windows-11-arm
             msystem: CLANGARM64
             pkg_prefix: mingw-w64-clang-aarch64

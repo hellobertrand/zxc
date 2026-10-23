@@ -38,13 +38,15 @@ concurrency:
 
 jobs:
   library:
-    name: "Kernel library (${{ matrix.platform }}, Windows 10 2004)"
+    name: "Kernel library ${{ matrix.arch }} (>= windows 10 2004)"
     runs-on: windows-2025
     timeout-minutes: 40
     strategy:
       fail-fast: false
       matrix:
-        platform: [x64, ARM64]
+        include:
+          - { arch: x86_64, platform: x64 }
+          - { arch: arm64, platform: ARM64 }
 
     steps:
       - name: Checkout Repository

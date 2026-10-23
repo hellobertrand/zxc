@@ -77,10 +77,10 @@ contract broke.
 
 The field-level structural validation runs separately, as the `format_golden` and `conformance` ctests in `build.yml`.
 
-### kernel-linux.yml - Kernel Module
+### kernel-linux.yml - Linux Kernel Module
 **Triggers:** Changes to `contrib/linux-kernel/`, `include/` or `src/lib/`; weekly; manual dispatch
 
-Builds [`contrib/linux-kernel`](../../contrib/linux-kernel/README.md) - the dependency header, the shims, the Kbuild and the self-test module - against the runner kernel's headers, under `-Werror`. The module's init round-trips a block and a frame at levels 3 and 7 and refuses to load on a mismatch. Off the PR path on purpose.
+Builds [`contrib/linux-kernel`](../../contrib/linux-kernel/README.md) - the dependency header, the shims, the Kbuild and the self-test module - against Linux 4.19 (the minimum) and the runner kernel's headers, on x86_64 and arm64, under `-Werror`. The module's init round-trips a block and a frame at levels 3 and 7 and refuses to load on a mismatch. Off the PR path on purpose.
 
 ### kernel-windows.yml - Windows Kernel Library
 **Triggers:** Changes to `contrib/windows-kernel/`, `include/` or `src/lib/`; weekly; manual dispatch

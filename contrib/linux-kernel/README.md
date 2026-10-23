@@ -5,7 +5,7 @@ shims, a Kbuild and a self-test module, plus this guide. `make` here stages the
 library sources next to the Kbuild and builds `build/zxc_selftest.ko` against
 the running kernel's headers (`KDIR=` for another tree). Loading it round-trips
 a block and a frame, also in place, at levels 3 and 7 and refuses to load on a
-mismatch.
+mismatch. It needs Linux 4.19 or later.
 
 ```
 zxc_deps.h     the kernel replacement for src/lib/zxc_deps.h
@@ -63,9 +63,9 @@ The `Kbuild` flags, and why:
   64-bit), an error under `CONFIG_WERROR`. What bounds the stack is the whole
   path, measured below.
 
-CI builds this module against the runner's kernel under `-Werror`
-(`.github/workflows/kernel-linux.yml`) when this directory or the library
-change, and weekly.
+CI builds this module under `-Werror`, on x86_64 and arm64, against Linux 4.19
+and the runner's kernel (`.github/workflows/kernel-linux.yml`) when this
+directory or the library change, and weekly.
 
 ## No FPU region
 
