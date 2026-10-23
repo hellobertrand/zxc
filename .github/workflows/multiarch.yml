@@ -26,20 +26,20 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux x64
+          - name: Linux x86_64
             runner: ubuntu-latest
             os: linux
             arch_flags: ""
-          - name: Linux x86 (32-bit)
+          - name: Linux i386
             runner: ubuntu-latest
             os: linux
             install_32bit_x86: true
             arch_flags: "-m32"
-          - name: Linux ARM64
+          - name: Linux arm64
             runner: ubuntu-24.04-arm
             os: linux
             arch_flags: ""
-          - name: Linux ARM (32-bit)
+          - name: Linux armhf
             runner: ubuntu-latest
             os: linux
             install_32bit_arm: true
@@ -48,23 +48,23 @@ jobs:
             cross_strip: arm-linux-gnueabihf-strip
             cmake_system_name: "Linux"
             cmake_system_processor: "arm"
-          - name: Windows x64
+          - name: Windows x86_64
             runner: windows-latest
             os: windows
             cmake_arch: "x64"
-          - name: Windows x86 (32-bit)
+          - name: Windows i386
             runner: windows-latest
             os: windows
             cmake_arch: "Win32"
-          - name: Windows ARM64
+          - name: Windows arm64
             runner: windows-11-arm
             os: windows
             cmake_arch: "ARM64"
           # Note: Windows ARM 32-bit removed - deprecated and unsupported by Windows SDK 10.0.26100+
-          - name: macOS Intel x64
+          - name: macOS x86_64
             runner: macos-26-intel
             os: macos
-          - name: macOS ARM64
+          - name: macOS arm64
             runner: macos-26
             os: macos
 
@@ -158,7 +158,8 @@ jobs:
           done
 
   # ===========================================================================
-  # Tier 2: Extended Linux architectures (cross-compiled, tested via QEMU)
+  # Tier 2: Debian release architectures (cross-compiled, tested via QEMU);
+  # x86_64, arm64 and i386 run natively in Tier 1
   # ===========================================================================
   build-tier2:
     name: "Tier 2: ${{ matrix.name }}"
@@ -169,75 +170,32 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux arm64
-            cross_pkg: gcc-aarch64-linux-gnu
-            cross_prefix: aarch64-linux-gnu
-            cmake_processor: aarch64
-            qemu_binary: qemu-aarch64
-          - name: Linux arm64 (cortex-a53)
-            cross_pkg: gcc-aarch64-linux-gnu
-            cross_prefix: aarch64-linux-gnu
-            cmake_processor: aarch64
-            qemu_binary: qemu-aarch64
-            qemu_cpu: cortex-a53
-          - name: Linux i386
-            cross_pkg: gcc-i686-linux-gnu
-            cross_prefix: i686-linux-gnu
-            cmake_processor: i686
-            qemu_binary: qemu-i386
-          - name: Linux RISC-V 64
-            cross_pkg: gcc-riscv64-linux-gnu
-            cross_prefix: riscv64-linux-gnu
-            cmake_processor: riscv64
-            qemu_binary: qemu-riscv64
-          - name: Linux s390x
-            cross_pkg: gcc-s390x-linux-gnu
-            cross_prefix: s390x-linux-gnu
-            cmake_processor: s390x
-            qemu_binary: qemu-s390x
-          - name: Linux armhf
+          - name: armhf
             cross_pkg: gcc-arm-linux-gnueabihf
             cross_prefix: arm-linux-gnueabihf
             cmake_processor: arm
             qemu_binary: qemu-arm
             qemu_cpu: cortex-a15
-          - name: Linux ppc64el
+          - name: ppc64le
             cross_pkg: gcc-powerpc64le-linux-gnu
             cross_prefix: powerpc64le-linux-gnu
             cmake_processor: ppc64le
             qemu_binary: qemu-ppc64le
-          - name: Linux mipsel
-            cross_pkg: gcc-mipsel-linux-gnu
-            cross_prefix: mipsel-linux-gnu
-            cmake_processor: mipsel
-            qemu_binary: qemu-mipsel
-          - name: Linux powerpc
-            cross_pkg: gcc-powerpc-linux-gnu
-            cross_prefix: powerpc-linux-gnu
-            cmake_processor: powerpc
-            qemu_binary: qemu-ppc
-          - name: Linux ppc64
-            cross_pkg: gcc-powerpc64-linux-gnu
-            cross_prefix: powerpc64-linux-gnu
-            cmake_processor: ppc64
-            qemu_binary: qemu-ppc64
-          - name: Linux sparc64
-            cross_pkg: gcc-sparc64-linux-gnu
-            cross_prefix: sparc64-linux-gnu
-            cmake_processor: sparc64
-            qemu_binary: qemu-sparc64
-          - name: Linux armel
-            cross_pkg: gcc-arm-linux-gnueabi
-            cross_prefix: arm-linux-gnueabi
-            cmake_processor: arm
-            qemu_binary: qemu-arm
-          - name: Linux armv6
-            cross_pkg: gcc-arm-linux-gnueabi
-            cross_prefix: arm-linux-gnueabi
-            cmake_processor: armv6l
-            cmake_c_flags: "-march=armv6"
-            qemu_binary: qemu-arm
-            qemu_cpu: arm1176
+          - name: s390x
+            cross_pkg: gcc-s390x-linux-gnu
+            cross_prefix: s390x-linux-gnu
+            cmake_processor: s390x
+            qemu_binary: qemu-s390x
+          - name: riscv64
+            cross_pkg: gcc-riscv64-linux-gnu
+            cross_prefix: riscv64-linux-gnu
+            cmake_processor: riscv64
+            qemu_binary: qemu-riscv64
+          - name: loong64
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            qemu_binary: qemu-loongarch64
 
     steps:
       - name: Checkout Repository
@@ -288,16 +246,9 @@ jobs:
               SHARED_FLAG="OFF"
               if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
 
-              # An `[ -n .. ] && ..` one-liner would abort the step under -e.
-              EXTRA_ARGS=()
-              if [ -n "${{ matrix.cmake_c_flags }}" ]; then
-                  EXTRA_ARGS+=(-DCMAKE_C_FLAGS="${{ matrix.cmake_c_flags }}")
-              fi
-
               cmake -S . -B $BUILD_DIR \
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
-                  "${EXTRA_ARGS[@]}" \
                   -DCMAKE_C_COMPILER=$CROSS_C \
                   -DCMAKE_CXX_COMPILER=$CROSS_CXX \
                   -DCMAKE_STRIP=$CROSS_STRIP \
@@ -327,7 +278,7 @@ jobs:
           done
 
   # ===========================================================================
-  # Tier 2 (amd64 SIMD tiers): each x86 dispatch tier runs as its own parallel
+  # Tier 2 (x86_64 SIMD tiers): each x86 dispatch tier runs as its own parallel
   # job under Intel SDE. SDE runs host-native x86 directly (faster than QEMU's
   # TCG re-translation) and, unlike QEMU's TCG, can execute AVX-512. One native
   # build per job carries all per-ISA variants; the emulated CPU model makes the
@@ -341,7 +292,7 @@ jobs:
   #                            Skylake-Server lacks)
   # ===========================================================================
   build-tier2-amd64-sde:
-    name: "Tier 2: Linux amd64 (${{ matrix.tier }})"
+    name: "Tier 2: x86_64 (${{ matrix.tier }})"
     runs-on: ubuntu-latest
     timeout-minutes: 10
     strategy:
@@ -413,7 +364,8 @@ jobs:
           done
 
   # ===========================================================================
-  # Tier 3: Experimental Linux architectures (cross-compiled, tested via QEMU)
+  # Tier 3: Debian ports and retired architectures (cross-compiled, tested via
+  # QEMU; x32, which QEMU lacks, natively when the runner kernel supports it)
   # ===========================================================================
   build-tier3:
     name: "Tier 3: ${{ matrix.name }}"
@@ -424,21 +376,58 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: Linux mips64el
-            cross_pkg: gcc-mips64el-linux-gnuabi64
-            cross_prefix: mips64el-linux-gnuabi64
-            cmake_processor: mips64
-            qemu_binary: qemu-mips64el
-          - name: Linux loong64
-            cross_pkg: gcc-loongarch64-linux-gnu
-            cross_prefix: loongarch64-linux-gnu
-            cmake_processor: loongarch64
-            qemu_binary: qemu-loongarch64
-          - name: Linux alpha
+          - name: armv6
+            cross_pkg: gcc-arm-linux-gnueabi
+            cross_prefix: arm-linux-gnueabi
+            cmake_processor: armv6l
+            cmake_c_flags: "-march=armv6"
+            qemu_binary: qemu-arm
+            qemu_cpu: arm1176
+          - name: mipsel
+            cross_pkg: gcc-mipsel-linux-gnu
+            cross_prefix: mipsel-linux-gnu
+            cmake_processor: mipsel
+            qemu_binary: qemu-mipsel
+          - name: powerpc
+            cross_pkg: gcc-powerpc-linux-gnu
+            cross_prefix: powerpc-linux-gnu
+            cmake_processor: powerpc
+            qemu_binary: qemu-ppc
+          - name: ppc64
+            cross_pkg: gcc-powerpc64-linux-gnu
+            cross_prefix: powerpc64-linux-gnu
+            cmake_processor: ppc64
+            qemu_binary: qemu-ppc64
+          - name: sparc64
+            cross_pkg: gcc-sparc64-linux-gnu
+            cross_prefix: sparc64-linux-gnu
+            cmake_processor: sparc64
+            qemu_binary: qemu-sparc64
+          - name: alpha
             cross_pkg: gcc-alpha-linux-gnu
             cross_prefix: alpha-linux-gnu
             cmake_processor: alpha
             qemu_binary: qemu-alpha
+          - name: hppa
+            cross_pkg: gcc-hppa-linux-gnu
+            cross_prefix: hppa-linux-gnu
+            cmake_processor: hppa
+            qemu_binary: qemu-hppa
+          - name: m68k
+            cross_pkg: gcc-m68k-linux-gnu
+            cross_prefix: m68k-linux-gnu
+            cmake_processor: m68k
+            qemu_binary: qemu-m68k
+          - name: sh4
+            cross_pkg: gcc-sh4-linux-gnu
+            cross_prefix: sh4-linux-gnu
+            cmake_processor: sh4
+            qemu_binary: qemu-sh4
+          - name: x32
+            cross_pkg: gcc-x86-64-linux-gnux32
+            cross_prefix: x86_64-linux-gnux32
+            cmake_processor: x86_64
+            x32_loader: ld-linux-x32.so.2
 
     steps:
       - name: Checkout Repository
@@ -464,7 +453,7 @@ jobs:
           if [ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]; then
               apt-get update
           fi
-          apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
+          apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} ${{ matrix.qemu_binary && 'qemu-user' || '' }}
 
       - name: Save apt cache
         if: github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
@@ -483,6 +472,21 @@ jobs:
           CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
           SYSROOT=/usr/${{ matrix.cross_prefix }}
 
+          RUN=()
+          if [ -n "${{ matrix.qemu_binary }}" ]; then
+              RUN=(${{ matrix.qemu_binary }} -L "$SYSROOT")
+              if [ -n "${{ matrix.qemu_cpu }}" ]; then
+                  RUN+=(-cpu ${{ matrix.qemu_cpu }})
+              fi
+          elif [ -n "${{ matrix.x32_loader }}" ]; then
+              LOADER=$SYSROOT/lib/${{ matrix.x32_loader }}
+              if "$LOADER" --version > /dev/null 2>&1; then
+                  RUN=("$LOADER" --library-path "$SYSROOT/lib")
+              else
+                  echo "::warning::Runner kernel lacks the x32 ABI: ${{ matrix.name }} is build only."
+              fi
+          fi
+
           for LIB_TYPE in "STATIC" "SHARED"; do
               echo ">>> Starting Build: $LIB_TYPE"
               BUILD_DIR="build_${LIB_TYPE}"
@@ -490,9 +494,16 @@ jobs:
               SHARED_FLAG="OFF"
               if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
 
+              # An `[ -n .. ] && ..` one-liner would abort the step under -e.
+              EXTRA_ARGS=()
+              if [ -n "${{ matrix.cmake_c_flags }}" ]; then
+                  EXTRA_ARGS+=(-DCMAKE_C_FLAGS="${{ matrix.cmake_c_flags }}")
+              fi
+
               cmake -S . -B $BUILD_DIR \
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
+                  "${EXTRA_ARGS[@]}" \
                   -DCMAKE_C_COMPILER=$CROSS_C \
                   -DCMAKE_CXX_COMPILER=$CROSS_CXX \
                   -DCMAKE_STRIP=$CROSS_STRIP \
@@ -503,8 +514,14 @@ jobs:
 
               cmake --build $BUILD_DIR --config Release --parallel
 
-              echo "Running Tests for $LIB_TYPE via QEMU..."
-              ${{ matrix.qemu_binary }} -L $SYSROOT ./$BUILD_DIR/zxc_test
+              if [ ${#RUN[@]} -gt 0 ]; then
+                  echo "Running Tests for $LIB_TYPE via ${RUN[0]}..."
+                  "${RUN[@]}" ./$BUILD_DIR/zxc_test
+                  "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./conformance
+                  "${RUN[@]}" ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
+              else
+                  echo "Skipping tests for $LIB_TYPE (no emulator)"
+              fi
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""

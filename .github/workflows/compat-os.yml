@@ -4,10 +4,10 @@ name: OS (libc) Compatibility
 # covers CPU architectures on glibc Linux):
 #   - musl libc (Alpine): catches non-glibc bugs the rest of CI can't see
 #     (e.g. the 128 KB default thread stack vs glibc's 8 MB). Native on both
-#     x86_64 and ARM64 runners via an Alpine container.
+#     x86_64 and arm64 runners via an Alpine container.
 #   - Arch Linux / AlmaLinux 9 (RHEL 9): newest vs enterprise GCC, each with
 #     its distro's packaging flags (makepkg.conf, %optflags).
-#   - Amazon Linux 2023: the Graviton (ARM64) cloud target.
+#   - Amazon Linux 2023: the Graviton (arm64) cloud target.
 #   - FreeBSD: non-glibc / clang-default portability canary, and the BSD that
 #     matters for packaging (ports, TrueNAS/ZFS, pfSense). Built in a VM via
 #     cross-platform-actions (no native BSD runners exist); x86_64 only, as
@@ -42,7 +42,7 @@ jobs:
             runner: ubuntu-latest
             image: alpine:latest
             setup: apk add --no-cache build-base cmake
-          - name: Linux ARM64 (Alpine musl)
+          - name: Linux arm64 (Alpine musl)
             kind: container
             runner: ubuntu-24.04-arm
             image: alpine:latest
@@ -63,7 +63,7 @@ jobs:
             setup: >-
               dnf -y install gcc cmake make redhat-rpm-config annobin-plugin-gcc &&
               export CFLAGS="$(rpm --eval %optflags)"
-          - name: Linux ARM64 (Amazon Linux 2023)
+          - name: Linux arm64 (Amazon Linux 2023)
             kind: container
             runner: ubuntu-24.04-arm
             image: amazonlinux:2023
