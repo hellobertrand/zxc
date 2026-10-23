@@ -131,12 +131,23 @@ describe("Cctx / Dctx", () => {
     expect(err).toBeDefined();
     expect(err.code).toBe(zxc.ERROR_BAD_LEVEL);
     expect(err.message).toBe("ZXC_ERROR_BAD_LEVEL");
-    // The one-shot API keeps clamping, like the C zxc_compress().
+    // The one-shot API refuses too: no entry point clamps the level.
     const payload = Buffer.concat(samples());
-    const clamped = zxc.compress(payload, { level: zxc.LEVEL_ULTRA + 1 });
-    expect(clamped.equals(zxc.compress(payload, { level: zxc.LEVEL_ULTRA }))).toBe(
-      true,
-    );
+    let oneShot;
+    try {
+      zxc.compress(payload, { level: zxc.LEVEL_ULTRA + 1 });
+    } catch (e) {
+      oneShot = e;
+    }
+    expect(oneShot).toBeDefined();
+    expect(oneShot.code).toBe(zxc.ERROR_BAD_LEVEL);
+    expect(() => zxc.compress(payload, { level: -1 })).toThrow();
+    // 0 still selects the default level.
+    expect(
+      zxc.compress(payload, { level: 0 }).equals(
+        zxc.compress(payload, { level: zxc.LEVEL_DEFAULT }),
+      ),
+    ).toBe(true);
   });
 
   test("refuse calls after close", () => {

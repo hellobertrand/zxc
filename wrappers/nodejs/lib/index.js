@@ -324,8 +324,8 @@ function dictLoad(zxd) {
  *
  * @param {Buffer} data - Buffer to compress.
  * @param {object} [options] - Compression options.
- * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-7); out-of-range
- *   values are clamped, like the C one-shot `zxc_compress()`.
+ * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-7); an out-of-range
+ *   value throws with `code === ERROR_BAD_LEVEL`.
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
  * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
  * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).

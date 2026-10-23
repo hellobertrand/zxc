@@ -75,23 +75,14 @@ static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) 
 // one-shot and FILE* functions configure a throw-away context, the push
 // streams copy one at creation, Cctx / Dctx keep theirs.
 
-/* Levels are clamped as the one-shot zxc_compress() does: 0 is the default,
- * anything else is pinned into [min_level, max_level]. The setter refuses an
- * out-of-range level instead of clamping, hence this step. */
-static int pyzxc_level(int level) {
-    if (level == 0) return zxc_default_level();
-    if (level < zxc_min_level()) return zxc_min_level();
-    if (level > zxc_max_level()) return zxc_max_level();
-    return level;
-}
-
 /* Applies the compression keyword arguments to a context. 0 keeps the library
- * default for block_size and n_threads (negative thread counts mean auto, as
- * before). Returns ZXC_OK or the first setter error. */
+ * default for level, block_size and n_threads (negative thread counts mean
+ * auto, as before); the setters refuse an out-of-range value instead of
+ * clamping it, the level included. Returns ZXC_OK or the first setter error. */
 static int pyzxc_cctx_configure(zxc_cctx* c, int level, int64_t block_size, int n_threads,
                                 int checksum, int seekable, const void* dict, size_t dict_size,
                                 const void* dict_huf) {
-    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, pyzxc_level(level));
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, block_size);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_THREADS, n_threads > 0 ? n_threads : 0);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum ? 1 : 0);
