@@ -69,6 +69,21 @@ symbols report the bounds, `zxc_cparam_bounds()` / `zxc_dparam_bounds()`, and
 one error code is new, `ZXC_ERROR_BAD_PARAM` (-20). The full contract is in
 [API.md §6.1 and §9](API.md#61-parameter-identifiers).
 
+The same SOVERSION break renames the dictionary functions under one `zxc_dict_`
+prefix, makes the bound functions return `size_t` and adds
+`zxc_version_number()`:
+
+| 0.14.x | 0.15.x |
+| :--- | :--- |
+| `zxc_train_dict(...)` | `zxc_dict_train_content(...)` (same arguments) |
+| `zxc_train_dict_huf(...)` | `zxc_dict_train_huf(...)` (same arguments) |
+| `zxc_dict_id(dict, size, huf)` | `zxc_dict_compute_id(dict, size, huf)` |
+| `zxc_dict_get_id(buf, size)` | `zxc_dict_read_id(buf, size)` |
+| `uint64_t zxc_compress_bound()`, `zxc_compress_block_bound()`, `zxc_decompress_block_bound()`, `zxc_estimate_cctx_size()` | the same functions return `size_t`; 0 still means "too large for this platform" |
+| — | `zxc_version_number()`: `MAJOR*10000 + MINOR*100 + PATCH` of the loaded library, with the `ZXC_VERSION_NUMBER` macro for the headers |
+
+Option structs and their call sites:
+
 | 0.14.x | 0.15.x |
 | :--- | :--- |
 | `zxc_compress(src, n, dst, cap, NULL)` | `zxc_compress(src, n, dst, cap, 0)` (0 = default level) |

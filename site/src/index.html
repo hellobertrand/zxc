@@ -158,16 +158,23 @@ zxc -b input_file</code></pre>
 <pre class="code" data-lang="c"><code>#include "zxc.h"
 
 size_t bound = zxc_compress_bound(src_size);
-zxc_compress_opts_t c = {
-    .level            = ZXC_LEVEL_DEFAULT,
-    .checksum_enabled = 1,
-};
-int64_t csize = zxc_compress(src, src_size, dst, bound, &amp;c);
+int64_t csize = zxc_compress(src, src_size, dst, bound, ZXC_LEVEL_DEFAULT);
 
-zxc_decompress_opts_t d = { .checksum_enabled = 1 };
-int64_t n = zxc_decompress(dst, csize, out, out_cap, &amp;d);
+int64_t n = zxc_decompress(dst, csize, out, out_cap);
 if (n &lt; 0)
     fprintf(stderr, "zxc: %s\n", zxc_error_name((int)n));</code></pre>
+
+<p>Checksums, seek tables, dictionaries and threads are set on a reusable context:</p>
+<pre class="code" data-lang="c"><code>zxc_cctx *c = zxc_create_cctx();
+zxc_cctx_set_param(c, ZXC_C_LEVEL, ZXC_LEVEL_COMPACT);
+zxc_cctx_set_param(c, ZXC_C_CHECKSUM, 1);
+int64_t csize = zxc_compress_cctx(c, src, src_size, dst, bound);
+zxc_free_cctx(c);
+
+zxc_dctx *d = zxc_create_dctx();
+zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1);   /* verify what the archive carries */
+int64_t n = zxc_decompress_dctx(d, dst, csize, out, out_cap);
+zxc_free_dctx(d);</code></pre>
 
 <p>See the <a href="/docs/examples/">examples</a> for the streaming, context, seekable and dictionary interfaces, the <a href="/docs/api/">API reference</a> for every function, and the <a href="/docs/cli/">manual page</a> for all command options.</p>
 
