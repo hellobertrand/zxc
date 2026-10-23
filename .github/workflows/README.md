@@ -15,7 +15,7 @@ Builds and tests ZXC across multiple platforms (Linux x86_64/ARM64, macOS ARM64,
 Builds and tests ZXC across CPU architectures, Debian's included (GNU/Hurd aside: an OS, not a CPU), in three tiers:
 - **Tier 1** (native runners): Linux x86_64/i386/arm64, Windows x86_64/i386/arm64, macOS x86_64/arm64; Linux armhf is cross-compiled, build only.
 - **Tier 2** (Debian release architectures, cross-compiled in `debian:trixie`, tested under QEMU): armhf, ppc64le, s390x, riscv64, loong64; plus x86_64 under Intel SDE, one job per SIMD dispatch tier (SSE2, AVX2, AVX-512).
-- **Tier 3** (Debian ports and retired architectures, same setup): armv6, mipsel, powerpc, ppc64, sparc64, alpha, hppa, m68k, sh4, and x32, run natively through its loader.
+- **Tier 3** (Debian ports and retired architectures, same setup): armv6, mipsel, powerpc, ppc64, sparc64, alpha, hppa, m68k, sh4.
 
 Tier 1 and Tier 2 are required checks on `main`; Tier 3 is not.
 

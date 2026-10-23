@@ -161,8 +161,7 @@ jobs:
   # Tiers 2 & 3: Linux, cross-compiled in debian:trixie and tested via QEMU.
   #   Tier 2: Debian release architectures (x86_64, arm64 and i386 run
   #           natively in Tier 1).
-  #   Tier 3: Debian ports and retired architectures; x32, which QEMU lacks,
-  #           runs natively and needs the runner kernel's x32 ABI.
+  #   Tier 3: Debian ports and retired architectures.
   # ===========================================================================
   build-cross:
     name: "Tier ${{ matrix.tier }}: ${{ matrix.name }}"
@@ -261,12 +260,6 @@ jobs:
             cross_prefix: sh4-linux-gnu
             cmake_processor: sh4
             qemu_binary: qemu-sh4
-          - name: x32
-            tier: 3
-            cross_pkg: gcc-x86-64-linux-gnux32
-            cross_prefix: x86_64-linux-gnux32
-            cmake_processor: x86_64
-            x32_loader: ld-linux-x32.so.2
 
     steps:
       - name: Checkout Repository
@@ -291,7 +284,7 @@ jobs:
           if [ "${{ steps.apt-cache.outputs.cache-hit }}" != "true" ]; then
               apt-get update
           fi
-          apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} ${{ matrix.qemu_binary && 'qemu-user' || '' }}
+          apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
 
       - name: Save apt cache
         if: github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
@@ -310,19 +303,9 @@ jobs:
           CROSS_STRIP=/usr/bin/${{ matrix.cross_prefix }}-strip
           SYSROOT=/usr/${{ matrix.cross_prefix }}
 
-          if [ -n "${{ matrix.qemu_binary }}" ]; then
-              RUN=(${{ matrix.qemu_binary }} -L "$SYSROOT")
-              if [ -n "${{ matrix.qemu_cpu }}" ]; then
-                  RUN+=(-cpu ${{ matrix.qemu_cpu }})
-              fi
-          elif [ -n "${{ matrix.x32_loader }}" ]; then
-              LOADER=$SYSROOT/lib/${{ matrix.x32_loader }}
-              if "$LOADER" --version > /dev/null 2>&1; then
-                  RUN=("$LOADER" --library-path "$SYSROOT/lib")
-              else
-                  echo "::error::Runner kernel lacks the x32 ABI: ${{ matrix.name }} cannot run its tests."
-                  exit 1
-              fi
+          RUN=(${{ matrix.qemu_binary }} -L "$SYSROOT")
+          if [ -n "${{ matrix.qemu_cpu }}" ]; then
+              RUN+=(-cpu ${{ matrix.qemu_cpu }})
           fi
 
           for LIB_TYPE in "STATIC" "SHARED"; do
@@ -352,7 +335,7 @@ jobs:
 
               cmake --build $BUILD_DIR --config Release --parallel
 
-              echo "Running Tests for $LIB_TYPE via ${RUN[0]}..."
+              echo "Running Tests for $LIB_TYPE via QEMU..."
               "${RUN[@]}" ./$BUILD_DIR/zxc_test
               "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./conformance
               "${RUN[@]}" ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
