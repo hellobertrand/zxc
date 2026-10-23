@@ -2172,24 +2172,46 @@ int main(int argc, char** argv) {
         zxc_cctx* bench_cctx = NULL;
         zxc_dctx* bench_dctx = NULL;
         FILE* f_in = NULL;
-        if (cli_cctx(&bench_cctx, num_threads, level, block_size, checksum, 0, dict, dict_size,
-                     g_dict_huf, NULL, NULL) != ZXC_OK ||
-            cli_dctx(&bench_dctx, num_threads, checksum, dict, dict_size, g_dict_huf, NULL, NULL) !=
-                ZXC_OK)
+        int bench_rc = cli_cctx(&bench_cctx, num_threads, level, block_size, checksum, 0, dict,
+                                dict_size, g_dict_huf, NULL, NULL);
+        if (bench_rc == ZXC_OK)
+            bench_rc = cli_dctx(&bench_dctx, num_threads, checksum, dict, dict_size, g_dict_huf,
+                                NULL, NULL);
+        if (bench_rc != ZXC_OK) {
+            zxc_log("Error: Cannot configure the benchmark: %s\n", zxc_error_name(bench_rc));
             goto bench_cleanup;
+        }
 
         f_in = fopen(resolved_path, "rb");
-        if (!f_in) goto bench_cleanup;
+        if (!f_in) {
+            zxc_log("Error: Cannot open '%s': %s\n", in_path, strerror(errno));
+            goto bench_cleanup;
+        }
 
-        if (fseeko(f_in, 0, SEEK_END) != 0) goto bench_cleanup;
+        if (fseeko(f_in, 0, SEEK_END) != 0) {
+            zxc_log("Error: Cannot seek in '%s': %s\n", in_path, strerror(errno));
+            goto bench_cleanup;
+        }
         const long long fsize = ftello(f_in);
-        if (fsize <= 0) goto bench_cleanup;
+        if (fsize <= 0) {
+            zxc_log("Error: '%s' is empty or not a regular file\n", in_path);
+            goto bench_cleanup;
+        }
         const size_t in_size = (size_t)fsize;
-        if (fseeko(f_in, 0, SEEK_SET) != 0) goto bench_cleanup;
+        if (fseeko(f_in, 0, SEEK_SET) != 0) {
+            zxc_log("Error: Cannot seek in '%s': %s\n", in_path, strerror(errno));
+            goto bench_cleanup;
+        }
 
         ram = malloc(in_size);
-        if (!ram) goto bench_cleanup;
-        if (fread(ram, 1, in_size, f_in) != in_size) goto bench_cleanup;
+        if (!ram) {
+            zxc_log("Error: Out of memory (%zu bytes)\n", in_size);
+            goto bench_cleanup;
+        }
+        if (fread(ram, 1, in_size, f_in) != in_size) {
+            zxc_log("Error: Short read on '%s'\n", in_path);
+            goto bench_cleanup;
+        }
         fclose(f_in);
         f_in = NULL;
 
@@ -2209,7 +2231,10 @@ int main(int argc, char** argv) {
 #else
         fm = fmemopen(ram, in_size, "rb");
 #endif
-        if (!fm) goto bench_cleanup;
+        if (!fm) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
+            goto bench_cleanup;
+        }
 
         double best_compress = 1e30;
         int compress_iters = 0;
@@ -2232,12 +2257,16 @@ int main(int argc, char** argv) {
 
         const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc((size_t)max_c);
-        if (!c_dat) goto bench_cleanup;
+        if (!c_dat) {
+            zxc_log("Error: Out of memory (%zu bytes)\n", (size_t)max_c);
+            goto bench_cleanup;
+        }
 
 #ifdef _WIN32
         FILE* fm_in = tmpfile();
         FILE* fm_out = tmpfile();
         if (!fm_in || !fm_out) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
             if (fm_in) fclose(fm_in);
             if (fm_out) fclose(fm_out);
             goto bench_cleanup;
@@ -2248,6 +2277,7 @@ int main(int argc, char** argv) {
         FILE* fm_in = fmemopen(ram, in_size, "rb");
         FILE* fm_out = fmemopen(c_dat, max_c, "wb");
         if (!fm_in || !fm_out) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
             if (fm_in) fclose(fm_in);
             if (fm_out) fclose(fm_out);
             goto bench_cleanup;
@@ -2256,6 +2286,7 @@ int main(int argc, char** argv) {
 
         const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, bench_cctx);
         if (c_sz < 0) {
+            zxc_log("Error: Compression failed: %s\n", zxc_error_name((int)c_sz));
             fclose(fm_in);
             fclose(fm_out);
             fm_in = NULL;
@@ -2266,6 +2297,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
         rewind(fm_out);
         if (fread(c_dat, 1, (size_t)c_sz, fm_out) != (size_t)c_sz) {
+            zxc_log("Error: Short read on the compressed stream\n");
             fclose(fm_in);
             fclose(fm_out);
             fm_in = NULL;
@@ -2281,12 +2313,18 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
         FILE* fc = tmpfile();
-        if (!fc) goto bench_cleanup;
+        if (!fc) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
+            goto bench_cleanup;
+        }
         fwrite(c_dat, 1, (size_t)c_sz, fc);
         rewind(fc);
 #else
         FILE* fc = fmemopen(c_dat, (size_t)c_sz, "rb");
-        if (!fc) goto bench_cleanup;
+        if (!fc) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
+            goto bench_cleanup;
+        }
 #endif
 
         double best_decompress = 1e30;
