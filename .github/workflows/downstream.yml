@@ -1,7 +1,8 @@
-name: OS (libc) Compatibility
+name: Downstream Builds
 
-# Portability across the OS / libc axis (orthogonal to multiarch.yml, which
-# covers CPU architectures on glibc Linux):
+# ZXC built and tested as downstream distributions build it, each in its own
+# environment: libc, OS, compiler, packaging flags (orthogonal to multiarch.yml,
+# which covers CPU architectures on glibc Linux):
 #   - musl libc (Alpine): catches non-glibc bugs the rest of CI can't see
 #     (e.g. the 128 KB default thread stack vs glibc's 8 MB). Native on both
 #     x86_64 and arm64 runners via an Alpine container.

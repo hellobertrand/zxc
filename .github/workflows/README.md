@@ -19,10 +19,10 @@ Builds and tests ZXC across CPU architectures, Debian's included (GNU/Hurd aside
 
 Tier 1 and Tier 2 are required checks on `main`; Tier 3 is not.
 
-### compat-os.yml - OS (libc) Compatibility
+### downstream.yml - Downstream Builds
 **Triggers:** Push to main, pull requests, manual dispatch
 
-Covers the OS and libc axis that multiarch.yml, all glibc Linux, does not: Alpine (musl, x86_64 and arm64), Arch Linux and AlmaLinux 9 (RHEL 9) built with their distro packaging flags, Amazon Linux 2023 (arm64), and FreeBSD 14 and 15 in a VM. Warnings are errors at compile and at LTO link time.
+Builds and tests ZXC as downstream distributions build it, each in its own environment (libc, OS, compiler, packaging flags): Alpine (musl, x86_64 and arm64), Arch Linux and AlmaLinux 9 (RHEL 9) built with their distro packaging flags, Amazon Linux 2023 (arm64), and FreeBSD 14 and 15 in a VM. Warnings are errors at compile and at LTO link time.
 
 ### multicomp.yml - Compiler Compatibility
 **Triggers:** Push to main, pull requests, manual dispatch
