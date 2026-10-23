@@ -38,7 +38,7 @@ int test_block_api(void) {
     // 2. Allocate buffers and contexts
     compressed = malloc((size_t)block_bound);
     decompressed = malloc(src_size);
-    cctx = zxc_create_cctx(NULL);
+    cctx = zxc_create_cctx();
     dctx = zxc_create_dctx();
     if (!compressed || !decompressed || !cctx || !dctx) {
         printf("Failed: Allocation failed\n");
@@ -46,9 +46,12 @@ int test_block_api(void) {
     }
 
     // 3. Compress block (no checksum)
-    zxc_compress_opts_t copts = {.level = 3, .checksum_enabled = 0};
-    int64_t csize =
-        zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &copts);
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) != ZXC_OK ||
+        zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 0) != ZXC_OK) {
+        printf("Failed: cctx configuration\n");
+        goto cleanup;
+    }
+    int64_t csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound);
     if (csize <= 0) {
         printf("Failed: zxc_compress_block returned %lld\n", (long long)csize);
         goto cleanup;
@@ -56,9 +59,11 @@ int test_block_api(void) {
     printf("  [PASS] Compress block: %zu -> %lld bytes\n", src_size, (long long)csize);
 
     // 4. Decompress block (no checksum)
-    zxc_decompress_opts_t dopts = {.checksum_enabled = 0};
-    int64_t dsize =
-        zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size, &dopts);
+    if (zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 0) != ZXC_OK) {
+        printf("Failed: dctx configuration\n");
+        goto cleanup;
+    }
+    int64_t dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size);
     if (dsize != (int64_t)src_size) {
         printf("Failed: zxc_decompress_block returned %lld, expected %zu\n", (long long)dsize,
                src_size);
@@ -71,14 +76,17 @@ int test_block_api(void) {
     printf("  [PASS] Decompress block: roundtrip OK (no checksum)\n");
 
     // 5. With checksum enabled
-    copts.checksum_enabled = 1;
-    csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &copts);
+    if (zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) != ZXC_OK ||
+        zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) != ZXC_OK) {
+        printf("Failed: enabling the checksum\n");
+        goto cleanup;
+    }
+    csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound);
     if (csize <= 0) {
         printf("Failed: zxc_compress_block with checksum returned %lld\n", (long long)csize);
         goto cleanup;
     }
-    dopts.checksum_enabled = 1;
-    dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size, &dopts);
+    dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size);
     if (dsize != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
         printf("Failed: Roundtrip with checksum failed\n");
         goto cleanup;
@@ -86,35 +94,36 @@ int test_block_api(void) {
     printf("  [PASS] Decompress block: roundtrip OK (with checksum)\n");
 
     // 6. Error cases
-    if (zxc_compress_block(NULL, src, src_size, compressed, (size_t)block_bound, &copts) >= 0) {
+    if (zxc_compress_block(NULL, src, src_size, compressed, (size_t)block_bound) >= 0) {
         printf("Failed: Should fail with NULL cctx\n");
         goto cleanup;
     }
-    if (zxc_compress_block(cctx, NULL, src_size, compressed, (size_t)block_bound, &copts) >= 0) {
+    if (zxc_compress_block(cctx, NULL, src_size, compressed, (size_t)block_bound) >= 0) {
         printf("Failed: Should fail with NULL src\n");
         goto cleanup;
     }
-    if (zxc_decompress_block(NULL, compressed, (size_t)csize, decompressed, src_size, &dopts) >=
-        0) {
+    if (zxc_decompress_block(NULL, compressed, (size_t)csize, decompressed, src_size) >= 0) {
         printf("Failed: Should fail with NULL dctx\n");
         goto cleanup;
     }
     printf("  [PASS] Error cases handled correctly\n");
 
     // 7. Context reuse across multiple blocks
+    if (zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 0) != ZXC_OK ||
+        zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 0) != ZXC_OK) {
+        printf("Failed: disabling the checksum\n");
+        goto cleanup;
+    }
     for (int i = 0; i < 3; i++) {
         gen_lz_data(src, src_size);
         src[0] = (uint8_t)i;
 
-        copts.checksum_enabled = 0;
-        csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &copts);
+        csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound);
         if (csize <= 0) {
             printf("Failed: Reuse iteration %d compress failed\n", i);
             goto cleanup;
         }
-        dopts.checksum_enabled = 0;
-        dsize =
-            zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size, &dopts);
+        dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, src_size);
         if (dsize != (int64_t)src_size || memcmp(src, decompressed, src_size) != 0) {
             printf("Failed: Reuse iteration %d roundtrip failed\n", i);
             goto cleanup;
@@ -124,9 +133,11 @@ int test_block_api(void) {
 
     // 8. Auto-resize: src_size > block_size must succeed (ZXC auto-sizes)
     {
-        zxc_compress_opts_t guard_opts = {.level = 3, .block_size = 4096, .checksum_enabled = 0};
-        int64_t guard_rc =
-            zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound, &guard_opts);
+        if (zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 4096) != ZXC_OK) {
+            printf("Failed: setting a 4 KiB block size\n");
+            goto cleanup;
+        }
+        int64_t guard_rc = zxc_compress_block(cctx, src, src_size, compressed, (size_t)block_bound);
         if (guard_rc <= 0) {
             printf("Failed: src_size > block_size should auto-resize, got %lld\n",
                    (long long)guard_rc);
@@ -147,15 +158,22 @@ cleanup:
     return result;
 }
 
-/* Roundtrip helper: compress src into a newly-malloc'd buffer; return compressed size (or <0). */
+/* Roundtrip helper: compress src into a newly-malloc'd buffer; return compressed size (or <0).
+ * src_size doubles as the block size, so it must be a power of two in range. */
 static int64_t sbs_compress(const uint8_t* src, size_t src_size, int level, int checksum,
                             uint8_t** out_buf, size_t* out_cap) {
     const uint64_t cbound = zxc_compress_block_bound(src_size);
     uint8_t* buf = (uint8_t*)malloc((size_t)cbound);
     if (!buf) return -1;
-    zxc_cctx* cctx = zxc_create_cctx(NULL);
-    zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum, .block_size = src_size};
-    int64_t csz = zxc_compress_block(cctx, src, src_size, buf, (size_t)cbound, &co);
+    zxc_cctx* cctx = zxc_create_cctx();
+    if (!cctx) {
+        free(buf);
+        return -1;
+    }
+    int64_t csz = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level);
+    if (csz == ZXC_OK) csz = zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, checksum);
+    if (csz == ZXC_OK) csz = zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, (int64_t)src_size);
+    if (csz == ZXC_OK) csz = zxc_compress_block(cctx, src, src_size, buf, (size_t)cbound);
     zxc_free_cctx(cctx);
     if (csz <= 0) {
         free(buf);
@@ -204,8 +222,8 @@ int test_decompress_block_safe(void) {
                 }
 
                 zxc_dctx* dctx = zxc_create_dctx();
-                zxc_decompress_opts_t dopts = {.checksum_enabled = checksum};
-                int64_t dsz = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, &dopts);
+                int64_t dsz = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, checksum) : -1;
+                if (dsz == ZXC_OK) dsz = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n);
                 int ok = (dsz == (int64_t)n) && memcmp(src, dst, n) == 0;
                 zxc_free_dctx(dctx);
                 free(dst);
@@ -235,8 +253,8 @@ int test_decompress_block_safe(void) {
 
         zxc_dctx* dctx1 = zxc_create_dctx();
         zxc_dctx* dctx2 = zxc_create_dctx();
-        int64_t r1 = zxc_decompress_block(dctx1, comp, (size_t)csz, dst_fast, (size_t)dbound, NULL);
-        int64_t r2 = zxc_decompress_block_safe(dctx2, comp, (size_t)csz, dst_safe, n, NULL);
+        int64_t r1 = zxc_decompress_block(dctx1, comp, (size_t)csz, dst_fast, (size_t)dbound);
+        int64_t r2 = zxc_decompress_block_safe(dctx2, comp, (size_t)csz, dst_safe, n);
         int ok = (r1 == (int64_t)n) && (r2 == (int64_t)n) && memcmp(dst_fast, dst_safe, n) == 0;
         zxc_free_dctx(dctx1);
         zxc_free_dctx(dctx2);
@@ -263,7 +281,7 @@ int test_decompress_block_safe(void) {
         uint8_t* dst = (uint8_t*)malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
-        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n - 128, NULL);
+        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n - 128);
         int ok = (r < 0);
         zxc_free_dctx(dctx);
         free(dst);
@@ -292,7 +310,7 @@ int test_decompress_block_safe(void) {
         uint8_t* dst = (uint8_t*)malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
-        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, NULL);
+        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n);
         int ok = (r == (int64_t)n) && memcmp(src, dst, n) == 0;
         zxc_free_dctx(dctx);
         free(dst);
@@ -318,9 +336,9 @@ int test_decompress_block_safe(void) {
         uint8_t* dst = (uint8_t*)malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
-        zxc_decompress_opts_t opts = {.checksum_enabled = 1};
-        int64_t r = lz ? zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, &opts) : 0;
-        int ok = lz && (r < 0 || (r == (int64_t)n && memcmp(src, dst, n) == 0));
+        const int set = dctx && zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK;
+        int64_t r = lz && set ? zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n) : 0;
+        int ok = lz && set && (r < 0 || (r == (int64_t)n && memcmp(src, dst, n) == 0));
         zxc_free_dctx(dctx);
         free(dst);
         free(comp);
@@ -346,8 +364,8 @@ int test_decompress_block_safe(void) {
         uint8_t* dst = (uint8_t*)malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
-        zxc_decompress_opts_t opts = {.checksum_enabled = 1};
-        int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n, &opts);
+        int64_t r = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) : -1;
+        if (r == ZXC_OK) r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n);
         int ok = raw && r == ZXC_ERROR_BAD_CHECKSUM;
         zxc_free_dctx(dctx);
         free(dst);
@@ -366,19 +384,17 @@ int test_decompress_block_safe(void) {
         enum { BS = 4096, FRAME = 4 * BS };
         static uint8_t fsrc[FRAME], farc[2 * FRAME], fout[FRAME], bcomp[2 * BS], bout[BS];
         gen_lz_data(fsrc, FRAME);
-        const zxc_compress_opts_t co = {.level = 3, .block_size = BS, .checksum_enabled = 1};
-        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
-        zxc_cctx* cctx = zxc_create_cctx(NULL);
+        zxc_cctx* cctx = zxc_create_cctx();
         zxc_dctx* dctx = zxc_create_dctx();
-        const int64_t fn =
-            cctx ? zxc_compress_cctx(cctx, fsrc, FRAME, farc, sizeof(farc), &co) : -1;
-        const int64_t bn =
-            cctx ? zxc_compress_block(cctx, fsrc, BS, bcomp, sizeof(bcomp), &co) : -1;
-        const int64_t fd =
-            dctx && fn > 0 ? zxc_decompress_dctx(dctx, farc, (size_t)fn, fout, FRAME, &verify) : -1;
+        const int set = cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) == ZXC_OK &&
+                        zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, BS) == ZXC_OK &&
+                        zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) == ZXC_OK &&
+                        zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK;
+        const int64_t fn = set ? zxc_compress_cctx(cctx, fsrc, FRAME, farc, sizeof(farc)) : -1;
+        const int64_t bn = set ? zxc_compress_block(cctx, fsrc, BS, bcomp, sizeof(bcomp)) : -1;
+        const int64_t fd = fn > 0 ? zxc_decompress_dctx(dctx, farc, (size_t)fn, fout, FRAME) : -1;
         const int64_t bd =
-            dctx && bn > 0 ? zxc_decompress_block_safe(dctx, bcomp, (size_t)bn, bout, BS, &verify)
-                           : -1;
+            bn > 0 ? zxc_decompress_block_safe(dctx, bcomp, (size_t)bn, bout, BS) : -1;
         zxc_free_cctx(cctx);
         zxc_free_dctx(dctx);
         if (fd != FRAME || bd != BS || memcmp(bout, fsrc, BS) != 0) {
@@ -446,17 +462,16 @@ int test_decompress_block_bound(void) {
         const uint64_t dbound = zxc_decompress_block_bound(src_size);
         uint8_t* decompressed = malloc((size_t)dbound);
 
-        zxc_cctx* cctx = zxc_create_cctx(NULL);
+        zxc_cctx* cctx = zxc_create_cctx();
         zxc_dctx* dctx = zxc_create_dctx();
 
         int ok = 0;
-        if (compressed && decompressed && cctx && dctx) {
-            zxc_compress_opts_t copts = {.level = 3};
-            int64_t csize =
-                zxc_compress_block(cctx, src, src_size, compressed, (size_t)cbound, &copts);
+        if (compressed && decompressed && cctx && dctx &&
+            zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) == ZXC_OK) {
+            int64_t csize = zxc_compress_block(cctx, src, src_size, compressed, (size_t)cbound);
             if (csize > 0) {
                 int64_t dsize = zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed,
-                                                     (size_t)dbound, NULL);
+                                                     (size_t)dbound);
                 ok = (dsize == (int64_t)src_size) && memcmp(src, decompressed, src_size) == 0;
             }
         }
@@ -570,7 +585,7 @@ int test_block_api_boundary_sizes(void) {
     const uint64_t bound = zxc_compress_block_bound(max_size);
     uint8_t* compressed = malloc((size_t)bound);
     uint8_t* decompressed = malloc(max_size);
-    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
 
     if (!src || !compressed || !decompressed || !cctx || !dctx) {
@@ -590,15 +605,18 @@ int test_block_api_boundary_sizes(void) {
         patterns[p].gen(src, max_size);
 
         for (int lvl = 1; lvl <= 5; lvl++) {
+            if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, lvl) != ZXC_OK) {
+                printf("  [FAIL] %s: cannot set level %d\n", patterns[p].name, lvl);
+                failures++;
+                continue;
+            }
             for (int s = 0; s < num_sizes; s++) {
                 const size_t sz = sizes[s];
                 /* gen_num_data fills whole 4-byte integers; skip tiny/unaligned
                  * sizes so the buffer is fully initialized before round-trip. */
                 if (p == 2 && (sz < 16 || sz % 4 != 0)) continue;
 
-                zxc_compress_opts_t copts = {.level = lvl, .checksum_enabled = 0};
-                const int64_t csize =
-                    zxc_compress_block(cctx, src, sz, compressed, (size_t)bound, &copts);
+                const int64_t csize = zxc_compress_block(cctx, src, sz, compressed, (size_t)bound);
 
                 if (csize <= 0) {
                     /* RAW fallback or incompressible is OK, but actual errors are not */
@@ -610,9 +628,8 @@ int test_block_api_boundary_sizes(void) {
                     continue;
                 }
 
-                zxc_decompress_opts_t dopts = {.checksum_enabled = 0};
                 const int64_t dsize =
-                    zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, sz, &dopts);
+                    zxc_decompress_block(dctx, compressed, (size_t)csize, decompressed, sz);
 
                 if (dsize != (int64_t)sz) {
                     printf("  [FAIL] %s lvl=%d sz=%zu: decompress returned %lld (expected %zu)\n",
@@ -676,7 +693,7 @@ int test_block_api_large_block_varint(void) {
         const uint64_t bound = zxc_compress_block_bound(ZXC_BLOCK_SIZE_MAX);
         uint8_t* compressed = bound ? malloc((size_t)bound) : NULL;
         uint8_t* decompressed = malloc(sz);
-        zxc_cctx* cctx = zxc_create_cctx(NULL);
+        zxc_cctx* cctx = zxc_create_cctx();
         zxc_dctx* dctx = zxc_create_dctx();
 
         if (!src || !compressed || !decompressed || !cctx || !dctx) {
@@ -684,10 +701,16 @@ int test_block_api_large_block_varint(void) {
             failures++;
             goto per_case_cleanup;
         }
+        if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 1) != ZXC_OK ||
+            zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) != ZXC_OK ||
+            zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) != ZXC_OK) {
+            printf("  [FAIL] %s: context configuration failed\n", cases[i].name);
+            failures++;
+            goto per_case_cleanup;
+        }
 
         gen_lz_data(src, sz);
-        zxc_compress_opts_t copts = {.level = 1, .checksum_enabled = 1};
-        const int64_t csize = zxc_compress_block(cctx, src, sz, compressed, (size_t)bound, &copts);
+        const int64_t csize = zxc_compress_block(cctx, src, sz, compressed, (size_t)bound);
         if (csize != ZXC_ERROR_BAD_BLOCK_SIZE) {
             printf("  [FAIL] %s compress: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
                    cases[i].name, ZXC_ERROR_BAD_BLOCK_SIZE, (long long)csize);
@@ -695,8 +718,7 @@ int test_block_api_large_block_varint(void) {
             goto per_case_cleanup;
         }
 
-        zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-        const int64_t dsize = zxc_decompress_block(dctx, src, sz, decompressed, sz, &dopts);
+        const int64_t dsize = zxc_decompress_block(dctx, src, sz, decompressed, sz);
         if (dsize != ZXC_ERROR_BAD_BLOCK_SIZE) {
             printf("  [FAIL] %s decompress: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
                    cases[i].name, ZXC_ERROR_BAD_BLOCK_SIZE, (long long)dsize);
@@ -704,7 +726,7 @@ int test_block_api_large_block_varint(void) {
             goto per_case_cleanup;
         }
 
-        const int64_t dssize = zxc_decompress_block_safe(dctx, src, sz, decompressed, sz, &dopts);
+        const int64_t dssize = zxc_decompress_block_safe(dctx, src, sz, decompressed, sz);
         if (dssize != ZXC_ERROR_BAD_BLOCK_SIZE) {
             printf(
                 "  [FAIL] %s decompress_safe: expected ZXC_ERROR_BAD_BLOCK_SIZE (%d), got %lld\n",
@@ -753,12 +775,10 @@ int test_block_api_tiny_capacity(void) {
 
     int failures = 0;
     for (int level = 1; level <= 7; level++) {
-        zxc_compress_opts_t opts;
-        memset(&opts, 0, sizeof(opts));
-        opts.level = level;
-        zxc_cctx* cctx = zxc_create_cctx(&opts);
-        if (!cctx) {
+        zxc_cctx* cctx = zxc_create_cctx();
+        if (!cctx || zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) != ZXC_OK) {
             printf("FAILED: cctx (level %d)\n", level);
+            zxc_free_cctx(cctx);
             free(src);
             return 0;
         }
@@ -769,14 +789,14 @@ int test_block_api_tiny_capacity(void) {
             if (!dst) continue;
 
             // SRC_SIZE far exceeds MAX_CAP: every capacity here must be refused.
-            const int64_t b = zxc_compress_block(cctx, src, SRC_SIZE, dst, cap, &opts);
+            const int64_t b = zxc_compress_block(cctx, src, SRC_SIZE, dst, cap);
             if (b != ZXC_ERROR_DST_TOO_SMALL) {
                 printf("  [FAIL] compress_block level %d cap %zu: expected %d, got %lld\n", level,
                        cap, ZXC_ERROR_DST_TOO_SMALL, (long long)b);
                 failures++;
             }
 
-            const int64_t f = zxc_compress(src, SRC_SIZE, dst, cap, &opts);
+            const int64_t f = zxc_compress(src, SRC_SIZE, dst, cap, level);
             if (f >= 0) {
                 printf("  [FAIL] compress level %d cap %zu: expected a rejection, got %lld\n",
                        level, cap, (long long)f);
@@ -815,7 +835,7 @@ int test_block_api_direct_decode(void) {
     uint8_t* dict = (uint8_t*)malloc(4096);
     uint8_t* comp = (uint8_t*)malloc(cap);
     uint8_t* out = (uint8_t*)malloc(dbound_max);
-    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
     int ok = 0;
     do {
@@ -827,7 +847,6 @@ int test_block_api_direct_decode(void) {
         gen_lz_data(lz, max);
         for (size_t i = 0; i < max; i++) lit[i] = (uint8_t)('a' + zxc_test_rand() % 26);
         for (size_t i = 0; i < 4096; i++) dict[i] = (uint8_t)('a' + zxc_test_rand() % 26);
-        const zxc_decompress_opts_t dopts = {.dict = dict, .dict_size = 4096};
         int failed = 0, cells = 0;
         for (size_t g = 0; g < 2; g++) {
             const uint8_t* src = g ? lit : lz;
@@ -836,10 +855,16 @@ int test_block_api_direct_decode(void) {
                 for (size_t l = 0; l < sizeof(levels) / sizeof(levels[0]); l++) {
                     /* the same block without and with a dictionary */
                     for (int with_dict = 0; with_dict < 2; with_dict++) {
-                        const zxc_compress_opts_t co = {.level = levels[l],
-                                                        .dict = with_dict ? dict : NULL,
-                                                        .dict_size = with_dict ? 4096 : 0};
-                        const int64_t c = zxc_compress_block(cctx, src, n, comp, cap, &co);
+                        const uint8_t* const d = with_dict ? dict : NULL;
+                        const size_t dsz = with_dict ? 4096 : 0;
+                        if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, levels[l]) != ZXC_OK ||
+                            zxc_cctx_set_dict(cctx, d, dsz, NULL) != ZXC_OK ||
+                            zxc_dctx_set_dict(dctx, d, dsz, NULL) != ZXC_OK) {
+                            printf("  [FAIL] configure L%d dict=%d\n", levels[l], with_dict);
+                            failed++;
+                            continue;
+                        }
+                        const int64_t c = zxc_compress_block(cctx, src, n, comp, cap);
                         if (c <= 0) {
                             printf("  [FAIL] compress g%zu n=%zu L%d dict=%d: %lld\n", g, n,
                                    levels[l], with_dict, (long long)c);
@@ -850,8 +875,8 @@ int test_block_api_direct_decode(void) {
                         for (size_t k = 0; k < sizeof(caps) / sizeof(caps[0]); k++) {
                             /* n <= max, so every cap fits dbound_max */
                             memset(out, 0xA5, n);
-                            const int64_t r = zxc_decompress_block(
-                                dctx, comp, (size_t)c, out, caps[k], with_dict ? &dopts : NULL);
+                            const int64_t r =
+                                zxc_decompress_block(dctx, comp, (size_t)c, out, caps[k]);
                             cells++;
                             if (r != (int64_t)n || memcmp(out, src, n) != 0) {
                                 printf("  [FAIL] g%zu n=%zu L%d dict=%d dst=%zu: %lld\n", g, n,
@@ -861,8 +886,7 @@ int test_block_api_direct_decode(void) {
                         }
                         /* strict decoder at the exact size, same contract */
                         memset(out, 0xA5, n);
-                        const int64_t rs = zxc_decompress_block_safe(dctx, comp, (size_t)c, out, n,
-                                                                     with_dict ? &dopts : NULL);
+                        const int64_t rs = zxc_decompress_block_safe(dctx, comp, (size_t)c, out, n);
                         cells++;
                         if (rs != (int64_t)n || memcmp(out, src, n) != 0) {
                             printf("  [FAIL] strict g%zu n=%zu L%d dict=%d: %lld\n", g, n,
@@ -881,9 +905,14 @@ int test_block_api_direct_decode(void) {
             break;
         }
         /* a destination that cannot hold the block is still refused */
-        const zxc_compress_opts_t co = {.level = 3};
-        const int64_t c = zxc_compress_block(cctx, lit, 100000, comp, cap, &co);
-        const int64_t r = c > 0 ? zxc_decompress_block(dctx, comp, (size_t)c, out, 99000, NULL) : 0;
+        if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) != ZXC_OK ||
+            zxc_cctx_set_dict(cctx, NULL, 0, NULL) != ZXC_OK ||
+            zxc_dctx_set_dict(dctx, NULL, 0, NULL) != ZXC_OK) {
+            printf("  [FAIL] configure L3 without dictionary\n");
+            break;
+        }
+        const int64_t c = zxc_compress_block(cctx, lit, 100000, comp, cap);
+        const int64_t r = c > 0 ? zxc_decompress_block(dctx, comp, (size_t)c, out, 99000) : 0;
         if (c <= 0 || r != ZXC_ERROR_DST_TOO_SMALL) {
             printf("  [FAIL] short destination: %lld (want DST_TOO_SMALL)\n", (long long)r);
             break;
@@ -907,14 +936,14 @@ int test_block_api_direct_decode(void) {
             zxc_test_srand(tail_cases[t].seed);
             for (size_t i = 0; i < n; i++)
                 lit[i] = (uint8_t)skewed[zxc_test_rand() % (sizeof(skewed) - 1)];
-            const zxc_compress_opts_t tc = {.level = tail_cases[t].level};
-            const int64_t c2 = zxc_compress_block(cctx, lit, n, comp, cap, &tc);
+            int64_t c2 = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, tail_cases[t].level);
+            if (c2 == ZXC_OK) c2 = zxc_compress_block(cctx, lit, n, comp, cap);
             const int64_t exact =
-                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, out, n, NULL) : c2;
-            const int64_t direct =
-                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, padded,
-                                              (size_t)zxc_decompress_block_bound(n), NULL)
-                       : c2;
+                c2 > 0 ? zxc_decompress_block(dctx, comp, (size_t)c2, out, n) : c2;
+            const int64_t direct = c2 > 0
+                                       ? zxc_decompress_block(dctx, comp, (size_t)c2, padded,
+                                                              (size_t)zxc_decompress_block_bound(n))
+                                       : c2;
             if (exact != (int64_t)n || direct != (int64_t)n || memcmp(out, lit, n) != 0 ||
                 memcmp(padded, lit, n) != 0) {
                 printf("  [FAIL] tight tail seed %llu n=%zu L%d: exact %lld, direct %lld\n",

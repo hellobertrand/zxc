@@ -16,9 +16,11 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_decompress_inplace_bound"
         "_zxc_create_cctx"
         "_zxc_free_cctx"
+        "_zxc_cctx_set_dict"
         "_zxc_compress_cctx"
         "_zxc_create_dctx"
         "_zxc_free_dctx"
+        "_zxc_dctx_set_dict"
         "_zxc_decompress_dctx"
         # Push streaming API
         "_zxc_cstream_create"
@@ -59,15 +61,17 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxcw_seekable_get_block_decomp_size"
         "_zxcw_write_seek_table"
         "_zxcw_seek_table_size"
+        # i32 shims for the context parameter setters, whose value is an i64
+        # (see wasm_entry.c).
+        "_zxcw_cctx_set_param"
+        "_zxcw_dctx_set_param"
         "_zxc_min_level"
         "_zxc_max_level"
         "_zxc_default_level"
         "_zxc_version_string"
         "_zxc_version_number"
         "_zxc_error_name"
-        # Options-struct layout guards
-        "_zxc_compress_opts_size"
-        "_zxc_decompress_opts_size"
+        # Frame-info struct layout guard
         "_zxc_get_frame_info"
         "_zxc_frame_info_size"
         "_malloc"

@@ -53,15 +53,38 @@ static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const v
     static uint8_t out[FUZZ_DICT_HUF_PAYLOAD];
     if (n > FUZZ_DICT_HUF_PAYLOAD) n = FUZZ_DICT_HUF_PAYLOAD;
     if (n == 0 || zxc_compress_bound(n) > sizeof(comp)) return;
-    const zxc_compress_opts_t co = {
-        .level = 6, .dict = dict, .dict_size = dict_size, .dict_huf = huf};
-    const int64_t c = zxc_compress(src, n, comp, sizeof(comp), &co);
+    static zxc_cctx* cctx = NULL;
+    static zxc_dctx* dctx = NULL;
+    if (!cctx) cctx = zxc_create_cctx();
+    if (!dctx) dctx = zxc_create_dctx();
+    if (!cctx || !dctx) return;
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 6) != ZXC_OK ||
+        zxc_cctx_set_dict(cctx, dict, dict_size, huf) != ZXC_OK ||
+        zxc_dctx_set_dict(dctx, dict, dict_size, huf) != ZXC_OK)
+        return;
+    const int64_t c = zxc_compress_cctx(cctx, src, n, comp, sizeof(comp));
     assert(c > 0);
-    const zxc_decompress_opts_t dop = {.dict = dict, .dict_size = dict_size, .dict_huf = huf};
-    const int64_t d = zxc_decompress(comp, (size_t)c, out, n, &dop);
+    const int64_t d = zxc_decompress_dctx(dctx, comp, (size_t)c, out, n);
     assert(d == (int64_t)n && memcmp(out, src, n) == 0);
     (void)c;
     (void)d;
+}
+
+/* Configures a compression context for phase 3; ZXC_OK, or the setter's error. */
+static int configure_cctx(zxc_cctx* c, const int level, const int checksum, const void* dict,
+                          const size_t dict_size, const void* huf) {
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_dict(c, dict, dict_size, huf);
+    return rc;
+}
+
+/* Same for a decompression context. */
+static int configure_dctx(zxc_dctx* d, const int checksum, const void* dict, const size_t dict_size,
+                          const void* huf) {
+    int rc = zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum);
+    if (rc == ZXC_OK) rc = zxc_dctx_set_dict(d, dict, dict_size, huf);
+    return rc;
 }
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
@@ -218,29 +241,33 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         comp_cap = bound;
     }
 
-    zxc_compress_opts_t copts = {
-        .level = level,
-        .checksum_enabled = use_checksum,
-        .dict = dict_buf,
-        .dict_size = (size_t)dict_sz,
-        .dict_huf = use_huf ? huf : NULL,
-    };
-    const int64_t csize = zxc_compress(data, size, comp_buf, bound, &copts);
+    const void* const dict_huf = use_huf ? huf : NULL;
+
+    /* Reference: a fresh context, used once. */
+    zxc_cctx* const fresh = zxc_create_cctx();
+    if (!fresh) return 0;
+    if (configure_cctx(fresh, level, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) != ZXC_OK) {
+        zxc_free_cctx(fresh);
+        return 0;
+    }
+    const int64_t csize = zxc_compress_cctx(fresh, data, size, comp_buf, bound);
+    zxc_free_cctx(fresh);
     if (csize < 0) return 0;
 
-    /* The reusable context must produce the very same archive. */
+    /* The context reused across runs must produce the very same archive. */
     static zxc_cctx* cctx = NULL;
     static void* comp2_buf = NULL;
     static size_t comp2_cap = 0;
-    if (!cctx) cctx = zxc_create_cctx(NULL);
+    if (!cctx) cctx = zxc_create_cctx();
     if (bound > comp2_cap) {
         void* nb = realloc(comp2_buf, bound);
         if (!nb) return 0;
         comp2_buf = nb;
         comp2_cap = bound;
     }
-    if (cctx) {
-        const int64_t c2 = zxc_compress_cctx(cctx, data, size, comp2_buf, bound, &copts);
+    if (cctx &&
+        configure_cctx(cctx, level, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) == ZXC_OK) {
+        const int64_t c2 = zxc_compress_cctx(cctx, data, size, comp2_buf, bound);
         assert(c2 == csize);
         assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
     }
@@ -252,25 +279,26 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         decomp_cap = size;
     }
 
-    zxc_decompress_opts_t dopts = {
-        .checksum_enabled = use_checksum,
-        .dict = dict_buf,
-        .dict_size = (size_t)dict_sz,
-        .dict_huf = use_huf ? huf : NULL,
-    };
-    const int64_t dsize = zxc_decompress(comp_buf, (size_t)csize, decomp_buf, size, &dopts);
+    /* Reference decode: a fresh context, used once. */
+    zxc_dctx* const fresh_d = zxc_create_dctx();
+    if (!fresh_d) return 0;
+    if (configure_dctx(fresh_d, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) != ZXC_OK) {
+        zxc_free_dctx(fresh_d);
+        return 0;
+    }
+    const int64_t dsize = zxc_decompress_dctx(fresh_d, comp_buf, (size_t)csize, decomp_buf, size);
+    zxc_free_dctx(fresh_d);
 
     if (dsize >= 0) {
         assert((size_t)dsize == size);
         assert(memcmp(data, decomp_buf, size) == 0);
     }
 
-    /* Same archive through a reusable context: must agree with the one-shot path. */
+    /* Same archive through the context reused across runs: must agree. */
     static zxc_dctx* dctx = NULL;
     if (!dctx) dctx = zxc_create_dctx();
-    if (dctx) {
-        const int64_t d2 =
-            zxc_decompress_dctx(dctx, comp_buf, (size_t)csize, decomp_buf, size, &dopts);
+    if (dctx && configure_dctx(dctx, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) == ZXC_OK) {
+        const int64_t d2 = zxc_decompress_dctx(dctx, comp_buf, (size_t)csize, decomp_buf, size);
         assert(d2 == dsize);
         if (d2 >= 0) assert(memcmp(data, decomp_buf, size) == 0);
     }

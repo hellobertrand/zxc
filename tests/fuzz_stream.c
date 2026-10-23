@@ -46,13 +46,17 @@ static void fuzz_raw(const uint8_t* src, const size_t n, const int n_threads, co
     FILE* const in = fmemopen((void*)src, n, "rb");
     if (!in) return;
     (void)zxc_stream_get_decompressed_size(in); /* restores the position */
-    const zxc_decompress_opts_t o = {.n_threads = n_threads, .checksum_enabled = checksum};
-    (void)zxc_stream_decompress(in, NULL, &o); /* no output: a bomb costs CPU, not memory */
+    zxc_dctx* const cfg = zxc_create_dctx();
+    if (cfg && zxc_dctx_set_param(cfg, ZXC_D_THREADS, n_threads) == 0 &&
+        zxc_dctx_set_param(cfg, ZXC_D_CHECKSUM, checksum) == 0) {
+        (void)zxc_stream_decompress(in, NULL, cfg); /* no output: a bomb costs CPU, not memory */
+    }
+    zxc_free_dctx(cfg);
     fclose(in);
 }
 
-static void roundtrip(uint8_t* plain, const size_t total, const zxc_compress_opts_t* co,
-                      const zxc_decompress_opts_t* dopts) {
+static void roundtrip(uint8_t* plain, const size_t total, const zxc_cctx* co,
+                      const zxc_dctx* dopts) {
     char* comp = NULL;
     size_t comp_len = 0;
     FILE* in = fmemopen(plain, total, "rb");
@@ -118,20 +122,23 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         plain[t * size] ^= (uint8_t)t; /* distinct blocks */
     }
 
-    const zxc_compress_opts_t co = {.n_threads = n_threads,
-                                    .level = level,
-                                    .block_size = block_size,
-                                    .checksum_enabled = checksum,
-                                    .seekable = seekable,
-                                    .dict = dict_size ? data : NULL,
-                                    .dict_size = dict_size,
-                                    .progress_cb = cb};
-    const zxc_decompress_opts_t dopts = {.n_threads = n_threads,
-                                         .checksum_enabled = checksum,
-                                         .dict = co.dict,
-                                         .dict_size = dict_size,
-                                         .progress_cb = cb};
-    roundtrip(plain, total, &co, &dopts);
+    const void* const dict = dict_size ? data : NULL;
+    zxc_cctx* const co = zxc_create_cctx();
+    zxc_dctx* const dopts = zxc_create_dctx();
+    const int configured = co && dopts && zxc_cctx_set_param(co, ZXC_C_THREADS, n_threads) == 0 &&
+                           zxc_cctx_set_param(co, ZXC_C_LEVEL, level) == 0 &&
+                           zxc_cctx_set_param(co, ZXC_C_BLOCK_SIZE, (int64_t)block_size) == 0 &&
+                           zxc_cctx_set_param(co, ZXC_C_CHECKSUM, checksum) == 0 &&
+                           zxc_cctx_set_param(co, ZXC_C_SEEKABLE, seekable) == 0 &&
+                           zxc_cctx_set_dict(co, dict, dict_size, NULL) == 0 &&
+                           zxc_cctx_set_progress(co, cb, NULL) == 0 &&
+                           zxc_dctx_set_param(dopts, ZXC_D_THREADS, n_threads) == 0 &&
+                           zxc_dctx_set_param(dopts, ZXC_D_CHECKSUM, checksum) == 0 &&
+                           zxc_dctx_set_dict(dopts, dict, dict_size, NULL) == 0 &&
+                           zxc_dctx_set_progress(dopts, cb, NULL) == 0;
+    if (configured) roundtrip(plain, total, co, dopts);
+    zxc_free_cctx(co);
+    zxc_free_dctx(dopts);
 
     free(plain);
     return 0;

@@ -30,9 +30,11 @@
  * int64_t zxd_sz = zxc_dict_save(dict_buf, dict_sz, huf, zxd, ...);
  *
  * // Use for compression
- * zxc_compress_opts_t opts = {
- *     .level = 6, .dict = dict_buf, .dict_size = dict_sz, .dict_huf = huf };
- * zxc_compress(src, src_size, dst, dst_capacity, &opts);
+ * zxc_cctx* cctx = zxc_create_cctx();
+ * zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 6);
+ * zxc_cctx_set_dict(cctx, dict_buf, dict_sz, huf);
+ * zxc_compress_cctx(cctx, src, src_size, dst, dst_capacity);
+ * zxc_free_cctx(cctx);
  * @endcode
  */
 
@@ -139,7 +141,7 @@ ZXC_EXPORT uint32_t zxc_dict_read_id(const void* buf, size_t buf_size);
  * @brief Trains a dictionary from a corpus of samples.
  *
  * Picks the byte sequences that maximize LZ77 match coverage across the
- * samples. The content can go straight into zxc_compress_opts_t::dict, or
+ * samples. The content can go straight to zxc_cctx_set_dict(), or
  * through zxc_dict_save().
  *
  * @param[in]  samples        Array of pointers to sample buffers.

@@ -49,21 +49,15 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	o := applyOptions(opts)
-
-	var copts C.zxc_compress_opts_t
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
-	}
-	if o.seekable {
-		copts.seekable = 1
-	}
+	// The options live on a native context for the duration of the call; it
+	// is freed before the dictionary it points at is unpinned (defer order).
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setCompressDict(&copts, o, &pinner); err != nil {
+	cctx, err := createCctx(applyOptions(opts), &pinner)
+	if err != nil {
 		return 0, err
 	}
+	defer C.zxc_free_cctx(cctx)
 
 	// &data[0] panics on an empty slice; pass a valid non-nil pointer instead
 	// (the C side reads 0 bytes) so empty input yields a minimal frame.
@@ -73,12 +67,12 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 		srcPtr = unsafe.Pointer(&data[0])
 	}
 
-	written := C.zxc_compress(
+	written := C.zxc_compress_cctx(
+		cctx,
 		srcPtr,
 		C.size_t(len(data)),
 		unsafe.Pointer(&output[0]),
 		C.size_t(len(output)),
-		&copts,
 	)
 
 	if written < 0 {
@@ -152,22 +146,19 @@ func GetFrameInfo(data []byte) (FrameInfo, error) {
 // The output size is read from the compressed data footer. For pre-allocated
 // buffers, use [DecompressTo].
 //
-// Options: [WithChecksum].
+// Options: [WithChecksum], [WithDict], [WithDictHuf], [WithDictionary].
 func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	o := applyOptions(opts)
-	var dopts C.zxc_decompress_opts_t
-	if o.checksum {
-		dopts.checksum_enabled = 1
-	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+	dctx, err := createDctx(applyOptions(opts), &pinner)
+	if err != nil {
 		return nil, err
 	}
+	defer C.zxc_free_dctx(dctx)
 
 	size := uint64(C.zxc_get_decompressed_size(
 		unsafe.Pointer(&data[0]),
@@ -187,12 +178,12 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 		// caller's buffer: blocks contradict the empty size the footer claims,
 		// which reads as invalid data.
 		var dummy [1]byte
-		written := C.zxc_decompress(
+		written := C.zxc_decompress_dctx(
+			dctx,
 			unsafe.Pointer(&data[0]),
 			C.size_t(len(data)),
 			unsafe.Pointer(&dummy[0]),
 			C.size_t(0),
-			&dopts,
 		)
 		if written < 0 {
 			if int(written) == int(C.ZXC_ERROR_DST_TOO_SMALL) {
@@ -207,12 +198,12 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	}
 
 	dst := make([]byte, size)
-	written := C.zxc_decompress(
+	written := C.zxc_decompress_dctx(
+		dctx,
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
 		unsafe.Pointer(&dst[0]),
 		C.size_t(size),
-		&dopts,
 	)
 
 	if written < 0 {
@@ -227,6 +218,8 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 
 // DecompressTo decompresses data into a pre-allocated output buffer.
 // Returns the number of bytes written.
+//
+// Options: same as [Decompress].
 func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	if len(data) == 0 {
 		return 0, ErrInvalidData
@@ -235,24 +228,20 @@ func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	o := applyOptions(opts)
-
-	var dopts C.zxc_decompress_opts_t
-	if o.checksum {
-		dopts.checksum_enabled = 1
-	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+	dctx, err := createDctx(applyOptions(opts), &pinner)
+	if err != nil {
 		return 0, err
 	}
+	defer C.zxc_free_dctx(dctx)
 
-	written := C.zxc_decompress(
+	written := C.zxc_decompress_dctx(
+		dctx,
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
 		unsafe.Pointer(&output[0]),
 		C.size_t(len(output)),
-		&dopts,
 	)
 
 	if written < 0 {

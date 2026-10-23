@@ -1223,8 +1223,9 @@ static int zxc_file_span(FILE* f, long long* saved, uint64_t* size) {
  * level, block size, checksums, seekable, dictionary) with their defaults, then
  * runs the engine over the input.
  */
-int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* opts) {
+int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_cctx* cfg) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
+    const zxc_cparams_t* const opts = cfg ? zxc_cctx_params(cfg) : NULL;
 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
@@ -1308,8 +1309,9 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
  * header, not from @p opts. Consecutive frames with the same block size and
  * checksum flag share one engine.
  */
-int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts_t* opts) {
+int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_dctx* cfg) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
+    const zxc_dparams_t* const opts = cfg ? zxc_dctx_params(cfg) : NULL;
 
     const int n_threads = opts ? opts->n_threads : 0;
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;

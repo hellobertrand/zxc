@@ -25,7 +25,8 @@ import (
 // This is the recommended method for large files. It uses an asynchronous
 // pipeline with separate reader, worker, and writer threads.
 //
-// Options: [WithLevel], [WithChecksum], [WithThreads].
+// Options: [WithLevel], [WithChecksum], [WithThreads], [WithSeekable],
+// [WithDict].
 //
 //	n, err := zxc.CompressFile("input.bin", "output.zxc",
 //	    zxc.WithLevel(zxc.LevelCompact), zxc.WithThreads(4))
@@ -62,22 +63,17 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 		}
 	}()
 
-	var copts C.zxc_compress_opts_t
-	copts.n_threads = C.int(o.threads)
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
-	}
-	if o.seekable {
-		copts.seekable = 1
-	}
+	// The pipeline reads its parameters from a configured context; the
+	// context is freed before the dictionary it points at is unpinned.
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setCompressDict(&copts, o, &pinner); err != nil {
+	cctx, err := createCctx(o, &pinner)
+	if err != nil {
 		return 0, err
 	}
+	defer C.zxc_free_cctx(cctx)
 
-	result := C.zxc_stream_compress(cIn, cOut, &copts)
+	result := C.zxc_stream_compress(cIn, cOut, cctx)
 
 	// fclose flushes the last stdio buffer of compressed output; a failure
 	// here (ENOSPC, EIO) means the archive tail never reached the OS, so it
@@ -118,7 +114,7 @@ func FileDecompressedSize(path string) (int64, error) {
 
 // DecompressFile decompresses src to dst using multi-threaded streaming.
 //
-// Options: [WithChecksum], [WithThreads].
+// Options: [WithChecksum], [WithThreads], [WithDict].
 //
 //	n, err := zxc.DecompressFile("compressed.zxc", "output.bin")
 func DecompressFile(input, output string, opts ...Option) (int64, error) {
@@ -153,18 +149,15 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 		}
 	}()
 
-	var dopts C.zxc_decompress_opts_t
-	dopts.n_threads = C.int(o.threads)
-	if o.checksum {
-		dopts.checksum_enabled = 1
-	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+	dctx, err := createDctx(o, &pinner)
+	if err != nil {
 		return 0, err
 	}
+	defer C.zxc_free_dctx(dctx)
 
-	result := C.zxc_stream_decompress(cIn, cOut, &dopts)
+	result := C.zxc_stream_decompress(cIn, cOut, dctx)
 
 	// See CompressFile: the fclose flush result is part of the success path.
 	outClosed = true

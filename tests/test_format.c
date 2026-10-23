@@ -648,8 +648,7 @@ int test_eof_block_structure(void) {
     uint8_t* compressed = malloc(max_dst_size);
     if (!compressed) return 0;
 
-    zxc_compress_opts_t _co26 = {.level = 1, .checksum_enabled = 0};
-    int64_t comp_size = zxc_compress(input, src_size, compressed, max_dst_size, &_co26);
+    int64_t comp_size = zxc_compress(input, src_size, compressed, max_dst_size, 1);
     if (comp_size <= 0) {
         printf("Failed: Compression returned 0\n");
         free(compressed);
@@ -767,8 +766,14 @@ int test_swapped_blocks_stream(void) {
     rewind(f_in);
 
     // 2. Compress with Checksum Enabled
-    zxc_compress_opts_t _sco27 = {.n_threads = 1, .level = 1, .checksum_enabled = 1};
-    zxc_stream_compress(f_in, f_comp, &_sco27);
+    zxc_cctx* const ccfg = zxc_create_cctx();
+    if (ccfg) {
+        zxc_cctx_set_param(ccfg, ZXC_C_THREADS, 1);
+        zxc_cctx_set_param(ccfg, ZXC_C_LEVEL, 1);
+        zxc_cctx_set_param(ccfg, ZXC_C_CHECKSUM, 1);
+    }
+    zxc_stream_compress(f_in, f_comp, ccfg);
+    zxc_free_cctx(ccfg);
 
     // 3. Read compressed data to memory
     long comp_sz = ftell(f_comp);
@@ -836,8 +841,13 @@ int test_swapped_blocks_stream(void) {
 
     // 7. Attempt Decompression
     FILE* f_out = tmpfile();
-    zxc_decompress_opts_t _sdo28 = {.n_threads = 1, .checksum_enabled = 1};
-    int64_t res = zxc_stream_decompress(f_bad, f_out, &_sdo28);
+    zxc_dctx* const dcfg = zxc_create_dctx();
+    if (dcfg) {
+        zxc_dctx_set_param(dcfg, ZXC_D_THREADS, 1);
+        zxc_dctx_set_param(dcfg, ZXC_D_CHECKSUM, 1);
+    }
+    int64_t res = dcfg ? zxc_stream_decompress(f_bad, f_out, dcfg) : ZXC_ERROR_MEMORY;
+    zxc_free_dctx(dcfg);
 
     fclose(f_in);
     fclose(f_comp);
@@ -881,8 +891,7 @@ int test_swapped_blocks_oneshot(void) {
     int ok = 0;
     do {
         if (!comp || !swapped || !out) break;
-        zxc_compress_opts_t co = {.level = 3, .block_size = BLK, .checksum_enabled = 1};
-        const int64_t n = zxc_compress(src, in_sz, comp, cap, &co);
+        const int64_t n = test_compress_cfg(src, in_sz, comp, cap, 3, BLK, 1, 0);
         if (n <= 0) {
             printf("[FAIL] compress -> %lld\n", (long long)n);
             break;
@@ -913,13 +922,12 @@ int test_swapped_blocks_oneshot(void) {
         memcpy(swapped + off[1], comp + off[33], len[33]);
         memcpy(swapped + off[33], comp + off[1], len[1]);
 
-        zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-        const int64_t intact = zxc_decompress(comp, (size_t)n, out, in_sz, &dopts);
+        const int64_t intact = test_decompress_verified(comp, (size_t)n, out, in_sz);
         if (intact != (int64_t)in_sz || memcmp(out, src, in_sz) != 0) {
             printf("[FAIL] the intact archive -> %lld\n", (long long)intact);
             break;
         }
-        const int64_t r = zxc_decompress(swapped, (size_t)n, out, in_sz, &dopts);
+        const int64_t r = test_decompress_verified(swapped, (size_t)n, out, in_sz);
         if (r != ZXC_ERROR_BAD_CHECKSUM) {
             printf("[FAIL] a 32-apart swap -> %lld, want BAD_CHECKSUM\n", (long long)r);
             break;
@@ -1014,18 +1022,16 @@ int test_tail_between_eof_and_footer(void) {
     for (size_t i = 0; i < n; i++) src[i] = (uint8_t)(i * 7U);
 
     int ok = 1;
-    const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
     /* Checksummed footer and plain both. */
     for (int cs = 0; cs <= 1 && ok; cs++) {
-        const zxc_compress_opts_t co = {.level = 3, .checksum_enabled = cs};
-        const int64_t alen = zxc_compress(src, n, arc, cap, &co);
+        const int64_t alen = test_compress_cfg(src, n, arc, cap, 3, 0, cs, 0);
         const size_t footer_len = alen > 0 ? test_footer_len(arc, (size_t)alen) : 0;
         if (alen <= (int64_t)footer_len) {
             printf("  [FAIL] cs=%d: compress returned %lld\n", cs, (long long)alen);
             ok = 0;
             break;
         }
-        if (zxc_decompress(arc, (size_t)alen, out, n, &verify) != (int64_t)n) {
+        if (test_decompress_verified(arc, (size_t)alen, out, n) != (int64_t)n) {
             printf("  [FAIL] cs=%d: the intact archive must decode\n", cs);
             ok = 0;
             break;
@@ -1036,7 +1042,7 @@ int test_tail_between_eof_and_footer(void) {
             memcpy(mod, arc, head);
             memset(mod + head, 0xAB, gaps[g]);
             memcpy(mod + head + gaps[g], arc + head, footer_len);
-            const int64_t r = zxc_decompress(mod, head + gaps[g] + footer_len, out, n, &verify);
+            const int64_t r = test_decompress_verified(mod, head + gaps[g] + footer_len, out, n);
             if (r != ZXC_ERROR_CORRUPT_DATA) {
                 printf("  [FAIL] cs=%d: %zu inserted bytes gave %lld, want %d\n", cs, gaps[g],
                        (long long)r, ZXC_ERROR_CORRUPT_DATA);
@@ -1047,9 +1053,8 @@ int test_tail_between_eof_and_footer(void) {
 
     /* The legitimate gap: a seekable archive carries its SEK block there. */
     if (ok) {
-        const zxc_compress_opts_t so = {.level = 3, .checksum_enabled = 1, .seekable = 1};
-        const int64_t slen = zxc_compress(src, n, arc, cap, &so);
-        if (slen <= 0 || zxc_decompress(arc, (size_t)slen, out, n, &verify) != (int64_t)n) {
+        const int64_t slen = test_compress_cfg(src, n, arc, cap, 3, 0, 1, 1);
+        if (slen <= 0 || test_decompress_verified(arc, (size_t)slen, out, n) != (int64_t)n) {
             printf("  [FAIL] a seekable archive must still decode (len %lld)\n", (long long)slen);
             ok = 0;
         }
@@ -1067,21 +1072,21 @@ int test_tail_between_eof_and_footer(void) {
  * all refuse, -1 (printed) if they disagree. */
 static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t n, uint8_t* out,
                              const char* what) {
-    const zxc_decompress_opts_t o = {.checksum_enabled = 1};
     int acc[4] = {0, 0, 0, 0};
 
-    acc[0] = zxc_decompress(arc, len, out, n + 64, &o) == (int64_t)n;
+    /* The one-shot verifies no checksum; the three others do, from one config. */
+    acc[0] = zxc_decompress(arc, len, out, n + 64) == (int64_t)n;
 
     zxc_dctx* const d = zxc_create_dctx();
-    acc[1] = d && zxc_decompress_dctx(d, arc, len, out, n + 64, &o) == (int64_t)n;
-    zxc_free_dctx(d);
+    if (d) zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1);
+    acc[1] = d && zxc_decompress_dctx(d, arc, len, out, n + 64) == (int64_t)n;
 
     FILE* const f = tmpfile();
-    if (f && fwrite(arc, 1, len, f) == len && fseek(f, 0, SEEK_SET) == 0)
-        acc[2] = zxc_stream_decompress(f, NULL, &o) == (int64_t)n;
+    if (d && f && fwrite(arc, 1, len, f) == len && fseek(f, 0, SEEK_SET) == 0)
+        acc[2] = zxc_stream_decompress(f, NULL, d) == (int64_t)n;
     if (f) fclose(f);
 
-    zxc_dstream* const ds = zxc_dstream_create(&o);
+    zxc_dstream* const ds = d ? zxc_dstream_create(d) : NULL;
     if (ds) {
         zxc_inbuf_t ib = {arc, len, 0};
         zxc_outbuf_t ob = {out, n + 64, 0};
@@ -1089,6 +1094,7 @@ static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t 
             zxc_dstream_decompress(ds, &ob, &ib) >= 0 && zxc_dstream_finished(ds) && ob.pos == n;
     }
     zxc_dstream_free(ds);
+    zxc_free_dctx(d);
 
     if (acc[0] == acc[1] && acc[1] == acc[2] && acc[2] == acc[3]) return acc[0];
     printf("  [FAIL] %s: readers disagree (buffer %d, dctx %d, FILE* %d, push %d)\n", what, acc[0],
@@ -1114,11 +1120,8 @@ int test_seek_flag_contract(void) {
     if (ok) gen_lz_data(src, n);
 
     for (int cs = 0; cs <= 1 && ok; cs++) {
-        const zxc_compress_opts_t po = {.level = 3, .block_size = 4096, .checksum_enabled = cs};
-        zxc_compress_opts_t so = po;
-        so.seekable = 1;
-        const int64_t pl = zxc_compress(src, n, plain, cap, &po);
-        const int64_t sl = zxc_compress(src, n, seek, cap, &so);
+        const int64_t pl = test_compress_cfg(src, n, plain, cap, 3, 4096, cs, 0);
+        const int64_t sl = test_compress_cfg(src, n, seek, cap, 3, 4096, cs, 1);
         if (pl <= 0 || sl <= 0 || (plain[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) ||
             !(seek[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE)) {
             printf("  [FAIL] cs=%d: flag does not follow the seekable option\n", cs);
@@ -1158,14 +1161,20 @@ int test_seek_flag_contract(void) {
     // writers must agree on these bytes. It opens with 0 blocks, from memory and
     // from a file alike, and only the empty range lies inside it.
     if (ok) {
-        const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
-        const int64_t el = zxc_compress(NULL, 0, seek, cap, &so);
+        zxc_cctx* const so = zxc_create_cctx();
+        if (so) {
+            zxc_cctx_set_param(so, ZXC_C_LEVEL, 3);
+            zxc_cctx_set_param(so, ZXC_C_BLOCK_SIZE, 4096);
+            zxc_cctx_set_param(so, ZXC_C_SEEKABLE, 1);
+        }
+        const int64_t el = so ? zxc_compress_cctx(so, NULL, 0, seek, cap) : ZXC_ERROR_MEMORY;
         const size_t want =
             ZXC_FILE_HEADER_SIZE + 2 * ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE;
         FILE* const fi = tmpfile();
         FILE* const fo = tmpfile();
         int64_t fl = -1;
-        if (fi && fo) fl = zxc_stream_compress(fi, fo, &so);
+        if (so && fi && fo) fl = zxc_stream_compress(fi, fo, so);
+        zxc_free_cctx(so);
         const int same = fl == el && fo && fseek(fo, 0, SEEK_SET) == 0 &&
                          fread(lie, 1, (size_t)(fl > 0 ? fl : 0), fo) == (size_t)fl &&
                          memcmp(lie, seek, (size_t)el) == 0;
@@ -1195,9 +1204,12 @@ int test_seek_flag_contract(void) {
 
     // The context API sets the flag and writes the table.
     if (ok) {
-        const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
-        zxc_cctx* const c = zxc_create_cctx(&so);
-        const int64_t cl = c ? zxc_compress_cctx(c, src, n, lie, cap, &so) : -1;
+        zxc_cctx* const c = zxc_create_cctx();
+        int64_t cl = c ? ZXC_OK : ZXC_ERROR_MEMORY;
+        if (cl == ZXC_OK) cl = zxc_cctx_set_param(c, ZXC_C_LEVEL, 3);
+        if (cl == ZXC_OK) cl = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, 4096);
+        if (cl == ZXC_OK) cl = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, 1);
+        if (cl == ZXC_OK) cl = zxc_compress_cctx(c, src, n, lie, cap);
         zxc_free_cctx(c);
         zxc_seekable* const sc = cl > 0 ? zxc_seekable_open(lie, (size_t)cl) : NULL;
         ok = cl > 0 && (lie[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) && sc &&
@@ -1232,9 +1244,8 @@ int test_footer_digest(void) {
     int ok = 0;
     do {
         if (!a || !b || !out) break;
-        const zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
-        const int64_t ca = zxc_compress(src, N, a, cap, &co);
-        const int64_t cb = zxc_compress(src, N, b, cap, &co);
+        const int64_t ca = test_compress_cfg(src, N, a, cap, 3, 4096, 1, 0);
+        const int64_t cb = test_compress_cfg(src, N, b, cap, 3, 4096, 1, 0);
         if (ca <= 0 || cb <= 0) {
             printf("[FAIL] compress\n");
             break;
@@ -1253,24 +1264,22 @@ int test_footer_digest(void) {
         }
         /* A verified decode accepts it; flipping a digest byte fails BAD_CHECKSUM;
          * an unverified decode ignores it. */
-        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
-        const zxc_decompress_opts_t quiet = {.checksum_enabled = 0};
-        if (zxc_decompress(a, (size_t)ca, out, N, &verify) != N) {
+        if (test_decompress_verified(a, (size_t)ca, out, N) != N) {
             printf("[FAIL] verified decode of intact archive\n");
             break;
         }
         a[digest_at] ^= 0xFF;
-        if (zxc_decompress(a, (size_t)ca, out, N, &verify) != ZXC_ERROR_BAD_CHECKSUM) {
+        if (test_decompress_verified(a, (size_t)ca, out, N) != ZXC_ERROR_BAD_CHECKSUM) {
             printf("[FAIL] flipped digest not caught\n");
             break;
         }
-        if (zxc_decompress(a, (size_t)ca, out, N, &quiet) != N) {
+        if (zxc_decompress(a, (size_t)ca, out, N) != N) {
             printf("[FAIL] unverified decode should ignore the digest\n");
             break;
         }
         /* Empty -C archive: digest of zero blocks is 0, opening the footer. */
         uint8_t e[64];
-        const int64_t ce = zxc_compress(NULL, 0, e, sizeof(e), &co);
+        const int64_t ce = test_compress_cfg(NULL, 0, e, sizeof(e), 3, 4096, 1, 0);
         if (ce < (int64_t)(ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_DIGEST_SIZE +
                            ZXC_FILE_FOOTER_MIN_SIZE) ||
             zxc_le64(e + ce - test_footer_len(e, (size_t)ce)) != 0) {
@@ -1356,11 +1365,8 @@ static uint8_t* forge_build(size_t plain_sz, int compressible, size_t block_sz, 
         free(plain);
         return NULL;
     }
-    zxc_compress_opts_t o = {0};
-    o.level = 3;
-    o.block_size = block_sz;
-    o.checksum_enabled = checksum;
-    const int64_t n = zxc_compress(plain, plain_sz, arc, (size_t)bound, &o);
+    const int64_t n =
+        test_compress_cfg(plain, plain_sz, arc, (size_t)bound, 3, block_sz, checksum, 0);
     if (n < 0) {
         free(plain);
         free(arc);
@@ -1387,21 +1393,21 @@ static int forge_comp_size(uint8_t* arc, size_t arc_sz, uint32_t comp_size) {
     return 1;
 }
 
-/* Decodes through zxc_decompress (use_dctx == 0) or a reusable zxc_dctx: the
-   two frame walks are separate code and must reject the same forgeries. */
+/* Decodes through zxc_decompress (use_dctx == 0, which verifies no checksum) or
+   a reusable zxc_dctx that verifies them when @p checksum: the two frame walks
+   are separate code and must reject the same forgeries. */
 static int64_t forge_decode_via(const uint8_t* arc, size_t arc_sz, size_t plain_sz, int checksum,
                                 int use_dctx) {
     uint8_t* out = (uint8_t*)malloc(plain_sz);
     if (!out) return ZXC_ERROR_MEMORY;
-    zxc_decompress_opts_t o = {0};
-    o.checksum_enabled = checksum;
     int64_t r;
     if (use_dctx) {
         zxc_dctx* d = zxc_create_dctx();
-        r = d ? zxc_decompress_dctx(d, arc, arc_sz, out, plain_sz, &o) : ZXC_ERROR_MEMORY;
+        if (d) zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum);
+        r = d ? zxc_decompress_dctx(d, arc, arc_sz, out, plain_sz) : ZXC_ERROR_MEMORY;
         zxc_free_dctx(d);
     } else {
-        r = zxc_decompress(arc, arc_sz, out, plain_sz, &o);
+        r = zxc_decompress(arc, arc_sz, out, plain_sz);
     }
     free(out);
     return r;
@@ -1506,8 +1512,11 @@ int test_forged_block_comp_size(void) {
         }
         if (ok) {
             ok = forge_comp_size(arc, arc_sz, swallow);
-            const int64_t want = checksum ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA;
             for (int via = 0; ok && via <= 1; via++) {
+                /* Only the verifying dctx can name the checksum; the one-shot
+                   verifies none and trips on the structure instead. */
+                const int64_t want =
+                    (checksum && via) ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA;
                 const int64_t r = forge_decode_via(arc, arc_sz, small_sz, checksum, via);
                 if (r != want) {
                     printf("  [FAIL] skipped EOF via %s gave %lld, expected %lld\n",
@@ -1653,7 +1662,7 @@ int test_rle_section_trailing_bytes(void) {
     uint8_t* comp = (uint8_t*)malloc(bound + 1);
     uint8_t* forged = (uint8_t*)malloc(bound + 1);
     uint8_t* out = (uint8_t*)malloc((size_t)zxc_decompress_block_bound(n));
-    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
     int ok = 0;
     if (!src || !comp || !forged || !out || !cctx || !dctx) {
@@ -1666,9 +1675,9 @@ int test_rle_section_trailing_bytes(void) {
         memset(src + i, (int)(seed >> 24), 4);
     }
 
-    zxc_compress_opts_t co = {0};
-    co.level = ZXC_LEVEL_DEFAULT;
-    const int64_t csz = zxc_compress_block(cctx, src, n, comp, bound, &co);
+    const int64_t csz = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) == ZXC_OK
+                            ? zxc_compress_block(cctx, src, n, comp, bound)
+                            : ZXC_ERROR_BAD_PARAM;
     const size_t spl = ZXC_BLOCK_HEADER_SIZE;
     const size_t desc = spl + ZXC_SPL_HEADER_BINARY_SIZE;
     if (csz <= 0 || comp[0] != ZXC_BLOCK_SPL || comp[spl + 8] != ZXC_SECTION_ENCODING_RLE ||
@@ -1676,8 +1685,8 @@ int test_rle_section_trailing_bytes(void) {
         printf("  [FAIL] expected a SPL block with RLE literals and RAW tokens\n");
         goto done;
     }
-    if (zxc_decompress_block(dctx, comp, (size_t)csz, out, (size_t)zxc_decompress_block_bound(n),
-                             NULL) != (int64_t)n ||
+    if (zxc_decompress_block(dctx, comp, (size_t)csz, out, (size_t)zxc_decompress_block_bound(n)) !=
+            (int64_t)n ||
         memcmp(out, src, n) != 0) {
         printf("  [FAIL] untouched block does not round-trip\n");
         goto done;
@@ -1702,7 +1711,7 @@ int test_rle_section_trailing_bytes(void) {
     }
 
     const int64_t r = zxc_decompress_block(dctx, forged, (size_t)csz + 1, out,
-                                           (size_t)zxc_decompress_block_bound(n), NULL);
+                                           (size_t)zxc_decompress_block_bound(n));
     if (r != ZXC_ERROR_CORRUPT_DATA) {
         printf("  [FAIL] trailing RLE byte: got %lld, want ZXC_ERROR_CORRUPT_DATA\n", (long long)r);
         goto done;

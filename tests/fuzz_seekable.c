@@ -59,12 +59,15 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         comp_cap = bound;
     }
 
-    zxc_compress_opts_t copts = {
-        .level = level,
-        .checksum_enabled = use_checksum,
-        .seekable = 1,
-    };
-    const int64_t csize = zxc_compress(data, size, comp_buf, bound, &copts);
+    zxc_cctx* const cctx = zxc_create_cctx();
+    if (!cctx) return 0;
+    int64_t csize = -1;
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == 0 &&
+        zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, use_checksum) == 0 &&
+        zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1) == 0) {
+        csize = zxc_compress_cctx(cctx, data, size, comp_buf, bound);
+    }
+    zxc_free_cctx(cctx);
     if (csize < 0) return 0;
 
     /* ------------------------------------------------------------------ */

@@ -26,47 +26,59 @@ const DictSizeMax = int(C.ZXC_DICT_SIZE_MAX)
 // carried by a .zxd file (packed 4-bit code lengths for 256 symbols).
 const HufTableSize = int(C.ZXC_HUF_TABLE_SIZE)
 
-// setCompressDict points copts at the dictionary content from o when one is
-// configured. The dict byte is pinned for the duration of the C call so that
-// the Go pointer stored inside the (Go-allocated) opts struct satisfies the
-// cgo pointer-passing rules; callers must keep pinner alive until the C call
-// returns.
+// pinDict pins the dictionary content and shared table of o for a native
+// context to keep their addresses, and returns them; nil pointers when o
+// carries no dictionary. Callers keep pinner pinned until the context no
+// longer refers to them: freed, or the dictionary detached.
 //
 // The shared Huffman table length is validated here: the C library reads a
-// fixed ZXC_HUF_TABLE_SIZE bytes from dict_huf, so a shorter slice would be
-// read out of bounds.
-func setCompressDict(copts *C.zxc_compress_opts_t, o options, pinner *runtime.Pinner) error {
-	// A wrong length is a programming error, dictionary or not.
+// fixed ZXC_HUF_TABLE_SIZE bytes from it, so a shorter slice would be read
+// out of bounds. A wrong length is a programming error, dictionary or not.
+func pinDict(o options, pinner *runtime.Pinner) (dict, huf unsafe.Pointer, err error) {
 	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
-		return ErrBadHufTable
+		return nil, nil, ErrBadHufTable
 	}
 	if len(o.dict) == 0 {
-		return nil
+		return nil, nil, nil
 	}
 	pinner.Pin(&o.dict[0])
-	copts.dict = unsafe.Pointer(&o.dict[0])
-	copts.dict_size = C.size_t(len(o.dict))
+	dict = unsafe.Pointer(&o.dict[0])
 	if len(o.dictHuf) > 0 {
 		pinner.Pin(&o.dictHuf[0])
-		copts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
+		huf = unsafe.Pointer(&o.dictHuf[0])
+	}
+	return dict, huf, nil
+}
+
+// attachCompressDict attaches the dictionary of o to cctx, or detaches any
+// when o carries none; see [pinDict] for the pinning contract.
+func attachCompressDict(cctx *C.zxc_cctx, o options, pinner *runtime.Pinner) error {
+	dict, huf, err := pinDict(o, pinner)
+	if err != nil {
+		return err
+	}
+	var size C.size_t
+	if dict != nil {
+		size = C.size_t(len(o.dict))
+	}
+	if rc := C.zxc_cctx_set_dict(cctx, dict, size, huf); rc != C.ZXC_OK {
+		return errorFromCode(C.int64_t(rc))
 	}
 	return nil
 }
 
-// setDecompressDict mirrors setCompressDict for decompression options.
-func setDecompressDict(dopts *C.zxc_decompress_opts_t, o options, pinner *runtime.Pinner) error {
-	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
-		return ErrBadHufTable
+// attachDecompressDict mirrors attachCompressDict for a decompression context.
+func attachDecompressDict(dctx *C.zxc_dctx, o options, pinner *runtime.Pinner) error {
+	dict, huf, err := pinDict(o, pinner)
+	if err != nil {
+		return err
 	}
-	if len(o.dict) == 0 {
-		return nil
+	var size C.size_t
+	if dict != nil {
+		size = C.size_t(len(o.dict))
 	}
-	pinner.Pin(&o.dict[0])
-	dopts.dict = unsafe.Pointer(&o.dict[0])
-	dopts.dict_size = C.size_t(len(o.dict))
-	if len(o.dictHuf) > 0 {
-		pinner.Pin(&o.dictHuf[0])
-		dopts.dict_huf = unsafe.Pointer(&o.dictHuf[0])
+	if rc := C.zxc_dctx_set_dict(dctx, dict, size, huf); rc != C.ZXC_OK {
+		return errorFromCode(C.int64_t(rc))
 	}
 	return nil
 }

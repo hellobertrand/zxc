@@ -23,26 +23,6 @@
 // ============================================================================
 
 /**
- * @brief Returns @c sizeof(zxc_compress_opts_t) for ABI-safe allocation.
- *
- * Public API; see @c zxc_buffer.h. Lets callers (other languages, or a
- * different library version) size the options struct without knowing its layout.
- *
- * @return Size of @ref zxc_compress_opts_t in bytes.
- */
-size_t zxc_compress_opts_size(void) { return sizeof(zxc_compress_opts_t); }
-
-/**
- * @brief Returns @c sizeof(zxc_decompress_opts_t) for ABI-safe allocation.
- *
- * Public API; see @c zxc_buffer.h. Lets callers (other languages, or a
- * different library version) size the options struct without knowing its layout.
- *
- * @return Size of @ref zxc_decompress_opts_t in bytes.
- */
-size_t zxc_decompress_opts_size(void) { return sizeof(zxc_decompress_opts_t); }
-
-/**
  * @brief Returns @c sizeof(zxc_frame_info_t) for ABI-safe mirroring.
  *
  * Public API; see @c zxc_buffer.h.
@@ -1140,6 +1120,8 @@ const char* zxc_error_name(const int code) {
             return "ZXC_ERROR_BAD_LEVEL";
         case ZXC_ERROR_DICT_UNSUPPORTED:
             return "ZXC_ERROR_DICT_UNSUPPORTED";
+        case ZXC_ERROR_BAD_PARAM:
+            return "ZXC_ERROR_BAD_PARAM";
         default:
             return "ZXC_UNKNOWN_ERROR";
     }

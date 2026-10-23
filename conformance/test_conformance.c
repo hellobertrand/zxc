@@ -212,15 +212,15 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
             ok = 0;
         } else {
             /* A vector that stores checksums only proves the block-checksum
-             * rules if the decoder is asked to check them; the opt is a no-op
-             * on vectors carrying none. Same reason as test_invalid_vector. */
-            zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-            if (dict) {
-                dopts.dict = dict;
-                dopts.dict_size = dict_size;
-                dopts.dict_huf = dict_huf;
-            }
-            int64_t result = zxc_decompress(comp, comp_sz, output, (size_t)dec_sz, &dopts);
+             * rules if the decoder is asked to check them; the parameter is a
+             * no-op on vectors carrying none. Same reason as test_invalid_vector. */
+            zxc_dctx* const dctx = zxc_create_dctx();
+            int64_t result = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) : ZXC_ERROR_MEMORY;
+            if (result == ZXC_OK && dict)
+                result = zxc_dctx_set_dict(dctx, dict, dict_size, dict_huf);
+            if (result == ZXC_OK)
+                result = zxc_decompress_dctx(dctx, comp, comp_sz, output, (size_t)dec_sz);
+            zxc_free_dctx(dctx);
             if (result < 0) {
                 fprintf(stderr, "FAIL: %s  decompress failed: %s\n", zxc_path,
                         zxc_error_name((int)result));
@@ -327,8 +327,18 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
     if (output) {
         /* Verify with checksum enabled so checksum/payload-corruption
          * vectors are caught (verification needs both the file flag and
-         * this opt; see zxc_decompress_block in zxc_dispatch.c). */
-        zxc_decompress_opts_t io = {.checksum_enabled = 1};
+         * this parameter; see zxc_decompress_block in zxc_dispatch.c). */
+        zxc_dctx* const dctx = zxc_create_dctx();
+        if (!dctx || zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) != ZXC_OK) {
+            fprintf(stderr, "FAIL: %s  cannot create a decompression context\n", zxc_path);
+            zxc_free_dctx(dctx);
+            free(output);
+            free(comp);
+            return 0;
+        }
+        const void* io_dict = NULL;
+        size_t io_dict_size = 0;
+        const void* io_dict_huf = NULL;
 
         /* Some defects sit past an earlier gate: a forged dict_id is only
          * reachable once a dictionary is actually offered. */
@@ -339,8 +349,10 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
             size_t dsz = 0;
             dict_buf = vio_read_file(dpath, &dsz);
             if (!dict_buf ||
-                zxc_dict_load(dict_buf, dsz, &io.dict, &io.dict_size, &io.dict_huf, NULL) != 0) {
+                zxc_dict_load(dict_buf, dsz, &io_dict, &io_dict_size, &io_dict_huf, NULL) != 0 ||
+                zxc_dctx_set_dict(dctx, io_dict, io_dict_size, io_dict_huf) != ZXC_OK) {
                 fprintf(stderr, "FAIL: %s  cannot load %s\n", zxc_path, dpath);
+                zxc_free_dctx(dctx);
                 free(dict_buf);
                 free(output);
                 free(comp);
@@ -348,7 +360,8 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
             }
         }
 
-        int64_t result = zxc_decompress(comp, comp_sz, output, out_cap, &io);
+        int64_t result = zxc_decompress_dctx(dctx, comp, comp_sz, output, out_cap);
+        zxc_free_dctx(dctx);
         free(dict_buf);
         if (result >= 0) {
             fprintf(stderr, "FAIL: %s  should be rejected but decoded %lld bytes\n", zxc_path,
@@ -466,15 +479,17 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
     }
 
     /* The .zxd carries the content and its Huffman table; both feed the dict_id. */
-    zxc_compress_opts_t opts = vc->opts;
+    const void* dict = NULL;
+    size_t dict_size = 0;
+    const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
     int dict_ok = 1;
     if (vc->dict) {
         snprintf(path, sizeof path, "%s/%s", valid_dir, vc->dict);
         size_t dict_file_size = 0;
         dict_buf = vio_read_file(path, &dict_file_size);
-        dict_ok = dict_buf && zxc_dict_load(dict_buf, dict_file_size, &opts.dict, &opts.dict_size,
-                                            &opts.dict_huf, NULL) == 0;
+        dict_ok = dict_buf &&
+                  zxc_dict_load(dict_buf, dict_file_size, &dict, &dict_size, &dict_huf, NULL) == 0;
         if (!dict_ok) fprintf(stderr, "FAIL: %s  cannot load dictionary %s\n", vc->name, vc->dict);
     }
 
@@ -484,7 +499,8 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
         if (!out) {
             fprintf(stderr, "FAIL: %s  OOM\n", vc->name);
         } else {
-            int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
+            int64_t csize =
+                vc_recipe_compress(&vc->opts, dict, dict_size, dict_huf, input, in_size, out, cap);
             if (csize <= 0) {
                 fprintf(stderr, "FAIL: %s  compress -> %s\n", vc->name, zxc_error_name((int)csize));
             } else if ((size_t)csize != ref_size || memcmp(out, ref, ref_size) != 0) {

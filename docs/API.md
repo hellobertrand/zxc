@@ -46,7 +46,8 @@ zxc.h                  <- freestanding umbrella (no <stdio.h>; kernel-safe)
 │   └── zxc_export.h
 ├── zxc_error.h        <- error codes + zxc_error_name()
 │   └── zxc_export.h
-├── zxc_opts.h         <- compression / decompression options structs
+├── zxc_opts.h         <- parameter identifiers (zxc_cparam_t / zxc_dparam_t),
+│   │                     their bounds, progress callback type
 │   └── zxc_export.h
 └── zxc_pstream.h      <- Push streaming API (caller-driven, single-thread)
     └── zxc_export.h
@@ -196,7 +197,10 @@ Defined in `zxc_constants.h`:
 ```
 
 Block size must be a power of two within `[ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX]`.
-Pass `0` to any API to use `ZXC_BLOCK_SIZE_DEFAULT`.
+It is set on a context with `zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, n)`:
+`0` restores `ZXC_BLOCK_SIZE_DEFAULT`, any other value outside the rule is
+refused with `ZXC_ERROR_BAD_BLOCK_SIZE`. `zxc_init_static_cctx()` takes an
+explicit block size (no `0`).
 
 ### 5.3 Compression Levels
 
@@ -216,7 +220,10 @@ Levels 1..5 produce data decompressible at essentially the **same speed**;
 levels 6 and 7 add a per-block Huffman decode step — literals at level 6,
 literals *and* sequence tokens at level 7 — trading some decode throughput for
 denser output (level 7 is the densest and carries the largest decode cost).
-Pass `0` for level to use `ZXC_LEVEL_DEFAULT`. Other levels are clamped to 1–7.
+`0` means `ZXC_LEVEL_DEFAULT` everywhere a level is given, with one difference
+in how out-of-range values are treated: the one-shot `zxc_compress()` clamps
+them to 1–7, while `zxc_cctx_set_param(cctx, ZXC_C_LEVEL, n)` refuses them with
+`ZXC_ERROR_BAD_LEVEL`. `zxc_init_static_cctx()` takes an explicit 1–7.
 
 ### 5.4 Error Codes
 
@@ -240,10 +247,11 @@ typedef enum {
     ZXC_ERROR_DICT_REQUIRED  = -15, // file requires a dictionary but none provided
     ZXC_ERROR_DICT_MISMATCH  = -16, // provided dictionary ID does not match header
     ZXC_ERROR_DICT_TOO_LARGE = -17, // dictionary exceeds ZXC_DICT_SIZE_MAX
-    ZXC_ERROR_BAD_LEVEL      = -18, // level unsupported by this context's workspace
-                                    // (static context dense-tier raise; out-of-range
-                                    // levels are otherwise silently clamped)
-    ZXC_ERROR_DICT_UNSUPPORTED = -19 // dictionary unsupported by this context's workspace
+    ZXC_ERROR_BAD_LEVEL      = -18, // ZXC_C_LEVEL out of 1..7, or a static context
+                                    // asked to raise into a tier its workspace lacks
+    ZXC_ERROR_DICT_UNSUPPORTED = -19, // dictionary unsupported by this context's workspace
+    ZXC_ERROR_BAD_PARAM      = -20  // unknown parameter id, or value out of bounds
+                                    // (zxc_cctx_set_param / zxc_dctx_set_param)
 } zxc_error_t;
 ```
 
@@ -253,48 +261,59 @@ All public functions that can fail return negative `zxc_error_t` values on error
 
 ## 6. Type Definitions
 
-### 6.1 Options Structs
+### 6.1 Parameter Identifiers
 
-**Compression options** (defined in `zxc_opts.h`, used by all compression functions):
+There is no options struct: every setting lives on a context (`zxc_cctx` /
+`zxc_dctx`) and is set one at a time with `zxc_cctx_set_param()` /
+`zxc_dctx_set_param()`. The identifiers are enums defined in `zxc_opts.h`.
+They are stable: new parameters are appended, and an existing value never
+changes meaning, so a binding can hard-code them.
 
-```c
-typedef struct {
-    int    n_threads;         // Worker thread count (0 = auto-detect).
-    int    level;             // Compression level 1–7 (0 = default).
-    size_t block_size;        // Block size in bytes (0 = 512 KB default).
-    int    checksum_enabled;  // 1 = enable checksums, 0 = disable.
-    int    seekable;          // 1 = append seek table for random access.
-    const void* dict;         // Pre-trained dictionary content (NULL = none).
-    size_t dict_size;         // Dictionary size in bytes (0 = none, max 64 KB).
-    const void* dict_huf;     // Shared literal Huffman table, 128 bytes
-                              // (NULL = none; ignored without dict). Codes
-                              // literals at levels 6-7 only, but is bound
-                              // into dict_id at every level.
-    zxc_progress_callback_t progress_cb;  // Optional callback (NULL to disable).
-    void*  user_data;                     // Passed through to progress_cb.
-} zxc_compress_opts_t;
-```
-
-**Decompression options**:
+**Compression parameters** (`zxc_cparam_t`):
 
 ```c
-typedef struct {
-    int    n_threads;         // Worker thread count (0 = auto-detect).
-    int    checksum_enabled;  // 1 = verify checksums, 0 = skip.
-    const void* dict;         // Pre-trained dictionary content (NULL = none).
-    size_t dict_size;         // Dictionary size in bytes (0 = none).
-    const void* dict_huf;     // Shared literal Huffman table, 128 bytes,
-                              // matching the one used at compression time.
-                              // Required if the archive used one: dict_id
-                              // covers the pair, so omitting it gives
-                              // ZXC_ERROR_DICT_MISMATCH.
-    zxc_progress_callback_t progress_cb;  // Optional callback.
-    void*  user_data;                     // Passed through to progress_cb.
-} zxc_decompress_opts_t;
+typedef enum {
+    ZXC_C_LEVEL      = 1,   // compression level
+    ZXC_C_BLOCK_SIZE = 2,   // block size in bytes
+    ZXC_C_THREADS    = 3,   // worker threads, FILE* pipeline only
+    ZXC_C_CHECKSUM   = 4,   // block checksums + archive digest
+    ZXC_C_SEEKABLE   = 5    // append a seek table
+} zxc_cparam_t;
 ```
 
-Both structs are safe to zero-initialize for default behavior.  
-Pass `NULL` instead of an options pointer to use all defaults.
+| Identifier | Meaning | Default | Bounds |
+|---|---|---|---|
+| `ZXC_C_LEVEL` | Compression level (`zxc_compression_level_t`). | `ZXC_LEVEL_DEFAULT` (3) | 1 to 7; out of range is `ZXC_ERROR_BAD_LEVEL` |
+| `ZXC_C_BLOCK_SIZE` | Block size in bytes. | `ZXC_BLOCK_SIZE_DEFAULT` (512 KB) | Power of two in `[ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX]` (4 KB to 2 MB); anything else is `ZXC_ERROR_BAD_BLOCK_SIZE` |
+| `ZXC_C_THREADS` | Worker threads for `zxc_stream_compress()`. The buffer, block and push APIs are single-threaded and ignore it. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
+| `ZXC_C_CHECKSUM` | 1 appends the per-block checksums and the archive digest. | 0 | 0 or 1 |
+| `ZXC_C_SEEKABLE` | 1 appends a seek table for random-access decompression. | 0 | 0 or 1 |
+
+**Decompression parameters** (`zxc_dparam_t`):
+
+```c
+typedef enum {
+    ZXC_D_THREADS  = 1,     // worker threads, FILE* pipeline only
+    ZXC_D_CHECKSUM = 2      // verify checksums when the archive carries them
+} zxc_dparam_t;
+```
+
+| Identifier | Meaning | Default | Bounds |
+|---|---|---|---|
+| `ZXC_D_THREADS` | Worker threads for `zxc_stream_decompress()`. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
+| `ZXC_D_CHECKSUM` | 1 verifies the block checksums and the archive digest when the archive carries them; 0 skips the verification. | 0 | 0 or 1 |
+
+For every parameter the value `0` restores the default, and `zxc_cctx_reset()` /
+`zxc_dctx_reset()` restore them all. Any other value must sit within the bounds
+reported by `zxc_cparam_bounds()` / `zxc_dparam_bounds()` (declared in
+`zxc_opts.h`, documented in §9): a setter **refuses** an out-of-bounds value
+rather than clamp it, and leaves the parameter as it was. Values the bounds do
+not cover (`ZXC_C_THREADS`, `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`, both
+decompression parameters) and unknown identifiers are `ZXC_ERROR_BAD_PARAM`.
+
+The dictionary and the progress callback are pointers, so they have their own
+setters, `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` and
+`zxc_cctx_set_progress()` / `zxc_dctx_set_progress()`, also in §9.
 
 ### 6.2 Progress Callback
 
@@ -306,8 +325,11 @@ typedef void (*zxc_progress_callback_t)(
 );
 ```
 
-Called from the writer thread after each block, or batch of blocks, is processed.
-Must be fast and non-blocking.
+Installed on a context with `zxc_cctx_set_progress()` / `zxc_dctx_set_progress()`
+and honoured by the `FILE*` pipeline only (`zxc_stream_compress()` /
+`zxc_stream_decompress()`): the buffer, block and push APIs are synchronous and
+never call it. Called from the writer thread after each block, or batch of
+blocks, is processed. Must be fast and non-blocking.
 
 ### 6.3 Opaque Context Types
 
@@ -317,7 +339,10 @@ typedef struct zxc_dctx_s zxc_dctx;  // Opaque decompression context
 ```
 
 Internal layout is hidden. Interact only through `zxc_create_*` / `zxc_free_*` /
-`zxc_*_cctx` / `zxc_*_dctx` functions.
+`zxc_cctx_*` / `zxc_dctx_*` and the `*_cctx` / `*_dctx` entry points. A
+context is both the configuration (its parameters, dictionary and callback) and
+the working buffers; the `FILE*` and push APIs take one as configuration alone
+(§10, §10b).
 
 ---
 
@@ -392,35 +417,39 @@ that size would not fit a `size_t` on the platform, i.e. no buffer could hold it
 
 ```c
 ZXC_EXPORT int64_t zxc_compress(
-    const void*                src,
-    size_t                     src_size,
-    void*                      dst,
-    size_t                     dst_capacity,
-    const zxc_compress_opts_t* opts       // NULL = defaults
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity,
+    int         level         // 1..7; 0 = ZXC_LEVEL_DEFAULT, others clamped
 );
 ```
 
-Compresses `src` into `dst`. Only `level`, `block_size`, `checksum_enabled`, and
-`seekable` fields of `opts` are used. `n_threads` is ignored (always single-threaded).
+The simple form: compresses `src` into `dst` at `level`, every other parameter
+at its default (512 KB blocks, no checksum, no seek table, no dictionary).
+Single-threaded. `level` is the one place in the API where an out-of-range
+value is clamped into 1–7 instead of refused. For any other setting configure
+a context and call `zxc_compress_cctx()` (§9).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
-zero `src_size` (with `src` NULL or not) writes the empty archive: 32 bytes, +8
-with `checksum_enabled`, +8 with `seekable`.
+zero `src_size` (with `src` NULL or not) writes the empty archive: 32 bytes.
 
 ### `zxc_decompress`
 
 ```c
 ZXC_EXPORT int64_t zxc_decompress(
-    const void*                  src,
-    size_t                       src_size,
-    void*                        dst,
-    size_t                       dst_capacity,
-    const zxc_decompress_opts_t* opts     // NULL = defaults
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity
 );
 ```
 
-Decompresses `src` into `dst`. `checksum_enabled` and the dictionary fields
-(`dict`, `dict_size`, `dict_huf`) are used.
+The simple form: decompresses `src` into `dst` with **no checksum verification
+and no dictionary**. An archive that carries checksums decodes without them
+being checked; an archive that requires a dictionary is `ZXC_ERROR_DICT_REQUIRED`.
+For either, configure a `zxc_dctx` (`ZXC_D_CHECKSUM`, `zxc_dctx_set_dict()`)
+and call `zxc_decompress_dctx()` (§9).
 `src` and `dst` must not overlap (same contract as `memcpy`); for overlapping
 single-buffer decode, use `zxc_decompress_inplace` below.
 
@@ -438,8 +467,7 @@ Callers that need that fault must decode into a buffer.
 
 Caller errors outrank all of it, before anything is read from `src`, a source
 too short to hold a frame included: a NULL `dst` with a non-zero
-`dst_capacity` is `ZXC_ERROR_NULL_INPUT`, and a `dict_size` the library cannot
-honour is `ZXC_ERROR_DICT_TOO_LARGE`.
+`dst_capacity` is `ZXC_ERROR_NULL_INPUT`.
 
 **Returns**: decompressed size, `0` for an empty archive, or negative
 `zxc_error_t`.
@@ -487,10 +515,9 @@ data.
 
 ```c
 ZXC_EXPORT int64_t zxc_decompress_inplace(
-    void*                        buffer,
-    size_t                       buffer_capacity,
-    size_t                       comp_size,
-    const zxc_decompress_opts_t* opts     // NULL = defaults
+    void*  buffer,
+    size_t buffer_capacity,
+    size_t comp_size
 );
 ```
 
@@ -503,22 +530,23 @@ cursor provably never overtakes the flush-right read cursor once
 `buffer_capacity >= zxc_decompress_inplace_bound(...)`; an archive whose output
 would reach unread input (padding, forged block sizes) is refused with
 `ZXC_ERROR_CORRUPT_DATA` first.
-Dictionary archives are
-supported. An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`,
-never corruption.
+An undersized buffer is rejected with `ZXC_ERROR_DST_TOO_SMALL`, never
+corruption.
 
 ```c
 size_t need = zxc_decompress_inplace_bound(archive, archive_size);
 uint8_t* buf = malloc(need);
 memcpy(buf + (need - archive_size), archive, archive_size);   // flush-right
-int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);
+int64_t n = zxc_decompress_inplace(buf, need, archive_size);
 // buf[0 .. n) now holds the decompressed data
 ```
 
-The decode context is allocated for the duration of the call: about two
-blocks, up to roughly `zxc_static_dctx_workspace_size` once the archive holds
-entropy-coded blocks. To decode without any allocation, use
-`zxc_decompress_inplace_dctx` below with a static context.
+Like `zxc_decompress()`, this simple form verifies no checksum and takes no
+dictionary. The decode context is allocated for the duration of the call: about
+two blocks, up to roughly `zxc_static_dctx_workspace_size` once the archive
+holds entropy-coded blocks. For checksum verification, a dictionary archive, or
+a decode without any allocation, use `zxc_decompress_inplace_dctx` below with
+a configured (or static) context.
 
 **Returns**: decompressed size (> 0), `0` for an empty frame, or negative
 `zxc_error_t`.
@@ -527,17 +555,18 @@ entropy-coded blocks. To decode without any allocation, use
 
 ```c
 ZXC_EXPORT int64_t zxc_decompress_inplace_dctx(
-    zxc_dctx*                    dctx,
-    void*                        buffer,
-    size_t                       buffer_capacity,
-    size_t                       comp_size,
-    const zxc_decompress_opts_t* opts     // NULL = defaults
+    zxc_dctx* dctx,
+    void*     buffer,
+    size_t    buffer_capacity,
+    size_t    comp_size
 );
 ```
 
 Same contract as `zxc_decompress_inplace` (flush-right archive, buffer of at
 least `zxc_decompress_inplace_bound`, same buffer checks and error codes), but
-the decode context comes from `dctx`. With a static context
+the decode context, and with it the configuration (`ZXC_D_CHECKSUM`,
+dictionary), comes from `dctx`. Dictionary archives are supported on a heap
+context. With a static context
 (`zxc_init_static_dctx`) the call touches no allocator at all: peak memory is
 the caller's buffer plus the caller's workspace, both sized up front. This is
 the entry point for kernel code and heapless targets.
@@ -553,7 +582,7 @@ void* ws = aligned_alloc(64, ws_size);                  // or .bss, kmalloc, vma
 zxc_dctx* dctx = zxc_init_static_dctx(ws, ws_size, 64 * 1024);
 
 memcpy(buf + (need - archive_size), archive, archive_size);   // flush-right
-int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size, NULL);
+int64_t n = zxc_decompress_inplace_dctx(dctx, buf, need, archive_size);
 ```
 
 **Returns**: decompressed size (> 0), `0` for an empty frame, or negative
@@ -679,40 +708,40 @@ that genuinely cannot oversize their output buffer, use
 
 ```c
 ZXC_EXPORT int64_t zxc_compress_block(
-    zxc_cctx*                  cctx,
-    const void*                src,
-    size_t                     src_size,
-    void*                      dst,
-    size_t                     dst_capacity,
-    const zxc_compress_opts_t* opts       // NULL = sticky settings
+    zxc_cctx*   cctx,
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity
 );
 ```
 
-Compresses a single block using a reusable context.  
-`level`, `block_size`, `checksum_enabled` and the dictionary fields (`dict`,
-`dict_size`, `dict_huf`) of `opts` are used; the shared literal table is
-rebuilt only when it changes. A static context returns
-`ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary. `seekable` is ignored and not
-remembered.
+Compresses a single block using a reusable context, under the context's
+configuration: `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`, `ZXC_C_CHECKSUM` and the
+dictionary set with `zxc_cctx_set_dict()`; the shared literal table is rebuilt
+only when it changes. `ZXC_C_SEEKABLE` and `ZXC_C_THREADS` have no effect here.
+A static context cannot carry a dictionary (`zxc_cctx_set_dict()` refuses it
+with `ZXC_ERROR_DICT_UNSUPPORTED`).
 
 `src_size` must be in `[1, ZXC_BLOCK_SIZE_MAX]` (2 MiB). For larger payloads,
 use the frame API (`zxc_compress`) or streaming API (`zxc_cstream_*`), which
 chunk transparently into format-conformant blocks.
 
 **Returns**: compressed block size (> 0) on success, or negative `zxc_error_t`.
-Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `src_size > ZXC_BLOCK_SIZE_MAX`, or if
-`block_size` is not a power of two in range.
+Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `src_size > ZXC_BLOCK_SIZE_MAX`. An
+invalid block size, a level a static workspace cannot serve, or a dictionary
+on a static context are refused earlier, by the setter that would install them
+(§9).
 
 ### `zxc_decompress_block`
 
 ```c
 ZXC_EXPORT int64_t zxc_decompress_block(
-    zxc_dctx*                    dctx,
-    const void*                  src,
-    size_t                       src_size,
-    void*                        dst,
-    size_t                       dst_capacity,
-    const zxc_decompress_opts_t* opts     // NULL = defaults
+    zxc_dctx*   dctx,
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity
 );
 ```
 
@@ -728,9 +757,10 @@ not survive a failed call.
 `dst_capacity` **must not exceed**
 `ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD`. For payloads
 produced by the frame or streaming APIs, use `zxc_decompress` instead.
-`checksum_enabled` and the dictionary fields are used; a block carries no
-dictionary id, so pass the same (content, table) pair as at compression. A
-static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+The context's `ZXC_D_CHECKSUM` and dictionary (`zxc_dctx_set_dict()`) apply; a
+block carries no dictionary id, so attach the same (content, table) pair as at
+compression. A static context cannot carry a dictionary
+(`ZXC_ERROR_DICT_UNSUPPORTED` from the setter).
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
 Returns `ZXC_ERROR_BAD_BLOCK_SIZE` if `dst_capacity` exceeds the per-block
@@ -743,12 +773,11 @@ unspecified on error.
 
 ```c
 ZXC_EXPORT int64_t zxc_decompress_block_safe(
-    zxc_dctx*                    dctx,
-    const void*                  src,
-    size_t                       src_size,
-    void*                        dst,
-    size_t                       dst_capacity,
-    const zxc_decompress_opts_t* opts     // NULL = defaults
+    zxc_dctx*   dctx,
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity
 );
 ```
 
@@ -769,8 +798,8 @@ tail-pad margin, so the upper limit is `ZXC_BLOCK_SIZE_MAX` (not
 context applies the same bound and codes as `zxc_decompress_block` and accepts
 a larger `dst_capacity` alike.
 
-Same options as `zxc_decompress_block`: `checksum_enabled` and the dictionary
-fields; a dictionary routes through its bounce path.
+Same configuration as `zxc_decompress_block`: the context's `ZXC_D_CHECKSUM`
+and dictionary; a dictionary routes through its bounce path.
 
 **Returns**: decompressed size (> 0) on success, or negative `zxc_error_t`.
 
@@ -798,19 +827,53 @@ is intended for integrators that need to build an accurate memory budget
 ## 9. Reusable Context API
 
 Declared in `zxc_buffer.h`. Eliminates per-call allocation overhead for
-hot-path integrations (filesystem plug-ins, batch processing).
+hot-path integrations (filesystem plug-ins, batch processing), and is where
+every setting beyond the one-shot `level` is made.
+
+### The model
+
+A context **carries the configuration**. `zxc_create_cctx()` /
+`zxc_create_dctx()` return a context with every parameter at its default;
+`zxc_cctx_set_param()` / `zxc_dctx_set_param()` change one parameter at a time
+(§6.1 lists them), `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` attach a
+dictionary and `zxc_cctx_set_progress()` / `zxc_dctx_set_progress()` a
+progress callback. A setting stays in force for every later call on that
+context until changed again or `zxc_cctx_reset()` / `zxc_dctx_reset()`:
+
+- **0 restores the default** of a parameter; `reset` restores them all and
+  detaches the dictionary and the callback, keeping the working buffers.
+- **A setter refuses, it never clamps.** A value outside
+  `zxc_cparam_bounds()` / `zxc_dparam_bounds()` leaves the parameter as it was
+  and returns `ZXC_ERROR_BAD_LEVEL` (`ZXC_C_LEVEL`), `ZXC_ERROR_BAD_BLOCK_SIZE`
+  (`ZXC_C_BLOCK_SIZE`, non-powers of two included) or `ZXC_ERROR_BAD_PARAM`
+  (every other parameter, and any unknown identifier). The only clamp left in
+  the API is the `level` argument of the one-shot `zxc_compress()`.
+- **Static contexts pin block size and level** (§9b). On a context from
+  `zxc_init_static_cctx()`, `ZXC_C_BLOCK_SIZE` accepts only the pinned value,
+  a raise into `ZXC_LEVEL_DENSITY` on a workspace carved below it is
+  `ZXC_ERROR_BAD_LEVEL`, and `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` are
+  `ZXC_ERROR_DICT_UNSUPPORTED`. These errors come from the setter, so a
+  compress or decompress call on a configured context no longer meets them.
+- **The `FILE*` and push APIs read a context as configuration only.**
+  `zxc_stream_compress()` / `zxc_stream_decompress()` and
+  `zxc_cstream_create()` / `zxc_dstream_create()` take a `const` context, copy
+  or read its parameters and never use its buffers; `NULL` means all defaults.
+  The context may be freed, or used for a one-shot call, right after.
+
+A heap context allocates its working buffers on the first call, sized from the
+parameters then in force, and re-carves them only when the block size changes
+or a level raise into `ZXC_LEVEL_DENSITY` needs the optimal-parser scratch.
 
 ### `zxc_create_cctx`
 
 ```c
-ZXC_EXPORT zxc_cctx* zxc_create_cctx(const zxc_compress_opts_t* opts);
+ZXC_EXPORT zxc_cctx* zxc_create_cctx(void);
 ```
 
-Creates a heap-allocated compression context.  
-When `opts` is non-NULL, internal buffers are pre-allocated (eager init).  
-When `opts` is NULL, allocation is deferred to first use (lazy init).  
-The creation options are also what a zero `level` or `block_size` in a later
-call falls back to (the library defaults for NULL).
+Creates a heap-allocated compression context with every parameter at its
+default: level 3, 512 KB blocks, threads auto, no checksum, no seek table, no
+dictionary, no callback. Only the handle is allocated; the working buffers
+come on the first compress call.
 
 **Returns**: context pointer, or `NULL` on allocation failure.
 
@@ -820,36 +883,120 @@ call falls back to (the library defaults for NULL).
 ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
 ```
 
-Frees all resources. Safe to pass `NULL`.
+Frees all resources. Safe to pass `NULL`; a no-op on a static context.
+
+### `zxc_cctx_set_param`
+
+```c
+ZXC_EXPORT int zxc_cctx_set_param(zxc_cctx* cctx, zxc_cparam_t param, int64_t value);
+```
+
+Sets one parameter; `0` restores its default. Takes effect on the next call.
+An out-of-bounds value is refused and the parameter keeps its value:
+`ZXC_ERROR_BAD_LEVEL` for `ZXC_C_LEVEL`, `ZXC_ERROR_BAD_BLOCK_SIZE` for
+`ZXC_C_BLOCK_SIZE`, `ZXC_ERROR_BAD_PARAM` otherwise and for an unknown `param`.
+On a static context the block size is pinned and a level raise into
+`ZXC_LEVEL_DENSITY` is refused when the workspace was carved below it.
+
+**Returns**: `ZXC_OK`, or a negative `zxc_error_t` (`ZXC_ERROR_NULL_INPUT` for
+a NULL `cctx`).
+
+### `zxc_cctx_get_param`
+
+```c
+ZXC_EXPORT int zxc_cctx_get_param(const zxc_cctx* cctx, zxc_cparam_t param, int64_t* value);
+```
+
+Reads the value in force for `param` into `*value`.
+
+**Returns**: `ZXC_OK`, `ZXC_ERROR_BAD_PARAM` for an unknown `param`, or
+`ZXC_ERROR_NULL_INPUT`.
+
+### `zxc_cparam_bounds` / `zxc_dparam_bounds`
+
+```c
+#include <zxc_opts.h>   // pulled in by every API header
+
+ZXC_EXPORT int zxc_cparam_bounds(zxc_cparam_t param, int64_t* min, int64_t* max);
+ZXC_EXPORT int zxc_dparam_bounds(zxc_dparam_t param, int64_t* min, int64_t* max);
+```
+
+Report the accepted range of a parameter (`min` and `max` may each be NULL),
+so a caller or a binding can validate a value before setting it, and learn
+whether the loaded library knows `param` at all. For `ZXC_C_BLOCK_SIZE` the
+range is `[ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX]`; the power-of-two rule is
+checked by the setter.
+
+**Returns**: `ZXC_OK`, or `ZXC_ERROR_BAD_PARAM` for an unknown `param`.
+
+### `zxc_cctx_set_dict`
+
+```c
+ZXC_EXPORT int zxc_cctx_set_dict(
+    zxc_cctx*   cctx,
+    const void* dict,        // content, or NULL to detach
+    size_t      dict_size,   // at most ZXC_DICT_SIZE_MAX
+    const void* dict_huf     // 128-byte shared literal table, or NULL
+);
+```
+
+Attaches a pre-trained dictionary; a NULL `dict` detaches it. The context keeps
+the **pointers only**: the bytes stay caller-owned and must outlive every call
+that uses them. `dict_huf`, when given, is the `ZXC_HUF_TABLE_SIZE`-byte table
+from `zxc_dict_load()` / `zxc_dict_huf()`: it codes literals at levels 6–7 and
+is bound into the archive's `dict_id` at every level (§11b). The shared table is
+rebuilt only when its bytes change between calls.
+
+**Returns**: `ZXC_OK`; `ZXC_ERROR_DICT_TOO_LARGE` above `ZXC_DICT_SIZE_MAX`;
+`ZXC_ERROR_DICT_UNSUPPORTED` on a static context.
+
+### `zxc_cctx_set_progress`
+
+```c
+ZXC_EXPORT int zxc_cctx_set_progress(zxc_cctx* cctx, zxc_progress_callback_t cb, void* user_data);
+```
+
+Installs the progress callback (§6.2); a NULL `cb` disables it. Honoured by
+`zxc_stream_compress()` only: the buffer, block and push APIs are synchronous
+and never call it.
+
+**Returns**: `ZXC_OK`, or `ZXC_ERROR_NULL_INPUT`.
+
+### `zxc_cctx_reset`
+
+```c
+ZXC_EXPORT int zxc_cctx_reset(zxc_cctx* cctx);
+```
+
+Restores every parameter to its default, detaches the dictionary and the
+callback. The working buffers are kept. On a static context the pinned block
+size and level are the defaults.
+
+**Returns**: `ZXC_OK`, or `ZXC_ERROR_NULL_INPUT`.
 
 ### `zxc_compress_cctx`
 
 ```c
 ZXC_EXPORT int64_t zxc_compress_cctx(
-    zxc_cctx*                  cctx,
-    const void*                src,
-    size_t                     src_size,
-    void*                      dst,
-    size_t                     dst_capacity,
-    const zxc_compress_opts_t* opts
+    zxc_cctx*   cctx,
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity
 );
 ```
 
-Same as `zxc_compress()` but reuses internal buffers from `cctx`.
-The workspace is re-carved when the block size changes, or when a level raise
-into `ZXC_LEVEL_DENSITY` needs the optimal-parser scratch. A zero
-`src_size` writes the empty archive, as `zxc_compress()` does, without carving
-the workspace. Dictionary options are honoured as in `zxc_compress()` but are
-not sticky; the shared literal table is rebuilt only when it changes. A static
-context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary. `seekable`
-appends the seek table as `zxc_compress()` does, without allocating, static
-contexts included.
+Compresses a complete archive like `zxc_compress()`, under the context's
+configuration and reusing its buffers: `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`,
+`ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE` and the dictionary; `ZXC_C_THREADS` is
+ignored (single-threaded). The workspace is re-carved when the block size
+changes, or when a level raise into `ZXC_LEVEL_DENSITY` needs the
+optimal-parser scratch. `ZXC_C_SEEKABLE` appends the seek table without
+allocating, static contexts included.
 
-Options are **sticky**: `NULL` reuses the last successful call's `level`,
-`block_size`, `checksum_enabled` and `seekable` (the first three for
-`zxc_compress_block()`), starting from the creation options. A zero `level` or
-`block_size` in a non-NULL `opts` means the value the context was created
-with, never an earlier call's. A failed call leaves them untouched.
+**Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
+zero `src_size` writes the empty archive without carving the workspace: 32
+bytes, +8 with `ZXC_C_CHECKSUM`, +8 with `ZXC_C_SEEKABLE`.
 
 ### `zxc_create_dctx`
 
@@ -857,7 +1004,12 @@ with, never an earlier call's. A failed call leaves them untouched.
 ZXC_EXPORT zxc_dctx* zxc_create_dctx(void);
 ```
 
-Creates a heap-allocated decompression context.
+Creates a heap-allocated decompression context with every parameter at its
+default: threads auto, no checksum verification, no dictionary, no callback.
+Only the handle is allocated; the working buffers are sized from the archive
+header, so they come on the first decode.
+
+**Returns**: context pointer, or `NULL` on allocation failure.
 
 ### `zxc_free_dctx`
 
@@ -865,24 +1017,90 @@ Creates a heap-allocated decompression context.
 ZXC_EXPORT void zxc_free_dctx(zxc_dctx* dctx);
 ```
 
-Frees all resources. Safe to pass `NULL`.
+Frees all resources. Safe to pass `NULL`; a no-op on a static context.
+
+### `zxc_dctx_set_param`
+
+```c
+ZXC_EXPORT int zxc_dctx_set_param(zxc_dctx* dctx, zxc_dparam_t param, int64_t value);
+```
+
+Sets one decompression parameter (`ZXC_D_THREADS`, `ZXC_D_CHECKSUM`); `0`
+restores its default. Takes effect on the next call. A value outside
+`zxc_dparam_bounds()` is `ZXC_ERROR_BAD_PARAM`, as is an unknown `param`; the
+parameter keeps its value.
+
+**Returns**: `ZXC_OK`, or a negative `zxc_error_t`.
+
+### `zxc_dctx_get_param`
+
+```c
+ZXC_EXPORT int zxc_dctx_get_param(const zxc_dctx* dctx, zxc_dparam_t param, int64_t* value);
+```
+
+Reads the value in force for `param`. Same contract as `zxc_cctx_get_param()`.
+
+### `zxc_dctx_set_dict`
+
+```c
+ZXC_EXPORT int zxc_dctx_set_dict(
+    zxc_dctx*   dctx,
+    const void* dict,        // content, or NULL to detach
+    size_t      dict_size,   // at most ZXC_DICT_SIZE_MAX
+    const void* dict_huf     // the table used at compression, or NULL
+);
+```
+
+Attaches the dictionary the archives were compressed with; a NULL `dict`
+detaches it. Same ownership rules as `zxc_cctx_set_dict()` (pointers kept,
+bytes caller-owned). `dict_huf` must be the table used at compression time when
+the archive carries one: the header's `dict_id` is checked against the
+(content, table) pair, `ZXC_ERROR_DICT_MISMATCH` otherwise.
+
+**Returns**: `ZXC_OK`; `ZXC_ERROR_DICT_TOO_LARGE` above `ZXC_DICT_SIZE_MAX`;
+`ZXC_ERROR_DICT_UNSUPPORTED` on a static context.
+
+### `zxc_dctx_set_progress`
+
+```c
+ZXC_EXPORT int zxc_dctx_set_progress(zxc_dctx* dctx, zxc_progress_callback_t cb, void* user_data);
+```
+
+Installs the progress callback; a NULL `cb` disables it. Honoured by
+`zxc_stream_decompress()` only.
+
+**Returns**: `ZXC_OK`, or `ZXC_ERROR_NULL_INPUT`.
+
+### `zxc_dctx_reset`
+
+```c
+ZXC_EXPORT int zxc_dctx_reset(zxc_dctx* dctx);
+```
+
+Restores every parameter to its default, detaches the dictionary and the
+callback. The working buffers are kept.
+
+**Returns**: `ZXC_OK`, or `ZXC_ERROR_NULL_INPUT`.
 
 ### `zxc_decompress_dctx`
 
 ```c
 ZXC_EXPORT int64_t zxc_decompress_dctx(
-    zxc_dctx*                    dctx,
-    const void*                  src,
-    size_t                       src_size,
-    void*                        dst,
-    size_t                       dst_capacity,
-    const zxc_decompress_opts_t* opts
+    zxc_dctx*   dctx,
+    const void* src,
+    size_t      src_size,
+    void*       dst,
+    size_t      dst_capacity
 );
 ```
 
-Same as `zxc_decompress()`, dictionary options included, but reuses buffers
-from `dctx`; the shared literal table is rebuilt only when it changes between
-calls. A static context returns `ZXC_ERROR_DICT_UNSUPPORTED` for any dictionary.
+Decompresses a complete archive like `zxc_decompress()`, but under the
+context's configuration and reusing its buffers: `ZXC_D_CHECKSUM` decides
+whether checksums are verified, and the dictionary from `zxc_dctx_set_dict()`
+is used; the shared literal table is rebuilt only when it changes between
+calls. This is the entry point for checksum verification and dictionary
+archives, which the simple form does not offer. A static context cannot carry
+a dictionary (`ZXC_ERROR_DICT_UNSUPPORTED` from the setter).
 
 The no-destination probe works here too, answered under this context's rules:
 a static context still rejects a foreign block size and a dictionary-bound
@@ -907,10 +1125,10 @@ served via `vmalloc` / `kmalloc` up front), embedded targets without a heap
 (`.bss` or stack-allocated workspace), sandboxed runtimes with a fixed
 memory budget, etc.
 
-Trade-off vs the dynamic API: the workspace is **pinned** to a single `block_size` at init time;
-subsequent compress / decompress calls cannot enlarge the footprint, so a
-workload that needs to mix block sizes must size the workspace for the
-maximum block size up front.
+Trade-off vs the dynamic API: the workspace is **pinned** to a single `block_size`
+(and, for compression, a `level` tier) at init time; the setters cannot enlarge
+the footprint afterwards, so a workload that needs to mix block sizes must size
+the workspace for the maximum block size up front.
 
 ### Properties
 
@@ -921,10 +1139,14 @@ maximum block size up front.
   the context.
 - **`zxc_free_*ctx` is a no-op** on a static handle. The caller owns the
   workspace.
-- **`block_size` is locked.** A subsequent call passing a different
-  `block_size` returns `ZXC_ERROR_BAD_BLOCK_SIZE` without re-initialising.
-  `level` and `checksum_enabled` may still vary per call (they affect only
-  the encoder state, not the buffer layout).
+- **`block_size` is locked.** `zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, n)`
+  with any value other than the pinned one returns `ZXC_ERROR_BAD_BLOCK_SIZE`
+  without re-initialising (`0` is the pinned value here). `ZXC_C_LEVEL` may
+  still change, within the tier the workspace was carved for: a raise into
+  `ZXC_LEVEL_DENSITY` on a workspace sized below it is `ZXC_ERROR_BAD_LEVEL`.
+  `ZXC_C_CHECKSUM` and `ZXC_C_SEEKABLE` are honoured without re-partitioning.
+- **No dictionary.** `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` return
+  `ZXC_ERROR_DICT_UNSUPPORTED`: the workspace has no room for the prefix.
 - **Workspace alignment.** Must be at least cache-line (64-byte) aligned.
   Use `posix_memalign(..., 64, ...)`, `aligned_alloc(64, ...)`, the slab
   allocator (kmalloc returns ≥ `ARCH_KMALLOC_MINALIGN`), or a
@@ -956,23 +1178,26 @@ wrapper plus every persistent sub-buffer the library would partition.
 
 ```c
 ZXC_EXPORT zxc_cctx* zxc_init_static_cctx(
-    void*                       workspace,
-    const size_t                workspace_size,
-    const zxc_compress_opts_t*  opts
+    void*        workspace,
+    const size_t workspace_size,
+    const size_t block_size,     // explicit: power of two, 4 KB..2 MB
+    const int    level           // explicit: 1..7
 );
 ```
 
 Initialises a compression context inside a caller-supplied workspace.
 `workspace_size` must be at least `zxc_static_cctx_workspace_size` for the
-same `block_size` / `level`. `opts` is **required**: `block_size` and
-`level` are pinned at init time and must be set explicitly.
-Dictionaries are rejected: `ZXC_ERROR_DICT_UNSUPPORTED`.
+same `block_size` / `level`. Both are **explicit and pinned**: `0` is not a
+default here but an invalid argument. The other parameters start at their
+defaults and are set as on a heap context (`ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`,
+a lower `ZXC_C_LEVEL`); `zxc_cctx_set_dict()` is refused with
+`ZXC_ERROR_DICT_UNSUPPORTED`.
 
 The returned handle points **inside** `workspace`; the workspace must
 remain valid for the lifetime of the handle. `zxc_free_cctx` is a no-op.
 
 **Returns**: handle pointing inside `workspace`, or `NULL` if the
-workspace is too small, the options are invalid, or `workspace` / `opts`
+workspace is too small, `block_size` or `level` is invalid, or `workspace`
 is `NULL`.
 
 ### `zxc_static_dctx_workspace_size`
@@ -1029,11 +1254,11 @@ size_t cws_sz = zxc_static_cctx_workspace_size(BLOCK_SZ, LEVEL);
 void  *cws    = NULL;
 posix_memalign(&cws, 64, cws_sz);                  /* or kmalloc / vmalloc / .bss */
 
-zxc_compress_opts_t copts = { .level = LEVEL, .block_size = BLOCK_SZ };
-zxc_cctx *cctx = zxc_init_static_cctx(cws, cws_sz, &copts);
+zxc_cctx *cctx = zxc_init_static_cctx(cws, cws_sz, BLOCK_SZ, LEVEL);
+zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);       /* optional; no re-partitioning */
 
 for (/* each block */) {
-    zxc_compress_cctx(cctx, src, n, dst, cap, NULL);  /* no allocation */
+    zxc_compress_cctx(cctx, src, n, dst, cap);     /* no allocation */
 }
 zxc_free_cctx(cctx);  /* no-op for static */
 free(cws);            /* caller owns the workspace */
@@ -1044,7 +1269,8 @@ void  *dws    = NULL;
 posix_memalign(&dws, 64, dws_sz);
 
 zxc_dctx *dctx = zxc_init_static_dctx(dws, dws_sz, BLOCK_SZ);
-zxc_decompress_dctx(dctx, in, in_sz, out, out_cap, NULL);
+zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1);       /* verify what the archive carries */
+zxc_decompress_dctx(dctx, in, in_sz, out, out_cap);
 zxc_free_dctx(dctx);  /* no-op */
 free(dws);
 ```
@@ -1124,7 +1350,7 @@ must know it *before* calling `init`. Four patterns cover every use case:
 
    If the workspace pool must stay tight and worst-case sizing is too
    expensive, fall back to the dynamic Context API (`zxc_create_dctx`)
-   — its `block_size` is set per call.
+   — it sizes its buffers from each archive's header.
 
 ---
 
@@ -1140,14 +1366,18 @@ open helper `zxc_seekable_open_file` (documented in §11).
 
 ```c
 ZXC_EXPORT int64_t zxc_stream_compress(
-    FILE*                      f_in,
-    FILE*                      f_out,
-    const zxc_compress_opts_t* opts
+    FILE*           f_in,
+    FILE*           f_out,
+    const zxc_cctx* cfg          // configuration only; NULL = defaults
 );
 ```
 
-Compresses `f_in` -> `f_out` using a parallel pipeline.
-All fields of `opts` are used, including `n_threads` and `progress_cb`.
+Compresses `f_in` -> `f_out` using a parallel pipeline. `cfg` is a configured
+compression context read for its parameters only: every one of them applies
+here (`ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`, `ZXC_C_THREADS`, `ZXC_C_CHECKSUM`,
+`ZXC_C_SEEKABLE`, the dictionary, the progress callback). Its buffers are not
+used, the pipeline carves its own per worker, so the context may be freed or
+reused for a one-shot call right after. `NULL` means all defaults.
 
 **Returns**: total compressed bytes written, or negative `zxc_error_t`.
 
@@ -1155,14 +1385,16 @@ All fields of `opts` are used, including `n_threads` and `progress_cb`.
 
 ```c
 ZXC_EXPORT int64_t zxc_stream_decompress(
-    FILE*                        f_in,
-    FILE*                        f_out,
-    const zxc_decompress_opts_t* opts
+    FILE*           f_in,
+    FILE*           f_out,
+    const zxc_dctx* cfg          // configuration only; NULL = defaults
 );
 ```
 
-Decompresses `f_in` -> `f_out` using a parallel pipeline. Bytes after the footer
-are `ZXC_ERROR_CORRUPT_DATA`.
+Decompresses `f_in` -> `f_out` using a parallel pipeline. `cfg` is read for
+`ZXC_D_THREADS`, `ZXC_D_CHECKSUM`, the dictionary and the progress callback;
+its buffers are not used. `NULL` means all defaults (no checksum verification,
+no dictionary). Bytes after the footer are `ZXC_ERROR_CORRUPT_DATA`.
 
 A regular file is read ahead in batches; a pipe or socket is decoded block by
 block, so a live stream's output is never held back.
@@ -1248,15 +1480,18 @@ unspecified — never keep live data inside the declared capacity.
 #### `zxc_cstream_create`
 
 ```c
-ZXC_EXPORT zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts);
+ZXC_EXPORT zxc_cstream* zxc_cstream_create(const zxc_cctx* cfg);   // NULL = defaults
 ```
 
-Creates a push compression context.  Settings (`level`, `block_size`,
-`checksum_enabled`) are copied from `opts` and frozen for the lifetime of
-the stream.  `n_threads`, `progress_cb`, `seekable` are ignored on this
-path.
+Creates a push compression stream. `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE` and
+`ZXC_C_CHECKSUM` are copied from `cfg` at creation and frozen for the lifetime
+of the stream; the context itself may be freed or reused afterwards.
+`ZXC_C_THREADS`, `ZXC_C_SEEKABLE` and the progress callback are ignored on
+this path. A dictionary on `cfg` **fails creation**: push streams take no
+dictionary yet, and dropping it silently would produce archives that decode
+wrong elsewhere.
 
-**Returns**: context, or `NULL` on allocation failure.
+**Returns**: stream, or `NULL` on allocation failure or a dictionary on `cfg`.
 
 #### `zxc_cstream_free`
 
@@ -1328,16 +1563,16 @@ these are purely performance hints.
 #### `zxc_dstream_create`
 
 ```c
-ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts);
+ZXC_EXPORT zxc_dstream* zxc_dstream_create(const zxc_dctx* cfg);   // NULL = defaults
 ```
 
-Creates a push decompression context.  Only `checksum_enabled` from `opts`
-is honoured (controls whether the block checksums and archive digest are
-verified when the file carries them). Dictionary options fail creation, and an
+Creates a push decompression stream. Only `ZXC_D_CHECKSUM` is copied from
+`cfg` (it controls whether the block checksums and archive digest are verified
+when the file carries them). A dictionary on `cfg` fails creation, and an
 archive whose header requires a dictionary fails with `ZXC_ERROR_DICT_REQUIRED`
 at the first decompress call.
 
-**Returns**: context, or `NULL` on allocation failure.
+**Returns**: stream, or `NULL` on allocation failure or a dictionary on `cfg`.
 
 #### `zxc_dstream_free`
 
@@ -1408,8 +1643,11 @@ threads.
 ### Compression Example
 
 ```c
-zxc_compress_opts_t opts = { .level = 3, .checksum_enabled = 1 };
-zxc_cstream* cs = zxc_cstream_create(&opts);
+zxc_cctx* cfg = zxc_create_cctx();
+zxc_cctx_set_param(cfg, ZXC_C_LEVEL, 3);
+zxc_cctx_set_param(cfg, ZXC_C_CHECKSUM, 1);
+zxc_cstream* cs = zxc_cstream_create(cfg);   /* parameters copied */
+zxc_free_cctx(cfg);                          /* no longer needed */
 
 uint8_t in_buf[64*1024], out_buf[64*1024];
 zxc_outbuf_t out = { out_buf, sizeof out_buf, 0 };
@@ -1444,16 +1682,19 @@ consumers do not need random-access decompression). The header is
 consumers can include it directly and plug their own storage backend behind
 the `zxc_reader_t` callback. The `FILE*` convenience open
 (`zxc_seekable_open_file`) lives in `zxc_stream.h` instead. Seekable archives
-are produced with `seekable = 1` in `zxc_compress_opts_t`.
+are produced with `ZXC_C_SEEKABLE` set to 1 on the compression context.
 
 ### Creating a Seekable Archive
 
-Set `seekable = 1` in `zxc_compress_opts_t`. Works with both the Buffer API
-and the Streaming API:
+Set `ZXC_C_SEEKABLE` to 1 on a `zxc_cctx`. The same context drives the Buffer
+API (`zxc_compress_cctx`) and the Streaming API (`zxc_stream_compress`):
 
 ```c
-zxc_compress_opts_t opts = { .level = 3, .seekable = 1 };
-int64_t csize = zxc_compress(src, src_size, dst, dst_cap, &opts);
+zxc_cctx* cctx = zxc_create_cctx();
+zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3);
+zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1);
+int64_t csize = zxc_compress_cctx(cctx, src, src_size, dst, dst_cap);
+zxc_free_cctx(cctx);
 ```
 
 The resulting archive contains a Seek Table block (SEK) between the EOF block
@@ -1716,7 +1957,7 @@ ZXC_EXPORT int zxc_dict_train_huf(
 );
 ```
 
-Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and can be attached at (de)compression time via the `dict_huf` option field. It only codes literals at levels 6-7, but binds into `dict_id` at every level (see the note at the top of this section). Returns `ZXC_OK` or a negative error code.
+Trains the **shared literal Huffman table** for an already-trained dictionary. It compresses the samples with `dict` and derives canonical code lengths from the real post-LZ literal distribution. The 128-byte table is required by `zxc_dict_save()` and is attached at (de)compression time as the `dict_huf` argument of `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()`. It only codes literals at levels 6-7, but binds into `dict_id` at every level (see the note at the top of this section). Returns `ZXC_OK` or a negative error code.
 
 ### `zxc_dict_compute_id`
 
@@ -1754,7 +1995,7 @@ ZXC_EXPORT int zxc_dict_load(
 );
 ```
 
-Validates and parses a `.zxd` file from memory in **one call**. On success, `content_out` and `huf_out` (when non-NULL) both point into the input buffer (zero-copy) — pass them straight to `dict` / `dict_huf` in the options. Returns `ZXC_OK` or a negative error code.
+Validates and parses a `.zxd` file from memory in **one call**. On success, `content_out` and `huf_out` (when non-NULL) both point into the input buffer (zero-copy) — pass them straight to `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` as `dict` / `dict_huf`. Returns `ZXC_OK` or a negative error code.
 
 ### `zxc_dict_huf`
 
@@ -1764,7 +2005,7 @@ ZXC_EXPORT const void* zxc_dict_huf(const void* buf, size_t buf_size);
 
 Standalone accessor for the 128-byte shared table inside a `.zxd` buffer (zero-copy), or NULL if invalid. Equivalent to the `huf_out` of `zxc_dict_load()`; use it when you only need the table.
 
-Returns a zero-copy pointer to the 128-byte shared Huffman table inside a `.zxd` buffer (valid as long as `buf` is), or NULL if `buf` is not a valid `.zxd` file. Pass this to `zxc_compress_opts_t::dict_huf` / `zxc_decompress_opts_t::dict_huf`.
+Returns a zero-copy pointer to the 128-byte shared Huffman table inside a `.zxd` buffer (valid as long as `buf` is), or NULL if `buf` is not a valid `.zxd` file. Pass this as the `dict_huf` argument of `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()`.
 
 ### `zxc_dict_save_bound`
 
@@ -1822,11 +2063,28 @@ Returns `"ZXC_UNKNOWN_ERROR"` for unrecognized codes.
 All functions that can fail use the same convention:
 
 ```c
-int64_t result = zxc_compress(src, src_size, dst, dst_cap, &opts);
+int64_t result = zxc_compress(src, src_size, dst, dst_cap, ZXC_LEVEL_DEFAULT);
 if (result < 0) {
     fprintf(stderr, "Error: %s\n", zxc_error_name((int)result));
 }
 ```
+
+### Parameter errors
+
+The setters validate up front, so a configuration mistake surfaces at the
+`zxc_*ctx_set_*` call, not at the compress or decompress call that follows:
+
+| Setter | Code | When |
+|---|---|---|
+| `zxc_cctx_set_param` | `ZXC_ERROR_BAD_LEVEL` | `ZXC_C_LEVEL` outside 1–7, or a raise into `ZXC_LEVEL_DENSITY` on a static workspace carved below it |
+| `zxc_cctx_set_param` | `ZXC_ERROR_BAD_BLOCK_SIZE` | `ZXC_C_BLOCK_SIZE` out of range, not a power of two, or different from a static context's pinned size |
+| `zxc_cctx_set_param`, `zxc_dctx_set_param`, `zxc_cctx_get_param`, `zxc_dctx_get_param`, `zxc_cparam_bounds`, `zxc_dparam_bounds` | `ZXC_ERROR_BAD_PARAM` | Unknown parameter identifier, or a value outside the bounds of `ZXC_C_THREADS`, `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`, `ZXC_D_THREADS`, `ZXC_D_CHECKSUM` |
+| `zxc_cctx_set_dict`, `zxc_dctx_set_dict` | `ZXC_ERROR_DICT_TOO_LARGE` | `dict_size` above `ZXC_DICT_SIZE_MAX` |
+| `zxc_cctx_set_dict`, `zxc_dctx_set_dict` | `ZXC_ERROR_DICT_UNSUPPORTED` | Dictionary on a static context |
+
+A refused value leaves the parameter unchanged, and the context stays usable.
+`ZXC_ERROR_BAD_PARAM` is also what a binding gets from `zxc_cparam_bounds()`
+for an identifier the loaded library predates.
 
 ---
 
@@ -1838,7 +2096,7 @@ if (result < 0) {
 | **Block API** | Per-context | Uses `zxc_cctx` / `zxc_dctx`: same rule as Context API.  Create one context per thread. |
 | **Context API** | Per-context | A single `zxc_cctx` / `zxc_dctx` must not be shared between threads.  Create one context per thread. |
 | **Static Context API** | Per-handle | Same per-context rule as the dynamic Context API.  Allocate one workspace per thread; the static handle does not introduce any cross-thread synchronisation. |
-| **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. |
+| **Streaming API** | Per-call | Each `zxc_stream_*` call manages its own thread pool internally.  Do not call from multiple threads on the same `FILE*`. The `cfg` context is only read, so one may serve several concurrent calls as long as no thread sets a parameter on it meanwhile. |
 | **Seekable API** | Per-handle | A single `zxc_seekable` handle must not be shared between threads for single-threaded decompression.  Use `zxc_seekable_decompress_range_mt()` for parallel access. |
 | `zxc_error_name` | Yes | Returns a pointer to a static string. |
 
@@ -1846,7 +2104,7 @@ if (result < 0) {
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **75 symbols** (verified with `nm -gU`):
+The shared library exports **85 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -1854,77 +2112,87 @@ The shared library exports **75 symbols** (verified with `nm -gU`):
 | 2 | `zxc_max_level` | Info | `zxc_buffer.h` |
 | 3 | `zxc_default_level` | Info | `zxc_buffer.h` |
 | 4 | `zxc_version_string` | Info | `zxc_buffer.h` |
-| 5 | `zxc_compress_bound` | Buffer | `zxc_buffer.h` |
-| 6 | `zxc_compress` | Buffer | `zxc_buffer.h` |
-| 7 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
-| 8 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
-| 9 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
-| 10 | `zxc_decompress_block_bound` | Block | `zxc_buffer.h` |
-| 11 | `zxc_compress_block` | Block | `zxc_buffer.h` |
-| 12 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
-| 13 | `zxc_decompress_block_safe` | Block | `zxc_buffer.h` |
-| 14 | `zxc_estimate_cctx_size` | Block | `zxc_buffer.h` |
-| 15 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
-| 16 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
-| 17 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
-| 18 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
-| 19 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
-| 20 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
-| 21 | `zxc_static_cctx_workspace_size` | Static Context | `zxc_buffer.h` |
-| 22 | `zxc_init_static_cctx` | Static Context | `zxc_buffer.h` |
-| 23 | `zxc_static_dctx_workspace_size` | Static Context | `zxc_buffer.h` |
-| 24 | `zxc_init_static_dctx` | Static Context | `zxc_buffer.h` |
-| 25 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
-| 26 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
-| 27 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 28 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
-| 29 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
-| 30 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
-| 31 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
-| 32 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
-| 33 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
-| 34 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
-| 35 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
-| 36 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
-| 37 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
-| 38 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
-| 39 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
-| 40 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 41 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
-| 42 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
-| 43 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
-| 44 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
-| 45 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
-| 46 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
-| 47 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
-| 48 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
-| 49 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
-| 50 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 51 | `zxc_error_name` | Error | `zxc_error.h` |
-| 52 | `zxc_dict_train` | Dictionary | `zxc_dict.h` |
-| 53 | `zxc_dict_train_content` | Dictionary | `zxc_dict.h` |
-| 54 | `zxc_dict_train_huf` | Dictionary | `zxc_dict.h` |
-| 55 | `zxc_dict_compute_id` | Dictionary | `zxc_dict.h` |
-| 56 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
-| 57 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
-| 58 | `zxc_dict_huf` | Dictionary | `zxc_dict.h` |
-| 59 | `zxc_dict_read_id` | Dictionary | `zxc_dict.h` |
-| 60 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
-| 61 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
-| 62 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
+| 5 | `zxc_version_number` | Info | `zxc_buffer.h` |
+| 6 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
+| 7 | `zxc_compress_bound` | Buffer | `zxc_buffer.h` |
+| 8 | `zxc_compress` | Buffer | `zxc_buffer.h` |
+| 9 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
+| 10 | `zxc_decompress_inplace_bound` | Buffer | `zxc_buffer.h` |
+| 11 | `zxc_decompress_inplace` | Buffer | `zxc_buffer.h` |
+| 12 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
+| 13 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
+| 14 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
+| 15 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
+| 16 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
+| 17 | `zxc_decompress_block_bound` | Block | `zxc_buffer.h` |
+| 18 | `zxc_compress_block` | Block | `zxc_buffer.h` |
+| 19 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
+| 20 | `zxc_decompress_block_safe` | Block | `zxc_buffer.h` |
+| 21 | `zxc_estimate_cctx_size` | Block | `zxc_buffer.h` |
+| 22 | `zxc_cparam_bounds` | Parameters | `zxc_opts.h` |
+| 23 | `zxc_dparam_bounds` | Parameters | `zxc_opts.h` |
+| 24 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
+| 25 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
+| 26 | `zxc_cctx_set_param` | Context | `zxc_buffer.h` |
+| 27 | `zxc_cctx_get_param` | Context | `zxc_buffer.h` |
+| 28 | `zxc_cctx_set_dict` | Context | `zxc_buffer.h` |
+| 29 | `zxc_cctx_set_progress` | Context | `zxc_buffer.h` |
+| 30 | `zxc_cctx_reset` | Context | `zxc_buffer.h` |
+| 31 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
+| 32 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
+| 33 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
+| 34 | `zxc_dctx_set_param` | Context | `zxc_buffer.h` |
+| 35 | `zxc_dctx_get_param` | Context | `zxc_buffer.h` |
+| 36 | `zxc_dctx_set_dict` | Context | `zxc_buffer.h` |
+| 37 | `zxc_dctx_set_progress` | Context | `zxc_buffer.h` |
+| 38 | `zxc_dctx_reset` | Context | `zxc_buffer.h` |
+| 39 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
+| 40 | `zxc_decompress_inplace_dctx` | Context | `zxc_buffer.h` |
+| 41 | `zxc_static_cctx_workspace_size` | Static Context | `zxc_buffer.h` |
+| 42 | `zxc_init_static_cctx` | Static Context | `zxc_buffer.h` |
+| 43 | `zxc_static_dctx_workspace_size` | Static Context | `zxc_buffer.h` |
+| 44 | `zxc_init_static_dctx` | Static Context | `zxc_buffer.h` |
+| 45 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
+| 46 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
+| 47 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
+| 48 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
+| 49 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
+| 50 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
+| 51 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
+| 52 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
+| 53 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
+| 54 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 55 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 56 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
+| 57 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
+| 58 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
+| 59 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
+| 60 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 61 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 62 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
 | 63 | `zxc_seekable_open_reader` | Seekable | `zxc_seekable.h` |
-| 64 | `zxc_decompress_inplace` | Buffer | `zxc_buffer.h` |
-| 65 | `zxc_decompress_inplace_bound` | Buffer | `zxc_buffer.h` |
-| 66 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
-| 67 | `zxc_compress_opts_size` | Info | `zxc_opts.h` |
-| 68 | `zxc_decompress_opts_size` | Info | `zxc_opts.h` |
-| 69 | `zxc_decompress_inplace_dctx` | Context | `zxc_buffer.h` |
-| 70 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
-| 71 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
-| 72 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
-| 73 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
-| 74 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
-| 75 | `zxc_version_number` | Info | `zxc_buffer.h` |
+| 64 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
+| 65 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
+| 66 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
+| 67 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
+| 68 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
+| 69 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
+| 70 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
+| 71 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
+| 72 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
+| 73 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
+| 74 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
+| 75 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
+| 76 | `zxc_dict_train` | Dictionary | `zxc_dict.h` |
+| 77 | `zxc_dict_train_content` | Dictionary | `zxc_dict.h` |
+| 78 | `zxc_dict_train_huf` | Dictionary | `zxc_dict.h` |
+| 79 | `zxc_dict_compute_id` | Dictionary | `zxc_dict.h` |
+| 80 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
+| 81 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
+| 82 | `zxc_dict_huf` | Dictionary | `zxc_dict.h` |
+| 83 | `zxc_dict_read_id` | Dictionary | `zxc_dict.h` |
+| 84 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
+| 85 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with
