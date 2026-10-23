@@ -2205,7 +2205,7 @@ int main(int argc, char** argv) {
 
         ram = malloc(in_size);
         if (!ram) {
-            zxc_log("Error: Out of memory (%zu bytes)\n", in_size);
+            zxc_log("Error: Out of memory (%llu bytes)\n", (unsigned long long)in_size);
             goto bench_cleanup;
         }
         if (fread(ram, 1, in_size, f_in) != in_size) {
@@ -2258,7 +2258,7 @@ int main(int argc, char** argv) {
         const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc((size_t)max_c);
         if (!c_dat) {
-            zxc_log("Error: Out of memory (%zu bytes)\n", (size_t)max_c);
+            zxc_log("Error: Out of memory (%llu bytes)\n", (unsigned long long)max_c);
             goto bench_cleanup;
         }
 
