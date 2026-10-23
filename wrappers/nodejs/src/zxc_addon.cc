@@ -35,16 +35,6 @@ static Napi::Value ThrowZxcError(Napi::Env env, int code);
 using CctxPtr = std::unique_ptr<zxc_cctx, decltype(&zxc_free_cctx)>;
 using DctxPtr = std::unique_ptr<zxc_dctx, decltype(&zxc_free_dctx)>;
 
-// The one-shot compress() keeps the clamping of the C zxc_compress(): 0 is
-// the default, anything else lands inside [minLevel, maxLevel]. Contexts and
-// streams pass the level through unclamped and let the setter refuse it.
-static int ClampLevel(int level) {
-    if (level == 0) return ZXC_LEVEL_DEFAULT;
-    if (level < zxc_min_level()) return zxc_min_level();
-    if (level > zxc_max_level()) return zxc_max_level();
-    return level;
-}
-
 // Each setter throws the zxc error (with its `code`) and returns false when
 // the library refuses the value, so a constructor or call can bail out.
 static bool SetCParam(Napi::Env env, zxc_cctx* c, zxc_cparam_t param, int64_t value) {
@@ -177,7 +167,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         Napi::Error::New(env, "zxc_create_cctx failed").ThrowAsJavaScriptException();
         return env.Undefined();
     }
-    if (!SetCParam(env, cctx.get(), ZXC_C_LEVEL, ClampLevel(level)) ||
+    if (!SetCParam(env, cctx.get(), ZXC_C_LEVEL, level) ||
         !SetCParam(env, cctx.get(), ZXC_C_CHECKSUM, checksum) ||
         !SetCParam(env, cctx.get(), ZXC_C_SEEKABLE, seekable) ||
         !SetCDict(env, cctx.get(), dict, dict_size, dict_huf)) {

@@ -50,7 +50,7 @@ Compress a Buffer.
 | Parameter          | Type      | Default         | Description                                  |
 | ------------------ | --------- | --------------- | -------------------------------------------- |
 | `data`             | `Buffer`  | -               | Input data                                   |
-| `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (1–7); out of range clamped |
+| `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (1–7); out of range throws |
 | `options.checksum` | `boolean` | `false`         | Enable checksum                              |
 | `options.seekable` | `boolean` | `false`         | Append a seek table (see `Seekable`)         |
 | `options.dict`     | `Buffer`  | -               | Pre-trained dictionary (or a `Dictionary`)   |
@@ -76,8 +76,8 @@ Reusable contexts: the working buffers are carved once instead of once per
 call, which pays off when compressing many payloads with the same settings.
 The options are set on the native context at construction and apply to every
 call; an invalid value throws from the constructor with the zxc error `code`
-(for example `ERROR_BAD_LEVEL` for a level outside 1–7, which contexts and
-streams refuse rather than clamp).
+(for example `ERROR_BAD_LEVEL` for a level outside 1–7, which every entry
+point refuses rather than clamps).
 
 | Parameter          | Type      | Default         | Description                      |
 | ------------------ | --------- | --------------- | -------------------------------- |

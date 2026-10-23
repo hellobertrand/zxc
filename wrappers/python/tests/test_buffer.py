@@ -105,6 +105,20 @@ def test_get_frame_info_invalid():
         zxc.get_frame_info(b"not a zxc frame at all, long enough")
 
 
+def test_out_of_range_level_is_refused():
+    # No entry point clamps the level: the native setter refuses it. 0 is the default.
+    data = b"level bounds " * 50
+    with pytest.raises(RuntimeError, match="ZXC_ERROR_BAD_LEVEL"):
+        zxc.compress(data, level=zxc.LEVEL_ULTRA + 1)
+    with pytest.raises(RuntimeError, match="ZXC_ERROR_BAD_LEVEL"):
+        zxc.compress(data, level=-1)
+    with pytest.raises(RuntimeError, match="ZXC_ERROR_BAD_LEVEL"):
+        zxc.Cctx(level=zxc.LEVEL_ULTRA + 1)
+    with pytest.raises(RuntimeError, match="ZXC_ERROR_BAD_LEVEL"):
+        zxc.CStream(level=zxc.LEVEL_ULTRA + 1)
+    assert zxc.compress(data, level=0) == zxc.compress(data, level=zxc.LEVEL_DEFAULT)
+
+
 def test_concatenated_archives():
     # Two archives back to back decode as one (FORMAT.md 2.1); the size query sums them.
     a, b = b"first frame " * 50, b"second frame " * 70

@@ -63,8 +63,8 @@ export const ERROR_DICT_UNSUPPORTED: number;
 export const ERROR_BAD_PARAM: number;
 
 export interface CompressOptions {
-  /** Compression level (1-7). Defaults to LEVEL_DEFAULT; out-of-range values
-   *  are clamped, like the C one-shot `zxc_compress()`. */
+  /** Compression level (1-7). Defaults to LEVEL_DEFAULT; an out-of-range
+   *  value throws with `code === ERROR_BAD_LEVEL`. */
   level?: number;
   /** Enable checksum verification. Defaults to false. */
   checksum?: boolean;
