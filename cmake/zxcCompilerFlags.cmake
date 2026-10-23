@@ -103,9 +103,10 @@ set(ZXC_WARNING_FLAGS
 
 macro(zxc_apply_warnings target)
     if(MSVC)
+        # /wd4127: constant conditions on purpose (sizeof tests); VS2026 no longer flags them.
         # /wd4244: block-bounded uint64->size_t narrowing, lossless.
         # /wd4310: constants truncated on purpose by a cast.
-        target_compile_options(${target} PRIVATE /wd4244 /wd4310)
+        target_compile_options(${target} PRIVATE /wd4127 /wd4244 /wd4310)
         if(PROJECT_IS_TOP_LEVEL)
             target_compile_options(${target} PRIVATE /W4)
         endif()

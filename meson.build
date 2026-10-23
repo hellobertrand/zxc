@@ -18,9 +18,9 @@ host_cpu = host_machine.cpu_family()
 msvc_syntax = cc.get_argument_syntax() == 'msvc'
 is_cl = cc.get_id() == 'msvc'
 
-# As CMake: /wd4244 (lossless uint64 -> size_t narrowing), /wd4310 (deliberate
-# constant truncation by a cast).
-msvc_narrowing_args = msvc_syntax ? ['/wd4244', '/wd4310'] : []
+# As CMake: /wd4127 (deliberate constant conditions), /wd4244 (lossless
+# uint64 -> size_t narrowing), /wd4310 (deliberate constant truncation by a cast).
+msvc_wd_args = msvc_syntax ? ['/wd4127', '/wd4244', '/wd4310'] : []
 # As CMake: /W4 for MSVC, top-level only (warning_level=3 is /W4 there).
 msvc_w4 = msvc_syntax and not meson.is_subproject() ? ['warning_level=3'] : []
 
@@ -143,7 +143,7 @@ foreach info : variant_sets
       'zxc' + info[0] + '_' + src.underscorify(),
       src,
       override_options : msvc_w4,
-      c_args : info[1] + msvc_narrowing_args + lib_warning_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
+      c_args : info[1] + msvc_wd_args + lib_warning_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
     )
@@ -172,7 +172,7 @@ libzxc = library('zxc',
   name_prefix : 'lib',
   override_options : msvc_w4,
   objects : variant_objects,
-  c_args : lib_export_args + msvc_narrowing_args + lib_warning_args,
+  c_args : lib_export_args + msvc_wd_args + lib_warning_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : libzxc_includes,
   dependencies : [thread_dep],
@@ -196,7 +196,7 @@ else
     libzxc_sources,
     override_options : msvc_w4,
     objects : variant_objects,
-    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args + lib_warning_args,
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_wd_args + lib_warning_args,
     include_directories : libzxc_includes,
     dependencies : [thread_dep],
     build_by_default : false,
@@ -237,7 +237,7 @@ install_headers(
 if not meson.is_subproject() and get_option('build_cli')
   math_dep = cc.find_library('m', required : false)
 
-  cli_c_args = msvc_narrowing_args + (is_cl ? ['-D_CRT_SECURE_NO_WARNINGS'] : [])
+  cli_c_args = msvc_wd_args + (is_cl ? ['-D_CRT_SECURE_NO_WARNINGS'] : [])
   cli_link_args = msvc_syntax ? ['setargv.obj'] : []
 
   executable('zxc',
@@ -298,7 +298,7 @@ if not meson.is_subproject()
       'tests/test_dict.c',
     ),
     override_options : msvc_w4,
-    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_narrowing_args +
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_wd_args +
              (is_cl ? ['-D_CRT_SECURE_NO_WARNINGS'] : []),
     include_directories : libzxc_includes,
     link_with : libzxc_static,

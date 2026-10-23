@@ -125,7 +125,8 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
     if (hf == INVALID_HANDLE_VALUE) return NULL;
     do {
         char path[1024];
-        snprintf(path, sizeof(path), "%s%s", dir, fd.cFileName);
+        const int n = snprintf(path, sizeof(path), "%s%s", dir, fd.cFileName);
+        if (n < 0 || (size_t)n >= sizeof(path)) continue;
         size_t sz = 0;
         uint8_t* buf = vio_read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
@@ -144,7 +145,8 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
     while ((ent = readdir(dp)) != NULL) {
         if (!has_suffix(ent->d_name, ".zxd")) continue;
         char path[1024];
-        snprintf(path, sizeof(path), "%s%s", dir, ent->d_name);
+        const int n = snprintf(path, sizeof(path), "%s%s", dir, ent->d_name);
+        if (n < 0 || (size_t)n >= sizeof(path)) continue;
         size_t sz = 0;
         uint8_t* buf = vio_read_file(path, &sz);
         if (buf && zxc_dict_get_id(buf, sz) == target_id) {
