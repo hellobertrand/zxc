@@ -159,3 +159,38 @@ func TestFixHufTableValidation(t *testing.T) {
 		t.Fatalf("want ErrBadHufTable, got %v", err)
 	}
 }
+
+// Parameters are set on a native context, which refuses a value out of its
+// bounds instead of clamping it: the level on every compression entry point
+// (at creation for a Cctx), the thread count on the file pipeline.
+func TestParamRefusal(t *testing.T) {
+	data := []byte("parameter bounds")
+	if _, err := Compress(data, WithLevel(Level(MaxLevel()+1))); !errors.Is(err, ErrBadLevel) {
+		t.Fatalf("Compress(level 8): want ErrBadLevel, got %v", err)
+	}
+	if _, err := Compress(data, WithLevel(0)); err != nil {
+		t.Fatalf("Compress(level 0) selects the default: %v", err)
+	}
+	if _, err := NewCctx(WithLevel(-1)); !errors.Is(err, ErrBadLevel) {
+		t.Fatalf("NewCctx(level -1): want ErrBadLevel, got %v", err)
+	}
+	if _, err := NewCStream(WithLevel(Level(MaxLevel() + 1))); !errors.Is(err, ErrBadLevel) {
+		t.Fatalf("NewCStream(level 8): want ErrBadLevel, got %v", err)
+	}
+	if _, err := Compress(data, WithThreads(-1)); !errors.Is(err, ErrBadParam) {
+		t.Fatalf("WithThreads(-1): want ErrBadParam, got %v", err)
+	}
+	c, err := NewCctx()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	dst := make([]byte, CompressBlockBound(len(data)))
+	if _, err := c.CompressBlock(data, dst, WithLevel(99)); !errors.Is(err, ErrBadLevel) {
+		t.Fatalf("CompressBlock(level 99): want ErrBadLevel, got %v", err)
+	}
+	// The refused call leaves the context usable.
+	if _, err := c.CompressBlock(data, dst); err != nil {
+		t.Fatalf("CompressBlock after a refused level: %v", err)
+	}
+}

@@ -923,7 +923,36 @@ static inline int zxc_level_clamp(const int level) {
     return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
 }
 
-/** @brief Dictionary length from a (possibly NULL) options struct.
+/**
+ * @brief Compression parameters of a @ref zxc_cctx, the private form of what
+ *        zxc_cctx_set_param() / zxc_cctx_set_dict() / zxc_cctx_set_progress()
+ *        configure. Zero means the default for level and block_size.
+ */
+typedef struct {
+    int n_threads;
+    int level;
+    size_t block_size;
+    int checksum_enabled;
+    int seekable;
+    const void* dict;
+    size_t dict_size;
+    const void* dict_huf;
+    zxc_progress_callback_t progress_cb;
+    void* user_data;
+} zxc_cparams_t;
+
+/** @brief Decompression parameters of a @ref zxc_dctx; see @ref zxc_cparams_t. */
+typedef struct {
+    int n_threads;
+    int checksum_enabled;
+    const void* dict;
+    size_t dict_size;
+    const void* dict_huf;
+    zxc_progress_callback_t progress_cb;
+    void* user_data;
+} zxc_dparams_t;
+
+/** @brief Dictionary length from a (possibly NULL) parameter struct.
  *
  *  Gated on @c dict itself: no dictionary pointer means no dictionary, whatever
  *  the sibling fields hold. Macros rather than functions because the compression
@@ -2100,8 +2129,12 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
 /** @brief @ref zxc_compress_block, its checksum seeded with @p block_index (public entry: 0). */
 int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, size_t src_size,
-                              void* RESTRICT dst, size_t dst_capacity,
-                              const zxc_compress_opts_t* opts, uint64_t block_index);
+                              void* RESTRICT dst, size_t dst_capacity, const zxc_cparams_t* opts,
+                              uint64_t block_index);
+
+/** @brief Parameters a public context carries, for the FILE* and push paths. */
+const zxc_cparams_t* zxc_cctx_params(const zxc_cctx* cctx);
+const zxc_dparams_t* zxc_dctx_params(const zxc_dctx* dctx);
 
 // ---------------------------------------------------------------------------
 // Internal frame primitives.

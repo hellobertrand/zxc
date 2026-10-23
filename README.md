@@ -221,32 +221,36 @@ zxc -d < archive.tar.zxc | tar xf -
 ### 2. API
 
 The one-shot calls are stateless and **thread-safe**: buffers are caller-allocated with explicit
-bounds, and parameters go through options structs, so call sites stay readable and
-forward-compatible. Reusable contexts are per-thread: never share a `zxc_cctx` / `zxc_dctx`
-between threads.
+bounds, and the simple forms take a level and nothing else. Every other setting is a parameter
+on a reusable context, set by identifier, so call sites stay readable and forward-compatible.
+Contexts are per-thread: never share a `zxc_cctx` / `zxc_dctx` between threads.
 
 ```c
 #include "zxc.h"
 
-// Compression
+// One-shot: level 3, 512 KB blocks, no checksum, no dictionary
 size_t bound = zxc_compress_bound(src_size);
-zxc_compress_opts_t c_opts = {
-    .level            = ZXC_LEVEL_DEFAULT,
-    .checksum_enabled = 1,
-    /* .block_size = 0 -> 512 KB default */
-};
-int64_t compressed_size = zxc_compress(src, src_size, dst, bound, &c_opts);
+int64_t compressed_size   = zxc_compress(src, src_size, dst, bound, ZXC_LEVEL_DEFAULT);
+int64_t decompressed_size = zxc_decompress(dst, (size_t)compressed_size, out, out_capacity);
 
-// Decompression
-zxc_decompress_opts_t d_opts = { .checksum_enabled = 1 };
-int64_t decompressed_size = zxc_decompress(src, src_size, dst, dst_capacity, &d_opts);
+// Anything else: configure a context (settings persist across calls)
+zxc_cctx* cctx = zxc_create_cctx();
+zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_COMPACT);
+zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);
+compressed_size = zxc_compress_cctx(cctx, src, src_size, dst, bound);
+zxc_free_cctx(cctx);
+
+zxc_dctx* dctx = zxc_create_dctx();
+zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1);                // verify what the archive carries
+decompressed_size = zxc_decompress_dctx(dctx, dst, (size_t)compressed_size, out, out_capacity);
+zxc_free_dctx(dctx);
 ```
 
-The same structs drive `zxc_stream_compress()` / `zxc_stream_decompress()` (multi-threaded file
-streaming, one worker per core by default), reusable `zxc_cctx` / `zxc_dctx` contexts that skip
-per-call allocation in tight loops (`zxc_cctx` compression settings are **sticky**: `NULL` reuses
-the last successful call's, except dictionary options), and `.seekable = 1`, which appends a seek
-table for O(1) random access.
+The same contexts configure `zxc_stream_compress()` / `zxc_stream_decompress()` (multi-threaded
+file streaming, one worker per core by default; the context is read, its buffers unused), skip
+per-call allocation in tight loops, carry a dictionary (`zxc_cctx_set_dict()`), and with
+`ZXC_C_SEEKABLE` set to 1 append a seek table for O(1) random access. A setter refuses an
+out-of-range value rather than clamp it, and `0` restores a parameter's default.
 
 **[👉 See complete examples and advanced usage](docs/EXAMPLES.md)** — stream API, reusable contexts,
 seekable readers, dictionaries and numeric pre-filters, as full compilable programs.
@@ -332,7 +336,7 @@ Both cursors move right and a ZXC block never expands, so with a small margin th
 size_t need = zxc_decompress_inplace_bound(archive, archive_size);   // reads header + footer only
 uint8_t* buf = malloc(need);
 memcpy(buf + (need - archive_size), archive, archive_size);          // archive at the end
-int64_t n = zxc_decompress_inplace(buf, need, archive_size, NULL);   // decode from buf[0]
+int64_t n = zxc_decompress_inplace(buf, need, archive_size);         // decode from buf[0]
 // buf[0 .. n) now holds the decompressed data
 ```
 
@@ -379,10 +383,9 @@ Blocks are powers of two from 4 KB to 2 MB. The default, **512 KB**, favours rat
 zxc -B 256K -5 input_file output_file
 
 # API
-zxc_compress_opts_t opts = {
-    .level      = ZXC_LEVEL_COMPACT,
-    .block_size = 256 * 1024,
-};
+zxc_cctx* cctx = zxc_create_cctx();
+zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_COMPACT);
+zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 256 * 1024);   // power of two, 4 KB..2 MB
 ```
 
 ## Format & Conformance

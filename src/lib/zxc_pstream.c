@@ -122,7 +122,7 @@ typedef enum {
  *      Sticky error code; valid only when @c state is @c CS_ERRORED.
  */
 struct zxc_cstream_s {
-    zxc_compress_opts_t opts;
+    zxc_cparams_t opts;
     zxc_cctx* cctx;
     size_t block_size;
 
@@ -263,11 +263,11 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
  * @c pending buffer so that the file header / footer paths never need a
  * realloc.
  */
-zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
+zxc_cstream* zxc_cstream_create(const zxc_cctx* cfg) {
     zxc_cstream* cs = (zxc_cstream*)ZXC_CALLOC(1, sizeof(*cs));
     if (UNLIKELY(!cs)) return NULL;  // LCOV_EXCL_LINE
 
-    if (opts) cs->opts = *opts;
+    if (cfg) cs->opts = *zxc_cctx_params(cfg);
 
     // Push streams take no dictionary yet (deferred until a need arises): the
     // header id stays 0, so a dictionary here would produce archives that
@@ -286,7 +286,9 @@ zxc_cstream* zxc_cstream_create(const zxc_compress_opts_t* opts) {
     cs->opts.seekable = 0;
     cs->block_size = cs->opts.block_size;
 
-    cs->cctx = zxc_create_cctx(&cs->opts);
+    // The block encoder reads its parameters from cs->opts on every call;
+    // the context only needs to exist.
+    cs->cctx = zxc_create_cctx();
     // LCOV_EXCL_START
     if (UNLIKELY(!cs->cctx)) {
         ZXC_FREE(cs);
@@ -687,7 +689,7 @@ typedef enum {
  *      Sticky error code; valid only when @c state is @c DS_ERRORED.
  */
 struct zxc_dstream_s {
-    zxc_decompress_opts_t opts;
+    zxc_dparams_t opts;
     zxc_cctx_t inner;
     int inner_initialized;
     size_t block_size;
@@ -795,10 +797,10 @@ static void ds_start_frame(zxc_dstream* ds) {
  * and the @c payload / @c decoded buffers are filled in lazily once the
  * file header is parsed.
  */
-zxc_dstream* zxc_dstream_create(const zxc_decompress_opts_t* opts) {
+zxc_dstream* zxc_dstream_create(const zxc_dctx* cfg) {
     zxc_dstream* ds = (zxc_dstream*)ZXC_CALLOC(1, sizeof(*ds));
     if (UNLIKELY(!ds)) return NULL;  // LCOV_EXCL_LINE
-    if (opts) ds->opts = *opts;
+    if (cfg) ds->opts = *zxc_dctx_params(cfg);
     if (UNLIKELY(ds->opts.dict || ds->opts.dict_size || ds->opts.dict_huf)) {
         ZXC_FREE(ds);
         return NULL;

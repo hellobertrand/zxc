@@ -74,34 +74,32 @@ _Use_decl_annotations_ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
 
     if (!comp || !back || !sdctx) goto out;
     for (i = 0; i < 2; i++) {
-        zxc_compress_opts_t opts = {.level = levels[i]};
-        zxc_cctx* cctx = zxc_create_cctx(&opts);
+        zxc_cctx* cctx = zxc_create_cctx();
         zxc_dctx* dctx = zxc_create_dctx();
         int64_t n = -1, m = -1, fn = -1, fm = -1, pn = -1, pm = -1;
 
         status = STATUS_INSUFFICIENT_RESOURCES;
-        if (cctx && dctx) {
-            n = zxc_compress_block(cctx, msg, sizeof(msg), comp, cap, &opts);
-            if (n > 0)
-                m = zxc_decompress_block_safe(dctx, comp, (size_t)n, back, sizeof(msg), NULL);
+        if (cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_LEVEL, levels[i]) == ZXC_OK) {
+            n = zxc_compress_block(cctx, msg, sizeof(msg), comp, cap);
+            if (n > 0) m = zxc_decompress_block_safe(dctx, comp, (size_t)n, back, sizeof(msg));
             status = (m == sizeof(msg) && !memcmp(back, msg, sizeof(msg))) ? STATUS_SUCCESS
                                                                            : STATUS_DATA_ERROR;
             memset(back, 0, sizeof(msg));
-            fn = zxc_compress(msg, sizeof(msg), comp, cap, &opts);
-            if (fn > 0) fm = zxc_decompress(comp, (size_t)fn, back, sizeof(msg), NULL);
+            fn = zxc_compress(msg, sizeof(msg), comp, cap, levels[i]);
+            if (fn > 0) fm = zxc_decompress(comp, (size_t)fn, back, sizeof(msg));
             if (NT_SUCCESS(status) && (fm != sizeof(msg) || memcmp(back, msg, sizeof(msg))))
                 status = STATUS_DATA_ERROR;
 
             // In place: the archive flush-right in one buffer, no allocation inside.
-            zxc_compress_opts_t popts = {.level = levels[i], .block_size = PAGE_SIZE};
             uint8_t* buf = NULL;
             size_t need = 0;
-            pn = zxc_compress(msg, sizeof(msg), comp, cap, &popts);
+            if (zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, (int64_t)PAGE_SIZE) == ZXC_OK)
+                pn = zxc_compress_cctx(cctx, msg, sizeof(msg), comp, cap);
             if (pn > 0) need = zxc_decompress_inplace_bound(comp, (size_t)pn);
             if (need) buf = st_alloc(need);
             if (buf) {
                 memcpy(buf + need - (size_t)pn, comp, (size_t)pn);
-                pm = zxc_decompress_inplace_dctx(sdctx, buf, need, (size_t)pn, NULL);
+                pm = zxc_decompress_inplace_dctx(sdctx, buf, need, (size_t)pn);
             }
             if (need && !buf) {
                 status = STATUS_INSUFFICIENT_RESOURCES;

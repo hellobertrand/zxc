@@ -13,12 +13,14 @@
  * via add_executable(). Most public ZXC functionality is exported
  * directly from the library through -sEXPORTED_FUNCTIONS; this file
  * adds a few thin shims that adapt 64-bit C parameters to wasm32
- * so the JS wrapper can call them through cwrap('number', ...) without
- * relying on BigInt support.
+ * (seekable offsets and block counts, context parameter values) so the
+ * JS wrapper can call them through cwrap('number', ...) without relying
+ * on BigInt support.
  */
 
 #include <stdint.h>
 
+#include "zxc_buffer.h"
 #include "zxc_seekable.h"
 
 #ifdef __EMSCRIPTEN__
@@ -92,4 +94,25 @@ int32_t zxcw_write_seek_table(uint8_t* dst, uint32_t dst_capacity, const uint32_
     if (r > INT32_MAX) return INT32_MAX;
     if (r < INT32_MIN) return INT32_MIN;
     return (int32_t)r;
+}
+
+/*
+ * i32 shims for the context parameter setters.
+ *
+ * The native value is an `int64_t`, which cwrap cannot carry without
+ * `-sWASM_BIGINT=1`. Every parameter the wrapper sets (level, block size,
+ * thread count, 0/1 flags) fits in 32 bits; the library validates the value
+ * against zxc_cparam_bounds() / zxc_dparam_bounds() as usual.
+ */
+
+/** @return ZXC_OK, or a negative `zxc_error_t` code. */
+EMSCRIPTEN_KEEPALIVE
+int32_t zxcw_cctx_set_param(zxc_cctx* cctx, int32_t param, int32_t value) {
+    return zxc_cctx_set_param(cctx, (zxc_cparam_t)param, (int64_t)value);
+}
+
+/** @return ZXC_OK, or a negative `zxc_error_t` code. */
+EMSCRIPTEN_KEEPALIVE
+int32_t zxcw_dctx_set_param(zxc_dctx* dctx, int32_t param, int32_t value) {
+    return zxc_dctx_set_param(dctx, (zxc_dparam_t)param, (int64_t)value);
 }

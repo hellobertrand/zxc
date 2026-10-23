@@ -249,16 +249,48 @@ static const uint8_t* gc_dict_huf_table(void) {
 /* Case table                                                                */
 /* ------------------------------------------------------------------------- */
 
+/* Compression recipe of a case: a plain struct, so the table stays designated
+ * initialisers. gc_recipe_apply() carries it onto a context. */
+typedef struct {
+    int level;
+    size_t block_size;
+    int checksum_enabled;
+    int seekable;
+    const void* dict;
+    size_t dict_size;
+} gc_recipe_t;
+
+/* Configures @p c from @p r plus the shared table. ZXC_OK or the setter's error. */
+static inline int gc_recipe_apply(zxc_cctx* c, const gc_recipe_t* r, const void* dict_huf) {
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, r->level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, (int64_t)r->block_size);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, r->checksum_enabled);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, r->seekable);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_dict(c, r->dict, r->dict_size, dict_huf);
+    return rc;
+}
+
+/* Compresses @p in with @p r into @p out: the size, or a negative zxc_error_t. */
+static inline int64_t gc_recipe_compress(const gc_recipe_t* r, const void* dict_huf, const void* in,
+                                         size_t in_size, void* out, size_t cap) {
+    zxc_cctx* const c = zxc_create_cctx();
+    if (!c) return ZXC_ERROR_MEMORY;
+    const int rc = gc_recipe_apply(c, r, dict_huf);
+    const int64_t n = rc == ZXC_OK ? zxc_compress_cctx(c, in, in_size, out, cap) : rc;
+    zxc_free_cctx(c);
+    return n;
+}
+
 typedef struct {
     const char* name; /* basename, no extension */
     size_t (*make_input)(uint8_t** out);
-    zxc_compress_opts_t opts; /* level / block_size / checksum / seekable */
+    gc_recipe_t opts;         /* level / block_size / checksum / seekable / dict */
     uint8_t expect_data_type; /* every data block must equal this, or GC_ANY_TYPE */
     int expect_enc_lit;       /* SPL literal encoding (-1 = no constraint;
                                  2 = HUFFMAN, 3 = HUFFMAN_DICT) */
     int min_data_blocks;      /* lower bound on data-block count */
     int expect_seek;          /* a SEK block must be present */
-    int use_dict_huf;         /* attach gc_dict_huf_table() to the opts */
+    int use_dict_huf;         /* attach gc_dict_huf_table() to the recipe */
 } golden_case_t;
 
 /* The corpus. Each entry maps onto one or more sections of docs/FORMAT.md Sec 5. */

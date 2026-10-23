@@ -41,7 +41,9 @@ static int generate(const char* dir, const valid_case_t* vc) {
     }
 
     /* The .zxd carries the content and its Huffman table; both feed the dict_id. */
-    zxc_compress_opts_t opts = vc->opts;
+    const void* dict = NULL;
+    size_t dict_size = 0;
+    const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
     if (vc->dict) {
         snprintf(path, sizeof path, "%s/%s", dir, vc->dict);
@@ -52,8 +54,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
             free(input);
             return -1;
         }
-        if (zxc_dict_load(dict_buf, dict_file_size, &opts.dict, &opts.dict_size, &opts.dict_huf,
-                          NULL) != 0) {
+        if (zxc_dict_load(dict_buf, dict_file_size, &dict, &dict_size, &dict_huf, NULL) != 0) {
             fprintf(stderr, "  FAIL %s: %s is not a valid dictionary\n", vc->name, path);
             free(dict_buf);
             free(input);
@@ -66,7 +67,8 @@ static int generate(const char* dir, const valid_case_t* vc) {
     if (!out) {
         fprintf(stderr, "  FAIL %s: out of memory\n", vc->name);
     } else {
-        const int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
+        const int64_t csize =
+            vc_recipe_compress(&vc->opts, dict, dict_size, dict_huf, input, in_size, out, cap);
         if (csize <= 0) {
             fprintf(stderr, "  FAIL %s: compress -> %s\n", vc->name, zxc_error_name((int)csize));
         } else {

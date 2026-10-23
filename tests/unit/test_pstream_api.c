@@ -25,8 +25,13 @@
 static uint8_t* pstream_compress_in_chunks(const uint8_t* src, size_t src_size, size_t in_chunk,
                                            size_t out_chunk, int level, int checksum_enabled,
                                            size_t* out_size) {
-    const zxc_compress_opts_t opts = {.level = level, .checksum_enabled = checksum_enabled};
-    zxc_cstream* cs = zxc_cstream_create(&opts);
+    zxc_cctx* const cfg = zxc_create_cctx();
+    if (!cfg) return NULL;
+    zxc_cstream* cs = NULL;
+    if (zxc_cctx_set_param(cfg, ZXC_C_LEVEL, level) == ZXC_OK &&
+        zxc_cctx_set_param(cfg, ZXC_C_CHECKSUM, checksum_enabled) == ZXC_OK)
+        cs = zxc_cstream_create(cfg);
+    zxc_free_cctx(cfg);
     if (!cs) return NULL;
 
     size_t cap = 1024;
@@ -107,8 +112,12 @@ static uint8_t* pstream_compress_in_chunks(const uint8_t* src, size_t src_size, 
 static uint8_t* pstream_decompress_in_chunks(const uint8_t* src, size_t src_size, size_t in_chunk,
                                              size_t out_chunk, int checksum_enabled,
                                              size_t* out_size) {
-    const zxc_decompress_opts_t opts = {.checksum_enabled = checksum_enabled};
-    zxc_dstream* ds = zxc_dstream_create(&opts);
+    zxc_dctx* const cfg = zxc_create_dctx();
+    if (!cfg) return NULL;
+    zxc_dstream* ds = NULL;
+    if (zxc_dctx_set_param(cfg, ZXC_D_CHECKSUM, checksum_enabled) == ZXC_OK)
+        ds = zxc_dstream_create(cfg);
+    zxc_free_dctx(cfg);
     if (!ds) return NULL;
 
     size_t cap = 1024;
@@ -331,15 +340,14 @@ int test_pstream_compatible_with_buffer_api(void) {
         free(src);
         return 0;
     }
-    /* Decode with the one-shot buffer API. */
+    /* Decode with the buffer API, checksums verified. */
     uint8_t* dec = (uint8_t*)malloc(size);
     if (!dec) {
         free(src);
         free(comp);
         return 0;
     }
-    const zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-    const int64_t dsz = zxc_decompress(comp, comp_size, dec, size, &dopts);
+    const int64_t dsz = test_decompress_verified(comp, comp_size, dec, size);
     const int ok = (dsz == (int64_t)size && memcmp(dec, src, size) == 0);
     if (!ok) {
         printf("FAIL: dsz=%lld, expected %zu\n", (long long)dsz, size);
@@ -364,8 +372,7 @@ int test_pstream_decompress_compatible_with_buffer_api(void) {
         free(src);
         return 0;
     }
-    const zxc_compress_opts_t copts = {.level = 3, .checksum_enabled = 1};
-    const int64_t csz = zxc_compress(src, size, comp, (size_t)bound, &copts);
+    const int64_t csz = test_compress_cfg(src, size, comp, (size_t)bound, 3, 0, 1, 0);
     if (csz <= 0) {
         free(src);
         free(comp);
@@ -396,18 +403,32 @@ int test_pstream_invalid_args(void) {
     if (zxc_dstream_in_size(NULL) != 0) return 0;
     if (zxc_dstream_out_size(NULL) != 0) return 0;
 
-    /* Dictionary options are rejected at create time (the push-stream format
-     * carries no dict_id): a dictionary must never be silently dropped. */
+    /* A dictionary on the configuring context is rejected at create time (the
+     * push-stream format carries no dict_id): it must never be silently dropped. */
     {
         static const uint8_t d[4] = {1, 2, 3, 4};
-        zxc_compress_opts_t copts = {.level = 3, .dict = d, .dict_size = sizeof(d)};
-        if (zxc_cstream_create(&copts)) {
-            printf("  [FAIL] cstream_create must reject dict opts\n");
+        zxc_cctx* const ccfg = zxc_create_cctx();
+        zxc_dctx* const dcfg = zxc_create_dctx();
+        if (!ccfg || !dcfg || zxc_cctx_set_param(ccfg, ZXC_C_LEVEL, 3) != ZXC_OK ||
+            zxc_cctx_set_dict(ccfg, d, sizeof(d), NULL) != ZXC_OK ||
+            zxc_dctx_set_dict(dcfg, d, sizeof(d), NULL) != ZXC_OK) {
+            zxc_free_cctx(ccfg);
+            zxc_free_dctx(dcfg);
             return 0;
         }
-        zxc_decompress_opts_t dopts_dict = {.dict = d, .dict_size = sizeof(d)};
-        if (zxc_dstream_create(&dopts_dict)) {
-            printf("  [FAIL] dstream_create must reject dict opts\n");
+        zxc_cstream* const cs = zxc_cstream_create(ccfg);
+        zxc_dstream* const ds = zxc_dstream_create(dcfg);
+        zxc_free_cctx(ccfg);
+        zxc_free_dctx(dcfg);
+        if (cs) {
+            printf("  [FAIL] cstream_create must reject a dictionary on the context\n");
+            zxc_cstream_free(cs);
+            zxc_dstream_free(ds);
+            return 0;
+        }
+        if (ds) {
+            printf("  [FAIL] dstream_create must reject a dictionary on the context\n");
+            zxc_dstream_free(ds);
             return 0;
         }
     }
@@ -416,8 +437,7 @@ int test_pstream_invalid_args(void) {
      * unchecked memcpy() that could underflow size_t arithmetic or
      * dereference NULL. */
     {
-        const zxc_decompress_opts_t dopts = {0};
-        zxc_dstream* ds = zxc_dstream_create(&dopts);
+        zxc_dstream* ds = zxc_dstream_create(NULL);
         if (!ds) return 0;
         uint8_t buf[16] = {0};
         zxc_outbuf_t good_out = {buf, sizeof buf, 0};
@@ -489,8 +509,7 @@ int test_pstream_corrupted_magic(void) {
     /* Hand-craft 16 bogus bytes of "file header". */
     uint8_t junk[16];
     for (int i = 0; i < 16; i++) junk[i] = (uint8_t)(0xAA ^ i);
-    const zxc_decompress_opts_t opts = {0};
-    zxc_dstream* ds = zxc_dstream_create(&opts);
+    zxc_dstream* ds = zxc_dstream_create(NULL);
     if (!ds) return 0;
     uint8_t out_buf[64];
     zxc_outbuf_t out = {out_buf, sizeof out_buf, 0};
@@ -527,11 +546,9 @@ int test_pstream_decode_seekable_archive(void) {
         free(src);
         return 0;
     }
-    const zxc_compress_opts_t copts = {
-        .level = 3, .checksum_enabled = 1, .seekable = 1, .block_size = 32 * 1024};
-    const int64_t comp_size = zxc_compress(src, size, comp, (size_t)bound, &copts);
+    const int64_t comp_size = test_compress_cfg(src, size, comp, (size_t)bound, 3, 32 * 1024, 1, 1);
     if (comp_size <= 0) {
-        printf("FAIL: zxc_compress(seekable=1) returned %lld\n", (long long)comp_size);
+        printf("FAIL: test_compress_cfg(seekable=1) returned %lld\n", (long long)comp_size);
         free(src);
         free(comp);
         return 0;
@@ -542,8 +559,11 @@ int test_pstream_decode_seekable_archive(void) {
      * receive the output via 8 KB chunks: this stresses the SEK skip across
      * multiple calls (DS_DRAIN_SEK_PAYLOAD returns when the input is exhausted
      * mid-skip). */
-    const zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-    zxc_dstream* ds = zxc_dstream_create(&dopts);
+    zxc_dctx* const dcfg = zxc_create_dctx();
+    zxc_dstream* ds = NULL;
+    if (dcfg && zxc_dctx_set_param(dcfg, ZXC_D_CHECKSUM, 1) == ZXC_OK)
+        ds = zxc_dstream_create(dcfg);
+    zxc_free_dctx(dcfg);
     if (!ds) {
         free(src);
         free(comp);
@@ -606,8 +626,7 @@ int test_pstream_decode_seekable_archive(void) {
  * zxc_cstream_compress(). */
 int test_pstream_compress_after_end_rejected(void) {
     printf("=== TEST: PStream _compress() after _end() -> ZXC_ERROR_NULL_INPUT ===\n");
-    const zxc_compress_opts_t opts = {.level = 3};
-    zxc_cstream* cs = zxc_cstream_create(&opts);
+    zxc_cstream* cs = zxc_cstream_create(NULL); /* defaults: level 3 */
     if (!cs) return 0;
 
     /* Feed a few bytes so _end has actual residual data to flush. */
@@ -652,8 +671,12 @@ int test_pstream_compress_after_end_rejected(void) {
 int test_pstream_compress_drain_block_resume(void) {
     printf("=== TEST: PStream _compress() resumes CS_DRAIN_BLOCK across calls ===\n");
     /* Small block size so we trigger the block boundary quickly. */
-    const zxc_compress_opts_t opts = {.level = 3, .block_size = 4096};
-    zxc_cstream* cs = zxc_cstream_create(&opts);
+    zxc_cctx* const cfg = zxc_create_cctx();
+    zxc_cstream* cs = NULL;
+    if (cfg && zxc_cctx_set_param(cfg, ZXC_C_LEVEL, 3) == ZXC_OK &&
+        zxc_cctx_set_param(cfg, ZXC_C_BLOCK_SIZE, 4096) == ZXC_OK)
+        cs = zxc_cstream_create(cfg);
+    zxc_free_cctx(cfg);
     if (!cs) return 0;
 
     /* Enough input for one full block (+ a little) but no more. */
@@ -703,8 +726,13 @@ int test_pstream_dict_archive_rejected(void) {
     uint8_t src[2048];
     for (size_t i = 0; i < sizeof(src); i++) src[i] = (uint8_t)(i * 31 + (i >> 5));
     uint8_t comp[4096];
-    const zxc_compress_opts_t co = {.level = 3, .dict = dict, .dict_size = sizeof(dict) - 1};
-    const int64_t cs = zxc_compress(src, sizeof(src), comp, sizeof(comp), &co);
+    zxc_cctx* const cctx = zxc_create_cctx();
+    if (cctx) {
+        zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3);
+        zxc_cctx_set_dict(cctx, dict, sizeof(dict) - 1, NULL);
+    }
+    const int64_t cs = cctx ? zxc_compress_cctx(cctx, src, sizeof(src), comp, sizeof(comp)) : -1;
+    zxc_free_cctx(cctx);
     if (cs <= 0 || zxc_get_dict_id(comp, (size_t)cs) == 0) {
         printf("  [FAIL] setup: %lld\n", (long long)cs);
         return 0;

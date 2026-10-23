@@ -54,12 +54,17 @@ export const ERROR_DICT_REQUIRED: number;
 export const ERROR_DICT_MISMATCH: number;
 /** Dictionary exceeds maximum allowed size. */
 export const ERROR_DICT_TOO_LARGE: number;
+/** Compression level not supported: outside 1-7 on a context or stream. */
 export const ERROR_BAD_LEVEL: number;
 /** Dictionary not supported by this context's workspace (static contexts). */
 export const ERROR_DICT_UNSUPPORTED: number;
+/** Unknown context parameter, or value out of its bounds (e.g. a checksum
+ *  flag that is neither 0 nor 1 at the C level). */
+export const ERROR_BAD_PARAM: number;
 
 export interface CompressOptions {
-  /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
+  /** Compression level (1-7). Defaults to LEVEL_DEFAULT; out-of-range values
+   *  are clamped, like the C one-shot `zxc_compress()`. */
   level?: number;
   /** Enable checksum verification. Defaults to false. */
   checksum?: boolean;
@@ -239,16 +244,21 @@ export function defaultLevel(): number;
 export function libraryVersion(): string;
 
 export interface CStreamOptions {
-  /** Compression level (1-7). Defaults to LEVEL_DEFAULT. */
+  /** Compression level (1-7). Defaults to LEVEL_DEFAULT; an out-of-range
+   *  value throws with `code === ERROR_BAD_LEVEL`. */
   level?: number;
   /** Append a per-block checksum and the archive digest. Defaults to false. */
   checksum?: boolean;
-  /** Block size in bytes (0 = default 512 KB). Power of 2, 4 KB – 2 MB. */
+  /** Block size in bytes (0 = default 512 KB). Power of 2, 4 KB – 2 MB;
+   *  anything else throws with `code === ERROR_BAD_BLOCK_SIZE`. */
   blockSize?: number;
 }
 
 export interface CctxOptions {
+  /** Compression level (1-7). Defaults to LEVEL_DEFAULT; an out-of-range
+   *  value throws with `code === ERROR_BAD_LEVEL` (no clamping). */
   level?: number;
+  /** Append a per-block checksum and the archive digest. Defaults to false. */
   checksum?: boolean;
   /** A {@link Dictionary}, or raw dictionary content. */
   dict?: Dictionary | Buffer | Uint8Array;
@@ -257,6 +267,7 @@ export interface CctxOptions {
 }
 
 export interface DctxOptions {
+  /** Verify the block checksums and archive digest when present. Defaults to false. */
   checksum?: boolean;
   /** A {@link Dictionary}, or raw dictionary content. */
   dict?: Dictionary | Buffer | Uint8Array;
@@ -264,7 +275,11 @@ export interface DctxOptions {
   dictHuf?: Buffer | Uint8Array;
 }
 
-/** Reusable compression context: one archive per `compress()` call. */
+/**
+ * Reusable compression context: one archive per `compress()` call. The
+ * options are set on the native context at construction and apply to every
+ * call.
+ */
 export class Cctx {
   constructor(options?: CctxOptions);
   compress(data: Buffer): Buffer;

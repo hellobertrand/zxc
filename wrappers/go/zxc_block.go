@@ -78,23 +78,24 @@ type Cctx struct {
 // NewCctx creates a new compression context.
 //
 // [WithLevel], [WithChecksum], [WithDict] and [WithDictHuf] become the defaults
-// for every [Cctx.CompressBlock] call that does not override them. The context
-// carves for a dictionary on first use, so only the table length is checked here.
+// for every [Cctx.CompressBlock] call that does not override them. The level
+// and the table length are validated here; the context carves for a
+// dictionary on first use.
 func NewCctx(opts ...Option) (*Cctx, error) {
 	o := applyOptions(opts)
 	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
 		return nil, ErrBadHufTable
 	}
-	var copts C.zxc_compress_opts_t
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
-	}
-	// Block size is optional; 0 lets the library pick the default.
-
-	ptr := C.zxc_create_cctx(&copts)
+	ptr := C.zxc_create_cctx()
 	if ptr == nil {
 		return nil, ErrMemory
+	}
+	// The level is refused here rather than on the first call. Block size is
+	// left at the library default. The dictionary is attached per call, so no
+	// Go pointer stays in the native context between calls.
+	if err := setCParam(ptr, C.ZXC_C_LEVEL, int64(o.level)); err != nil {
+		C.zxc_free_cctx(ptr)
+		return nil, err
 	}
 	c := &Cctx{ptr: ptr, level: o.level, checksum: o.checksum, dict: o.dict, dictHuf: o.dictHuf}
 	runtime.SetFinalizer(c, (*Cctx).Close)
@@ -132,9 +133,8 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	// Merge per-call options over the creation-time settings: the C side
-	// always receives a non-NULL opts struct, so its own stored-level
-	// fallback never triggers and the merge must happen here.
+	// Merge per-call options over the creation-time settings, then set the
+	// result on the native context for this call.
 	o := applyOptions(opts)
 	if !o.levelSet {
 		o.level = c.level
@@ -148,16 +148,20 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if !o.dictHufSet {
 		o.dictHuf = c.dictHuf
 	}
-	var copts C.zxc_compress_opts_t
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
-	}
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	if err := setCompressDict(&copts, o, &pinner); err != nil {
+	if err := setCParam(c.ptr, C.ZXC_C_LEVEL, int64(o.level)); err != nil {
 		return 0, err
 	}
+	if err := setCParam(c.ptr, C.ZXC_C_CHECKSUM, boolParam(o.checksum)); err != nil {
+		return 0, err
+	}
+	// The dictionary is pinned for the call and detached before the pins go
+	// (defer order), so the native context never outlives a Go pointer.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	if err := attachCompressDict(c.ptr, o, &pinner); err != nil {
+		return 0, err
+	}
+	defer C.zxc_cctx_set_dict(c.ptr, nil, 0, nil)
 
 	n := C.zxc_compress_block(
 		c.ptr,
@@ -165,7 +169,6 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 		C.size_t(len(src)),
 		unsafe.Pointer(&dst[0]),
 		C.size_t(len(dst)),
-		&copts,
 	)
 	runtime.KeepAlive(c)
 	if n < 0 {
@@ -202,14 +205,25 @@ func NewDctx(opts ...Option) (*Dctx, error) {
 	return d, nil
 }
 
-// mergeDict fills in the creation-time dictionary where a call omits it.
-func (d *Dctx) mergeDict(o *options) {
+// prepare sets a decode call's options on the native context: the checksum
+// flag, and the dictionary (the creation-time one where the call omits it),
+// pinned on pinner. The returned detach runs before pinner.Unpin, so the
+// native context never outlives a Go pointer.
+func (d *Dctx) prepare(opts []Option, pinner *runtime.Pinner) (detach func(), err error) {
+	o := applyOptions(opts)
 	if !o.dictSet {
 		o.dict = d.dict
 	}
 	if !o.dictHufSet {
 		o.dictHuf = d.dictHuf
 	}
+	if err := setDParam(d.ptr, C.ZXC_D_CHECKSUM, boolParam(o.checksum)); err != nil {
+		return nil, err
+	}
+	if err := attachDecompressDict(d.ptr, o, pinner); err != nil {
+		return nil, err
+	}
+	return func() { C.zxc_dctx_set_dict(d.ptr, nil, 0, nil) }, nil
 }
 
 // Close releases the native resources held by the context.
@@ -242,17 +256,13 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	o := applyOptions(opts)
-	d.mergeDict(&o)
-	var dopts C.zxc_decompress_opts_t
-	if o.checksum {
-		dopts.checksum_enabled = 1
-	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+	detach, err := d.prepare(opts, &pinner)
+	if err != nil {
 		return 0, err
 	}
+	defer detach()
 
 	n := C.zxc_decompress_block(
 		d.ptr,
@@ -260,7 +270,6 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 		C.size_t(len(src)),
 		unsafe.Pointer(&dst[0]),
 		C.size_t(len(dst)),
-		&dopts,
 	)
 	runtime.KeepAlive(d)
 	if n < 0 {
@@ -285,17 +294,13 @@ func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error)
 		return 0, ErrDstTooSmall
 	}
 
-	o := applyOptions(opts)
-	d.mergeDict(&o)
-	var dopts C.zxc_decompress_opts_t
-	if o.checksum {
-		dopts.checksum_enabled = 1
-	}
 	var pinner runtime.Pinner
 	defer pinner.Unpin()
-	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
+	detach, err := d.prepare(opts, &pinner)
+	if err != nil {
 		return 0, err
 	}
+	defer detach()
 
 	n := C.zxc_decompress_block_safe(
 		d.ptr,
@@ -303,7 +308,6 @@ func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error)
 		C.size_t(len(src)),
 		unsafe.Pointer(&dst[0]),
 		C.size_t(len(dst)),
-		&dopts,
 	)
 	runtime.KeepAlive(d)
 	if n < 0 {

@@ -119,6 +119,26 @@ describe("Cctx / Dctx", () => {
     expect(() => new zxc.Dctx({ dict, dictHuf: Buffer.alloc(3) })).toThrow();
   });
 
+  test("refuse an out-of-range level at construction", () => {
+    // Contexts set the level on the native context: no clamping, the setter
+    // refuses and the constructor throws with the zxc error code.
+    let err;
+    try {
+      new zxc.Cctx({ level: zxc.LEVEL_ULTRA + 1 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err.code).toBe(zxc.ERROR_BAD_LEVEL);
+    expect(err.message).toBe("ZXC_ERROR_BAD_LEVEL");
+    // The one-shot API keeps clamping, like the C zxc_compress().
+    const payload = Buffer.concat(samples());
+    const clamped = zxc.compress(payload, { level: zxc.LEVEL_ULTRA + 1 });
+    expect(clamped.equals(zxc.compress(payload, { level: zxc.LEVEL_ULTRA }))).toBe(
+      true,
+    );
+  });
+
   test("refuse calls after close", () => {
     const payload = Buffer.concat(samples());
     const cctx = new zxc.Cctx();

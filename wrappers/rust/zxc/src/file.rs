@@ -14,6 +14,7 @@ use std::path::Path;
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
+use crate::ctx::{RawCctx, RawDctx, thread_param};
 use crate::error::error_from_code;
 use crate::{Error, Level};
 
@@ -22,7 +23,8 @@ use crate::{Error, Level};
 pub struct StreamCompressOptions {
     /// Compression level (default: `Level::Default`)
     pub level: Level,
-    /// Number of worker threads (default: `None` = auto-detect CPU cores)
+    /// Number of worker threads (default: `None` = auto-detect CPU cores).
+    /// At most the library maximum (512); more is [`Error::BadParam`].
     pub threads: Option<usize>,
     /// Enable checksum for data integrity (default: `true`)
     pub checksum: bool,
@@ -72,7 +74,8 @@ impl StreamCompressOptions {
 /// Options for streaming decompression operations.
 #[derive(Debug, Clone)]
 pub struct StreamDecompressOptions {
-    /// Number of worker threads (default: `None` = auto-detect CPU cores)
+    /// Number of worker threads (default: `None` = auto-detect CPU cores).
+    /// At most the library maximum (512); more is [`Error::BadParam`].
     pub threads: Option<usize>,
     /// Verify checksum during decompression (default: `true`)
     pub verify_checksum: bool,
@@ -376,6 +379,16 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
     output: P,
     opts: &StreamCompressOptions,
 ) -> StreamResult<u64> {
+    // The pipeline reads its parameters from a configured context; validate
+    // them before touching the files.
+    let mut cfg = RawCctx::new()?;
+    cfg.set_params(
+        opts.level,
+        opts.checksum,
+        opts.seekable,
+        thread_param(opts.threads),
+    )?;
+
     let f_in = File::open(input)?;
     let f_out = File::create(output)?;
 
@@ -395,17 +408,7 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::Io(io::Error::last_os_error()));
         }
 
-        let result = zxc_sys::zxc_stream_compress(
-            c_in,
-            c_out,
-            &zxc_sys::zxc_compress_opts_t {
-                n_threads: opts.threads.unwrap_or(0) as i32,
-                level: opts.level as i32,
-                checksum_enabled: opts.checksum as i32,
-                seekable: opts.seekable as i32,
-                ..Default::default()
-            },
-        );
+        let result = zxc_sys::zxc_stream_compress(c_in, c_out, cfg.as_ptr());
 
         // Always close C FILE handles (they own duplicated fds)
         let closed = close_output(c_out);
@@ -466,11 +469,11 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
     output: P,
     opts: &StreamDecompressOptions,
 ) -> StreamResult<u64> {
+    let mut cfg = RawDctx::new()?;
+    cfg.set_params(opts.verify_checksum, thread_param(opts.threads))?;
+
     let f_in = File::open(input)?;
     let f_out = File::create(output)?;
-
-    let n_threads = opts.threads.unwrap_or(0) as i32;
-    let checksum_enabled = opts.verify_checksum as i32;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
@@ -488,15 +491,7 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::Io(io::Error::last_os_error()));
         }
 
-        let result = zxc_sys::zxc_stream_decompress(
-            c_in,
-            c_out,
-            &zxc_sys::zxc_decompress_opts_t {
-                n_threads,
-                checksum_enabled,
-                ..Default::default()
-            },
-        );
+        let result = zxc_sys::zxc_stream_decompress(c_in, c_out, cfg.as_ptr());
 
         // Always close C FILE handles (they own duplicated fds)
         let closed = close_output(c_out);

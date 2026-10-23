@@ -166,9 +166,20 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     fwrite(input, 1, size, f_in);
     fseek(f_in, 0, SEEK_SET);
 
-    zxc_compress_opts_t _sco1 = {
-        .n_threads = 1, .level = level, .checksum_enabled = checksum_enabled};
-    if (zxc_stream_compress(f_in, f_comp, &_sco1) < 0) {
+    zxc_cctx* const cfg = zxc_create_cctx();
+    if (!cfg || zxc_cctx_set_param(cfg, ZXC_C_THREADS, 1) != ZXC_OK ||
+        zxc_cctx_set_param(cfg, ZXC_C_LEVEL, level) != ZXC_OK ||
+        zxc_cctx_set_param(cfg, ZXC_C_CHECKSUM, checksum_enabled) != ZXC_OK) {
+        printf("Compression setup failed!\n");
+        zxc_free_cctx(cfg);
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
+        return 0;
+    }
+    const int64_t crc = zxc_stream_compress(f_in, f_comp, cfg);
+    zxc_free_cctx(cfg);
+    if (crc < 0) {
         printf("Compression Failed!\n");
         fclose(f_in);
         fclose(f_comp);
@@ -181,8 +192,14 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
            (double)size / (comp_size > 0 ? comp_size : 1));
     fseek(f_comp, 0, SEEK_SET);
 
-    zxc_decompress_opts_t _sdo2 = {.n_threads = 1, .checksum_enabled = checksum_enabled};
-    if (zxc_stream_decompress(f_comp, f_decomp, &_sdo2) < 0) {
+    zxc_dctx* const dcfg = zxc_create_dctx();
+    if (dcfg) {
+        zxc_dctx_set_param(dcfg, ZXC_D_THREADS, 1);
+        zxc_dctx_set_param(dcfg, ZXC_D_CHECKSUM, checksum_enabled);
+    }
+    const int64_t drc = dcfg ? zxc_stream_decompress(f_comp, f_decomp, dcfg) : ZXC_ERROR_MEMORY;
+    zxc_free_dctx(dcfg);
+    if (drc < 0) {
         printf("Decompression Failed!\n");
         fclose(f_in);
         fclose(f_comp);
@@ -227,4 +244,27 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     fclose(f_comp);
     fclose(f_decomp);
     return 1;
+}
+
+int64_t test_compress_cfg(const void* src, const size_t n, void* dst, const size_t cap,
+                          const int level, const size_t block_size, const int checksum,
+                          const int seekable) {
+    zxc_cctx* const c = zxc_create_cctx();
+    if (!c) return ZXC_ERROR_MEMORY;
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, (int64_t)block_size);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, seekable);
+    const int64_t r = rc == ZXC_OK ? zxc_compress_cctx(c, src, n, dst, cap) : rc;
+    zxc_free_cctx(c);
+    return r;
+}
+
+int64_t test_decompress_verified(const void* src, const size_t n, void* dst, const size_t cap) {
+    zxc_dctx* const d = zxc_create_dctx();
+    if (!d) return ZXC_ERROR_MEMORY;
+    const int rc = zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1);
+    const int64_t r = rc == ZXC_OK ? zxc_decompress_dctx(d, src, n, dst, cap) : rc;
+    zxc_free_dctx(d);
+    return r;
 }

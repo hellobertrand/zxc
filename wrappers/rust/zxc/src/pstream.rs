@@ -11,6 +11,7 @@
 
 use std::ffi::c_void;
 
+use crate::ctx::{RawCctx, RawDctx};
 use crate::error::error_from_code;
 use crate::{CompressOptions, DecompressOptions, Error, Result};
 
@@ -84,6 +85,7 @@ unsafe impl Send for CStream {}
 impl CStream {
     /// Creates a new push compression stream.
     ///
+    /// `opts.level` and `opts.checksum` are copied into the stream;
     /// `opts.seekable` is ignored (the push API is single-threaded and does
     /// not emit a seek table). Pass `None` for all defaults.
     ///
@@ -100,19 +102,18 @@ impl CStream {
                 ));
             }
         }
-        let c_opts = opts.map(|o| zxc_sys::zxc_compress_opts_t {
-            level: o.level as i32,
-            checksum_enabled: o.checksum as i32,
-            seekable: 0,
-            ..Default::default()
-        });
+        // The stream copies the parameters at creation; the configuration
+        // context is dropped right after.
+        let cfg = match opts {
+            Some(o) => {
+                let mut cfg = RawCctx::new()?;
+                cfg.set_params(o.level, o.checksum, false, 0)?;
+                Some(cfg)
+            }
+            None => None,
+        };
         let ptr = unsafe {
-            zxc_sys::zxc_cstream_create(
-                c_opts
-                    .as_ref()
-                    .map(|o| o as *const _)
-                    .unwrap_or(std::ptr::null()),
-            )
+            zxc_sys::zxc_cstream_create(cfg.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()))
         };
         if ptr.is_null() {
             Err(Error::Memory)
@@ -220,6 +221,9 @@ unsafe impl Send for DStream {}
 impl DStream {
     /// Creates a new push decompression stream.
     ///
+    /// `opts.verify_checksum` is copied into the stream. Pass `None` for the
+    /// defaults.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::Unsupported`] when `opts.dict` or `opts.dict_huf`
@@ -233,17 +237,16 @@ impl DStream {
                 ));
             }
         }
-        let c_opts = opts.map(|o| zxc_sys::zxc_decompress_opts_t {
-            checksum_enabled: o.verify_checksum as i32,
-            ..Default::default()
-        });
+        let cfg = match opts {
+            Some(o) => {
+                let mut cfg = RawDctx::new()?;
+                cfg.set_params(o.verify_checksum, 0)?;
+                Some(cfg)
+            }
+            None => None,
+        };
         let ptr = unsafe {
-            zxc_sys::zxc_dstream_create(
-                c_opts
-                    .as_ref()
-                    .map(|o| o as *const _)
-                    .unwrap_or(std::ptr::null()),
-            )
+            zxc_sys::zxc_dstream_create(cfg.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()))
         };
         if ptr.is_null() {
             Err(Error::Memory)
