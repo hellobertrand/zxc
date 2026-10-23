@@ -13,8 +13,8 @@ Builds and tests ZXC across multiple platforms (Linux x86_64/ARM64, macOS ARM64,
 **Triggers:** Push to main, pull requests, manual dispatch
 
 Builds and tests ZXC across CPU architectures, Debian's included (GNU/Hurd aside: an OS, not a CPU), in three tiers:
-- **Tier 1** (native runners, every supported image): Ubuntu 22.04/24.04/26.04 (x86_64, i386, arm64; armhf cross-compiled, build only), Windows Server 2022/2025 (x86_64, i386), Windows 11 (arm64), macOS 15/26 (x86_64, arm64) and macOS 27 (arm64, preview image).
-- **Tier 2** (Debian release architectures, cross-compiled in `debian:trixie`, tested under QEMU): armhf, ppc64le, s390x, riscv64, loong64; plus x86_64 under Intel SDE, one job per SIMD dispatch tier (SSE2, AVX2, AVX-512).
+- **Tier 1** (native runners, every supported image): Ubuntu 22.04/24.04/26.04 (x86_64, i386, arm64), Windows Server 2022/2025 (x86_64, i386), Windows 11 (arm64), macOS 15/26 (x86_64, arm64) and macOS 27 (arm64, preview image).
+- **Tier 2** (Debian release architectures, cross-compiled in `debian:trixie`, tested under QEMU): armhf (with LTO), ppc64le, s390x, riscv64, loong64; plus x86_64 under Intel SDE, one job per SIMD dispatch tier (SSE2, AVX2, AVX-512).
 - **Tier 3** (Debian ports and retired architectures, same setup): armv6, mipsel, powerpc, ppc64, sparc64, alpha, hppa, m68k, sh4.
 
 Tier 1 and Tier 2 are required checks on `main`; Tier 3 is not.
