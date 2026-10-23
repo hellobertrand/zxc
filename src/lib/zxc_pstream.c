@@ -251,17 +251,14 @@ static int cs_drain_pending(zxc_cstream* cs, zxc_outbuf_t* out) {
 /**
  * @brief Allocates and initialises a push compression stream.
  *
- * Copies @p opts into the new context, applying defaults for any zero-valued
- * field (@c level -> @ref ZXC_LEVEL_DEFAULT, @c block_size ->
- * @ref ZXC_BLOCK_SIZE_DEFAULT; levels above @ref ZXC_LEVEL_ULTRA are
- * clamped).  Forces single-threaded operation (@c n_threads = 0) and
- * disables progress callbacks and seekable framing (those modes belong to
- * the @c FILE*-based pipeline).  Dictionary options are REJECTED (the
- * push-stream format carries no dict_id, so a dictionary would produce
- * undecodable archives): passing any of @c dict / @c dict_size / @c dict_huf
- * returns @c NULL rather than silently dropping them.  Pre-sizes the
- * @c pending buffer so that the file header / footer paths never need a
- * realloc.
+ * Copies the parameters of @p cfg (NULL = library defaults): level, block
+ * size and checksum.  Forces single-threaded operation and disables progress
+ * callbacks and seekable framing (those modes belong to the @c FILE*-based
+ * pipeline).  A dictionary attached to @p cfg is REJECTED (the push-stream
+ * format carries no dict_id, so a dictionary would produce undecodable
+ * archives): the call returns @c NULL rather than silently dropping it.
+ * Pre-sizes the @c pending buffer so that the file header / footer paths
+ * never need a realloc.
  */
 zxc_cstream* zxc_cstream_create(const zxc_cctx* cfg) {
     zxc_cstream* cs = (zxc_cstream*)ZXC_CALLOC(1, sizeof(*cs));
@@ -791,9 +788,11 @@ static void ds_start_frame(zxc_dstream* ds) {
 /**
  * @brief Allocates and initialises a push decompression stream.
  *
- * Copies @p opts into the new context.  The internal multi-threading,
- * progress-callback, and seekable knobs are forced off (those modes belong
- * to the @c FILE*-based pipeline).  @c block_size, @c file_has_checksum,
+ * Copies the parameters of @p cfg (NULL = library defaults): only the
+ * checksum setting matters here.  Multi-threading and the progress callback
+ * are forced off (those modes belong to the @c FILE*-based pipeline), and a
+ * dictionary attached to @p cfg makes the call return @c NULL.
+ * @c block_size, @c file_has_checksum,
  * and the @c payload / @c decoded buffers are filled in lazily once the
  * file header is parsed.
  */

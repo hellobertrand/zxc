@@ -87,7 +87,9 @@ typedef enum {
  * @brief Reports the accepted range of a compression parameter.
  *
  * Lets a caller, or a binding, validate a value before setting it, and tells
- * whether this library knows @p param at all.
+ * whether this library knows @p param at all. The range is necessary, not
+ * always sufficient: @ref ZXC_C_BLOCK_SIZE must also be a power of two, which
+ * only zxc_cctx_set_param() checks.
  *
  * @param[in]  param Parameter identifier.
  * @param[out] min   Lowest accepted value; may be NULL.

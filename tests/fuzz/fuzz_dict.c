@@ -58,16 +58,21 @@ static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const v
     if (!cctx) cctx = zxc_create_cctx();
     if (!dctx) dctx = zxc_create_dctx();
     if (!cctx || !dctx) return;
-    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 6) != ZXC_OK ||
-        zxc_cctx_set_dict(cctx, dict, dict_size, huf) != ZXC_OK ||
-        zxc_dctx_set_dict(dctx, dict, dict_size, huf) != ZXC_OK)
-        return;
-    const int64_t c = zxc_compress_cctx(cctx, src, n, comp, sizeof(comp));
-    assert(c > 0);
-    const int64_t d = zxc_decompress_dctx(dctx, comp, (size_t)c, out, n);
-    assert(d == (int64_t)n && memcmp(out, src, n) == 0);
-    (void)c;
-    (void)d;
+    const int ready = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 6) == ZXC_OK &&
+                      zxc_cctx_set_dict(cctx, dict, dict_size, huf) == ZXC_OK &&
+                      zxc_dctx_set_dict(dctx, dict, dict_size, huf) == ZXC_OK;
+    if (ready) {
+        const int64_t c = zxc_compress_cctx(cctx, src, n, comp, sizeof(comp));
+        assert(c > 0);
+        const int64_t d = zxc_decompress_dctx(dctx, comp, (size_t)c, out, n);
+        assert(d == (int64_t)n && memcmp(out, src, n) == 0);
+        (void)c;
+        (void)d;
+    }
+    /* The contexts outlive the fuzzer input the dictionary points into: never
+     * leave them holding it between iterations. */
+    (void)zxc_cctx_set_dict(cctx, NULL, 0, NULL);
+    (void)zxc_dctx_set_dict(dctx, NULL, 0, NULL);
 }
 
 /* Configures a compression context for phase 3; ZXC_OK, or the setter's error. */
@@ -271,6 +276,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(c2 == csize);
         assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
     }
+    /* The table lives on this frame: the persistent context must not keep it. */
+    if (cctx) (void)zxc_cctx_set_dict(cctx, NULL, 0, NULL);
 
     if (size > decomp_cap) {
         void* nb = realloc(decomp_buf, size);
@@ -302,6 +309,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(d2 == dsize);
         if (d2 >= 0) assert(memcmp(data, decomp_buf, size) == 0);
     }
+    if (dctx) (void)zxc_dctx_set_dict(dctx, NULL, 0, NULL);
 
     return 0;
 }
