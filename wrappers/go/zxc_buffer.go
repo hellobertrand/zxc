@@ -11,7 +11,6 @@ package zxc
 import "C"
 import (
 	"math"
-	"runtime"
 	"unsafe"
 )
 
@@ -49,11 +48,8 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	// The options live on a native context for the duration of the call; it
-	// is freed before the dictionary it points at is unpinned (defer order).
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	cctx, err := createCctx(applyOptions(opts), &pinner)
+	// The options live on a native context for the duration of the call.
+	cctx, err := createCctx(applyOptions(opts))
 	if err != nil {
 		return 0, err
 	}
@@ -152,9 +148,7 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 		return nil, ErrInvalidData
 	}
 
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	dctx, err := createDctx(applyOptions(opts), &pinner)
+	dctx, err := createDctx(applyOptions(opts))
 	if err != nil {
 		return nil, err
 	}
@@ -228,9 +222,7 @@ func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	dctx, err := createDctx(applyOptions(opts), &pinner)
+	dctx, err := createDctx(applyOptions(opts))
 	if err != nil {
 		return 0, err
 	}

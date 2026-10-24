@@ -26,34 +26,31 @@ const DictSizeMax = int(C.ZXC_DICT_SIZE_MAX)
 // carried by a .zxd file (packed 4-bit code lengths for 256 symbols).
 const HufTableSize = int(C.ZXC_HUF_TABLE_SIZE)
 
-// pinDict pins the dictionary content and shared table of o for a native
-// context to keep their addresses, and returns them; nil pointers when o
-// carries no dictionary. Callers keep pinner pinned until the context no
-// longer refers to them: freed, or the dictionary detached.
+// dictPtrs returns the dictionary content and shared table of o as C pointers,
+// nil when o carries none. The native setter copies the bytes, so the slices
+// only have to live for the call, which cgo guarantees.
 //
 // The shared Huffman table length is validated here: the C library reads a
 // fixed ZXC_HUF_TABLE_SIZE bytes from it, so a shorter slice would be read
 // out of bounds. A wrong length is a programming error, dictionary or not.
-func pinDict(o options, pinner *runtime.Pinner) (dict, huf unsafe.Pointer, err error) {
+func dictPtrs(o options) (dict, huf unsafe.Pointer, err error) {
 	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
 		return nil, nil, ErrBadHufTable
 	}
 	if len(o.dict) == 0 {
 		return nil, nil, nil
 	}
-	pinner.Pin(&o.dict[0])
 	dict = unsafe.Pointer(&o.dict[0])
 	if len(o.dictHuf) > 0 {
-		pinner.Pin(&o.dictHuf[0])
 		huf = unsafe.Pointer(&o.dictHuf[0])
 	}
 	return dict, huf, nil
 }
 
-// attachCompressDict attaches the dictionary of o to cctx, or detaches any
-// when o carries none; see [pinDict] for the pinning contract.
-func attachCompressDict(cctx *C.zxc_cctx, o options, pinner *runtime.Pinner) error {
-	dict, huf, err := pinDict(o, pinner)
+// attachCompressDict copies the dictionary of o onto cctx, or detaches any
+// when o carries none.
+func attachCompressDict(cctx *C.zxc_cctx, o options) error {
+	dict, huf, err := dictPtrs(o)
 	if err != nil {
 		return err
 	}
@@ -68,8 +65,8 @@ func attachCompressDict(cctx *C.zxc_cctx, o options, pinner *runtime.Pinner) err
 }
 
 // attachDecompressDict mirrors attachCompressDict for a decompression context.
-func attachDecompressDict(dctx *C.zxc_dctx, o options, pinner *runtime.Pinner) error {
-	dict, huf, err := pinDict(o, pinner)
+func attachDecompressDict(dctx *C.zxc_dctx, o options) error {
+	dict, huf, err := dictPtrs(o)
 	if err != nil {
 		return err
 	}

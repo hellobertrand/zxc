@@ -5,6 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
+#include "../include/zxc_dict.h"
 #include "test_common.h"
 
 int test_opaque_context_api(void) {
@@ -206,6 +207,69 @@ static void noop_progress(uint64_t done, uint64_t total, const void* user) {
     (void)user;
 }
 
+/* The context owns a copy of its dictionary: the same bytes at another address. */
+static int dict_copied(const void* attached, size_t attached_size, const void* dict, size_t n) {
+    return attached && attached != dict && attached_size == n && memcmp(attached, dict, n) == 0;
+}
+
+/* The contexts own a copy of the dictionary and its table: the caller's buffers
+ * may change or go once set_dict() has returned. Level 7 reads the table, and
+ * the archive's dict_id binds the (dict, table) pair the copies must preserve. */
+int test_ctx_dict_copied(void) {
+    printf("=== TEST: Context API - dictionary copied on attach ===\n");
+    const size_t n = 32 * 1024, dsz = 4096;
+    uint8_t* src = malloc(n);
+    uint8_t* dict = malloc(dsz);
+    uint8_t* comp = malloc(zxc_compress_bound(n));
+    uint8_t* dec = malloc(n);
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    zxc_cctx* cctx = zxc_create_cctx();
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = src && dict && comp && dec && cctx && dctx;
+    if (ok) {
+        gen_lz_data(src, n);
+        for (size_t i = 0; i < dsz; i++) dict[i] = src[(i * 7) % n];
+        const void* const samples[] = {src};
+        ok = zxc_dict_train_huf(samples, &n, 1, dict, dsz, huf) == ZXC_OK &&
+             zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_ULTRA) == ZXC_OK &&
+             zxc_cctx_set_dict(cctx, dict, dsz, huf) == ZXC_OK &&
+             zxc_dctx_set_dict(dctx, dict, dsz, huf) == ZXC_OK;
+        if (!ok) printf("  [FAIL] setup\n");
+    }
+    const uint32_t id = ok ? zxc_dict_compute_id(dict, dsz, huf) : 0;
+    // The caller's copies are gone from here on.
+    if (dict) memset(dict, 0, dsz);
+    free(dict);
+    dict = NULL;
+    memset(huf, 0, sizeof(huf));
+
+    if (ok) {
+        const int64_t csz = zxc_compress_cctx(cctx, src, n, comp, zxc_compress_bound(n));
+        const int64_t dsz_out =
+            csz > 0 ? zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, n) : csz;
+        if (csz <= 0 || zxc_get_dict_id(comp, (size_t)csz) != id || dsz_out != (int64_t)n ||
+            memcmp(src, dec, n) != 0) {
+            printf("  [FAIL] roundtrip through the copies: csz=%lld dsz=%lld id=%08x\n",
+                   (long long)csz, (long long)dsz_out, zxc_get_dict_id(comp, (size_t)csz));
+            ok = 0;
+        }
+    }
+    // Detach and reset release the copies; free releases what is left.
+    if (ok && (zxc_cctx_set_dict(cctx, NULL, 0, NULL) != ZXC_OK || zxc_dctx_reset(dctx) != ZXC_OK ||
+               zxc_cctx_params(cctx)->dict != NULL || zxc_dctx_params(dctx)->dict != NULL)) {
+        printf("  [FAIL] detach / reset must drop the copies\n");
+        ok = 0;
+    }
+    if (ok) printf("  [PASS] dictionary and table copied, caller buffers released\n");
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    free(src);
+    free(comp);
+    free(dec);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* One compression parameter: identifier, bounds and default. */
 typedef struct {
     zxc_cparam_t p;
@@ -336,11 +400,11 @@ int test_cctx_param_contract(void) {
     /* Dictionary and callback setters; an oversized dictionary is refused and
      * the attached one stays. */
     const zxc_cparams_t* const p = zxc_cctx_params(c);
-    if (zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != ZXC_OK || p->dict != dict ||
-        p->dict_size != sizeof(dict) ||
+    if (zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != ZXC_OK ||
+        !dict_copied(p->dict, p->dict_size, dict, sizeof(dict)) ||
         zxc_cctx_set_dict(c, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL) !=
             ZXC_ERROR_DICT_TOO_LARGE ||
-        p->dict != dict || p->dict_size != sizeof(dict)) {
+        !dict_copied(p->dict, p->dict_size, dict, sizeof(dict))) {
         printf("  [FAIL] dictionary setter: attach %p/%zu after an oversized refusal\n", p->dict,
                p->dict_size);
         fails++;
@@ -485,11 +549,11 @@ int test_dctx_param_contract(void) {
 
     /* Dictionary and callback setters, then reset detaches both. */
     const zxc_dparams_t* const p = zxc_dctx_params(d);
-    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK || p->dict != dict ||
-        p->dict_size != sizeof(dict) ||
+    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK ||
+        !dict_copied(p->dict, p->dict_size, dict, sizeof(dict)) ||
         zxc_dctx_set_dict(d, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL) !=
             ZXC_ERROR_DICT_TOO_LARGE ||
-        p->dict != dict || p->dict_size != sizeof(dict) ||
+        !dict_copied(p->dict, p->dict_size, dict, sizeof(dict)) ||
         zxc_dctx_set_dict(d, NULL, 0, NULL) != ZXC_OK || p->dict != NULL || p->dict_size != 0 ||
         zxc_dctx_set_progress(d, noop_progress, &marker) != ZXC_OK ||
         p->progress_cb != noop_progress || p->user_data != &marker ||

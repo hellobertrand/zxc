@@ -73,6 +73,9 @@ type Cctx struct {
 	checksum bool
 	dict     []byte
 	dictHuf  []byte
+	// The native context holds a per-call dictionary instead of the
+	// creation-time one, which the next call without one puts back.
+	overridden bool
 }
 
 // NewCctx creates a new compression context.
@@ -91,9 +94,12 @@ func NewCctx(opts ...Option) (*Cctx, error) {
 		return nil, ErrMemory
 	}
 	// The level is refused here rather than on the first call. Block size is
-	// left at the library default. The dictionary is attached per call, so no
-	// Go pointer stays in the native context between calls.
+	// left at the library default. The context copies the dictionary.
 	if err := setCParam(ptr, C.ZXC_C_LEVEL, int64(o.level)); err != nil {
+		C.zxc_free_cctx(ptr)
+		return nil, err
+	}
+	if err := attachCompressDict(ptr, o); err != nil {
 		C.zxc_free_cctx(ptr)
 		return nil, err
 	}
@@ -154,14 +160,12 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if err := setCParam(c.ptr, C.ZXC_C_CHECKSUM, boolParam(o.checksum)); err != nil {
 		return 0, err
 	}
-	// The dictionary is pinned for the call and detached before the pins go
-	// (defer order), so the native context never outlives a Go pointer.
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	if err := attachCompressDict(c.ptr, o, &pinner); err != nil {
-		return 0, err
+	if override := o.dictSet || o.dictHufSet; override || c.overridden {
+		if err := attachCompressDict(c.ptr, o); err != nil {
+			return 0, err
+		}
+		c.overridden = override
 	}
-	defer C.zxc_cctx_set_dict(c.ptr, nil, 0, nil)
 
 	n := C.zxc_compress_block(
 		c.ptr,
@@ -185,6 +189,8 @@ type Dctx struct {
 	// Creation-time dictionary, used by decode calls that do not carry one.
 	dict    []byte
 	dictHuf []byte
+	// See Cctx.overridden.
+	overridden bool
 }
 
 // NewDctx creates a new decompression context.
@@ -200,16 +206,19 @@ func NewDctx(opts ...Option) (*Dctx, error) {
 	if ptr == nil {
 		return nil, ErrMemory
 	}
+	if err := attachDecompressDict(ptr, o); err != nil {
+		C.zxc_free_dctx(ptr)
+		return nil, err
+	}
 	d := &Dctx{ptr: ptr, dict: o.dict, dictHuf: o.dictHuf}
 	runtime.SetFinalizer(d, (*Dctx).Close)
 	return d, nil
 }
 
 // prepare sets a decode call's options on the native context: the checksum
-// flag, and the dictionary (the creation-time one where the call omits it),
-// pinned on pinner. The returned detach runs before pinner.Unpin, so the
-// native context never outlives a Go pointer.
-func (d *Dctx) prepare(opts []Option, pinner *runtime.Pinner) (detach func(), err error) {
+// flag, and the dictionary when the call carries one or the previous call did
+// (the creation-time one is put back).
+func (d *Dctx) prepare(opts []Option) error {
 	o := applyOptions(opts)
 	if !o.dictSet {
 		o.dict = d.dict
@@ -218,12 +227,15 @@ func (d *Dctx) prepare(opts []Option, pinner *runtime.Pinner) (detach func(), er
 		o.dictHuf = d.dictHuf
 	}
 	if err := setDParam(d.ptr, C.ZXC_D_CHECKSUM, boolParam(o.checksum)); err != nil {
-		return nil, err
+		return err
 	}
-	if err := attachDecompressDict(d.ptr, o, pinner); err != nil {
-		return nil, err
+	if override := o.dictSet || o.dictHufSet; override || d.overridden {
+		if err := attachDecompressDict(d.ptr, o); err != nil {
+			return err
+		}
+		d.overridden = override
 	}
-	return func() { C.zxc_dctx_set_dict(d.ptr, nil, 0, nil) }, nil
+	return nil
 }
 
 // Close releases the native resources held by the context.
@@ -256,13 +268,9 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 		return 0, ErrDstTooSmall
 	}
 
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	detach, err := d.prepare(opts, &pinner)
-	if err != nil {
+	if err := d.prepare(opts); err != nil {
 		return 0, err
 	}
-	defer detach()
 
 	n := C.zxc_decompress_block(
 		d.ptr,
@@ -294,13 +302,9 @@ func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error)
 		return 0, ErrDstTooSmall
 	}
 
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	detach, err := d.prepare(opts, &pinner)
-	if err != nil {
+	if err := d.prepare(opts); err != nil {
 		return 0, err
 	}
-	defer detach()
 
 	n := C.zxc_decompress_block_safe(
 		d.ptr,

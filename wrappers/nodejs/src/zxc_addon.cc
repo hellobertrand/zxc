@@ -617,12 +617,12 @@ static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out, size_t out_len,
 // Reusable Context API (one archive per call, buffers carved once)
 // =============================================================================
 
-// Reads {level, checksum, dict, dictHuf}, copying the dictionary and table so
-// they outlive the caller's Buffers: the context keeps pointers into them.
-// `level` is left untouched (0) when absent, which the setter reads as the
-// default.
+// Reads {level, checksum, dict, dictHuf}. The dictionary pointers are only
+// good for the call: the context copies the bytes it is given. `level` is left
+// untouched (0) when absent, which the setter reads as the default.
 static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int64_t* level,
-                           int* checksum, std::vector<uint8_t>* dict, std::vector<uint8_t>* huf) {
+                           int* checksum, const uint8_t** dict, size_t* dict_size,
+                           const uint8_t** huf) {
     if (info.Length() < 1 || !info[0].IsObject()) return true;
     Napi::Object o = info[0].As<Napi::Object>();
     if (level && o.Has("level") && !ReadLevel(env, o.Get("level"), level)) return false;
@@ -631,7 +631,8 @@ static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int64_
     }
     if (o.Has("dict") && o.Get("dict").IsBuffer()) {
         Napi::Buffer<uint8_t> b = o.Get("dict").As<Napi::Buffer<uint8_t>>();
-        dict->assign(b.Data(), b.Data() + b.Length());
+        *dict = b.Data();
+        *dict_size = b.Length();
     }
     if (o.Has("dictHuf") && o.Get("dictHuf").IsBuffer()) {
         Napi::Buffer<uint8_t> b = o.Get("dictHuf").As<Napi::Buffer<uint8_t>>();
@@ -640,7 +641,7 @@ static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int64_
                 .ThrowAsJavaScriptException();
             return false;
         }
-        huf->assign(b.Data(), b.Data() + b.Length());
+        *huf = b.Data();
     }
     return true;
 }
@@ -659,7 +660,10 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
         Napi::Env env = info.Env();
         int64_t level = 0;
         int checksum = 0;
-        if (!ReadCtxOptions(env, info, &level, &checksum, &dict_, &huf_)) return;
+        const uint8_t* dict = nullptr;
+        size_t dict_size = 0;
+        const uint8_t* huf = nullptr;
+        if (!ReadCtxOptions(env, info, &level, &checksum, &dict, &dict_size, &huf)) return;
 
         cctx_ = zxc_create_cctx();
         if (!cctx_) {
@@ -673,8 +677,7 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
             !SetCParam(env, cctx_, ZXC_C_CHECKSUM, checksum)) {
             return;
         }
-        SetCDict(env, cctx_, dict_.empty() ? nullptr : dict_.data(), dict_.size(),
-                 huf_.empty() ? nullptr : huf_.data());
+        SetCDict(env, cctx_, dict, dict_size, huf);
     }
 
     ~CctxWrap() {
@@ -683,9 +686,6 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
 
    private:
     zxc_cctx* cctx_ = nullptr;
-    // Dictionary bytes the context points at; released with it in Close().
-    std::vector<uint8_t> dict_;
-    std::vector<uint8_t> huf_;
 
     Napi::Value Compress(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
@@ -717,8 +717,6 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
             zxc_free_cctx(cctx_);
             cctx_ = nullptr;
         }
-        std::vector<uint8_t>().swap(dict_);
-        std::vector<uint8_t>().swap(huf_);
         return info.Env().Undefined();
     }
 };
@@ -736,7 +734,10 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
     explicit DctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DctxWrap>(info) {
         Napi::Env env = info.Env();
         int checksum = 0;
-        if (!ReadCtxOptions(env, info, nullptr, &checksum, &dict_, &huf_)) return;
+        const uint8_t* dict = nullptr;
+        size_t dict_size = 0;
+        const uint8_t* huf = nullptr;
+        if (!ReadCtxOptions(env, info, nullptr, &checksum, &dict, &dict_size, &huf)) return;
 
         dctx_ = zxc_create_dctx();
         if (!dctx_) {
@@ -744,8 +745,7 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
             return;
         }
         if (!SetDParam(env, dctx_, ZXC_D_CHECKSUM, checksum)) return;
-        SetDDict(env, dctx_, dict_.empty() ? nullptr : dict_.data(), dict_.size(),
-                 huf_.empty() ? nullptr : huf_.data());
+        SetDDict(env, dctx_, dict, dict_size, huf);
     }
 
     ~DctxWrap() {
@@ -754,9 +754,6 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
 
    private:
     zxc_dctx* dctx_ = nullptr;
-    // Dictionary bytes the context points at; released with it in Close().
-    std::vector<uint8_t> dict_;
-    std::vector<uint8_t> huf_;
 
     Napi::Value Decompress(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
@@ -789,8 +786,6 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
             zxc_free_dctx(dctx_);
             dctx_ = nullptr;
         }
-        std::vector<uint8_t>().swap(dict_);
-        std::vector<uint8_t>().swap(huf_);
         return info.Env().Undefined();
     }
 };

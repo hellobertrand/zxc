@@ -36,7 +36,6 @@ import "C"
 import (
 	"errors"
 	"fmt"
-	"runtime"
 )
 
 // ============================================================================
@@ -363,9 +362,8 @@ func setDParam(ptr *C.zxc_dctx, param C.zxc_dparam_t, v int64) error {
 }
 
 // configureCctx sets the level, checksum, seek table and thread count of o
-// on ptr, then attaches its dictionary (see [attachCompressDict] for the
-// pinning contract).
-func configureCctx(ptr *C.zxc_cctx, o options, pinner *runtime.Pinner) error {
+// on ptr, then attaches its dictionary.
+func configureCctx(ptr *C.zxc_cctx, o options) error {
 	if err := setCParam(ptr, C.ZXC_C_LEVEL, int64(o.level)); err != nil {
 		return err
 	}
@@ -378,30 +376,29 @@ func configureCctx(ptr *C.zxc_cctx, o options, pinner *runtime.Pinner) error {
 	if err := setCParam(ptr, C.ZXC_C_THREADS, int64(o.threads)); err != nil {
 		return err
 	}
-	return attachCompressDict(ptr, o, pinner)
+	return attachCompressDict(ptr, o)
 }
 
 // configureDctx sets the checksum and thread count of o on ptr, then attaches
 // its dictionary.
-func configureDctx(ptr *C.zxc_dctx, o options, pinner *runtime.Pinner) error {
+func configureDctx(ptr *C.zxc_dctx, o options) error {
 	if err := setDParam(ptr, C.ZXC_D_CHECKSUM, boolParam(o.checksum)); err != nil {
 		return err
 	}
 	if err := setDParam(ptr, C.ZXC_D_THREADS, int64(o.threads)); err != nil {
 		return err
 	}
-	return attachDecompressDict(ptr, o, pinner)
+	return attachDecompressDict(ptr, o)
 }
 
-// createCctx returns a native compression context configured from o. The
-// caller frees it with C.zxc_free_cctx before pinner.Unpin: the context holds
-// the dictionary's address until then.
-func createCctx(o options, pinner *runtime.Pinner) (*C.zxc_cctx, error) {
+// createCctx returns a native compression context configured from o, for the
+// caller to free with C.zxc_free_cctx.
+func createCctx(o options) (*C.zxc_cctx, error) {
 	ptr := C.zxc_create_cctx()
 	if ptr == nil {
 		return nil, ErrMemory
 	}
-	if err := configureCctx(ptr, o, pinner); err != nil {
+	if err := configureCctx(ptr, o); err != nil {
 		C.zxc_free_cctx(ptr)
 		return nil, err
 	}
@@ -409,12 +406,12 @@ func createCctx(o options, pinner *runtime.Pinner) (*C.zxc_cctx, error) {
 }
 
 // createDctx is [createCctx] for a decompression context.
-func createDctx(o options, pinner *runtime.Pinner) (*C.zxc_dctx, error) {
+func createDctx(o options) (*C.zxc_dctx, error) {
 	ptr := C.zxc_create_dctx()
 	if ptr == nil {
 		return nil, ErrMemory
 	}
-	if err := configureDctx(ptr, o, pinner); err != nil {
+	if err := configureDctx(ptr, o); err != nil {
 		C.zxc_free_dctx(ptr)
 		return nil, err
 	}

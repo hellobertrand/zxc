@@ -154,6 +154,7 @@ int test_context_api_seekable_compress(void);
 int test_cctx_level_raise_reinit(void);
 int test_cctx_param_contract(void);
 int test_dctx_param_contract(void);
+int test_ctx_dict_copied(void);
 int test_cctx_configured_archives(void);
 int test_estimate_cctx_size(void);
 

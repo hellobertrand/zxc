@@ -381,18 +381,15 @@ export default async function createZXC(moduleOverrides, factory) {
   }
 
   /**
-   * Copy a dictionary into WASM memory and attach it to a context.
-   *
-   * The context keeps the pointers only, so the copies must outlive it:
-   * call the returned `release()` after the context is freed.
+   * Stage a dictionary in WASM memory for the time of a setter call: the
+   * context keeps its own copy.
    *
    * @param {{dict: Uint8Array|null, dictHuf: Uint8Array|null}} split
    * @param {Function} setDict - (dictPtr, dictSize, dictHufPtr) -> int.
-   * @returns {Function} `release()` frees the copies.
    */
   function _attachDict(split, setDict) {
     const { dict, dictHuf } = split;
-    if (!dict || dict.length === 0) return () => {};
+    if (!dict || dict.length === 0) return;
     let dictPtr = 0;
     let dictHufPtr = 0;
     try {
@@ -404,15 +401,10 @@ export default async function createZXC(moduleOverrides, factory) {
         Module.HEAPU8.set(dictHuf, dictHufPtr);
       }
       _checkParam(setDict(dictPtr, dict.length, dictHufPtr), "set_dict");
-    } catch (e) {
+    } finally {
       if (dictPtr) _free(dictPtr);
       if (dictHufPtr) _free(dictHufPtr);
-      throw e;
     }
-    return () => {
-      _free(dictPtr);
-      if (dictHufPtr) _free(dictHufPtr);
-    };
   }
 
   /**
@@ -424,7 +416,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * its error name.
    *
    * @returns {{cctx: number, release: Function}} `release()` frees the
-   *   context and the dictionary copies.
+   *   context.
    */
   /**
    * An absent (undefined or null) level selects the default; anything but an
@@ -451,7 +443,6 @@ export default async function createZXC(moduleOverrides, factory) {
     if (cctx === 0) {
       throw new Error("ZXC: failed to create compression context");
     }
-    let releaseDict = () => {};
     try {
       if (level) {
         _checkParam(_cctx_set_param(cctx, ZXC_C_LEVEL, level), "set_param");
@@ -462,21 +453,12 @@ export default async function createZXC(moduleOverrides, factory) {
       if (seekable) {
         _checkParam(_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1), "set_param");
       }
-      releaseDict = _attachDict(split, (d, n, h) =>
-        _cctx_set_dict(cctx, d, n, h),
-      );
+      _attachDict(split, (d, n, h) => _cctx_set_dict(cctx, d, n, h));
     } catch (e) {
       _free_cctx(cctx);
       throw e;
     }
-    return {
-      cctx,
-      release() {
-        // The context is freed first: it points into the dictionary copies.
-        _free_cctx(cctx);
-        releaseDict();
-      },
-    };
+    return { cctx, release: () => _free_cctx(cctx) };
   }
 
   /**
@@ -484,7 +466,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * ({checksum, dict, dictHuf}).
    *
    * @returns {{dctx: number, release: Function}} `release()` frees the
-   *   context and the dictionary copies.
+   *   context.
    */
   function _createDctx(opts) {
     const split = _splitDictOption(opts);
@@ -494,25 +476,16 @@ export default async function createZXC(moduleOverrides, factory) {
     if (dctx === 0) {
       throw new Error("ZXC: failed to create decompression context");
     }
-    let releaseDict = () => {};
     try {
       if (checksum) {
         _checkParam(_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1), "set_param");
       }
-      releaseDict = _attachDict(split, (d, n, h) =>
-        _dctx_set_dict(dctx, d, n, h),
-      );
+      _attachDict(split, (d, n, h) => _dctx_set_dict(dctx, d, n, h));
     } catch (e) {
       _free_dctx(dctx);
       throw e;
     }
-    return {
-      dctx,
-      release() {
-        _free_dctx(dctx);
-        releaseDict();
-      },
-    };
+    return { dctx, release: () => _free_dctx(dctx) };
   }
 
   // --- Public API ----------------------------------------------------------

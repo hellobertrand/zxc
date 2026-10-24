@@ -69,10 +69,6 @@ static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const v
         (void)c;
         (void)d;
     }
-    /* The contexts outlive the fuzzer input the dictionary points into: never
-     * leave them holding it between iterations. */
-    (void)zxc_cctx_set_dict(cctx, NULL, 0, NULL);
-    (void)zxc_dctx_set_dict(dctx, NULL, 0, NULL);
 }
 
 /* Configures a compression context for phase 3; ZXC_OK, or the setter's error. */
@@ -276,8 +272,6 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(c2 == csize);
         assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
     }
-    /* The table lives on this frame: the persistent context must not keep it. */
-    if (cctx) (void)zxc_cctx_set_dict(cctx, NULL, 0, NULL);
 
     if (size > decomp_cap) {
         void* nb = realloc(decomp_buf, size);
@@ -309,7 +303,6 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(d2 == dsize);
         if (d2 >= 0) assert(memcmp(data, decomp_buf, size) == 0);
     }
-    if (dctx) (void)zxc_dctx_set_dict(dctx, NULL, 0, NULL);
 
     return 0;
 }

@@ -922,6 +922,36 @@ typedef struct {
  * bookkeeping needed to reuse buffers across calls and re-init only when the
  * block size changes.
  */
+/** @brief A context's own copy of the dictionary attached to it. */
+typedef struct {
+    uint8_t* data; /* heap copy; NULL when none is attached */
+    size_t size;
+    uint8_t huf[ZXC_HUF_TABLE_SIZE]; /* copy of the shared table, when has_huf */
+    int has_huf;
+} zxc_dict_copy_t;
+
+/**
+ * @brief Replaces the copy with @p dict; a NULL or empty @p dict detaches.
+ *
+ * The previous copy survives a refused call, so the parameter keeps its value.
+ */
+static int zxc_dict_copy_set(zxc_dict_copy_t* c, const void* dict, const size_t dict_size,
+                             const void* dict_huf) {
+    uint8_t* copy = NULL;
+    if (dict && dict_size > 0) {
+        if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
+        copy = (uint8_t*)ZXC_MALLOC(dict_size);
+        if (UNLIKELY(!copy)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
+        ZXC_MEMCPY(copy, dict, dict_size);
+        if (dict_huf) ZXC_MEMCPY(c->huf, dict_huf, ZXC_HUF_TABLE_SIZE);
+    }
+    ZXC_FREE(c->data);
+    c->data = copy;
+    c->size = copy ? dict_size : 0;
+    c->has_huf = copy && dict_huf;
+    return ZXC_OK;
+}
+
 struct zxc_cctx_s {
     zxc_cctx_t inner;                      /* existing internal context */
     int initialized;                       /* 1 if inner has live allocations */
@@ -930,6 +960,7 @@ struct zxc_cctx_s {
                                               block_size pinned at init) */
     size_t last_block_size;                /* block size used for last init */
     zxc_cparams_t params;                  /* in force; see zxc_cctx_set_param() */
+    zxc_dict_copy_t dict_copy;             /* what params.dict / dict_huf point into */
     int init_level;                        /* level a static workspace was carved for */
     int huf_cached;                        /* inner carries the table below */
     uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
@@ -1095,18 +1126,13 @@ int zxc_cctx_get_param(const zxc_cctx* cctx, const zxc_cparam_t param, int64_t* 
 int zxc_cctx_set_dict(zxc_cctx* cctx, const void* dict, const size_t dict_size,
                       const void* dict_huf) {
     if (UNLIKELY(!cctx)) return ZXC_ERROR_NULL_INPUT;
-    if (!dict || dict_size == 0) {
-        cctx->params.dict = NULL;
-        cctx->params.dict_size = 0;
-        cctx->params.dict_huf = NULL;
-        return ZXC_OK;
-    }
     // No room for the dictionary prefix in a workspace carved without it.
-    if (UNLIKELY(cctx->owns_workspace)) return ZXC_ERROR_DICT_UNSUPPORTED;
-    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    cctx->params.dict = dict;
-    cctx->params.dict_size = dict_size;
-    cctx->params.dict_huf = dict_huf;
+    if (UNLIKELY(cctx->owns_workspace && dict && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+    const int rc = zxc_dict_copy_set(&cctx->dict_copy, dict, dict_size, dict_huf);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    cctx->params.dict = cctx->dict_copy.data;
+    cctx->params.dict_size = cctx->dict_copy.size;
+    cctx->params.dict_huf = cctx->dict_copy.has_huf ? cctx->dict_copy.huf : NULL;
     return ZXC_OK;
 }
 
@@ -1119,6 +1145,7 @@ int zxc_cctx_set_progress(zxc_cctx* cctx, const zxc_progress_callback_t cb, void
 
 int zxc_cctx_reset(zxc_cctx* cctx) {
     if (UNLIKELY(!cctx)) return ZXC_ERROR_NULL_INPUT;
+    (void)zxc_dict_copy_set(&cctx->dict_copy, NULL, 0, NULL);
     cctx->params = zxc_cparams_defaults();
     // A static workspace keeps what it was carved for.
     if (cctx->owns_workspace) {
@@ -1141,6 +1168,7 @@ void zxc_free_cctx(zxc_cctx* cctx) {
     // which we do not own. Free is a no-op; the caller owns the workspace.
     if (cctx->owns_workspace) return;
     if (cctx->initialized) zxc_cctx_free(&cctx->inner);
+    ZXC_FREE(cctx->dict_copy.data);
     ZXC_FREE(cctx);
 }
 
@@ -1287,15 +1315,16 @@ int64_t zxc_compress_cctx(zxc_cctx* cctx, const void* RESTRICT src, const size_t
  * and dict sizes so the inner buffers are re-carved only when they change.
  */
 struct zxc_dctx_s {
-    zxc_cctx_t inner;       /* reuses the same internal context type */
-    size_t last_block_size; /* block size from last header parse */
-    size_t last_dict_size;  /* dict_size the inner buffer was carved for (drives re-init) */
-    int initialized;        /* 1 if inner has live allocations */
-    int owns_workspace;     /* 0 = library-allocated (free in zxc_free_dctx),
-                               1 = caller-supplied static workspace (no-op free,
-                               block_size pinned at init) */
-    int huf_cached;         /* inner carries the table below */
-    zxc_dparams_t params;   /* in force; see zxc_dctx_set_param() */
+    zxc_cctx_t inner;          /* reuses the same internal context type */
+    size_t last_block_size;    /* block size from last header parse */
+    size_t last_dict_size;     /* dict_size the inner buffer was carved for (drives re-init) */
+    int initialized;           /* 1 if inner has live allocations */
+    int owns_workspace;        /* 0 = library-allocated (free in zxc_free_dctx),
+                                  1 = caller-supplied static workspace (no-op free,
+                                  block_size pinned at init) */
+    int huf_cached;            /* inner carries the table below */
+    zxc_dparams_t params;      /* in force; see zxc_dctx_set_param() */
+    zxc_dict_copy_t dict_copy; /* what params.dict / dict_huf point into */
     uint8_t huf_cache[ZXC_HUF_TABLE_SIZE]; /* last table attached */
 };
 
@@ -1362,17 +1391,12 @@ int zxc_dctx_get_param(const zxc_dctx* dctx, const zxc_dparam_t param, int64_t* 
 int zxc_dctx_set_dict(zxc_dctx* dctx, const void* dict, const size_t dict_size,
                       const void* dict_huf) {
     if (UNLIKELY(!dctx)) return ZXC_ERROR_NULL_INPUT;
-    if (!dict || dict_size == 0) {
-        dctx->params.dict = NULL;
-        dctx->params.dict_size = 0;
-        dctx->params.dict_huf = NULL;
-        return ZXC_OK;
-    }
-    if (UNLIKELY(dctx->owns_workspace)) return ZXC_ERROR_DICT_UNSUPPORTED;
-    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    dctx->params.dict = dict;
-    dctx->params.dict_size = dict_size;
-    dctx->params.dict_huf = dict_huf;
+    if (UNLIKELY(dctx->owns_workspace && dict && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+    const int rc = zxc_dict_copy_set(&dctx->dict_copy, dict, dict_size, dict_huf);
+    if (UNLIKELY(rc != ZXC_OK)) return rc;
+    dctx->params.dict = dctx->dict_copy.data;
+    dctx->params.dict_size = dctx->dict_copy.size;
+    dctx->params.dict_huf = dctx->dict_copy.has_huf ? dctx->dict_copy.huf : NULL;
     return ZXC_OK;
 }
 
@@ -1385,6 +1409,7 @@ int zxc_dctx_set_progress(zxc_dctx* dctx, const zxc_progress_callback_t cb, void
 
 int zxc_dctx_reset(zxc_dctx* dctx) {
     if (UNLIKELY(!dctx)) return ZXC_ERROR_NULL_INPUT;
+    (void)zxc_dict_copy_set(&dctx->dict_copy, NULL, 0, NULL);
     ZXC_MEMSET(&dctx->params, 0, sizeof(dctx->params));
     return ZXC_OK;
 }
@@ -1401,6 +1426,7 @@ void zxc_free_dctx(zxc_dctx* dctx) {
     // which we do not own. Free is a no-op; the caller owns the workspace.
     if (dctx->owns_workspace) return;
     if (dctx->initialized) zxc_cctx_free(&dctx->inner);
+    ZXC_FREE(dctx->dict_copy.data);
     ZXC_FREE(dctx);
 }
 

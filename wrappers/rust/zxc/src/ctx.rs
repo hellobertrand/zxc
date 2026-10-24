@@ -68,9 +68,8 @@ impl RawCctx {
         self.set_param(zxc_sys::ZXC_C_THREADS, threads)
     }
 
-    /// Attaches the dictionary slices from [`crate::dict_parts`] (empty
-    /// detaches). The context keeps the pointers only: the slices must stay
-    /// alive, unmoved, until the next `set_dict` or the last call using them.
+    /// Attaches a copy of the dictionary slices from [`crate::dict_parts`]
+    /// (empty detaches); the slices only have to live for this call.
     pub(crate) fn set_dict(&mut self, dict: &[u8], dict_huf: &[u8]) -> Result<()> {
         check(unsafe {
             zxc_sys::zxc_cctx_set_dict(
@@ -83,8 +82,7 @@ impl RawCctx {
     }
 
     /// Applies a whole [`CompressOptions`], dictionary included, plus the
-    /// thread count the struct does not carry. The dictionary slices are
-    /// borrowed from `opts`, so the caller keeps `opts` alive for the call.
+    /// thread count the struct does not carry.
     pub(crate) fn configure(&mut self, opts: &CompressOptions, threads: i64) -> Result<()> {
         let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
         self.set_params(opts.level, opts.checksum, opts.seekable, threads)?;
@@ -126,8 +124,8 @@ impl RawDctx {
         self.set_param(zxc_sys::ZXC_D_THREADS, threads)
     }
 
-    /// Attaches the dictionary slices (empty detaches); same lifetime rule as
-    /// [`RawCctx::set_dict`].
+    /// Attaches a copy of the dictionary slices (empty detaches), as
+    /// [`RawCctx::set_dict`] does.
     pub(crate) fn set_dict(&mut self, dict: &[u8], dict_huf: &[u8]) -> Result<()> {
         check(unsafe {
             zxc_sys::zxc_dctx_set_dict(
@@ -139,8 +137,7 @@ impl RawDctx {
         })
     }
 
-    /// Applies a whole [`DecompressOptions`], dictionary included; the caller
-    /// keeps `opts` alive for the call.
+    /// Applies a whole [`DecompressOptions`], dictionary included.
     pub(crate) fn configure(&mut self, opts: &DecompressOptions, threads: i64) -> Result<()> {
         let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
         self.set_params(opts.verify_checksum, threads)?;
@@ -173,6 +170,9 @@ pub struct Cctx {
     inner: RawCctx,
     dict: Option<Vec<u8>>,
     dict_huf: Option<Vec<u8>>,
+    /// The context holds a per-call dictionary instead of the creation-time
+    /// one, which the next call without one puts back.
+    overridden: bool,
 }
 
 // SAFETY: the underlying handle is opaque and the library states contexts
@@ -184,20 +184,20 @@ impl Cctx {
     ///
     /// When `opts` is `Some`, its level, checksum and seek-table settings are
     /// set on the context (the working buffers are sized on the first call);
-    /// `None` keeps the library defaults. A dictionary given here is validated
-    /// and then applies to every call that omits one, as in the Go, Python and
-    /// Node bindings. Each [`Cctx::compress_block`] call sets its own options
-    /// on top.
+    /// `None` keeps the library defaults. A dictionary given here is copied
+    /// onto the context and applies to every call that omits one, as in the
+    /// Go, Python and Node bindings. Each [`Cctx::compress_block`] call sets
+    /// its own options on top.
     pub fn new(opts: Option<&CompressOptions>) -> Result<Self> {
         let mut inner = RawCctx::new()?;
         if let Some(o) = opts {
-            crate::dict_parts(o.dict.as_deref(), o.dict_huf.as_deref())?;
-            inner.set_params(o.level, o.checksum, o.seekable, 0)?;
+            inner.configure(o, 0)?;
         }
         Ok(Self {
             inner,
             dict: opts.and_then(|o| o.dict.clone()),
             dict_huf: opts.and_then(|o| o.dict_huf.clone()),
+            overridden: false,
         })
     }
 
@@ -212,13 +212,17 @@ impl Cctx {
         dst: &mut [u8],
         opts: &CompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_huf) = crate::dict_parts(
-            opts.dict.as_deref().or(self.dict.as_deref()),
-            opts.dict_huf.as_deref().or(self.dict_huf.as_deref()),
-        )?;
         self.inner
             .set_params(opts.level, opts.checksum, opts.seekable, 0)?;
-        self.inner.set_dict(dict, dict_huf)?;
+        let override_dict = opts.dict.is_some() || opts.dict_huf.is_some();
+        if override_dict || self.overridden {
+            let (dict, dict_huf) = crate::dict_parts(
+                opts.dict.as_deref().or(self.dict.as_deref()),
+                opts.dict_huf.as_deref().or(self.dict_huf.as_deref()),
+            )?;
+            self.inner.set_dict(dict, dict_huf)?;
+            self.overridden = override_dict;
+        }
         let res = unsafe {
             zxc_sys::zxc_compress_block(
                 self.inner.as_ptr(),
@@ -228,9 +232,6 @@ impl Cctx {
                 dst.len(),
             )
         };
-        // The slices may belong to `opts`, gone after this call: detach them
-        // so the context never holds a pointer past its owner.
-        self.inner.set_dict(&[], &[])?;
         if res < 0 {
             Err(error_from_code(res))
         } else {
@@ -256,8 +257,7 @@ impl Dctx {
         })
     }
 
-    /// Sets `opts` on the context, runs `call` on the raw handle and detaches
-    /// the borrowed dictionary afterwards.
+    /// Sets `opts` on the context and runs `call` on the raw handle.
     fn with_options(
         &mut self,
         opts: &DecompressOptions,
@@ -265,7 +265,6 @@ impl Dctx {
     ) -> Result<usize> {
         self.inner.configure(opts, 0)?;
         let res = call(self.inner.as_ptr());
-        self.inner.set_dict(&[], &[])?;
         if res < 0 {
             Err(error_from_code(res))
         } else {

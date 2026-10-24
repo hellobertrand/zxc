@@ -556,8 +556,8 @@ ZXC_EXPORT int zxc_cctx_get_param(const zxc_cctx* cctx, zxc_cparam_t param, int6
 /**
  * @brief Attaches a pre-trained dictionary to @p cctx; a NULL @p dict detaches.
  *
- * The context keeps the pointers only: the bytes stay caller-owned and must
- * outlive every call that uses them. @p dict_huf, when non-NULL, is the
+ * The context keeps its own copy of @p dict and @p dict_huf: the caller's
+ * buffers are free once this returns. @p dict_huf, when non-NULL, is the
  * @ref ZXC_HUF_TABLE_SIZE-byte shared literal table (zxc_dict_huf()), used at
  * levels 6-7 and part of the archive's dict_id binding.
  *
@@ -567,7 +567,8 @@ ZXC_EXPORT int zxc_cctx_get_param(const zxc_cctx* cctx, zxc_cparam_t param, int6
  * @param[in]     dict_huf  Shared literal table, or NULL.
  * @return @ref ZXC_OK; @ref ZXC_ERROR_DICT_TOO_LARGE above the maximum;
  *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context, which has no
- *         room for the dictionary prefix.
+ *         room for the dictionary prefix; @ref ZXC_ERROR_MEMORY when the copy
+ *         cannot be allocated. A refused call leaves the attached dictionary.
  */
 ZXC_EXPORT int zxc_cctx_set_dict(zxc_cctx* cctx, const void* dict, size_t dict_size,
                                  const void* dict_huf);
@@ -666,7 +667,7 @@ ZXC_EXPORT int zxc_dctx_get_param(const zxc_dctx* dctx, zxc_dparam_t param, int6
 /**
  * @brief Attaches the dictionary the archives were compressed with; NULL detaches.
  *
- * Same ownership rules as zxc_cctx_set_dict(). @p dict_huf must be the table
+ * Copies the bytes, as zxc_cctx_set_dict() does. @p dict_huf must be the table
  * used at compression time when the archive carries one; the header's dict_id
  * is checked against the pair, @ref ZXC_ERROR_DICT_MISMATCH otherwise.
  *
@@ -675,7 +676,8 @@ ZXC_EXPORT int zxc_dctx_get_param(const zxc_dctx* dctx, zxc_dparam_t param, int6
  * @param[in]     dict_size Size of @p dict in bytes, at most @ref ZXC_DICT_SIZE_MAX.
  * @param[in]     dict_huf  Shared literal table, or NULL.
  * @return @ref ZXC_OK; @ref ZXC_ERROR_DICT_TOO_LARGE above the maximum;
- *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context.
+ *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context;
+ *         @ref ZXC_ERROR_MEMORY when the copy cannot be allocated.
  */
 ZXC_EXPORT int zxc_dctx_set_dict(zxc_dctx* dctx, const void* dict, size_t dict_size,
                                  const void* dict_huf);

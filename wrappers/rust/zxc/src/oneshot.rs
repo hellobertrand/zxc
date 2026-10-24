@@ -117,8 +117,6 @@ unsafe fn impl_compress(
             )
         }
     } else {
-        // `options` outlives the call, so the dictionary pointers the context
-        // keeps stay valid until it is freed at the end of this block.
         let mut cctx = RawCctx::new()?;
         cctx.configure(options, 0)?;
         unsafe {

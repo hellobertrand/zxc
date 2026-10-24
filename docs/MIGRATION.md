@@ -146,9 +146,11 @@ Behaviour changes to know about, beyond the mechanical rewrite:
   `zxc_cctx_set_param()` / `zxc_*ctx_set_dict()`, no longer by the compress or
   decompress call. `zxc_init_static_cctx()` takes its block size and level as
   explicit arguments; `0` is invalid there, not a default.
-- **Dictionary pointers are kept, not copied.** As with the struct fields, the
-  context stores the `dict` / `dict_huf` pointers; the bytes must outlive every
-  call that uses them (`zxc_seekable_set_dict()` still copies).
+- **The dictionary is copied on attach.** The struct fields kept the `dict` /
+  `dict_huf` pointers and the bytes had to outlive every call; `zxc_cctx_set_dict()`
+  / `zxc_dctx_set_dict()` copy them (at most `ZXC_DICT_SIZE_MAX` + 128 bytes), so
+  the caller's buffers are free once the setter returns, as with
+  `zxc_seekable_set_dict()`. A failed copy is `ZXC_ERROR_MEMORY`.
 - **The `FILE*` and push creators take a context.** `zxc_stream_compress()` /
   `zxc_stream_decompress()` read a `const zxc_cctx*` / `const zxc_dctx*` for
   their parameters and never touch its buffers, so one context can configure a

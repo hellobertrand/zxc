@@ -940,14 +940,15 @@ ZXC_EXPORT int zxc_cctx_set_dict(
 ```
 
 Attaches a pre-trained dictionary; a NULL `dict` detaches it. The context keeps
-the **pointers only**: the bytes stay caller-owned and must outlive every call
-that uses them. `dict_huf`, when given, is the `ZXC_HUF_TABLE_SIZE`-byte table
+its **own copy** of the content and the table, so the caller's buffers are free
+once the call returns. `dict_huf`, when given, is the `ZXC_HUF_TABLE_SIZE`-byte table
 from `zxc_dict_load()` / `zxc_dict_huf()`: it codes literals at levels 6–7 and
 is bound into the archive's `dict_id` at every level (§11b). The shared table is
 rebuilt only when its bytes change between calls.
 
 **Returns**: `ZXC_OK`; `ZXC_ERROR_DICT_TOO_LARGE` above `ZXC_DICT_SIZE_MAX`;
-`ZXC_ERROR_DICT_UNSUPPORTED` on a static context.
+`ZXC_ERROR_DICT_UNSUPPORTED` on a static context; `ZXC_ERROR_MEMORY` when the
+copy cannot be allocated. A refused call leaves the attached dictionary.
 
 ### `zxc_cctx_set_progress`
 
@@ -1051,8 +1052,8 @@ ZXC_EXPORT int zxc_dctx_set_dict(
 ```
 
 Attaches the dictionary the archives were compressed with; a NULL `dict`
-detaches it. Same ownership rules as `zxc_cctx_set_dict()` (pointers kept,
-bytes caller-owned). `dict_huf` must be the table used at compression time when
+detaches it. Copies the bytes, as `zxc_cctx_set_dict()` does. `dict_huf` must
+be the table used at compression time when
 the archive carries one: the header's `dict_id` is checked against the
 (content, table) pair, `ZXC_ERROR_DICT_MISMATCH` otherwise.
 

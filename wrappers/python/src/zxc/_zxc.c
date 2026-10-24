@@ -1117,33 +1117,23 @@ static PyObject* pyzxc_dict_huf(PyObject* self, PyObject* arg) {
 //
 // PyCapsule handles like the push streams, wrapped by the Cctx / Dctx classes
 // in __init__.py. The keyword arguments are set on the context at creation
-// and stay for every call. The context keeps only pointers to a dictionary,
-// so the holder owns a copy that outlives it.
+// and stay for every call; the context copies its dictionary.
 
 #define ZXC_CCTX_CAPSULE "zxc_cctx"
 #define ZXC_DCTX_CAPSULE "zxc_dctx"
 
 typedef struct {
     zxc_cctx* cctx;
-    uint8_t* dict;  // owned copy, NULL when absent
-    size_t dict_size;
-    uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    int has_huf;
 } pyzxc_cctx_holder_t;
 
 typedef struct {
     zxc_dctx* dctx;
-    uint8_t* dict;
-    size_t dict_size;
-    uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    int has_huf;
 } pyzxc_dctx_holder_t;
 
 static void cctx_capsule_destructor(PyObject* capsule) {
     pyzxc_cctx_holder_t* h = (pyzxc_cctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CCTX_CAPSULE);
     if (h) {
         if (h->cctx) zxc_free_cctx(h->cctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
     }
 }
@@ -1152,52 +1142,42 @@ static void dctx_capsule_destructor(PyObject* capsule) {
     pyzxc_dctx_holder_t* h = (pyzxc_dctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DCTX_CAPSULE);
     if (h) {
         if (h->dctx) zxc_free_dctx(h->dctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
     }
 }
 
-// Copies the dictionary and its table into the holder. Returns 0, or -1 with
-// an exception set.
-static int pyzxc_ctx_take_dict(PyObject* dict_obj, PyObject* huf_obj, uint8_t** out_dict,
-                               size_t* out_size, uint8_t* out_huf, int* out_has_huf) {
-    *out_dict = NULL;
-    *out_size = 0;
-    *out_has_huf = 0;
+/* Dictionary buffers borrowed for one configure call; the context copies them.
+ * Released by pyzxc_dict_views_release(), also after a failed acquire. */
+typedef struct {
+    Py_buffer dict;
+    Py_buffer huf;
+    int have_dict, have_huf;
+} pyzxc_dict_views_t;
 
+static void pyzxc_dict_views_release(pyzxc_dict_views_t* v) {
+    if (v->have_dict) PyBuffer_Release(&v->dict);
+    if (v->have_huf) PyBuffer_Release(&v->huf);
+    v->have_dict = v->have_huf = 0;
+}
+
+/* Returns 0, or -1 with an exception set. */
+static int pyzxc_dict_views_acquire(pyzxc_dict_views_t* v, PyObject* dict_obj, PyObject* huf_obj) {
+    memset(v, 0, sizeof(*v));
+    if (dict_obj && dict_obj != Py_None) {
+        if (PyObject_GetBuffer(dict_obj, &v->dict, PyBUF_SIMPLE) < 0) return -1;
+        v->have_dict = 1;
+    }
     if (huf_obj && huf_obj != Py_None) {
-        Py_buffer hv;
-        if (PyObject_GetBuffer(huf_obj, &hv, PyBUF_SIMPLE) < 0) return -1;
-        if (hv.len != ZXC_HUF_TABLE_SIZE) {
-            PyBuffer_Release(&hv);
+        if (PyObject_GetBuffer(huf_obj, &v->huf, PyBUF_SIMPLE) < 0) {
+            pyzxc_dict_views_release(v);
+            return -1;
+        }
+        v->have_huf = 1;
+        if (v->huf.len != ZXC_HUF_TABLE_SIZE) {
+            pyzxc_dict_views_release(v);
             PyErr_SetString(PyExc_ValueError, "dict_huf must be exactly 128 bytes");
             return -1;
         }
-        memcpy(out_huf, hv.buf, ZXC_HUF_TABLE_SIZE);
-        PyBuffer_Release(&hv);
-        *out_has_huf = 1;
-    }
-
-    if (dict_obj && dict_obj != Py_None) {
-        Py_buffer dv;
-        if (PyObject_GetBuffer(dict_obj, &dv, PyBUF_SIMPLE) < 0) return -1;
-        if ((size_t)dv.len > ZXC_DICT_SIZE_MAX) {
-            PyBuffer_Release(&dv);
-            PyErr_SetString(PyExc_RuntimeError, zxc_error_name(ZXC_ERROR_DICT_TOO_LARGE));
-            return -1;
-        }
-        if (dv.len > 0) {
-            uint8_t* copy = (uint8_t*)PyMem_Malloc((size_t)dv.len);
-            if (!copy) {
-                PyBuffer_Release(&dv);
-                PyErr_NoMemory();
-                return -1;
-            }
-            memcpy(copy, dv.buf, (size_t)dv.len);
-            *out_dict = copy;
-            *out_size = (size_t)dv.len;
-        }
-        PyBuffer_Release(&dv);
     }
     return 0;
 }
@@ -1216,35 +1196,26 @@ static PyObject* pyzxc_cctx_create(PyObject* self, PyObject* args, PyObject* kwa
         return NULL;
     }
 
+    pyzxc_dict_views_t v;
+    if (pyzxc_dict_views_acquire(&v, dict_obj, huf_obj) < 0) return NULL;
     pyzxc_cctx_holder_t* h = (pyzxc_cctx_holder_t*)PyMem_Malloc(sizeof(*h));
-    if (!h) return PyErr_NoMemory();
-    memset(h, 0, sizeof(*h));
-    if (pyzxc_ctx_take_dict(dict_obj, huf_obj, &h->dict, &h->dict_size, h->huf, &h->has_huf) < 0) {
-        PyMem_Free(h);
-        return NULL;
+    if (!h) {
+        pyzxc_dict_views_release(&v);
+        return PyErr_NoMemory();
     }
-
     h->cctx = zxc_create_cctx();
-    if (!h->cctx) {
-        PyMem_Free(h->dict);
-        PyMem_Free(h);
-        Py_Return_Err(PyExc_MemoryError, "zxc_create_cctx failed");
-    }
-    const int rc = pyzxc_cctx_configure(h->cctx, level, 0, 0, checksum, seekable, h->dict,
-                                        h->dict_size, h->has_huf ? h->huf : NULL);
-    if (rc != ZXC_OK) {
-        zxc_free_cctx(h->cctx);
-        PyMem_Free(h->dict);
-        PyMem_Free(h);
-        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
-    }
-
-    PyObject* cap = PyCapsule_New(h, ZXC_CCTX_CAPSULE, cctx_capsule_destructor);
+    const int rc = h->cctx ? pyzxc_cctx_configure(h->cctx, level, 0, 0, checksum, seekable,
+                                                  v.have_dict ? v.dict.buf : NULL,
+                                                  v.have_dict ? (size_t)v.dict.len : 0,
+                                                  v.have_huf ? v.huf.buf : NULL)
+                           : ZXC_ERROR_MEMORY;
+    pyzxc_dict_views_release(&v);
+    PyObject* const cap =
+        rc == ZXC_OK ? PyCapsule_New(h, ZXC_CCTX_CAPSULE, cctx_capsule_destructor) : NULL;
     if (!cap) {
         zxc_free_cctx(h->cctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
-        return NULL;
+        if (rc != ZXC_OK) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     }
     return cap;
 }
@@ -1261,35 +1232,26 @@ static PyObject* pyzxc_dctx_create(PyObject* self, PyObject* args, PyObject* kwa
         return NULL;
     }
 
+    pyzxc_dict_views_t v;
+    if (pyzxc_dict_views_acquire(&v, dict_obj, huf_obj) < 0) return NULL;
     pyzxc_dctx_holder_t* h = (pyzxc_dctx_holder_t*)PyMem_Malloc(sizeof(*h));
-    if (!h) return PyErr_NoMemory();
-    memset(h, 0, sizeof(*h));
-    if (pyzxc_ctx_take_dict(dict_obj, huf_obj, &h->dict, &h->dict_size, h->huf, &h->has_huf) < 0) {
-        PyMem_Free(h);
-        return NULL;
+    if (!h) {
+        pyzxc_dict_views_release(&v);
+        return PyErr_NoMemory();
     }
-
     h->dctx = zxc_create_dctx();
-    if (!h->dctx) {
-        PyMem_Free(h->dict);
-        PyMem_Free(h);
-        Py_Return_Err(PyExc_MemoryError, "zxc_create_dctx failed");
-    }
-    const int rc = pyzxc_dctx_configure(h->dctx, 0, checksum, h->dict, h->dict_size,
-                                        h->has_huf ? h->huf : NULL);
-    if (rc != ZXC_OK) {
-        zxc_free_dctx(h->dctx);
-        PyMem_Free(h->dict);
-        PyMem_Free(h);
-        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
-    }
-
-    PyObject* cap = PyCapsule_New(h, ZXC_DCTX_CAPSULE, dctx_capsule_destructor);
+    const int rc = h->dctx
+                       ? pyzxc_dctx_configure(h->dctx, 0, checksum, v.have_dict ? v.dict.buf : NULL,
+                                              v.have_dict ? (size_t)v.dict.len : 0,
+                                              v.have_huf ? v.huf.buf : NULL)
+                       : ZXC_ERROR_MEMORY;
+    pyzxc_dict_views_release(&v);
+    PyObject* const cap =
+        rc == ZXC_OK ? PyCapsule_New(h, ZXC_DCTX_CAPSULE, dctx_capsule_destructor) : NULL;
     if (!cap) {
         zxc_free_dctx(h->dctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
-        return NULL;
+        if (rc != ZXC_OK) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     }
     return cap;
 }

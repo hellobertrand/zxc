@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sync/atomic"
 )
 
@@ -119,11 +118,8 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	o := applyOptions(opts)
 
 	// The pipeline reads its parameters from a configured context, built
-	// first so a refused option touches no file. It is freed before the
-	// dictionary it points at is unpinned.
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	cctx, err := createCctx(o, &pinner)
+	// first so a refused option touches no file.
+	cctx, err := createCctx(o)
 	if err != nil {
 		return 0, err
 	}
@@ -210,9 +206,7 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	o := applyOptions(opts)
 
 	// See CompressFile.
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	dctx, err := createDctx(o, &pinner)
+	dctx, err := createDctx(o)
 	if err != nil {
 		return 0, err
 	}
