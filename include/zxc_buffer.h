@@ -396,12 +396,9 @@ ZXC_EXPORT size_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Compressed block size (> 0), or a negative @ref zxc_error_t.
+ * @return Compressed block size (> 0), or a negative @ref zxc_error_t;
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p src_size exceeds
- *         @ref ZXC_BLOCK_SIZE_MAX or @c block_size is not a power of two in
- *         range; @ref ZXC_ERROR_BAD_LEVEL on a static
- *         context for a level raise its workspace cannot accommodate;
- *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context with a dictionary.
+ *         @ref ZXC_BLOCK_SIZE_MAX, or on a static context its pinned block size.
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,
                                       size_t dst_capacity);

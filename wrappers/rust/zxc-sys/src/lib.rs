@@ -303,8 +303,8 @@ unsafe extern "C" {
     /// # Returns
     ///
     /// Number of bytes written to `dst` (>0 on success), or a negative error
-    /// code. `level` 0 selects the default; other out-of-range levels are
-    /// silently clamped.
+    /// code. `level` 0 selects the default; any other level outside 1..7 is
+    /// `ZXC_ERROR_BAD_LEVEL`.
     pub fn zxc_compress(
         src: *const c_void,
         src_size: usize,

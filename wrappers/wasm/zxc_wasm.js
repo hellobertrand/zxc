@@ -355,6 +355,7 @@ export default async function createZXC(moduleOverrides, factory) {
   const ZXC_C_CHECKSUM = 4;
   const ZXC_C_SEEKABLE = 5;
   const ZXC_D_CHECKSUM = 2;
+  const ZXC_ERROR_BAD_LEVEL = -18;
 
   /** Throw a descriptive error when a context setter returns a code. */
   function _checkParam(r, what) {
@@ -425,10 +426,24 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {{cctx: number, release: Function}} `release()` frees the
    *   context and the dictionary copies.
    */
+  /**
+   * An absent (undefined or null) level selects the default; anything but an
+   * integer (2.5, NaN, 2 ** 32 + 3, "3") is refused rather than truncated by
+   * the i32 shim.
+   */
+  function _readLevel(opts) {
+    const level = opts == null ? null : opts.level;
+    if (level == null) return 0;
+    if (!Number.isInteger(level) || Math.abs(level) > 0x7fffffff) {
+      _checkParam(ZXC_ERROR_BAD_LEVEL, "set_param");
+    }
+    return level;
+  }
+
   function _createCctx(opts) {
-    // Validated before anything is allocated, so a rejected table leaks nothing.
+    // Validated before anything is allocated, so a rejected option leaks nothing.
     const split = _splitDictOption(opts);
-    const level = (opts && opts.level) || 0;
+    const level = _readLevel(opts);
     const checksum = (opts && opts.checksum) || false;
     const seekable = (opts && opts.seekable) || false;
 

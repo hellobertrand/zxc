@@ -55,9 +55,12 @@ typedef struct {
     int checksum;
 } run_ctx_t;
 
-/* Applies the checksum setting; the context, or NULL when it refused it. */
+/* Applies the checksum setting; the context, or NULL (freed) when it refused it. */
 static zxc_dctx* with_checksum(zxc_dctx* d, const int checksum) {
-    if (d && zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum) != ZXC_OK) return NULL;
+    if (d && zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum) != ZXC_OK) {
+        zxc_free_dctx(d);  // a no-op on a static context
+        return NULL;
+    }
     return d;
 }
 

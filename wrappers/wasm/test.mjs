@@ -441,6 +441,24 @@ async function main() {
       threw = true;
     }
     assert(threw, "frame info refuses a trailing byte");
+
+    // A non-integer level is refused, not truncated by the i32 shim.
+    for (const level of [2.5, NaN, Infinity, 2 ** 32 + 3, "3"]) {
+      let msg = "";
+      try {
+        zxc.compress(data, { level });
+      } catch (e) {
+        msg = e.message;
+      }
+      assert(
+        msg.includes("ZXC_ERROR_BAD_LEVEL"),
+        `level ${String(level)} refused (${msg || "no throw"})`,
+      );
+    }
+    assert(
+      zxc.compress(data, { level: null }).length > 0,
+      "level null selects the default",
+    );
   }
 
   // --- 9. WHATWG TransformStream adapters -------------------------------

@@ -193,11 +193,16 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     fseek(f_comp, 0, SEEK_SET);
 
     zxc_dctx* const dcfg = zxc_create_dctx();
-    if (dcfg) {
-        zxc_dctx_set_param(dcfg, ZXC_D_THREADS, 1);
-        zxc_dctx_set_param(dcfg, ZXC_D_CHECKSUM, checksum_enabled);
+    if (!dcfg || zxc_dctx_set_param(dcfg, ZXC_D_THREADS, 1) != ZXC_OK ||
+        zxc_dctx_set_param(dcfg, ZXC_D_CHECKSUM, checksum_enabled) != ZXC_OK) {
+        printf("Decompression setup failed!\n");
+        zxc_free_dctx(dcfg);
+        fclose(f_in);
+        fclose(f_comp);
+        fclose(f_decomp);
+        return 0;
     }
-    const int64_t drc = dcfg ? zxc_stream_decompress(f_comp, f_decomp, dcfg) : ZXC_ERROR_MEMORY;
+    const int64_t drc = zxc_stream_decompress(f_comp, f_decomp, dcfg);
     zxc_free_dctx(dcfg);
     if (drc < 0) {
         printf("Decompression Failed!\n");

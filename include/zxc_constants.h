@@ -99,8 +99,8 @@
  * @brief Bounds on thread-count parameters accepted by the streaming APIs.
  * @{
  */
-/** @brief Maximum `n_threads` for `zxc_stream_compress` /
- *  `zxc_stream_decompress`. Higher values are clamped to it. */
+/** @brief Maximum thread count: the @c THREADS setters refuse more, and
+ *  zxc_seekable_decompress_range_mt() caps its argument to it. */
 #define ZXC_MAX_THREADS 512
 /** @} */ /* end of threading */
 
