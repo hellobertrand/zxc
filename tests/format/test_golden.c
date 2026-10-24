@@ -483,8 +483,8 @@ static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8
         return 0;
     }
 
-    const int64_t csize = gc_recipe_compress(
-        &gc->opts, gc->use_dict_huf ? gc_dict_huf_table() : NULL, input, in_size, out, cap);
+    const int64_t csize = recipe_compress(&gc->opts, gc->use_dict_huf ? gc_dict_huf_table() : NULL,
+                                          input, in_size, out, cap);
 
     int ok = 0;
     if (csize <= 0) {

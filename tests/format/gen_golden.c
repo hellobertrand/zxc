@@ -58,8 +58,8 @@ int main(int argc, char** argv) {
             continue;
         }
 
-        int64_t csize = gc_recipe_compress(&gc->opts, gc->use_dict_huf ? gc_dict_huf_table() : NULL,
-                                           input, in_size, out, cap);
+        int64_t csize = recipe_compress(&gc->opts, gc->use_dict_huf ? gc_dict_huf_table() : NULL,
+                                        input, in_size, out, cap);
         if (csize <= 0) {
             fprintf(stderr, "  FAIL: compress(%s) -> %s\n", gc->name, zxc_error_name((int)csize));
             failures++;

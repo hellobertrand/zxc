@@ -500,7 +500,7 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
             fprintf(stderr, "FAIL: %s  OOM\n", vc->name);
         } else {
             int64_t csize =
-                vc_recipe_compress(&vc->opts, dict, dict_size, dict_huf, input, in_size, out, cap);
+                recipe_compress(&vc->opts, dict, dict_size, dict_huf, input, in_size, out, cap);
             if (csize <= 0) {
                 fprintf(stderr, "FAIL: %s  compress -> %s\n", vc->name, zxc_error_name((int)csize));
             } else if ((size_t)csize != ref_size || memcmp(out, ref, ref_size) != 0) {

@@ -250,7 +250,7 @@ static const uint8_t* gc_dict_huf_table(void) {
 /* ------------------------------------------------------------------------- */
 
 /* Compression recipe of a case: a plain struct, so the table stays designated
- * initialisers. gc_recipe_apply() carries it onto a context. */
+ * initialisers. recipe_apply() carries it onto a context. */
 typedef struct {
     int level;
     size_t block_size;
@@ -258,10 +258,10 @@ typedef struct {
     int seekable;
     const void* dict;
     size_t dict_size;
-} gc_recipe_t;
+} recipe_t;
 
 /* Configures @p c from @p r plus the shared table. ZXC_OK or the setter's error. */
-static inline int gc_recipe_apply(zxc_cctx* c, const gc_recipe_t* r, const void* dict_huf) {
+static inline int recipe_apply(zxc_cctx* c, const recipe_t* r, const void* dict_huf) {
     int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, r->level);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, (int64_t)r->block_size);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, r->checksum_enabled);
@@ -271,11 +271,11 @@ static inline int gc_recipe_apply(zxc_cctx* c, const gc_recipe_t* r, const void*
 }
 
 /* Compresses @p in with @p r into @p out: the size, or a negative zxc_error_t. */
-static inline int64_t gc_recipe_compress(const gc_recipe_t* r, const void* dict_huf, const void* in,
-                                         size_t in_size, void* out, size_t cap) {
+static inline int64_t recipe_compress(const recipe_t* r, const void* dict_huf, const void* in,
+                                      size_t in_size, void* out, size_t cap) {
     zxc_cctx* const c = zxc_create_cctx();
     if (!c) return ZXC_ERROR_MEMORY;
-    const int rc = gc_recipe_apply(c, r, dict_huf);
+    const int rc = recipe_apply(c, r, dict_huf);
     const int64_t n = rc == ZXC_OK ? zxc_compress_cctx(c, in, in_size, out, cap) : rc;
     zxc_free_cctx(c);
     return n;
@@ -284,7 +284,7 @@ static inline int64_t gc_recipe_compress(const gc_recipe_t* r, const void* dict_
 typedef struct {
     const char* name; /* basename, no extension */
     size_t (*make_input)(uint8_t** out);
-    gc_recipe_t opts;         /* level / block_size / checksum / seekable / dict */
+    recipe_t opts;            /* level / block_size / checksum / seekable / dict */
     uint8_t expect_data_type; /* every data block must equal this, or GC_ANY_TYPE */
     int expect_enc_lit;       /* SPL literal encoding (-1 = no constraint;
                                  2 = HUFFMAN, 3 = HUFFMAN_DICT) */
