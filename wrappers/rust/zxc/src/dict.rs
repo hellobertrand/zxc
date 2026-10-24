@@ -74,7 +74,7 @@ pub fn train_dict(samples: &[&[u8]], max_size: usize) -> Result<Vec<u8>> {
 
     let mut buf = vec![0u8; cap];
     let written = unsafe {
-        zxc_sys::zxc_train_dict(
+        zxc_sys::zxc_dict_train_content(
             ptrs.as_ptr(),
             sizes.as_ptr(),
             samples.len(),
@@ -97,7 +97,7 @@ pub fn train_dict(samples: &[&[u8]], max_size: usize) -> Result<Vec<u8>> {
 /// Returns 0 for empty content.
 pub fn dict_id(content: &[u8]) -> u32 {
     unsafe {
-        zxc_sys::zxc_dict_id(
+        zxc_sys::zxc_dict_compute_id(
             content.as_ptr() as *const c_void,
             content.len(),
             std::ptr::null(),
@@ -117,7 +117,7 @@ pub fn get_dict_id(archive: &[u8]) -> u32 {
 ///
 /// Returns 0 if the buffer is not a valid `.zxd` file.
 pub fn dict_get_id(zxd: &[u8]) -> u32 {
-    unsafe { zxc_sys::zxc_dict_get_id(zxd.as_ptr() as *const c_void, zxd.len()) }
+    unsafe { zxc_sys::zxc_dict_read_id(zxd.as_ptr() as *const c_void, zxd.len()) }
 }
 
 /// Trains the shared literal Huffman table for an already-trained dictionary.
@@ -140,7 +140,7 @@ pub fn train_dict_huf(samples: &[&[u8]], dict: &[u8]) -> Result<[u8; ZXC_HUF_TAB
 
     let mut huf = [0u8; ZXC_HUF_TABLE_SIZE];
     let rc = unsafe {
-        zxc_sys::zxc_train_dict_huf(
+        zxc_sys::zxc_dict_train_huf(
             ptrs.as_ptr(),
             sizes.as_ptr(),
             samples.len(),

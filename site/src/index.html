@@ -157,7 +157,7 @@ zxc -b input_file</code></pre>
 <p>From C, the buffer interface compresses and decompresses in one call each:</p>
 <pre class="code" data-lang="c"><code>#include "zxc.h"
 
-uint64_t bound = zxc_compress_bound(src_size);
+size_t bound = zxc_compress_bound(src_size);
 zxc_compress_opts_t c = {
     .level            = ZXC_LEVEL_DEFAULT,
     .checksum_enabled = 1,

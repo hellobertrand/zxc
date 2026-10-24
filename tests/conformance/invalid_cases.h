@@ -116,7 +116,7 @@ static size_t make_text(uint8_t** out) {
 /* Compress @p in with @p opts into a fresh buffer. Returns size, 0 on failure. */
 static size_t build_base(const uint8_t* in, size_t in_size, const zxc_compress_opts_t* opts,
                          uint8_t** out) {
-    const size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+    const size_t cap = zxc_compress_bound(in_size) + 4096;
     uint8_t* buf = (uint8_t*)malloc(cap);
     if (!buf) return 0;
     const int64_t n = zxc_compress(in, in_size, buf, cap, opts);

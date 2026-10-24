@@ -17,7 +17,7 @@
 static int __init zxc_selftest_init(void) {
     static const char msg[] = "zxc kernel smoke test, zxc kernel smoke test, zxc kernel";
     static const int levels[] = {3, 7};
-    size_t cap = (size_t)zxc_compress_bound(sizeof(msg));
+    size_t cap = zxc_compress_bound(sizeof(msg));
     size_t ws_sz = zxc_static_dctx_workspace_size(PAGE_SIZE);
     u8 *comp = kmalloc(cap, GFP_KERNEL), *back = kmalloc(sizeof(msg), GFP_KERNEL);
     void* ws = kvmalloc(ws_sz, GFP_KERNEL);

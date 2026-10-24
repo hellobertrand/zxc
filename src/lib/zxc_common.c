@@ -1032,32 +1032,33 @@ int zxc_read_pak_header(const uint8_t* RESTRICT src, const size_t len,
  * The block count is derived from @ref ZXC_BLOCK_SIZE_MIN (4 KB) to
  * guarantee the bound holds for all valid block sizes and seekable mode.
  */
-uint64_t zxc_compress_bound(const size_t input_size) {
-    // Guard against uint64 overflow when summing per-block overhead
-    // across very large inputs (input_size approaching SIZE_MAX).
-    if (UNLIKELY(input_size > (SIZE_MAX - (SIZE_MAX >> 8)))) return 0;
-    uint64_t n = ((uint64_t)input_size + ZXC_BLOCK_SIZE_MIN - 1) / ZXC_BLOCK_SIZE_MIN;
+size_t zxc_compress_bound(const size_t input_size) {
+    // n <= 2^52 even for a 64-bit size_t, so the overhead sum fits a uint64.
+    uint64_t n = (uint64_t)input_size / ZXC_BLOCK_SIZE_MIN + (input_size % ZXC_BLOCK_SIZE_MIN != 0);
     if (n == 0) n = 1;
-    return ZXC_FILE_HEADER_SIZE +
-           (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_FORMAT_OVERHEAD)) +
-           (uint64_t)input_size + ZXC_BLOCK_HEADER_SIZE + /* EOF block */
-           ZXC_BLOCK_HEADER_SIZE +                        /* SEK block header (seekable) */
-           zxc_seek_table_bytes(n) +                      /* SEK groups (seekable) */
-           ZXC_FOOTER_MAX_SIZE_WITH_DIGEST;               /* optional digest + footer */
+    const uint64_t overhead =
+        ZXC_FILE_HEADER_SIZE +
+        (n * (ZXC_BLOCK_HEADER_SIZE + ZXC_BLOCK_CHECKSUM_SIZE + ZXC_BLOCK_FORMAT_OVERHEAD)) +
+        ZXC_BLOCK_HEADER_SIZE +          /* EOF block */
+        ZXC_BLOCK_HEADER_SIZE +          /* SEK block header (seekable) */
+        zxc_seek_table_bytes(n) +        /* SEK groups (seekable) */
+        ZXC_FOOTER_MAX_SIZE_WITH_DIGEST; /* optional digest + footer */
+    // The bound is a buffer size: input + overhead must fit a size_t.
+    if (UNLIKELY(overhead > (uint64_t)(SIZE_MAX - input_size))) return 0;
+    return input_size + (size_t)overhead;
 }
 
 /**
  * @brief Returns the maximum compressed size for a single block (no file framing).
  */
-uint64_t zxc_compress_block_bound(const size_t input_size) {
+size_t zxc_compress_block_bound(const size_t input_size) {
     // Mirrors the Block API contract: outside [1, ZXC_BLOCK_SIZE_MAX] the call
     // would fail anyway, so the bound is undefined and 0 says "unusable". The cap
     // also makes the addition below trivially overflow-free.
     if (UNLIKELY(input_size == 0 || input_size > ZXC_BLOCK_SIZE_MAX)) return 0;
     // Outer block header + payload (worst case: incompressible, raw bytes)
     // + inner format overhead + optional checksum.
-    return (uint64_t)ZXC_BLOCK_HEADER_SIZE + (uint64_t)input_size + ZXC_BLOCK_FORMAT_OVERHEAD +
-           ZXC_BLOCK_CHECKSUM_SIZE;
+    return ZXC_BLOCK_HEADER_SIZE + input_size + ZXC_BLOCK_FORMAT_OVERHEAD + ZXC_BLOCK_CHECKSUM_SIZE;
 }
 
 /**
@@ -1071,9 +1072,9 @@ uint64_t zxc_compress_block_bound(const size_t input_size) {
  * Returns 0 if @p uncompressed_size exceeds ZXC_BLOCK_SIZE_MAX (the Block API
  * limit), or if the arithmetic would overflow.
  */
-uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
+size_t zxc_decompress_block_bound(const size_t uncompressed_size) {
     if (UNLIKELY(uncompressed_size > ZXC_BLOCK_SIZE_MAX)) return 0;
-    return (uint64_t)uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD;
+    return uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD;
 }
 
 /**
@@ -1090,10 +1091,10 @@ uint64_t zxc_decompress_block_bound(const size_t uncompressed_size) {
  * parser and reused as transient package-merge scratch for the Huffman
  * code-length builder.
  */
-uint64_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
+size_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
     if (UNLIKELY(src_size == 0)) return 0;
     const size_t chunk_size = zxc_block_size_ceil(src_size);
-    return (uint64_t)zxc_cctx_compute_workspace_size(chunk_size, 1, level, 0);
+    return zxc_cctx_compute_workspace_size(chunk_size, 1, level, 0);
 }
 
 // ============================================================================
@@ -1184,3 +1185,5 @@ int zxc_default_level(void) { return ZXC_LEVEL_DEFAULT; }
  * Format: "MAJOR.MINOR.PATCH".
  */
 const char* zxc_version_string(void) { return ZXC_LIB_VERSION_STR; }
+
+unsigned zxc_version_number(void) { return ZXC_VERSION_NUMBER; }

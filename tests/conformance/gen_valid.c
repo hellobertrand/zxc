@@ -61,7 +61,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
         }
     }
 
-    const size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+    const size_t cap = zxc_compress_bound(in_size) + 4096;
     uint8_t* out = (uint8_t*)malloc(cap);
     if (!out) {
         fprintf(stderr, "  FAIL %s: out of memory\n", vc->name);

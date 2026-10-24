@@ -475,7 +475,7 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
 static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8_t* have,
                            size_t have_size, const uint8_t* input, size_t in_size) {
     g_checks++;
-    const size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+    const size_t cap = zxc_compress_bound(in_size) + 4096;
     uint8_t* out = (uint8_t*)malloc(cap);
     if (!out) {
         fprintf(stderr, "    FAIL [%s]: out of memory\n", ctx);

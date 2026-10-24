@@ -103,7 +103,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* 2. Round trip of one block of at most bs bytes. */
     const size_t n = size < bs ? size : bs;
     const zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum, .block_size = bs};
-    const size_t cb = (size_t)zxc_compress_block_bound(n);
+    const size_t cb = zxc_compress_block_bound(n);
     zxc_cctx* const cctx = zxc_create_cctx(&co);
     uint8_t* const comp = cb ? (uint8_t*)malloc(cb) : NULL;
     const int64_t c = (cctx && comp) ? zxc_compress_block(cctx, data, n, comp, cb, &co) : -1;
