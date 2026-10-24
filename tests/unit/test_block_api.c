@@ -224,7 +224,7 @@ int test_decompress_block_safe(void) {
                 zxc_dctx* dctx = zxc_create_dctx();
                 int64_t dsz = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, checksum) : -1;
                 if (dsz == ZXC_OK) dsz = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n);
-                int ok = (dsz == (int64_t)n) && memcmp(src, dst, n) == 0;
+                int ok = dsz >= 0 && (size_t)dsz == n && memcmp(src, dst, n) == 0;
                 zxc_free_dctx(dctx);
                 free(dst);
                 free(comp);

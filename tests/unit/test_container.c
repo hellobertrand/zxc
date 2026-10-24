@@ -280,7 +280,7 @@ int test_container_engine_reuse(void) {
             r = zxc_stream_decompress(fi, NULL, verify);
             pos = ftell(fi);
         }
-        if (r != (int64_t)at || pos != (long)b.n) {
+        if (r < 0 || (size_t)r != at || pos != (long)b.n) {
             printf("  [FAIL] input position: decoded %lld, at %ld (want %zu)\n", (long long)r, pos,
                    b.n);
             ok = 0;
@@ -292,12 +292,14 @@ int test_container_engine_reuse(void) {
     if (ok) {
         uint64_t seen = 0;
         zxc_dctx* const po = zxc_create_dctx();
-        uint8_t* const out = malloc(at);
+        // The frames' total, as a constant: the sum above is what the decode must reach.
+        const size_t total = 5 * n + 2 * nbig;
+        uint8_t* const out = malloc(total);
         int64_t sq = 0;
         const int configured = po && zxc_dctx_set_param(po, ZXC_D_THREADS, 4) == ZXC_OK &&
                                zxc_dctx_set_progress(po, max_progress, &seen) == ZXC_OK;
-        const int64_t r = out && configured ? file_decode(b.p, b.n, out, at, po, &sq) : -1;
-        if (r != (int64_t)at || seen != (uint64_t)at) {
+        const int64_t r = out && configured ? file_decode(b.p, b.n, out, total, po, &sq) : -1;
+        if (r < 0 || (size_t)r != at || seen != (uint64_t)at) {
             printf("  [FAIL] progress: decoded %lld, last progress %llu (want %zu)\n", (long long)r,
                    (unsigned long long)seen, at);
             ok = 0;
