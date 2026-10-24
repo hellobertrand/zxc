@@ -65,7 +65,7 @@ typedef struct {
     const void* dict;     /**< Pre-trained dictionary content (NULL = none). */
     size_t dict_size;     /**< Dictionary size in bytes (0 = none, max ZXC_DICT_SIZE_MAX). */
     const void* dict_huf; /**< Optional shared literal Huffman table: the 128-byte packed
-                               code-lengths header from zxc_train_dict_huf() /
+                               code-lengths header from zxc_dict_train_huf() /
                                zxc_dict_huf() (NULL = none, ignored without dict).
                                Used at levels 6-7 only.
                                Becomes part of the archive's dict_id binding. */

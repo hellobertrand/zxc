@@ -73,7 +73,7 @@ fn main() -> Result<(), zxc::Error> {
     let data = b"Hello, world!";
 
     // Compression
-    let mut output = vec![0u8; compress_bound(data.len()) as usize];
+    let mut output = vec![0u8; compress_bound(data.len())];
     let size = compress_to(data, &mut output, &CompressOptions::default())?;
     output.truncate(size);
 

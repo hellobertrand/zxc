@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
         uint8_t* input = NULL;
         size_t in_size = gc->make_input(&input);
 
-        size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+        size_t cap = zxc_compress_bound(in_size) + 4096;
         uint8_t* out = (uint8_t*)malloc(cap);
         if (!out) {
             fprintf(stderr, "  OOM for %s\n", gc->name);

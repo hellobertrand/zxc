@@ -644,7 +644,7 @@ int test_eof_block_structure(void) {
 
     const char* input = "test";
     size_t src_size = 4;
-    size_t max_dst_size = (size_t)zxc_compress_bound(src_size);
+    size_t max_dst_size = zxc_compress_bound(src_size);
     uint8_t* compressed = malloc(max_dst_size);
     if (!compressed) return 0;
 
@@ -887,7 +887,7 @@ int test_swapped_blocks_oneshot(void) {
         src[i] = (uint8_t)(rng >> 16);
     }
 
-    const size_t cap = (size_t)zxc_compress_bound(in_sz) + 4096;
+    const size_t cap = zxc_compress_bound(in_sz) + 4096;
     uint8_t* comp = malloc(cap);
     uint8_t* swapped = malloc(cap);
     uint8_t* out = malloc(in_sz);
@@ -1013,7 +1013,7 @@ int test_tail_between_eof_and_footer(void) {
     printf("=== TEST: Format - only a SEK block may sit before the footer ===\n");
     const size_t n = 4096;
     uint8_t* const src = malloc(n);
-    const size_t cap = (size_t)zxc_compress_bound(n) + 128;
+    const size_t cap = zxc_compress_bound(n) + 128;
     uint8_t* const arc = malloc(cap);
     uint8_t* const mod = malloc(cap + 128);
     uint8_t* const out = malloc(n);
@@ -1117,7 +1117,7 @@ static int seek_flag_verdict(const uint8_t* arc, const size_t len, const size_t 
 int test_seek_flag_contract(void) {
     printf("=== TEST: Format - HAS_SEEK_TABLE matches the tail on every reader ===\n");
     const size_t n = 3 * 4096 + 7;
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const src = malloc(n);
     uint8_t* const plain = malloc(cap);
     uint8_t* const seek = malloc(cap);
@@ -1238,7 +1238,7 @@ int test_footer_digest(void) {
         rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
-    const size_t cap = (size_t)zxc_compress_bound(N);
+    const size_t cap = zxc_compress_bound(N);
     uint8_t* a = malloc(cap);
     uint8_t* b = malloc(cap);
     uint8_t* out = malloc(N);
@@ -1703,7 +1703,7 @@ int test_rle_section_trailing_bytes(void) {
     // long enough for RLE (repeat runs start at 4).
     const size_t n = 4096;
     uint8_t* src = (uint8_t*)malloc(n);
-    const size_t bound = (size_t)zxc_compress_block_bound(n);
+    const size_t bound = zxc_compress_block_bound(n);
     uint8_t* comp = (uint8_t*)malloc(bound + 1);
     uint8_t* forged = (uint8_t*)malloc(bound + 1);
     uint8_t* out = (uint8_t*)malloc((size_t)zxc_decompress_block_bound(n));

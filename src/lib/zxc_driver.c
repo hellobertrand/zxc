@@ -1287,7 +1287,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
     if (f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, block_size, checksum_enabled,
-                              zxc_dict_id(dict, dict_size, dict_huf), seekable);
+                              zxc_dict_compute_id(dict, dict_size, dict_huf), seekable);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx->io_error = 1;
     }
@@ -1324,7 +1324,7 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_decompress_opts
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
-    const uint32_t dict_id = zxc_dict_id(dict, dict_size, dict_huf);
+    const uint32_t dict_id = zxc_dict_compute_id(dict, dict_size, dict_huf);
 
     zxc_stream_engine_t e;
     int running = 0;

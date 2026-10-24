@@ -10,7 +10,7 @@
 #![allow(non_upper_case_globals)]
 
 use std::ffi::c_int;
-use std::os::raw::{c_char, c_void};
+use std::os::raw::{c_char, c_uint, c_void};
 
 // =============================================================================
 // ZXC Version Constants
@@ -302,6 +302,12 @@ unsafe extern "C" {
     ///
     /// The returned pointer is a compile-time constant and must not be freed.
     pub fn zxc_version_string() -> *const c_char;
+
+    /// Returns the library version as `MAJOR * 10000 + MINOR * 100 + PATCH`.
+    ///
+    /// Compare with the crate's `ZXC_VERSION_*` constants to detect a runtime
+    /// library older than the one compiled against.
+    pub fn zxc_version_number() -> c_uint;
 }
 
 // =============================================================================
@@ -312,7 +318,7 @@ unsafe extern "C" {
     /// Calculates the maximum compressed size for a given input.
     ///
     /// Useful for allocating output buffers before compression.
-    pub fn zxc_compress_bound(input_size: usize) -> u64;
+    pub fn zxc_compress_bound(input_size: usize) -> usize;
 
     /// Compresses a data buffer using the ZXC algorithm.
     ///
@@ -469,7 +475,7 @@ unsafe extern "C" {
     ///
     /// # Returns
     /// Size of the trained dictionary (>0), or a negative `zxc_error_t` code.
-    pub fn zxc_train_dict(
+    pub fn zxc_dict_train_content(
         samples: *const *const c_void,
         sample_sizes: *const usize,
         n_samples: usize,
@@ -485,7 +491,11 @@ unsafe extern "C" {
     /// - `huf_lengths` must be null or valid for 128 bytes (`ZXC_HUF_TABLE_SIZE`).
     ///
     /// Returns 0 if `dict` is NULL or `dict_size` is 0.
-    pub fn zxc_dict_id(dict: *const c_void, dict_size: usize, huf_lengths: *const c_void) -> u32;
+    pub fn zxc_dict_compute_id(
+        dict: *const c_void,
+        dict_size: usize,
+        huf_lengths: *const c_void,
+    ) -> u32;
 
     /// Returns the dictionary ID stored in a `.zxd` file buffer.
     ///
@@ -493,7 +503,7 @@ unsafe extern "C" {
     /// - `buf` must be a valid pointer to `buf_size` bytes.
     ///
     /// Returns 0 if the buffer is not a valid `.zxd` file.
-    pub fn zxc_dict_get_id(buf: *const c_void, buf_size: usize) -> u32;
+    pub fn zxc_dict_read_id(buf: *const c_void, buf_size: usize) -> u32;
 
     /// Returns the `.zxd` file size for a given content size
     /// (= 16 + `content_size` + 128 for the shared Huffman table).
@@ -502,14 +512,14 @@ unsafe extern "C" {
     /// Trains the shared literal Huffman table for an already-trained dictionary.
     ///
     /// # Safety
-    /// - `samples`/`sample_sizes` as in [`zxc_train_dict`].
+    /// - `samples`/`sample_sizes` as in [`zxc_dict_train_content`].
     /// - `dict` must be valid for `dict_size` bytes.
     /// - `huf_lengths_out` must be valid for writes of 128 bytes
     ///   (`ZXC_HUF_TABLE_SIZE`).
     ///
     /// # Returns
     /// `ZXC_OK` (0) on success, or a negative `zxc_error_t` code.
-    pub fn zxc_train_dict_huf(
+    pub fn zxc_dict_train_huf(
         samples: *const *const c_void,
         sample_sizes: *const usize,
         n_samples: usize,
@@ -569,7 +579,7 @@ unsafe extern "C" {
     /// serializes to ready-to-write `.zxd` bytes in `zxd_buf`.
     ///
     /// # Safety
-    /// - `samples`/`sample_sizes` as in [`zxc_train_dict`].
+    /// - `samples`/`sample_sizes` as in [`zxc_dict_train_content`].
     /// - `zxd_buf` must be valid for writes up to `zxd_capacity` bytes.
     ///
     /// # Returns
@@ -589,12 +599,12 @@ unsafe extern "C" {
 
 unsafe extern "C" {
     /// Returns the maximum compressed size for a single block (no file framing).
-    pub fn zxc_compress_block_bound(input_size: usize) -> u64;
+    pub fn zxc_compress_block_bound(input_size: usize) -> usize;
 
     /// Returns the minimum `dst_capacity` required by [`zxc_decompress_block`]
     /// for a block of `uncompressed_size` bytes. Accounts for the wild-copy
     /// tail pad used by the fast decoder.
-    pub fn zxc_decompress_block_bound(uncompressed_size: usize) -> u64;
+    pub fn zxc_decompress_block_bound(uncompressed_size: usize) -> usize;
 
     /// Compresses a single block without file framing.
     ///
@@ -654,7 +664,7 @@ unsafe extern "C" {
     /// `src_size` bytes), free'd at the end of each block.
     ///
     /// Returns the estimated peak memory usage in bytes, or 0 if `src_size == 0`.
-    pub fn zxc_estimate_cctx_size(src_size: usize, level: c_int) -> u64;
+    pub fn zxc_estimate_cctx_size(src_size: usize, level: c_int) -> usize;
 }
 
 // =============================================================================
@@ -1161,6 +1171,12 @@ mod tests {
     }
 
     #[test]
+    fn test_version_number() {
+        let header = ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH;
+        assert_eq!(unsafe { zxc_version_number() }, header);
+    }
+
+    #[test]
     fn test_roundtrip() {
         // Use highly repetitive data that definitely compresses well
         let input: Vec<u8> = (0..4096)
@@ -1169,7 +1185,7 @@ mod tests {
 
         unsafe {
             // Allocate compression buffer
-            let bound = zxc_compress_bound(input.len()) as usize;
+            let bound = zxc_compress_bound(input.len());
             let mut compressed = vec![0u8; bound];
 
             // Compress
@@ -1232,7 +1248,7 @@ mod tests {
             ZXC_LEVEL_ULTRA,
         ] {
             unsafe {
-                let bound = zxc_compress_bound(input.len()) as usize;
+                let bound = zxc_compress_bound(input.len());
                 let mut compressed = vec![0u8; bound];
 
                 let copts = zxc_compress_opts_t {

@@ -162,7 +162,7 @@ int test_truncated_input(void) {
     uint8_t src[1024];
     gen_lz_data(src, SRC_SIZE);
 
-    size_t cap = (size_t)zxc_compress_bound(SRC_SIZE);
+    size_t cap = zxc_compress_bound(SRC_SIZE);
     uint8_t* compressed = malloc(cap);
     uint8_t* decomp_buf = malloc(SRC_SIZE);
 
@@ -525,7 +525,7 @@ int test_stream_get_decompressed_size_errors(void) {
         const size_t src_sz = 4096;
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
-        const size_t cap = (size_t)zxc_compress_bound(src_sz);
+        const size_t cap = zxc_compress_bound(src_sz);
         uint8_t* comp = malloc(cap);
         zxc_compress_opts_t co = {.level = 1, .checksum_enabled = 1};
         const int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, &co);
@@ -589,7 +589,7 @@ int test_stream_get_decompressed_size_errors(void) {
         const size_t src_sz = 512;
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
-        const size_t cap = (size_t)zxc_compress_bound(src_sz);
+        const size_t cap = zxc_compress_bound(src_sz);
         uint8_t* comp = malloc(cap);
         zxc_compress_opts_t _co48 = {.level = 3, .checksum_enabled = 0};
         int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, &_co48);
@@ -1511,7 +1511,7 @@ int test_stream_size_then_decompress(void) {
     const char* const path = "zxc_size_then_decode.tmp";
     uint8_t* const src = malloc(n);
     uint8_t* const out = malloc(n);
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const arc = malloc(cap);
     if (!src || !out || !arc) {
         free(src);
@@ -1629,7 +1629,7 @@ int test_stream_footer_looks_like_sek(void) {
 
     uint8_t* const src = malloc((size_t)n);
     uint8_t* const out = malloc((size_t)n);
-    const size_t acap = (size_t)zxc_compress_bound((size_t)n) + 64;
+    const size_t acap = zxc_compress_bound((size_t)n) + 64;
     uint8_t* const arc = malloc(acap);
     int ok = 0;
     if (src && out && arc) {
@@ -1735,7 +1735,7 @@ static int push_frame_then_junk(const uint8_t* arc, const size_t len, const size
 int test_stream_trailing_bytes(void) {
     printf("=== TEST: Stream - bytes after the footer ===\n");
     const size_t n = 3 * 4096 + 5;
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(2 * cap);
     uint8_t* const forged = malloc(cap + ZXC_FILE_DIGEST_SIZE + ZXC_FILE_FOOTER_MAX_SIZE);
@@ -1911,7 +1911,7 @@ int test_stream_input_kinds(void) {
     for (size_t s = 0; ok && s < sizeof(sizes) / sizeof(sizes[0]); s++) {
         const size_t bs = sizes[s];
         const size_t n = 3 * bs + 5;
-        const size_t cap = (size_t)zxc_compress_bound(n);
+        const size_t cap = zxc_compress_bound(n);
         uint8_t* const src = malloc(n);
         uint8_t* const arc = malloc(cap + 1);
         uint8_t* const bad = malloc(cap + 1);
@@ -1979,7 +1979,7 @@ int test_stream_input_shrinks(void) {
 #if !defined(_WIN32)
     const size_t bs = 64 * 1024;
     const size_t n = 256 * bs;
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(cap);
     int ok = src && arc;
@@ -2027,11 +2027,11 @@ int test_stream_input_rewritten(void) {
 #if !defined(_WIN32)
     const size_t bs = 64 * 1024;
     const size_t n = 256 * bs;
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(cap);
     uint8_t* const evil = malloc(cap);
-    uint8_t* const tiny = malloc((size_t)zxc_compress_bound(bs));
+    uint8_t* const tiny = malloc(zxc_compress_bound(bs));
     int ok = src && arc && evil && tiny;
 
     // No checksums: the tiny block is valid wherever it lands.
@@ -2041,7 +2041,7 @@ int test_stream_input_rewritten(void) {
     size_t tiny_sz = 0;
     if (ok) {
         gen_periodic_blocks(src, bs, bs);
-        ok = zxc_compress(src, bs, tiny, (size_t)zxc_compress_bound(bs), &co) > 0 &&
+        ok = zxc_compress(src, bs, tiny, zxc_compress_bound(bs), &co) > 0 &&
              zxc_read_block_header(tiny + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh) ==
                  ZXC_OK;
         tiny_sz = ZXC_BLOCK_HEADER_SIZE + bh.comp_size;
@@ -2108,7 +2108,7 @@ int test_stream_block_batches(void) {
     printf("=== TEST: Stream - small blocks decoded in batches from a file ===\n");
     const size_t bs = 4096;
     const size_t n = 200 * bs + 5;
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const src = malloc(n);
     uint8_t* const arc = malloc(cap);
     uint8_t* const bad = malloc(cap);

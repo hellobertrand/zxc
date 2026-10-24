@@ -66,7 +66,8 @@ int test_error_name(void) {
 
 int test_library_info_api(void) {
     printf(
-        "=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string) ===\n");
+        "=== TEST: Unit - Library Info API (zxc_min/max/default_level, zxc_version_string/number) "
+        "===\n");
 
     // 1. Min level must match compile-time constant
     int min = zxc_min_level();
@@ -108,6 +109,15 @@ int test_library_info_api(void) {
         return 0;
     }
     printf("  [PASS] zxc_version_string() == \"%s\"\n", ver);
+
+    // 5. Version number must match the header's packed triple
+    const unsigned num = zxc_version_number();
+    if (num != ZXC_VERSION_NUMBER) {
+        printf("Failed: zxc_version_number() returned %u, expected %u\n", num,
+               (unsigned)ZXC_VERSION_NUMBER);
+        return 0;
+    }
+    printf("  [PASS] zxc_version_number() == %u\n", num);
 
     printf("PASS\n\n");
     return 1;

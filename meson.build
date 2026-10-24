@@ -52,7 +52,7 @@ if not meson.is_subproject() and not msvc_syntax and cc.sizeof('void*') == 8 and
 endif
 
 # Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
-zxc_soversion = '5'
+zxc_soversion = '6'
 
 # =============================================================================
 # Windows DLL export control

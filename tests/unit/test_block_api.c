@@ -808,7 +808,7 @@ int test_block_api_direct_decode(void) {
         100, 4096, 4097, 5000, 6208, 6209, 10304, 100000, ZXC_BLOCK_SIZE_MAX};
     static const int levels[] = {1, 3, 7}; /* 1 emits PAK, 3 and 7 emit SPL */
     const size_t max = ZXC_BLOCK_SIZE_MAX;
-    const size_t cap = (size_t)zxc_compress_block_bound(max);
+    const size_t cap = zxc_compress_block_bound(max);
     const size_t dbound_max = (size_t)zxc_decompress_block_bound(max);
     uint8_t* lz = (uint8_t*)malloc(max);  /* matches: few literals */
     uint8_t* lit = (uint8_t*)malloc(max); /* letters: nearly all literals */

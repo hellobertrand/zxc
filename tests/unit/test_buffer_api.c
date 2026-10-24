@@ -12,7 +12,7 @@ int test_max_compressed_size_logic(void) {
     printf("=== TEST: Unit - zxc_compress_bound ===\n");
 
     // Case 1: 0 bytes (must at least contain the header)
-    size_t sz0 = (size_t)zxc_compress_bound(0);
+    size_t sz0 = zxc_compress_bound(0);
     if (sz0 == 0) {
         printf("Failed: Size for 0 bytes should not be 0 (headers required)\n");
         return 0;
@@ -20,7 +20,7 @@ int test_max_compressed_size_logic(void) {
 
     // Case 2: Small input
     size_t input_val = 100;
-    size_t sz100 = (size_t)zxc_compress_bound(input_val);
+    size_t sz100 = zxc_compress_bound(input_val);
     if (sz100 < input_val) {
         printf("Failed: Output buffer size (%zu) too small for input (%zu)\n", sz100, input_val);
         return 0;
@@ -30,6 +30,21 @@ int test_max_compressed_size_logic(void) {
     if (zxc_compress_bound(2000) < zxc_compress_bound(1000)) {
         printf("Failed: Max size function is not monotonic\n");
         return 0;
+    }
+
+    // Case 4: a bound that would not fit a size_t is reported as 0, not wrapped
+    const size_t big = SIZE_MAX / 2;
+    if (zxc_compress_bound(big) < big) {
+        printf("Failed: Bound for SIZE_MAX/2 wrapped (%zu)\n", zxc_compress_bound(big));
+        return 0;
+    }
+    const size_t huge[] = {SIZE_MAX, SIZE_MAX - SIZE_MAX / 256, SIZE_MAX - SIZE_MAX / 64};
+    for (size_t i = 0; i < sizeof(huge) / sizeof(huge[0]); i++) {
+        if (zxc_compress_bound(huge[i]) != 0) {
+            printf("Failed: Bound for %zu should be 0, got %zu\n", huge[i],
+                   zxc_compress_bound(huge[i]));
+            return 0;
+        }
     }
 
     printf("PASS\n\n");
@@ -45,7 +60,7 @@ int test_buffer_api(void) {
     gen_lz_data(src, src_size);
 
     // 1. Calculate max compressed size
-    size_t max_dst_size = (size_t)zxc_compress_bound(src_size);
+    size_t max_dst_size = zxc_compress_bound(src_size);
     uint8_t* compressed = malloc(max_dst_size);
     int checksum_enabled = 1;
 
@@ -113,7 +128,7 @@ int test_get_decompressed_size(void) {
     uint8_t* src = malloc(src_size);
     gen_lz_data(src, src_size);
 
-    size_t max_dst = (size_t)zxc_compress_bound(src_size);
+    size_t max_dst = zxc_compress_bound(src_size);
     uint8_t* compressed = malloc(max_dst);
 
     zxc_compress_opts_t _co29 = {.level = 3, .checksum_enabled = 0};
@@ -267,7 +282,7 @@ int test_buffer_error_codes(void) {
         const size_t src_sz = 256;
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
-        const size_t full_cap = (size_t)zxc_compress_bound(src_sz);
+        const size_t full_cap = zxc_compress_bound(src_sz);
         uint8_t* full_dst = malloc(full_cap);
         zxc_compress_opts_t _co36 = {.level = 3, .checksum_enabled = 0};
         const int64_t full_sz = zxc_compress(src, src_sz, full_dst, full_cap, &_co36);
@@ -379,7 +394,7 @@ int test_buffer_error_codes(void) {
     const size_t test_src_sz = 1024;
     uint8_t* test_src = malloc(test_src_sz);
     gen_lz_data(test_src, test_src_sz);
-    const size_t comp_cap = (size_t)zxc_compress_bound(test_src_sz);
+    const size_t comp_cap = zxc_compress_bound(test_src_sz);
     uint8_t* comp_buf = malloc(comp_cap);
     zxc_compress_opts_t _co42 = {.level = 3, .checksum_enabled = 1};
     const int64_t comp_sz = zxc_compress(test_src, test_src_sz, comp_buf, comp_cap, &_co42);
@@ -584,7 +599,7 @@ int test_buffer_api_scratch_buf(void) {
         uint8_t src[177];
         gen_lz_data(src, sz);
 
-        const size_t comp_cap = (size_t)zxc_compress_bound(sz);
+        const size_t comp_cap = zxc_compress_bound(sz);
         uint8_t* comp = malloc(comp_cap);
         zxc_compress_opts_t _co58 = {.level = 3, .checksum_enabled = 0};
         const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, &_co58);
@@ -612,7 +627,7 @@ int test_buffer_api_scratch_buf(void) {
         uint8_t* src = malloc(sz);
         gen_lz_data(src, sz);
 
-        const size_t comp_cap = (size_t)zxc_compress_bound(sz);
+        const size_t comp_cap = zxc_compress_bound(sz);
         uint8_t* comp = malloc(comp_cap);
         zxc_compress_opts_t _co60 = {.level = 1, .checksum_enabled = 1};
         const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, &_co60);
@@ -642,7 +657,7 @@ int test_buffer_api_scratch_buf(void) {
     // 3. Tiny data (1 byte)
     {
         const uint8_t src = 0x42;
-        const size_t comp_cap = (size_t)zxc_compress_bound(1);
+        const size_t comp_cap = zxc_compress_bound(1);
         uint8_t* comp = malloc(comp_cap);
         zxc_compress_opts_t _co62 = {.level = 1, .checksum_enabled = 0};
         const int64_t comp_sz = zxc_compress(&src, 1, comp, comp_cap, &_co62);
@@ -684,7 +699,7 @@ int test_buffer_api_scratch_buf(void) {
         uint8_t* src = malloc(sz);
         gen_lz_data(src, sz);
 
-        const size_t comp_cap = (size_t)zxc_compress_bound(sz);
+        const size_t comp_cap = zxc_compress_bound(sz);
         uint8_t* comp = malloc(comp_cap);
         zxc_compress_opts_t _co65 = {.level = 1, .checksum_enabled = 0};
         const int64_t comp_sz = zxc_compress(src, sz, comp, comp_cap, &_co65);
@@ -730,7 +745,7 @@ int test_decompress_fast_vs_safe_path(void) {
     if (!src) return 0;
     gen_lz_data(src, src_sz);
 
-    const size_t comp_cap = (size_t)zxc_compress_bound(src_sz);
+    const size_t comp_cap = zxc_compress_bound(src_sz);
     uint8_t* comp = malloc(comp_cap);
     zxc_compress_opts_t _co67 = {.level = 3, .checksum_enabled = 1};
     const int64_t comp_sz = zxc_compress(src, src_sz, comp, comp_cap, &_co67);
@@ -852,7 +867,7 @@ int test_decompress_fast_vs_safe_path(void) {
  * (the core in-place invariant), and the too-small-buffer rejection. */
 static int inplace_case(const char* label, const uint8_t* orig, size_t n, int level, int checksum,
                         size_t block_size, int seekable) {
-    const size_t cbound = (size_t)zxc_compress_bound(n);
+    const size_t cbound = zxc_compress_bound(n);
     uint8_t* comp = (uint8_t*)malloc(cbound);
     if (!comp) return 0;
     zxc_compress_opts_t co = {.level = level,
@@ -983,7 +998,7 @@ static int inplace_forged_footer(void) {
 static int inplace_padded_archive(void) {
     const size_t N = 64 * 1024;
     uint8_t* const orig = (uint8_t*)malloc(N);
-    const size_t cbound = (size_t)zxc_compress_bound(N);
+    const size_t cbound = zxc_compress_bound(N);
     uint8_t* const comp = (uint8_t*)malloc(cbound);
     if (!orig || !comp) {
         free(orig);
@@ -1072,7 +1087,7 @@ static int inplace_seek_flag_margin(void) {
     const size_t bs = ZXC_BLOCK_SIZE_MIN;
     const size_t nb = 256;
     const size_t n = nb * bs;
-    const size_t cbound = (size_t)zxc_compress_bound(n);
+    const size_t cbound = zxc_compress_bound(n);
     uint8_t* const src = (uint8_t*)malloc(n);
     uint8_t* const plain = (uint8_t*)malloc(cbound);
     uint8_t* const seek = (uint8_t*)malloc(cbound);
@@ -1128,7 +1143,7 @@ static int inplace_seek_flag_margin(void) {
  * still decode at its bound. */
 static int inplace_short_blocks(void) {
     const size_t hdr_bs = 64 * 1024, sub = ZXC_BLOCK_SIZE_MIN, n = 1 << 20;
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const src = (uint8_t*)malloc(n);
     uint8_t* const ref = (uint8_t*)malloc(cap);
     uint8_t* const arc = (uint8_t*)malloc(cap);
@@ -1399,7 +1414,7 @@ int test_frame_info(void) {
     printf("=== TEST: Frame info (buffer and FILE*) ===\n");
     enum { N = 100000 };
     uint8_t* const src = malloc(N);
-    const size_t cap = (size_t)zxc_compress_bound(N) + 1;
+    const size_t cap = zxc_compress_bound(N) + 1;
     uint8_t* const arc = malloc(cap);
     int ok = src && arc && zxc_frame_info_size() == sizeof(zxc_frame_info_t);
     if (ok) gen_lz_data(src, N);

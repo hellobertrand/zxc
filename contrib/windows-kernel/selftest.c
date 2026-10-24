@@ -65,7 +65,7 @@ _Use_decl_annotations_ NTSTATUS DriverEntry(PDRIVER_OBJECT DriverObject,
     UNREFERENCED_PARAMETER(RegistryPath);
     DriverObject->DriverUnload = zxc_selftest_unload;
 
-    cap = (size_t)zxc_compress_bound(sizeof(msg));
+    cap = zxc_compress_bound(sizeof(msg));
     ws_sz = zxc_static_dctx_workspace_size(PAGE_SIZE);
     comp = st_alloc(cap);
     back = st_alloc(sizeof(msg));

@@ -235,7 +235,7 @@ static const uint8_t* gc_dict_huf_table(void) {
         size_t sizes[1];
         samples[0] = payload;
         sizes[0] = n;
-        if (zxc_train_dict_huf(samples, sizes, 1, gc_dict_content, GC_DICT_SIZE, huf) != ZXC_OK) {
+        if (zxc_dict_train_huf(samples, sizes, 1, gc_dict_content, GC_DICT_SIZE, huf) != ZXC_OK) {
             fprintf(stderr, "FATAL: gc_dict_huf_table training failed\n");
             exit(1);
         }

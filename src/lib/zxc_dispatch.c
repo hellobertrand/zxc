@@ -655,7 +655,8 @@ int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* REST
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     if (UNLIKELY(!zxc_validate_block_size(block_size))) return ZXC_ERROR_BAD_BLOCK_SIZE;
 
-    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
+    const uint32_t did =
+        (dict && dict_size > 0) ? zxc_dict_compute_id(dict, dict_size, dict_huf) : 0;
 
     if (UNLIKELY(src_size == 0))
         return zxc_write_empty_frame((uint8_t*)dst, dst_capacity, block_size, checksum_enabled, did,
@@ -1238,7 +1239,8 @@ static int64_t zxc_compress_cctx_resolved(zxc_cctx* cctx, const void* RESTRICT s
     // The encoder sees [dict | block], so the carved chunk covers both.
     const size_t eff_chunk =
         dict_size > 0 ? zxc_block_size_ceil(dict_size + o.block_size) : o.block_size;
-    const uint32_t did = (dict && dict_size > 0) ? zxc_dict_id(dict, dict_size, dict_huf) : 0;
+    const uint32_t did =
+        (dict && dict_size > 0) ? zxc_dict_compute_id(dict, dict_size, dict_huf) : 0;
 
     // Empty source: same writer as the one-shot, workspace left alone.
     if (UNLIKELY(src_size == 0))
@@ -1527,7 +1529,7 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
     // Dictionary binding: same contract as zxc_decompress().
     if (header_dict_id != 0) {
         if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
-        if (UNLIKELY(zxc_dict_id(dict, dict_size, dict_huf) != header_dict_id))
+        if (UNLIKELY(zxc_dict_compute_id(dict, dict_size, dict_huf) != header_dict_id))
             return ZXC_ERROR_DICT_MISMATCH;
     }
 

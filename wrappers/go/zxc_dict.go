@@ -122,7 +122,7 @@ func TrainDict(samples [][]byte, maxSize int) ([]byte, error) {
 	defer C.free(csizes)
 
 	dict := make([]byte, DictSizeMax)
-	written := C.zxc_train_dict(
+	written := C.zxc_dict_train_content(
 		(*unsafe.Pointer)(cptrs),
 		(*C.size_t)(csizes),
 		C.size_t(len(samples)),
@@ -144,7 +144,7 @@ func DictID(content []byte) uint32 {
 	if len(content) == 0 {
 		return 0
 	}
-	return uint32(C.zxc_dict_id(unsafe.Pointer(&content[0]), C.size_t(len(content)), nil))
+	return uint32(C.zxc_dict_compute_id(unsafe.Pointer(&content[0]), C.size_t(len(content)), nil))
 }
 
 // GetDictID returns the dictionary ID recorded in a compressed .zxc archive
@@ -163,7 +163,7 @@ func DictGetID(zxd []byte) uint32 {
 	if len(zxd) == 0 {
 		return 0
 	}
-	return uint32(C.zxc_dict_get_id(unsafe.Pointer(&zxd[0]), C.size_t(len(zxd))))
+	return uint32(C.zxc_dict_read_id(unsafe.Pointer(&zxd[0]), C.size_t(len(zxd))))
 }
 
 // DictSave serializes dictionary content and its shared literal Huffman
@@ -208,7 +208,7 @@ func TrainDictHuf(samples [][]byte, dict []byte) ([]byte, error) {
 	defer C.free(csizes)
 
 	huf := make([]byte, HufTableSize)
-	rc := C.zxc_train_dict_huf(
+	rc := C.zxc_dict_train_huf(
 		(*unsafe.Pointer)(cptrs),
 		(*C.size_t)(csizes),
 		C.size_t(len(samples)),

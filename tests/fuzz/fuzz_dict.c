@@ -13,10 +13,10 @@
  * dict bounce path):
  *
  *  Phase 0 -- Raw .zxd parser. Feed the untrusted bytes straight to
- *             zxc_dict_load() / zxc_dict_get_id(). Must never crash on garbage.
+ *             zxc_dict_load() / zxc_dict_read_id(). Must never crash on garbage.
  *             A dictionary that loads then round-trips a payload with its own
  *             table, so the tree built from untrusted code lengths is decoded.
- *  Phase 1 -- Train. Split the input into samples and call zxc_train_dict().
+ *  Phase 1 -- Train. Split the input into samples and call zxc_dict_train_content().
  *  Phase 2 -- Serialize roundtrip. Save the trained dict to .zxd, load it back,
  *             and verify content / dict_id agree across save/load/get_id/id.
  *             Also drives the DST_TOO_SMALL path and single-byte corruption.
@@ -89,11 +89,11 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             assert(content_size > 0 && content_size <= ZXC_DICT_SIZE_MAX);
             /* A validated header round-trips through both ID accessors; the
              * stored id binds the (content, table) pair. */
-            assert(zxc_dict_get_id(data, size) == id);
-            assert(zxc_dict_id(content, content_size, huf) == id);
+            assert(zxc_dict_read_id(data, size) == id);
+            assert(zxc_dict_compute_id(content, content_size, huf) == id);
             dict_huf_roundtrip(content, content_size, huf, data, size);
         }
-        (void)zxc_dict_get_id(data, size);
+        (void)zxc_dict_read_id(data, size);
     }
 
     /* ------------------------------------------------------------------ */
@@ -133,14 +133,15 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (!dict_buf) return 0;
     }
 
-    const int64_t dict_sz = zxc_train_dict(samples, sample_sizes, n_samples, dict_buf, dict_cap);
+    const int64_t dict_sz =
+        zxc_dict_train_content(samples, sample_sizes, n_samples, dict_buf, dict_cap);
     if (dict_sz <= 0) return 0; /* corpus too small / no patterns: nothing to serialize */
     assert((size_t)dict_sz <= dict_cap);
 
     /* The .zxd format requires the shared literal table; train it on the same
      * samples (it needs the trained content for the post-LZ literal stats). */
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    if (zxc_train_dict_huf(samples, sample_sizes, n_samples, dict_buf, (size_t)dict_sz, huf) !=
+    if (zxc_dict_train_huf(samples, sample_sizes, n_samples, dict_buf, (size_t)dict_sz, huf) !=
         ZXC_OK)
         return 0;
 
@@ -168,7 +169,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         assert(memcmp(lc, dict_buf, (size_t)dict_sz) == 0);
         assert(lh && memcmp(lh, huf, ZXC_HUF_TABLE_SIZE) == 0);
         /* The stored id binds the (content, table) pair, not the content alone. */
-        assert(zxc_dict_get_id(zxd_buf, (size_t)zxd_sz) == lid);
+        assert(zxc_dict_read_id(zxd_buf, (size_t)zxd_sz) == lid);
     }
 
     /* DST_TOO_SMALL: any capacity below the full file must be rejected. */
@@ -198,7 +199,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         const int rc = zxc_dict_load(zxd_buf, (size_t)zxd_sz, &cc, &ccs, &ch, &cid);
         if (rc == ZXC_OK) {
             assert(ccs == (size_t)dict_sz);
-            assert(zxc_dict_id(cc, ccs, ch) == cid);
+            assert(zxc_dict_compute_id(cc, ccs, ch) == cid);
             if (pos < ZXC_DICT_HEADER_SIZE) assert(memcmp(cc, dict_buf, (size_t)dict_sz) == 0);
         }
         zxd_buf[pos] = saved;
@@ -208,9 +209,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* Phase 3: real compress -> decompress roundtrip with the trained    */
     /* dict (also keeps the in-memory dict bounce path covered).          */
     /* ------------------------------------------------------------------ */
-    const uint64_t bound64 = zxc_compress_bound(size);
-    if (bound64 == 0 || bound64 > SIZE_MAX) return 0;
-    const size_t bound = (size_t)bound64;
+    const size_t bound = zxc_compress_bound(size);
+    if (bound == 0) return 0;
     if (bound > comp_cap) {
         void* nb = realloc(comp_buf, bound);
         if (!nb) return 0;

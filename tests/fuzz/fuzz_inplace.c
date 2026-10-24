@@ -148,7 +148,7 @@ static void fuzz_one(const uint8_t* data, size_t size, const run_ctx_t* c) {
                                     .block_size = block_size,
                                     .checksum_enabled = checksum,
                                     .seekable = seekable};
-    const size_t cbound = (size_t)zxc_compress_bound(n);
+    const size_t cbound = zxc_compress_bound(n);
     uint8_t* const arc = (uint8_t*)malloc(cbound + pad + ZXC_FILE_FOOTER_MAX_SIZE);
     int64_t csize = arc ? zxc_compress(src, n, arc, cbound, &co) : -1;
     if (csize > 0 && short_bs) {

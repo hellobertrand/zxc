@@ -39,7 +39,7 @@ int test_opaque_context_api(void) {
 
     const size_t src_sz = 8192;
     uint8_t* src = malloc(src_sz);
-    const size_t comp_cap = (size_t)zxc_compress_bound(src_sz);
+    const size_t comp_cap = zxc_compress_bound(src_sz);
     uint8_t* comp = malloc(comp_cap);
     uint8_t* dec = malloc(src_sz);
 
@@ -95,7 +95,7 @@ int test_cctx_level_raise_reinit(void) {
 
     const size_t src_sz = 8192;
     uint8_t* src = malloc(src_sz);
-    const size_t comp_cap = (size_t)zxc_compress_bound(src_sz);
+    const size_t comp_cap = zxc_compress_bound(src_sz);
     uint8_t* comp = malloc(comp_cap);
     uint8_t* dec = malloc(src_sz);
     zxc_cctx* cctx = NULL;
@@ -314,8 +314,7 @@ static size_t frame_block_size(const uint8_t* arc, const int64_t n) {
 int test_cctx_zero_opts_creation_values(void) {
     printf("=== TEST: Opaque Context API - zero opts fields keep the creation values (#532) ===\n");
     enum { BS = 4096, SRC = 3000, BIG = 600000 };
-    const size_t cap = (size_t)zxc_compress_bound(SRC),
-                 bcap = (size_t)zxc_compress_block_bound(BIG);
+    const size_t cap = zxc_compress_bound(SRC), bcap = zxc_compress_block_bound(BIG);
     uint8_t src[SRC];
     uint8_t* const big = malloc(BIG);
     uint8_t* const arc = malloc(cap);
@@ -518,7 +517,7 @@ int test_context_api_seekable_frame(void) {
 static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t* src,
                                  const size_t n, const zxc_compress_opts_t* ctx_opts,
                                  const zxc_compress_opts_t* ref) {
-    const size_t cap = (size_t)zxc_compress_bound(n);
+    const size_t cap = zxc_compress_bound(n);
     uint8_t* const a = malloc(cap);
     uint8_t* const b = malloc(cap);
     uint8_t* const out = malloc(n + 1);
@@ -617,7 +616,7 @@ int test_context_api_seekable_compress(void) {
      * reads back like any other. */
     {
         const size_t rn = 5 * 4096 + 77;
-        const size_t rcap = (size_t)zxc_compress_bound(rn);
+        const size_t rcap = zxc_compress_bound(rn);
         uint8_t* const noise = malloc(rn);
         uint8_t* const rarc = malloc(rcap);
         if (noise && rarc) {
@@ -650,7 +649,7 @@ int test_context_api_seekable_compress(void) {
 
     /* A cut through the seek table or the footer: both entry points refuse it. */
     if (cctx) {
-        const size_t cap = (size_t)zxc_compress_bound(n);
+        const size_t cap = zxc_compress_bound(n);
         uint8_t* const arc = malloc(cap);
         const int64_t full = arc ? zxc_compress(src, n, arc, cap, &plain) : -1;
         const size_t table = zxc_seek_table_size(74);

@@ -142,13 +142,12 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* Sized so the compressor never runs out - bound is a safe upper limit. */
     /* Use the public buffer-API bound function via a local extern declaration
      * to avoid pulling zxc_buffer.h (kept narrow on purpose). */
-    extern uint64_t zxc_compress_bound(size_t input_size);
-    const uint64_t bound64 = zxc_compress_bound(size);
-    if (bound64 == 0 || bound64 > SIZE_MAX) {
+    extern size_t zxc_compress_bound(size_t input_size);
+    const size_t bound = zxc_compress_bound(size);
+    if (bound == 0) {
         zxc_cstream_free(cs);
         return 0;
     }
-    const size_t bound = (size_t)bound64;
     if (bound > comp_cap) {
         void* nb = realloc(comp_buf, bound);
         if (!nb) {
