@@ -680,11 +680,8 @@ unsafe extern "C" {
     ///
     /// # Safety
     /// - `cctx` must be a valid context; `value` must be valid for writes.
-    pub fn zxc_cctx_get_param(
-        cctx: *const zxc_cctx,
-        param: zxc_cparam_t,
-        value: *mut i64,
-    ) -> c_int;
+    pub fn zxc_cctx_get_param(cctx: *const zxc_cctx, param: zxc_cparam_t, value: *mut i64)
+    -> c_int;
 
     /// Reports the accepted range of a compression parameter.
     ///
@@ -776,11 +773,8 @@ unsafe extern "C" {
     ///
     /// # Safety
     /// - `dctx` must be a valid context; `value` must be valid for writes.
-    pub fn zxc_dctx_get_param(
-        dctx: *const zxc_dctx,
-        param: zxc_dparam_t,
-        value: *mut i64,
-    ) -> c_int;
+    pub fn zxc_dctx_get_param(dctx: *const zxc_dctx, param: zxc_dparam_t, value: *mut i64)
+    -> c_int;
 
     /// Reports the accepted range of a decompression parameter. See
     /// [`zxc_cparam_bounds`].
@@ -1449,12 +1443,18 @@ mod tests {
             assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 5), ZXC_OK);
             assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &mut v), ZXC_OK);
             assert_eq!(v, 5);
-            assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 8), ZXC_ERROR_BAD_LEVEL);
+            assert_eq!(
+                zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 8),
+                ZXC_ERROR_BAD_LEVEL
+            );
             assert_eq!(
                 zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 3000),
                 ZXC_ERROR_BAD_BLOCK_SIZE
             );
-            assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 2), ZXC_ERROR_BAD_PARAM);
+            assert_eq!(
+                zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 2),
+                ZXC_ERROR_BAD_PARAM
+            );
             assert_eq!(zxc_cctx_set_param(cctx, 99, 1), ZXC_ERROR_BAD_PARAM);
             assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &mut v), ZXC_OK);
             assert_eq!(v, 5, "a refused value must not change the parameter");

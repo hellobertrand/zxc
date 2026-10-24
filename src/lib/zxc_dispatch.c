@@ -1151,10 +1151,11 @@ static int zxc_ctx_sync_dict_huf(zxc_cctx_t* RESTRICT inner, uint8_t* RESTRICT c
 
 /** @brief Per-call options from a parameter set, library defaults for zero fields. */
 static zxc_cctx_opts_t zxc_cparams_resolve(const zxc_cparams_t* p) {
-    return (zxc_cctx_opts_t){.level = ZXC_OPTS_LEVEL(p, ZXC_LEVEL_DEFAULT),
-                             .checksum = p->checksum_enabled,
-                             .seekable = p->seekable,
-                             .block_size = ZXC_OPTS_BLOCK_SIZE(p, ZXC_BLOCK_SIZE_DEFAULT)};
+    return (zxc_cctx_opts_t){
+        .level = zxc_level_clamp(p->level != 0 ? p->level : ZXC_LEVEL_DEFAULT),
+        .checksum = p->checksum_enabled,
+        .seekable = p->seekable,
+        .block_size = p->block_size > 0 ? p->block_size : ZXC_BLOCK_SIZE_DEFAULT};
 }
 
 /** @brief The parameters every public context starts from. */

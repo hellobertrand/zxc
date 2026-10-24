@@ -33,6 +33,18 @@ import (
 func CompressFile(input, output string, opts ...Option) (int64, error) {
 	o := applyOptions(opts)
 
+	// The pipeline reads its parameters from a configured context. Build it
+	// before touching the files so a refused option never truncates the
+	// output; the context is freed before the dictionary it points at is
+	// unpinned.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	cctx, err := createCctx(o, &pinner)
+	if err != nil {
+		return 0, err
+	}
+	defer C.zxc_free_cctx(cctx)
+
 	fIn, err := os.Open(input)
 	if err != nil {
 		return 0, fmt.Errorf("zxc: open input: %w", err)
@@ -62,16 +74,6 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 			C.fclose(cOut)
 		}
 	}()
-
-	// The pipeline reads its parameters from a configured context; the
-	// context is freed before the dictionary it points at is unpinned.
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	cctx, err := createCctx(o, &pinner)
-	if err != nil {
-		return 0, err
-	}
-	defer C.zxc_free_cctx(cctx)
 
 	result := C.zxc_stream_compress(cIn, cOut, cctx)
 
@@ -120,6 +122,15 @@ func FileDecompressedSize(path string) (int64, error) {
 func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	o := applyOptions(opts)
 
+	// See CompressFile: validate the options before creating the output.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	dctx, err := createDctx(o, &pinner)
+	if err != nil {
+		return 0, err
+	}
+	defer C.zxc_free_dctx(dctx)
+
 	fIn, err := os.Open(input)
 	if err != nil {
 		return 0, fmt.Errorf("zxc: open input: %w", err)
@@ -148,14 +159,6 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 			C.fclose(cOut)
 		}
 	}()
-
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	dctx, err := createDctx(o, &pinner)
-	if err != nil {
-		return 0, err
-	}
-	defer C.zxc_free_dctx(dctx)
 
 	result := C.zxc_stream_decompress(cIn, cOut, dctx)
 

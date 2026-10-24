@@ -144,9 +144,9 @@ describe("Cctx / Dctx", () => {
     expect(() => zxc.compress(payload, { level: -1 })).toThrow();
     // 0 still selects the default level.
     expect(
-      zxc.compress(payload, { level: 0 }).equals(
-        zxc.compress(payload, { level: zxc.LEVEL_DEFAULT }),
-      ),
+      zxc
+        .compress(payload, { level: 0 })
+        .equals(zxc.compress(payload, { level: zxc.LEVEL_DEFAULT })),
     ).toBe(true);
   });
 

@@ -8,6 +8,8 @@ package zxc
 import (
 	"bytes"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -192,5 +194,33 @@ func TestParamRefusal(t *testing.T) {
 	// The refused call leaves the context usable.
 	if _, err := c.CompressBlock(data, dst); err != nil {
 		t.Fatalf("CompressBlock after a refused level: %v", err)
+	}
+}
+
+// The file pipeline validates its options before it creates the output, so a
+// refused option leaves an existing destination file untouched.
+func TestFileRefusalKeepsOutput(t *testing.T) {
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in")
+	out := filepath.Join(dir, "out")
+	if err := os.WriteFile(in, []byte("file pipeline input"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keep := []byte("previous content must survive")
+	if err := os.WriteFile(out, keep, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := CompressFile(in, out, WithLevel(Level(MaxLevel()+1))); !errors.Is(err, ErrBadLevel) {
+		t.Fatalf("CompressFile(level 8): want ErrBadLevel, got %v", err)
+	}
+	if _, err := DecompressFile(in, out, WithThreads(-1)); !errors.Is(err, ErrBadParam) {
+		t.Fatalf("DecompressFile(threads -1): want ErrBadParam, got %v", err)
+	}
+	got, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(got, keep) {
+		t.Fatalf("output truncated by a refused option: %q", got)
 	}
 }

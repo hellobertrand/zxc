@@ -36,7 +36,7 @@ int main(void) {
         return 1;
     }
 
-    const int64_t csize = zxc_compress(input, sizeof(input), compressed, sizeof(compressed), NULL);
+    const int64_t csize = zxc_compress(input, sizeof(input), compressed, sizeof(compressed), 0);
     if (csize <= 0) {
         fprintf(stderr, "consumer: zxc_compress failed: %s\n", zxc_error_name((int)csize));
         return 1;
@@ -48,7 +48,7 @@ int main(void) {
     }
 
     static char output[sizeof(input)];
-    const int64_t dsize = zxc_decompress(compressed, (size_t)csize, output, sizeof(output), NULL);
+    const int64_t dsize = zxc_decompress(compressed, (size_t)csize, output, sizeof(output));
     if (dsize != (int64_t)sizeof(input)) {
         fprintf(stderr, "consumer: zxc_decompress failed: %s\n", zxc_error_name((int)dsize));
         return 1;

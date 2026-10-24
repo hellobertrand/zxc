@@ -63,6 +63,10 @@ int main(void) {
     if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) != ZXC_OK ||
         zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) != ZXC_OK) {
         fprintf(stderr, "Bad compression parameter\n");
+        zxc_free_cctx(cctx);
+        zxc_free_dctx(dctx);
+        free(compressed);
+        free(decompressed);
         return 1;
     }
     int64_t compressed_size = zxc_compress_cctx(
@@ -288,6 +292,8 @@ int main(void) {
     if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) != ZXC_OK ||
         zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, BLOCK_SIZE) != ZXC_OK) {
         fprintf(stderr, "Bad parameter\n");
+        zxc_free_cctx(cctx);
+        zxc_free_dctx(dctx);
         return 1;
     }
 

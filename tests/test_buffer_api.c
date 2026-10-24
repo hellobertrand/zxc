@@ -1394,13 +1394,14 @@ int test_frame_info(void) {
     memset(dict, 'z', sizeof(dict));
     for (int v = 0; ok && v < 3; v++) {
         zxc_cctx* const c = zxc_create_cctx();
-        int64_t n = c ? ZXC_OK : ZXC_ERROR_MEMORY;
-        if (n == ZXC_OK) n = zxc_cctx_set_param(c, ZXC_C_LEVEL, 3);
-        if (n == ZXC_OK) n = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, 8192);
-        if (n == ZXC_OK && v >= 1) n = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, 1);
-        if (n == ZXC_OK && v >= 1) n = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, 1);
-        if (n == ZXC_OK && v == 2) n = zxc_cctx_set_dict(c, dict, sizeof(dict), NULL);
-        if (n == ZXC_OK) n = zxc_compress_cctx(c, src, N, arc, cap);
+        int rc = c ? ZXC_OK : ZXC_ERROR_MEMORY;
+        if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, 3);
+        if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, 8192);
+        if (rc == ZXC_OK && v >= 1) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, 1);
+        if (rc == ZXC_OK && v >= 1) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, 1);
+        if (rc == ZXC_OK && v == 2) rc = zxc_cctx_set_dict(c, dict, sizeof(dict), NULL);
+        // arc holds a frame only when the compression ran: a setter failure is -1 here.
+        const int64_t n = rc == ZXC_OK ? zxc_compress_cctx(c, src, N, arc, cap) : -1;
         zxc_free_cctx(c);
         zxc_frame_info_t a, b;
         memset(&a, 0xFF, sizeof(a));
