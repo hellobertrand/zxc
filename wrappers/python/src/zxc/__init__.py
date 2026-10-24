@@ -86,6 +86,7 @@ from ._zxc import (
     ERROR_DICT_TOO_LARGE,
     ERROR_BAD_LEVEL,
     ERROR_DICT_UNSUPPORTED,
+    ERROR_BAD_PARAM,
 )
 
 try:
@@ -159,6 +160,7 @@ __all__ = [
     "ERROR_DICT_TOO_LARGE",
     "ERROR_BAD_LEVEL",
     "ERROR_DICT_UNSUPPORTED",
+    "ERROR_BAD_PARAM",
 ]
 
 
@@ -320,7 +322,8 @@ def compress(
     Args:
         data: Bytes-like object to compress.
         level: Compression level. Use constants like LEVEL_FASTEST, LEVEL_DEFAULT, etc.
-            0 selects the default; others are clamped to LEVEL_FASTEST..LEVEL_ULTRA.
+            0 selects the default; a value outside LEVEL_FASTEST..LEVEL_ULTRA
+            raises RuntimeError("ZXC_ERROR_BAD_LEVEL").
         checksum: If True, append a checksum for integrity verification.
         dict: Optional pre-trained dictionary content (bytes) to prime the
             compressor. Must be passed (matching by ID) to `decompress`.

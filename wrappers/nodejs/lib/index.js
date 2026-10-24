@@ -39,6 +39,7 @@ const ERROR_DICT_MISMATCH = native.ERROR_DICT_MISMATCH;
 const ERROR_DICT_TOO_LARGE = native.ERROR_DICT_TOO_LARGE;
 const ERROR_BAD_LEVEL = native.ERROR_BAD_LEVEL;
 const ERROR_DICT_UNSUPPORTED = native.ERROR_DICT_UNSUPPORTED;
+const ERROR_BAD_PARAM = native.ERROR_BAD_PARAM;
 
 /**
  * Returns the minimum supported compression level (currently 1).
@@ -323,7 +324,8 @@ function dictLoad(zxd) {
  *
  * @param {Buffer} data - Buffer to compress.
  * @param {object} [options] - Compression options.
- * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-7).
+ * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-7); an out-of-range
+ *   value throws with `code === ERROR_BAD_LEVEL`.
  * @param {boolean} [options.checksum=false] - Enable checksum verification.
  * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
  * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
@@ -401,7 +403,10 @@ function decompress(data, options = {}) {
 /**
  * Reusable compression context: one archive per `compress()` call, buffers
  * carved once. Options: `level`, `checksum`, `dict`, `dictHuf`; a dictionary
- * applies to every call. Not thread-safe; `close()` when done.
+ * applies to every call. The options are set on the native context at
+ * construction: a `level` outside 1-7 throws with `code === ERROR_BAD_LEVEL`.
+ * Not thread-safe;
+ * `close()` when done.
  *
  * @example
  *   const cctx = new zxc.Cctx({ level: zxc.LEVEL_DEFAULT, dict });
@@ -436,6 +441,9 @@ class Dctx extends native.Dctx {
  *
  * The Node.js counterpart of the C `zxc_cstream`. Use it when you cannot
  * block on a `FILE*` (event loops, web frameworks, network protocols).
+ * Options: `level`, `checksum`, `blockSize`; an invalid `level` or
+ * `blockSize` throws with `code === ERROR_BAD_LEVEL` /
+ * `ERROR_BAD_BLOCK_SIZE`.
  *
  * @example
  *   const cs = new zxc.CStream({ level: zxc.LEVEL_DEFAULT, checksum: true });
@@ -740,4 +748,5 @@ module.exports = {
   ERROR_DICT_TOO_LARGE,
   ERROR_BAD_LEVEL,
   ERROR_DICT_UNSUPPORTED,
+  ERROR_BAD_PARAM,
 };

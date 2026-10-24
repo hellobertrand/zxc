@@ -18,6 +18,17 @@ This document provides complete, working examples for using the ZXC compression 
 
 Ideal for small assets or simple integrations. Thread-safe and ready for highly concurrent environments (Go routines, Node.js workers, Python threads).
 
+The simplest form takes a level and nothing else: 512 KB blocks, no checksum,
+no dictionary.
+
+```c
+int64_t csize = zxc_compress(src, src_size, dst, zxc_compress_bound(src_size), ZXC_LEVEL_DEFAULT);
+int64_t dsize = zxc_decompress(dst, (size_t)csize, out, src_size);   // verifies no checksum
+```
+
+Every other setting lives on a context. The program below enables checksums
+at both ends, so it configures a `zxc_cctx` and a `zxc_dctx`:
+
 ```c
 #include "zxc.h"
 #include <stdio.h>
@@ -32,36 +43,36 @@ int main(void) {
     // Step 1: Calculate maximum compressed size
     size_t max_compressed_size = zxc_compress_bound(original_size);
 
-    // Step 2: Allocate buffers
+    // Step 2: Allocate buffers and contexts (each free below accepts NULL)
+    int rc = 1;
     void* compressed   = malloc(max_compressed_size);
     void* decompressed = malloc(original_size);
+    zxc_cctx* cctx = zxc_create_cctx();   // every parameter at its default
+    zxc_dctx* dctx = zxc_create_dctx();
 
-    if (!compressed || !decompressed) {
-        fprintf(stderr, "Memory allocation failed\n");
-        free(compressed);
-        free(decompressed);
-        return 1;
+    if (!compressed || !decompressed || !cctx || !dctx) {
+        fprintf(stderr, "Allocation failed\n");
+        goto cleanup;
     }
 
-    // Step 3: Compress data (level 3, checksum enabled, default block size)
-    zxc_compress_opts_t c_opts = {
-        .level            = ZXC_LEVEL_DEFAULT,
-        .checksum_enabled = 1,
-        /* .block_size = 0  ->  512 KB default */
-    };
-    int64_t compressed_size = zxc_compress(
+    // Step 3: Compress data (level 3, checksum enabled, default 512 KB block size).
+    // A setter refuses an out-of-range value instead of clamping it, so check it.
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) != ZXC_OK ||
+        zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) != ZXC_OK) {
+        fprintf(stderr, "Bad compression parameter\n");
+        goto cleanup;
+    }
+    int64_t compressed_size = zxc_compress_cctx(
+        cctx,                // Configured context
         original,            // Source buffer
         original_size,       // Source size
         compressed,          // Destination buffer
-        max_compressed_size, // Destination capacity
-        &c_opts              // Options (NULL = all defaults)
+        max_compressed_size  // Destination capacity
     );
 
     if (compressed_size <= 0) {
         fprintf(stderr, "Compression failed (error %lld)\n", (long long)compressed_size);
-        free(compressed);
-        free(decompressed);
-        return 1;
+        goto cleanup;
     }
 
     printf("Original size:   %zu bytes\n", original_size);
@@ -70,35 +81,39 @@ int main(void) {
            100.0 * (double)compressed_size / (double)original_size);
 
     // Step 4: Decompress data (checksum verification enabled)
-    zxc_decompress_opts_t d_opts = { .checksum_enabled = 1 };
-    int64_t decompressed_size = zxc_decompress(
+    if (zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) != ZXC_OK) {
+        fprintf(stderr, "Bad decompression parameter\n");
+        goto cleanup;
+    }
+    int64_t decompressed_size = zxc_decompress_dctx(
+        dctx,                // Configured context
         compressed,          // Source buffer
         (size_t)compressed_size,
         decompressed,        // Destination buffer
-        original_size,       // Destination capacity
-        &d_opts              // Options (NULL = all defaults)
+        original_size        // Destination capacity
     );
 
     if (decompressed_size <= 0) {
         fprintf(stderr, "Decompression failed (error %lld)\n", (long long)decompressed_size);
-        free(compressed);
-        free(decompressed);
-        return 1;
+        goto cleanup;
     }
 
     // Step 5: Verify integrity
-    if ((size_t)decompressed_size == original_size &&
-        memcmp(original, decompressed, original_size) == 0) {
-        printf("Success! Data integrity verified.\n");
-        printf("Decompressed: %s\n", (char*)decompressed);
-    } else {
+    if ((size_t)decompressed_size != original_size ||
+        memcmp(original, decompressed, original_size) != 0) {
         fprintf(stderr, "Data mismatch after decompression\n");
+        goto cleanup;
     }
+    printf("Success! Data integrity verified.\n");
+    printf("Decompressed: %s\n", (char*)decompressed);
+    rc = 0;
 
-    // Cleanup
+cleanup:
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
     free(compressed);
     free(decompressed);
-    return 0;
+    return rc;
 }
 ```
 
@@ -150,14 +165,15 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 0 threads = auto-detect CPU cores; 0 block_size = 512 KB default
-    zxc_compress_opts_t c_opts = {
-        .n_threads        = 0,
-        .level            = ZXC_LEVEL_DEFAULT,
-        .checksum_enabled = 1,
-        /* .block_size = 0  ->  512 KB */
-    };
-    int64_t compressed_bytes = zxc_stream_compress(f_in, f_out, &c_opts);
+    // The pipeline reads its configuration from a context: level, block size,
+    // threads, checksum, seek table, dictionary, progress callback. Defaults:
+    // level 3, 512 KB blocks, threads auto-detected (ZXC_C_THREADS = 0).
+    zxc_cctx* cfg = zxc_create_cctx();
+    if (!cfg) { fclose(f_in); fclose(f_out); return 1; }
+    zxc_cctx_set_param(cfg, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT);
+    zxc_cctx_set_param(cfg, ZXC_C_CHECKSUM, 1);
+    int64_t compressed_bytes = zxc_stream_compress(f_in, f_out, cfg);
+    zxc_free_cctx(cfg);   // only read by the pipeline; its buffers are never used
 
     fclose(f_in);
     fclose(f_out);
@@ -186,8 +202,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    zxc_decompress_opts_t d_opts = { .n_threads = 0, .checksum_enabled = 1 };
-    int64_t decompressed_bytes = zxc_stream_decompress(f_compressed, f_decompressed, &d_opts);
+    // NULL would mean defaults: threads auto, no checksum verification.
+    zxc_dctx* dcfg = zxc_create_dctx();
+    if (!dcfg) { fclose(f_compressed); fclose(f_decompressed); return 1; }
+    zxc_dctx_set_param(dcfg, ZXC_D_CHECKSUM, 1);
+    int64_t decompressed_bytes = zxc_stream_decompress(f_compressed, f_decompressed, dcfg);
+    zxc_free_dctx(dcfg);
 
     fclose(f_compressed);
     fclose(f_decompressed);
@@ -230,11 +250,12 @@ ZXC provides opaque reusable contexts.
 Internal buffers are only reallocated when the **block size changes**, so the
 common case (same block size, different data) is completely allocation-free.
 
-Options are **sticky**: `zxc_compress_cctx()` remembers the options of its
-last successful call, starting from those given to `zxc_create_cctx()`, and
-reuses them when `opts` is `NULL`. In a non-NULL `opts`, a zero `level` or
-`block_size` means the creation value, so a level or block-size override needs
-only that field; `checksum_enabled` and `seekable` are taken as given (0 = off).
+A context **carries its configuration**: `zxc_create_cctx()` returns one with
+every parameter at its default, `zxc_cctx_set_param()` changes one parameter at
+a time, and the setting stays in force for every later call until changed again
+(`zxc_cctx_reset()` restores all defaults). `0` restores a parameter's default;
+an out-of-bounds value is refused (`ZXC_ERROR_BAD_LEVEL`,
+`ZXC_ERROR_BAD_BLOCK_SIZE`, `ZXC_ERROR_BAD_PARAM`) and leaves it unchanged.
 
 ```c
 #include "zxc.h"
@@ -246,58 +267,67 @@ only that field; `checksum_enabled` and `seekable` are taken as given (0 = off).
 #define NUM_BLOCKS   32
 
 int main(void) {
-    // Create context with sticky options (level 3, no checksum, 64 KB blocks).
-    // These settings are remembered for all subsequent calls.
-    zxc_compress_opts_t create_opts = {
-        .level            = 3,
-        .checksum_enabled = 0,
-        .block_size       = BLOCK_SIZE,
-    };
-    zxc_cctx* cctx = zxc_create_cctx(&create_opts);
+    // Create the contexts, then configure the compressor: level 3, 64 KB
+    // blocks, no checksum (the default). The settings persist across calls.
+    int rc = 1;
+    zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
-
-    if (!cctx || !dctx) {
-        fprintf(stderr, "Context creation failed\n");
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        return 1;
-    }
-
     const size_t comp_cap = zxc_compress_bound(BLOCK_SIZE);
     uint8_t* comp = malloc(comp_cap);
     uint8_t* src  = malloc(BLOCK_SIZE);
     uint8_t* dec  = malloc(BLOCK_SIZE);
 
+    if (!cctx || !dctx || !comp || !src || !dec) {
+        fprintf(stderr, "Allocation failed\n");
+        goto cleanup;
+    }
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) != ZXC_OK ||
+        zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, BLOCK_SIZE) != ZXC_OK) {
+        fprintf(stderr, "Bad parameter\n");
+        goto cleanup;
+    }
+
     for (int i = 0; i < NUM_BLOCKS; i++) {
         // Fill block with pseudo-random data
         for (size_t j = 0; j < BLOCK_SIZE; j++) src[j] = (uint8_t)(i ^ j);
 
-        // Compress - pass NULL to reuse sticky settings from create_opts.
-        // No malloc/free inside, no need to pass opts again.
-        int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, NULL);
-        if (csz <= 0) { fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz); break; }
+        // Compress under the context's configuration. The working buffers are
+        // carved on the first call and reused afterwards: no malloc/free inside.
+        int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap);
+        if (csz <= 0) {
+            fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz);
+            goto cleanup;
+        }
 
         // Decompress - no malloc/free inside
-        int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE, NULL);
+        int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE);
         if (dsz != BLOCK_SIZE || memcmp(src, dec, BLOCK_SIZE) != 0) {
             fprintf(stderr, "Block %d: roundtrip mismatch\n", i);
-            break;
+            goto cleanup;
         }
     }
-
-    // Switch to level 5. block_size 0 keeps the one from create_opts, so no
-    // re-allocation; later NULL calls reuse level 5.
-    zxc_compress_opts_t high_opts = { .level = 5 };
-    int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap, &high_opts);
-    printf("Level-5 compressed: %lld bytes\n", (long long)csz);
-
     printf("Processed %d blocks of %d KB - no per-block allocation.\n",
            NUM_BLOCKS, BLOCK_SIZE / 1024);
 
+    // Switch to level 5. The block size is untouched, so no re-allocation;
+    // every later call runs at level 5 until the parameter changes again.
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 5) != ZXC_OK) {
+        fprintf(stderr, "Bad parameter\n");
+        goto cleanup;
+    }
+    int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap);
+    if (csz <= 0) {
+        fprintf(stderr, "Level-5 compress error %lld\n", (long long)csz);
+        goto cleanup;
+    }
+    printf("Level-5 compressed: %lld bytes\n", (long long)csz);
+    rc = 0;
+
+cleanup:
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
     free(src); free(comp); free(dec);
-    return 0;
+    return rc;
 }
 ```
 
@@ -490,15 +520,14 @@ int main(void) {
     const size_t raw = n * sizeof *ts;
     size_t cap = zxc_compress_bound(raw);
     void *comp = malloc(cap);
-    zxc_compress_opts_t opts = { .level = 3 };
 
-    /* 1. Filter, then compress. */
+    /* 1. Filter, then compress (one-shot form: level 3, everything else default). */
     delta_encode_i64(ts, n);                       /* numeric struct -> small repeated deltas */
-    int64_t csize = zxc_compress(ts, raw, comp, cap, &opts);
+    int64_t csize = zxc_compress(ts, raw, comp, cap, 3);
 
     /* 2. Decompress, then invert the filter. */
     int64_t *out = malloc(raw);
-    zxc_decompress(comp, (size_t)csize, out, raw, NULL);
+    zxc_decompress(comp, (size_t)csize, out, raw);
     delta_decode_i64(out, n);                      /* exact original timestamps restored */
 
     free(ts); free(comp); free(out);
@@ -548,7 +577,7 @@ How it ties together:
   the decoder builds the table once instead of once per block. On large blocks
   the data builds its own match history, so a dictionary helps little.
 - **Raw content-only dictionaries** are still possible via the library API
-  (pass `dict`/`dict_size` with `dict_huf = NULL`) for ad-hoc priming where a
+  (`zxc_cctx_set_dict(cctx, dict, dict_size, NULL)`) for ad-hoc priming where a
   trained table adds nothing (binary data, levels 1–5). Such archives never use
   the shared-table literal encoding. The `.zxd` *file* format always includes
   the table.
@@ -593,42 +622,48 @@ int main(void) {
     const void *content, *table; size_t content_size; uint32_t dict_id;
     zxc_dict_load(zxd, (size_t)zxd_size, &content, &content_size, &table, &dict_id);
 
-    /* 3. Compress WITH the dictionary (level 6 to engage the shared table). */
+    /* 3. Compress WITH the dictionary (level 6 to engage the shared table).
+     *    The dictionary is attached to a context; the context keeps the
+     *    pointers only, so zxd must outlive every call that uses them. */
     const char *msg  = "{\"event\":\"login\",\"user_id\":2003,\"ok\":true}";
     size_t      n    = strlen(msg) + 1;
     size_t      cap  = zxc_compress_bound(n);
     uint8_t    *comp = malloc(cap);
 
-    zxc_compress_opts_t copts = { .level = 6, .dict = content,
-                                  .dict_size = content_size, .dict_huf = table };
-    int64_t csize = zxc_compress(msg, n, comp, cap, &copts);
+    zxc_cctx *cctx = zxc_create_cctx();
+    zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 6);
+    zxc_cctx_set_dict(cctx, content, content_size, table);
+    int64_t csize = zxc_compress_cctx(cctx, msg, n, comp, cap);
     if (csize < 0) { fprintf(stderr, "compress failed\n"); return 1; }
 
     /* The archive header now carries HAS_DICTIONARY + dict_id; a decoder reads
      * which dictionary it needs with zxc_get_dict_id(comp, csize). */
 
-    /* 4. Decompress WITH the same dictionary (content + table). */
+    /* 4. Decompress WITH the same dictionary (content + table). The simple
+     *    zxc_decompress() takes no dictionary: use a configured dctx. */
     uint8_t *out = malloc(n);
-    zxc_decompress_opts_t dopts = { .dict = content, .dict_size = content_size,
-                                    .dict_huf = table };
-    int64_t dsize = zxc_decompress(comp, (size_t)csize, out, n, &dopts);
+    zxc_dctx *dctx = zxc_create_dctx();
+    zxc_dctx_set_dict(dctx, content, content_size, table);
+    int64_t dsize = zxc_decompress_dctx(dctx, comp, (size_t)csize, out, n);
     if (dsize != (int64_t)n || memcmp(msg, out, n) != 0) {
         fprintf(stderr, "round-trip failed\n");
         return 1;
     }
 
+    zxc_free_cctx(cctx); zxc_free_dctx(dctx);
     free(zxd); free(comp); free(out);  /* content/table point INTO zxd; freed last */
     return 0;
 }
 ```
 
 > The `content` and `table` pointers returned by `zxc_dict_load()` aim **into**
-> `zxd` (zero-copy), so keep `zxd` alive until you're done compressing or
-> decompressing. The lower-level primitives (`zxc_dict_train_content` +
-> `zxc_dict_train_huf` + `zxc_dict_save`, and `zxc_dict_huf`) remain available
-> for advanced use — e.g. a **raw content-only dictionary** with no table
-> (`dict` set, `dict_huf = NULL`) for ad-hoc window priming where a trained
-> table adds nothing.
+> `zxd` (zero-copy), and the contexts keep those pointers rather than copies,
+> so keep `zxd` alive until you're done compressing or decompressing. The
+> lower-level primitives (`zxc_dict_train_content` + `zxc_dict_train_huf` +
+> `zxc_dict_save`, and `zxc_dict_huf`) remain available for advanced use —
+> e.g. a **raw content-only dictionary** with no table
+> (`zxc_cctx_set_dict(cctx, dict, size, NULL)`) for ad-hoc window priming
+> where a trained table adds nothing.
 
 ```c
 /* What zxc_dict_train() does internally, split into its three primitives.
@@ -657,16 +692,17 @@ Decoding a dictionary archive enforces that the right dictionary is supplied:
 
 | Situation | Result |
 |---|---|
-| No dictionary supplied (`opts == NULL` or `dict == NULL`) | `ZXC_ERROR_DICT_REQUIRED` |
+| No dictionary attached (the simple `zxc_decompress()`, or a `dctx` without `zxc_dctx_set_dict()`) | `ZXC_ERROR_DICT_REQUIRED` |
 | Wrong dictionary, or table missing/mismatched (`dict_id` mismatch) | `ZXC_ERROR_DICT_MISMATCH` |
-| Dictionary larger than `ZXC_DICT_SIZE_MAX` (64 KB) | `ZXC_ERROR_DICT_TOO_LARGE` |
+| Dictionary larger than `ZXC_DICT_SIZE_MAX` (64 KB) | `ZXC_ERROR_DICT_TOO_LARGE`, from `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` |
+| Dictionary on a static context | `ZXC_ERROR_DICT_UNSUPPORTED`, from the setter |
 
 Because the `dict_id` binds the **(content, table)** pair, decoding an
-archive that was compressed with a table requires passing that same table via
+archive that was compressed with a table requires passing that same table as
 `dict_huf` — omitting it (or supplying a different one) fails the id check with
 `ZXC_ERROR_DICT_MISMATCH`. So a decoder reads `zxc_get_dict_id()` first, fetches
-the matching `.zxd`, and passes its loaded `content` + `zxc_dict_huf()` table
-via `zxc_decompress_opts_t`. See `docs/FORMAT.md` §12 for the on-disk
+the matching `.zxd`, and attaches its loaded `content` + `zxc_dict_huf()` table
+with `zxc_dctx_set_dict()`. See `docs/FORMAT.md` §12 for the on-disk
 dictionary format and §3.1 for the header fields.
 
 ---

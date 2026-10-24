@@ -13,22 +13,19 @@ int test_opaque_context_api(void) {
     /* 1. NULL context -> ZXC_ERROR_NULL_INPUT */
     {
         uint8_t d[64] = {0};
-        zxc_compress_opts_t co = {.level = 3, .checksum_enabled = 0};
-        if (zxc_compress_cctx(NULL, d, sizeof(d), d, sizeof(d), &co) != ZXC_ERROR_NULL_INPUT) {
+        if (zxc_compress_cctx(NULL, d, sizeof(d), d, sizeof(d)) != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] compress_cctx NULL ctx\n");
             return 0;
         }
-        zxc_decompress_opts_t do_ = {.checksum_enabled = 0};
-        if (zxc_decompress_dctx(NULL, d, sizeof(d), d, sizeof(d), &do_) != ZXC_ERROR_NULL_INPUT) {
+        if (zxc_decompress_dctx(NULL, d, sizeof(d), d, sizeof(d)) != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] decompress_dctx NULL ctx\n");
             return 0;
         }
         printf("  [PASS] NULL context -> ZXC_ERROR_NULL_INPUT\n");
     }
 
-    /* 2. Create with eager init, multi-call reuse, free */
-    zxc_compress_opts_t create_opts = {.level = 3, .checksum_enabled = 0};
-    zxc_cctx* cctx = zxc_create_cctx(&create_opts);
+    /* 2. Create, multi-call reuse, free */
+    zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
     if (!cctx || !dctx) {
         printf("  [FAIL] create returned NULL\n");
@@ -43,18 +40,22 @@ int test_opaque_context_api(void) {
     uint8_t* comp = malloc(comp_cap);
     uint8_t* dec = malloc(src_sz);
 
-    /* 3. Three calls with the SAME cctx: level 1, 3, 5 */
+    /* 3. Three calls with the SAME cctx: level 1, 3, 5; checksums on at 3 */
     for (int lvl = 1; lvl <= 5; lvl += 2) {
         gen_lz_data(src, src_sz);
-        zxc_compress_opts_t co = {.level = lvl, .checksum_enabled = (lvl == 3)};
-        const int64_t csz = zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &co);
+        if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, lvl) != ZXC_OK ||
+            zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, lvl == 3) != ZXC_OK ||
+            zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, lvl == 3) != ZXC_OK) {
+            printf("  [FAIL] set_param level %d\n", lvl);
+            goto fail;
+        }
+        const int64_t csz = zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap);
         if (csz <= 0) {
             printf("  [FAIL] compress_cctx level %d returned %lld\n", lvl, (long long)csz);
             goto fail;
         }
 
-        zxc_decompress_opts_t do_ = {.checksum_enabled = (lvl == 3)};
-        const int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, src_sz, &do_);
+        const int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, src_sz);
         if (dsz != (int64_t)src_sz || memcmp(src, dec, src_sz) != 0) {
             printf("  [FAIL] roundtrip level %d (dsz=%lld)\n", lvl, (long long)dsz);
             goto fail;
@@ -86,10 +87,11 @@ fail:
     return 0;
 }
 
-/* Regression: a cctx created below ZXC_LEVEL_DENSITY has no opt_scratch; a
- * per-call level raise into the optimal-parser tier must re-init the inner
- * buffers instead of dereferencing the NULL scratch (crash before the fix).
- * Also covers the new out-of-range level validation (ZXC_ERROR_BAD_LEVEL). */
+/* Regression: a cctx whose buffers were carved below ZXC_LEVEL_DENSITY has no
+ * opt_scratch; a level raise into the optimal-parser tier must re-init the
+ * inner buffers instead of dereferencing the NULL scratch (crash before the
+ * fix). Also pins where levels are clamped (the one-shot) and where they are
+ * refused (the setter, ZXC_ERROR_BAD_LEVEL). */
 int test_cctx_level_raise_reinit(void) {
     printf("=== TEST: Opaque Context API - level raise re-init + level validation ===\n");
 
@@ -103,21 +105,26 @@ int test_cctx_level_raise_reinit(void) {
     if (!src || !comp || !dec) goto fail;
     gen_lz_data(src, src_sz);
 
-    /* 1. Eager init at level 3 (no opt_scratch), then raise to 7 in place. */
-    zxc_compress_opts_t create_opts = {.level = 3, .checksum_enabled = 0};
-    cctx = zxc_create_cctx(&create_opts);
+    /* 1. Buffers carved at level 3 (no opt_scratch) by a first call, then
+     *    raised to 7 in place. */
+    cctx = zxc_create_cctx();
     dctx = zxc_create_dctx();
     if (!cctx || !dctx) {
         printf("  [FAIL] create returned NULL\n");
         goto fail;
     }
-    zxc_compress_opts_t raise = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
-    const int64_t csz = zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &raise);
+    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap) <= 0) {
+        printf("  [FAIL] level-3 call to carve the buffers\n");
+        goto fail;
+    }
+    const int64_t csz = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_ULTRA) == ZXC_OK
+                            ? zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap)
+                            : ZXC_ERROR_BAD_LEVEL;
     if (csz <= 0) {
         printf("  [FAIL] level-7 raise on level-3 cctx returned %lld\n", (long long)csz);
         goto fail;
     }
-    const int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, src_sz, NULL);
+    const int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, src_sz);
     if (dsz != (int64_t)src_sz || memcmp(src, dec, src_sz) != 0) {
         printf("  [FAIL] roundtrip after level raise (dsz=%lld)\n", (long long)dsz);
         goto fail;
@@ -126,78 +133,55 @@ int test_cctx_level_raise_reinit(void) {
 
     /* 2. Same raise through the block API on a fresh low-level cctx. */
     zxc_free_cctx(cctx);
-    cctx = zxc_create_cctx(&create_opts);
+    cctx = zxc_create_cctx();
     if (!cctx) {
         printf("  [FAIL] re-create returned NULL\n");
         goto fail;
     }
-    zxc_compress_opts_t raise6 = {.level = ZXC_LEVEL_DENSITY, .checksum_enabled = 0};
-    const int64_t bsz = zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &raise6);
+    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap) <= 0) {
+        printf("  [FAIL] level-3 block to carve the buffers\n");
+        goto fail;
+    }
+    const int64_t bsz = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DENSITY) == ZXC_OK
+                            ? zxc_compress_block(cctx, src, src_sz, comp, comp_cap)
+                            : ZXC_ERROR_BAD_LEVEL;
     if (bsz <= 0) {
         printf("  [FAIL] level-6 block raise returned %lld\n", (long long)bsz);
         goto fail;
     }
     printf("  [PASS] level 3 -> 6 raise through the block API\n");
 
-    /* 3. Out-of-range levels are silently clamped to ULTRA: level 99 must
-     * produce the exact archive level 7 produces, on every entry point. */
-    zxc_compress_opts_t lvl7 = {.level = ZXC_LEVEL_ULTRA, .checksum_enabled = 0};
-    zxc_compress_opts_t lvl99 = {.level = 99, .checksum_enabled = 0};
-    uint8_t* comp7 = malloc(comp_cap);
-    if (!comp7) goto fail;
-    const int64_t c7 = zxc_compress(src, src_sz, comp7, comp_cap, &lvl7);
-    const int64_t c99 = zxc_compress(src, src_sz, comp, comp_cap, &lvl99);
-    if (c7 <= 0 || c99 != c7 || memcmp(comp, comp7, (size_t)c7) != 0) {
-        printf("  [FAIL] zxc_compress(level=99) must clamp to ULTRA (c7=%lld c99=%lld)\n",
-               (long long)c7, (long long)c99);
-        free(comp7);
+    /* 3. Out-of-range levels: the one-shot and the setter both refuse them,
+     *    the setter keeps its level and the context stays usable. 0 means the
+     *    default: the one-shot must produce the exact level-3 archive. */
+    const int bad_levels[] = {99, ZXC_LEVEL_ULTRA + 1, -5, -1};
+    int64_t lvl = 0;
+    for (size_t i = 0; i < sizeof(bad_levels) / sizeof(bad_levels[0]); i++) {
+        const int bad = bad_levels[i];
+        if (zxc_compress(src, src_sz, comp, comp_cap, bad) != ZXC_ERROR_BAD_LEVEL ||
+            zxc_cctx_set_param(cctx, ZXC_C_LEVEL, bad) != ZXC_ERROR_BAD_LEVEL ||
+            zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &lvl) != ZXC_OK || lvl != ZXC_LEVEL_DENSITY) {
+            printf("  [FAIL] level %d must be refused everywhere, setter level kept (now %lld)\n",
+                   bad, (long long)lvl);
+            goto fail;
+        }
+    }
+    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap) <= 0) {
+        printf("  [FAIL] context unusable after refused levels\n");
         goto fail;
     }
-    free(comp7);
-    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvl99) != c7) {
-        printf("  [FAIL] zxc_compress_cctx(level=99) must clamp to ULTRA\n");
+    uint8_t* comp3 = malloc(comp_cap);
+    if (!comp3) goto fail;
+    const int64_t c3 = zxc_compress(src, src_sz, comp3, comp_cap, ZXC_LEVEL_DEFAULT);
+    const int64_t c0 = zxc_compress(src, src_sz, comp, comp_cap, 0);
+    const int same = c3 > 0 && c0 == c3 && memcmp(comp, comp3, (size_t)c3) == 0;
+    free(comp3);
+    if (!same) {
+        printf("  [FAIL] zxc_compress(level=0) must mean the default (c3=%lld c0=%lld)\n",
+               (long long)c3, (long long)c0);
         goto fail;
     }
-    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap, &lvl99) <= 0) {
-        printf("  [FAIL] zxc_compress_block(level=99) must clamp to ULTRA\n");
-        goto fail;
-    }
-    zxc_cctx* cctx99 = zxc_create_cctx(&lvl99);
-    if (!cctx99) {
-        printf("  [FAIL] zxc_create_cctx(level=99) must clamp, not fail\n");
-        goto fail;
-    }
-    zxc_free_cctx(cctx99);
-    printf("  [PASS] level 99 silently clamped to ULTRA across entry points\n");
-
-    /* 4. Negative levels clamp to FASTEST, not the default: -5 must produce
-     * the level-1 archive. */
-    zxc_compress_opts_t lvl1 = {.level = ZXC_LEVEL_FASTEST, .checksum_enabled = 0};
-    zxc_compress_opts_t lvlneg = {.level = -5, .checksum_enabled = 0};
-    uint8_t* comp1 = malloc(comp_cap);
-    if (!comp1) goto fail;
-    const int64_t c1 = zxc_compress(src, src_sz, comp1, comp_cap, &lvl1);
-    const int64_t cneg = zxc_compress(src, src_sz, comp, comp_cap, &lvlneg);
-    if (c1 <= 0 || cneg != c1 || memcmp(comp, comp1, (size_t)c1) != 0) {
-        printf("  [FAIL] zxc_compress(level=-5) must clamp to FASTEST (c1=%lld cneg=%lld)\n",
-               (long long)c1, (long long)cneg);
-        free(comp1);
-        goto fail;
-    }
-    if (zxc_compress_cctx(cctx, src, src_sz, comp, comp_cap, &lvlneg) != c1 ||
-        memcmp(comp, comp1, (size_t)c1) != 0) {
-        printf("  [FAIL] zxc_compress_cctx(level=-5) must clamp to FASTEST\n");
-        free(comp1);
-        goto fail;
-    }
-    free(comp1);
-    zxc_cctx* cctxneg = zxc_create_cctx(&lvlneg);
-    if (!cctxneg) {
-        printf("  [FAIL] zxc_create_cctx(level=-5) must clamp, not fail\n");
-        goto fail;
-    }
-    zxc_free_cctx(cctxneg);
-    printf("  [PASS] level -5 silently clamped to FASTEST across entry points\n");
+    printf("  [PASS] out-of-range levels refused by one-shot and setter, 0 is the default\n");
 
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
@@ -216,89 +200,372 @@ fail:
     return 0;
 }
 
-/* Frame or block API compression on @p c. */
-static int64_t cctx_compress(zxc_cctx* c, const int block_api, const uint8_t* src, const size_t n,
-                             uint8_t* dst, const size_t cap, const zxc_compress_opts_t* co) {
-    return block_api ? zxc_compress_block(c, src, n, dst, cap, co)
-                     : zxc_compress_cctx(c, src, n, dst, cap, co);
+static void noop_progress(uint64_t done, uint64_t total, const void* user) {
+    (void)done;
+    (void)total;
+    (void)user;
 }
 
-/* #532: zero opts fields mean defaults, and a failed call is not remembered.
- * Second call on a reused context vs. a fresh context. */
-int test_cctx_zero_opts_defaults(void) {
-    printf("=== TEST: Opaque Context API - zero opts fields, failed calls (#532) ===\n");
+/* One compression parameter: identifier, bounds and default. */
+typedef struct {
+    zxc_cparam_t p;
+    const char* name;
+    int64_t lo, hi, def;
+} cparam_spec_t;
 
-    static const struct {
-        const char* name;
-        int fail_first;  /* first call fails: too-small destination */
-        int null_second; /* second call: NULL opts, not zeroed ones */
-        int want_custom; /* expect the custom output, not the defaults */
-    } cases[] = {
-        {"zero opts after a successful custom call", 0, 0, 0},
-        {"zero opts after a failed custom call", 1, 0, 0},
-        {"NULL opts after a failed custom call", 1, 1, 0},
-        {"NULL opts after a successful custom call (sticky)", 0, 1, 1},
+/* The cctx parameter contract: bounds, defaults, set/get round trips, 0 as
+ * the default, refusals that name the parameter and leave its value alone,
+ * NULL arguments, the dictionary and callback setters, reset. */
+int test_cctx_param_contract(void) {
+    printf("=== TEST: Context API - cctx parameter contract ===\n");
+    static const cparam_spec_t tab[] = {
+        {ZXC_C_LEVEL, "level", ZXC_LEVEL_FASTEST, ZXC_LEVEL_ULTRA, ZXC_LEVEL_DEFAULT},
+        {ZXC_C_BLOCK_SIZE, "block_size", ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX,
+         ZXC_BLOCK_SIZE_DEFAULT},
+        {ZXC_C_THREADS, "threads", 0, ZXC_MAX_THREADS, 0},
+        {ZXC_C_CHECKSUM, "checksum", 0, 1, 0},
+        {ZXC_C_SEEKABLE, "seekable", 0, 1, 0},
     };
-    const zxc_compress_opts_t zero = {0};
-    const zxc_compress_opts_t custom = {
-        .level = 1, .block_size = 4096, .checksum_enabled = 1, .seekable = 1};
+    const size_t n_tab = sizeof(tab) / sizeof(tab[0]);
+    zxc_cctx* const c = zxc_create_cctx();
+    if (!c) {
+        printf("  [FAIL] zxc_create_cctx\n");
+        return 0;
+    }
+    int fails = 0;
 
-    const size_t src_sz = 300000;
-    const uint64_t fb = zxc_compress_bound(src_sz), bb = zxc_compress_block_bound(src_sz);
-    const size_t cap = (size_t)(fb > bb ? fb : bb);
-    uint8_t* const src = malloc(src_sz);
-    uint8_t* const ref[2] = {malloc(cap), malloc(cap)}; /* defaults, custom */
-    uint8_t* const out = malloc(cap);
-    uint8_t tiny[16];
-    int ok = 0;
-    if (!src || !ref[0] || !ref[1] || !out) goto done;
-    gen_lz_data(src, src_sz);
-
-    for (int block_api = 0; block_api <= 1; block_api++) {
-        const char* const api = block_api ? "block" : "frame";
-        int64_t n_ref[2];
-        for (int k = 0; k < 2; k++) {
-            zxc_cctx* const c = zxc_create_cctx(NULL);
-            n_ref[k] =
-                c ? cctx_compress(c, block_api, src, src_sz, ref[k], cap, k ? &custom : &zero) : -1;
-            zxc_free_cctx(c);
+    for (size_t i = 0; i < n_tab; i++) {
+        const cparam_spec_t* t = &tab[i];
+        int64_t lo = -1, hi = -1, v = -1;
+        if (zxc_cparam_bounds(t->p, &lo, &hi) != ZXC_OK || lo != t->lo || hi != t->hi ||
+            zxc_cparam_bounds(t->p, NULL, NULL) != ZXC_OK) {
+            printf("  [FAIL] %s: bounds [%lld, %lld], want [%lld, %lld]\n", t->name, (long long)lo,
+                   (long long)hi, (long long)t->lo, (long long)t->hi);
+            fails++;
         }
-        if (n_ref[0] <= 0 || n_ref[1] <= 0 ||
-            (n_ref[0] == n_ref[1] && memcmp(ref[0], ref[1], (size_t)n_ref[0]) == 0)) {
-            printf("  [FAIL] %s: custom opts must change the output (%lld vs %lld)\n", api,
-                   (long long)n_ref[0], (long long)n_ref[1]);
-            goto done;
+        if (zxc_cctx_get_param(c, t->p, &v) != ZXC_OK || v != t->def) {
+            printf("  [FAIL] %s: fresh context reads %lld, want %lld\n", t->name, (long long)v,
+                   (long long)t->def);
+            fails++;
         }
+        int64_t got_lo = -1, got_hi = -1, got_0 = -1;
+        if (zxc_cctx_set_param(c, t->p, t->lo) != ZXC_OK ||
+            zxc_cctx_get_param(c, t->p, &got_lo) != ZXC_OK || got_lo != t->lo ||
+            zxc_cctx_set_param(c, t->p, t->hi) != ZXC_OK ||
+            zxc_cctx_get_param(c, t->p, &got_hi) != ZXC_OK || got_hi != t->hi) {
+            printf("  [FAIL] %s: round trip at the bounds read %lld / %lld\n", t->name,
+                   (long long)got_lo, (long long)got_hi);
+            fails++;
+        }
+        if (zxc_cctx_set_param(c, t->p, 0) != ZXC_OK ||
+            zxc_cctx_get_param(c, t->p, &got_0) != ZXC_OK || got_0 != t->def) {
+            printf("  [FAIL] %s: 0 must restore the default %lld, reads %lld\n", t->name,
+                   (long long)t->def, (long long)got_0);
+            fails++;
+        }
+    }
+    if (!fails) printf("  [PASS] bounds, defaults, round trips, 0 = default\n");
 
-        for (size_t i = 0; i < sizeof(cases) / sizeof(cases[0]); i++) {
-            zxc_cctx* const c = zxc_create_cctx(NULL);
-            if (!c) goto done;
-            const int64_t first =
-                cases[i].fail_first
-                    ? cctx_compress(c, block_api, src, src_sz, tiny, sizeof(tiny), &custom)
-                    : cctx_compress(c, block_api, src, src_sz, out, cap, &custom);
-            const int64_t n = cctx_compress(c, block_api, src, src_sz, out, cap,
-                                            cases[i].null_second ? NULL : &zero);
-            zxc_free_cctx(c);
-            const int want = cases[i].want_custom;
-            if ((cases[i].fail_first ? first >= 0 : first <= 0) || n != n_ref[want] ||
-                memcmp(out, ref[want], (size_t)n) != 0) {
-                printf("  [FAIL] %s, %s: first %lld, second %lld, want %lld\n", api, cases[i].name,
-                       (long long)first, (long long)n, (long long)n_ref[want]);
-                goto done;
+    /* Refusals: the code names the parameter, the value in force stays. */
+    static const struct {
+        zxc_cparam_t p;
+        int64_t v;
+        int want;
+    } bad[] = {
+        {ZXC_C_LEVEL, ZXC_LEVEL_ULTRA + 1, ZXC_ERROR_BAD_LEVEL},
+        {ZXC_C_LEVEL, 99, ZXC_ERROR_BAD_LEVEL},
+        {ZXC_C_LEVEL, -5, ZXC_ERROR_BAD_LEVEL},
+        {ZXC_C_BLOCK_SIZE, 10000, ZXC_ERROR_BAD_BLOCK_SIZE}, /* in range, not a power of 2 */
+        {ZXC_C_BLOCK_SIZE, ZXC_BLOCK_SIZE_MIN / 2, ZXC_ERROR_BAD_BLOCK_SIZE},
+        {ZXC_C_BLOCK_SIZE, 2 * (int64_t)ZXC_BLOCK_SIZE_MAX, ZXC_ERROR_BAD_BLOCK_SIZE},
+        {ZXC_C_BLOCK_SIZE, -4096, ZXC_ERROR_BAD_BLOCK_SIZE},
+        {ZXC_C_THREADS, ZXC_MAX_THREADS + 1, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_THREADS, -1, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_CHECKSUM, 2, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_CHECKSUM, -1, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_SEEKABLE, 2, ZXC_ERROR_BAD_PARAM},
+        {(zxc_cparam_t)0, 1, ZXC_ERROR_BAD_PARAM},
+        {(zxc_cparam_t)6, 0, ZXC_ERROR_BAD_PARAM},
+        {(zxc_cparam_t)99, 1, ZXC_ERROR_BAD_PARAM},
+    };
+    /* Non-default values first, so a refusal that resets would show. */
+    static const int64_t custom[] = {5, 65536, 2, 1, 1};
+    for (size_t i = 0; i < n_tab; i++) {
+        if (zxc_cctx_set_param(c, tab[i].p, custom[i]) != ZXC_OK) {
+            printf("  [FAIL] %s: custom value %lld refused\n", tab[i].name, (long long)custom[i]);
+            fails++;
+        }
+    }
+    int refused = 0;
+    for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
+        int64_t before = -1, after = -1;
+        const int known = zxc_cctx_get_param(c, bad[k].p, &before) == ZXC_OK;
+        const int rc = zxc_cctx_set_param(c, bad[k].p, bad[k].v);
+        if (known) zxc_cctx_get_param(c, bad[k].p, &after);
+        if (rc != bad[k].want || (known && after != before)) {
+            printf("  [FAIL] set(param %d, %lld): %d, want %d; value %lld -> %lld\n", (int)bad[k].p,
+                   (long long)bad[k].v, rc, bad[k].want, (long long)before, (long long)after);
+            fails++;
+        } else {
+            refused++;
+        }
+    }
+    int64_t lo = 0, hi = 0, v = 0;
+    if (zxc_cctx_get_param(c, (zxc_cparam_t)99, &v) != ZXC_ERROR_BAD_PARAM ||
+        zxc_cparam_bounds((zxc_cparam_t)99, &lo, &hi) != ZXC_ERROR_BAD_PARAM ||
+        zxc_cparam_bounds((zxc_cparam_t)0, &lo, &hi) != ZXC_ERROR_BAD_PARAM) {
+        printf("  [FAIL] unknown parameter on get / bounds must be ZXC_ERROR_BAD_PARAM\n");
+        fails++;
+    }
+    if (!fails) printf("  [PASS] %d refusals leave the value in force\n", refused);
+
+    /* NULL arguments. */
+    static uint8_t dict[1024];
+    memset(dict, 'd', sizeof(dict));
+    int marker = 0;
+    if (zxc_cctx_set_param(NULL, ZXC_C_LEVEL, 1) != ZXC_ERROR_NULL_INPUT ||
+        zxc_cctx_get_param(NULL, ZXC_C_LEVEL, &v) != ZXC_ERROR_NULL_INPUT ||
+        zxc_cctx_get_param(c, ZXC_C_LEVEL, NULL) != ZXC_ERROR_NULL_INPUT ||
+        zxc_cctx_set_dict(NULL, dict, sizeof(dict), NULL) != ZXC_ERROR_NULL_INPUT ||
+        zxc_cctx_set_progress(NULL, noop_progress, &marker) != ZXC_ERROR_NULL_INPUT ||
+        zxc_cctx_reset(NULL) != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] NULL arguments must be ZXC_ERROR_NULL_INPUT\n");
+        fails++;
+    }
+
+    /* Dictionary and callback setters; an oversized dictionary is refused and
+     * the attached one stays. */
+    const zxc_cparams_t* const p = zxc_cctx_params(c);
+    if (zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != ZXC_OK || p->dict != dict ||
+        p->dict_size != sizeof(dict) ||
+        zxc_cctx_set_dict(c, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL) !=
+            ZXC_ERROR_DICT_TOO_LARGE ||
+        p->dict != dict || p->dict_size != sizeof(dict)) {
+        printf("  [FAIL] dictionary setter: attach %p/%zu after an oversized refusal\n", p->dict,
+               p->dict_size);
+        fails++;
+    }
+    if (zxc_cctx_set_progress(c, noop_progress, &marker) != ZXC_OK ||
+        p->progress_cb != noop_progress || p->user_data != &marker ||
+        zxc_cctx_set_progress(c, NULL, &marker) != ZXC_OK || p->progress_cb != NULL ||
+        p->user_data != NULL || zxc_cctx_set_progress(c, noop_progress, &marker) != ZXC_OK) {
+        printf("  [FAIL] progress setter\n");
+        fails++;
+    }
+    if (zxc_cctx_set_dict(c, NULL, 0, NULL) != ZXC_OK || p->dict != NULL || p->dict_size != 0 ||
+        zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != ZXC_OK) {
+        printf("  [FAIL] NULL dictionary must detach\n");
+        fails++;
+    }
+    if (!fails) printf("  [PASS] NULL arguments, dictionary and callback setters\n");
+
+    /* Reset: every parameter back to its default, dictionary and callback
+     * detached, and the next archive is the level-3 one-shot's. */
+    if (zxc_cctx_reset(c) != ZXC_OK) {
+        printf("  [FAIL] zxc_cctx_reset\n");
+        fails++;
+    }
+    for (size_t i = 0; i < n_tab; i++) {
+        if (zxc_cctx_get_param(c, tab[i].p, &v) != ZXC_OK || v != tab[i].def) {
+            printf("  [FAIL] %s after reset: %lld, want %lld\n", tab[i].name, (long long)v,
+                   (long long)tab[i].def);
+            fails++;
+        }
+    }
+    if (p->dict != NULL || p->dict_size != 0 || p->dict_huf != NULL || p->progress_cb != NULL ||
+        p->user_data != NULL) {
+        printf("  [FAIL] reset must detach the dictionary and the callback\n");
+        fails++;
+    }
+    static const char text[] = "a reset context writes what the default one-shot writes";
+    uint8_t a[256], b[256];
+    const int64_t na = zxc_compress_cctx(c, text, sizeof(text) - 1, a, sizeof(a));
+    const int64_t nb = zxc_compress(text, sizeof(text) - 1, b, sizeof(b), ZXC_LEVEL_DEFAULT);
+    if (na <= 0 || nb != na || memcmp(a, b, (size_t)na) != 0 ||
+        zxc_get_dict_id(a, (size_t)na) != 0) {
+        printf("  [FAIL] after reset: context %lld, one-shot %lld\n", (long long)na, (long long)nb);
+        fails++;
+    }
+    if (!fails) printf("  [PASS] reset restores the defaults and detaches dict and callback\n");
+
+    zxc_free_cctx(c);
+    if (fails) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
+/* The dctx parameter contract, and what it changes: verification of a
+ * checksummed archive, the dictionary an archive is bound to. */
+int test_dctx_param_contract(void) {
+    printf("=== TEST: Context API - dctx parameter contract ===\n");
+    static const struct {
+        zxc_dparam_t p;
+        const char* name;
+        int64_t lo, hi;
+    } tab[] = {
+        {ZXC_D_THREADS, "threads", 0, ZXC_MAX_THREADS},
+        {ZXC_D_CHECKSUM, "checksum", 0, 1},
+    };
+    const size_t n_tab = sizeof(tab) / sizeof(tab[0]);
+    zxc_dctx* const d = zxc_create_dctx();
+    if (!d) {
+        printf("  [FAIL] zxc_create_dctx\n");
+        return 0;
+    }
+    int fails = 0;
+
+    for (size_t i = 0; i < n_tab; i++) {
+        int64_t lo = -1, hi = -1, v = -1, got_lo = -1, got_hi = -1, got_0 = -1;
+        if (zxc_dparam_bounds(tab[i].p, &lo, &hi) != ZXC_OK || lo != tab[i].lo || hi != tab[i].hi ||
+            zxc_dparam_bounds(tab[i].p, NULL, NULL) != ZXC_OK) {
+            printf("  [FAIL] %s: bounds [%lld, %lld], want [%lld, %lld]\n", tab[i].name,
+                   (long long)lo, (long long)hi, (long long)tab[i].lo, (long long)tab[i].hi);
+            fails++;
+        }
+        if (zxc_dctx_get_param(d, tab[i].p, &v) != ZXC_OK || v != 0) {
+            printf("  [FAIL] %s: fresh context reads %lld, want 0\n", tab[i].name, (long long)v);
+            fails++;
+        }
+        if (zxc_dctx_set_param(d, tab[i].p, tab[i].lo) != ZXC_OK ||
+            zxc_dctx_get_param(d, tab[i].p, &got_lo) != ZXC_OK || got_lo != tab[i].lo ||
+            zxc_dctx_set_param(d, tab[i].p, tab[i].hi) != ZXC_OK ||
+            zxc_dctx_get_param(d, tab[i].p, &got_hi) != ZXC_OK || got_hi != tab[i].hi ||
+            zxc_dctx_set_param(d, tab[i].p, 0) != ZXC_OK ||
+            zxc_dctx_get_param(d, tab[i].p, &got_0) != ZXC_OK || got_0 != 0) {
+            printf("  [FAIL] %s: round trip reads %lld / %lld, after 0: %lld\n", tab[i].name,
+                   (long long)got_lo, (long long)got_hi, (long long)got_0);
+            fails++;
+        }
+    }
+    static const struct {
+        zxc_dparam_t p;
+        int64_t v;
+    } bad[] = {
+        {ZXC_D_THREADS, ZXC_MAX_THREADS + 1},
+        {ZXC_D_THREADS, -1},
+        {ZXC_D_CHECKSUM, 2},
+        {ZXC_D_CHECKSUM, -1},
+        {(zxc_dparam_t)0, 1},
+        {(zxc_dparam_t)3, 1},
+        {(zxc_dparam_t)99, 0},
+    };
+    if (zxc_dctx_set_param(d, ZXC_D_THREADS, 3) != ZXC_OK ||
+        zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1) != ZXC_OK) {
+        printf("  [FAIL] custom values refused\n");
+        fails++;
+    }
+    for (size_t k = 0; k < sizeof(bad) / sizeof(bad[0]); k++) {
+        int64_t before = -1, after = -1;
+        const int known = zxc_dctx_get_param(d, bad[k].p, &before) == ZXC_OK;
+        const int rc = zxc_dctx_set_param(d, bad[k].p, bad[k].v);
+        if (known) zxc_dctx_get_param(d, bad[k].p, &after);
+        if (rc != ZXC_ERROR_BAD_PARAM || (known && after != before)) {
+            printf("  [FAIL] set(param %d, %lld): %d, want %d; value %lld -> %lld\n", (int)bad[k].p,
+                   (long long)bad[k].v, rc, ZXC_ERROR_BAD_PARAM, (long long)before,
+                   (long long)after);
+            fails++;
+        }
+    }
+    int64_t lo = 0, hi = 0, v = 0;
+    int marker = 0;
+    static uint8_t dict[2048];
+    memset(dict, 'q', sizeof(dict));
+    if (zxc_dctx_get_param(d, (zxc_dparam_t)99, &v) != ZXC_ERROR_BAD_PARAM ||
+        zxc_dparam_bounds((zxc_dparam_t)99, &lo, &hi) != ZXC_ERROR_BAD_PARAM ||
+        zxc_dctx_set_param(NULL, ZXC_D_CHECKSUM, 1) != ZXC_ERROR_NULL_INPUT ||
+        zxc_dctx_get_param(NULL, ZXC_D_CHECKSUM, &v) != ZXC_ERROR_NULL_INPUT ||
+        zxc_dctx_get_param(d, ZXC_D_CHECKSUM, NULL) != ZXC_ERROR_NULL_INPUT ||
+        zxc_dctx_set_dict(NULL, dict, sizeof(dict), NULL) != ZXC_ERROR_NULL_INPUT ||
+        zxc_dctx_set_progress(NULL, noop_progress, &marker) != ZXC_ERROR_NULL_INPUT ||
+        zxc_dctx_reset(NULL) != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] unknown parameter / NULL arguments\n");
+        fails++;
+    }
+    if (!fails) printf("  [PASS] bounds, defaults, round trips, refusals, NULL arguments\n");
+
+    /* Dictionary and callback setters, then reset detaches both. */
+    const zxc_dparams_t* const p = zxc_dctx_params(d);
+    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK || p->dict != dict ||
+        p->dict_size != sizeof(dict) ||
+        zxc_dctx_set_dict(d, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL) !=
+            ZXC_ERROR_DICT_TOO_LARGE ||
+        p->dict != dict || p->dict_size != sizeof(dict) ||
+        zxc_dctx_set_dict(d, NULL, 0, NULL) != ZXC_OK || p->dict != NULL || p->dict_size != 0 ||
+        zxc_dctx_set_progress(d, noop_progress, &marker) != ZXC_OK ||
+        p->progress_cb != noop_progress || p->user_data != &marker ||
+        zxc_dctx_set_progress(d, NULL, NULL) != ZXC_OK || p->progress_cb != NULL) {
+        printf("  [FAIL] dictionary / progress setters\n");
+        fails++;
+    }
+    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK ||
+        zxc_dctx_set_progress(d, noop_progress, &marker) != ZXC_OK ||
+        zxc_dctx_set_param(d, ZXC_D_THREADS, 4) != ZXC_OK || zxc_dctx_reset(d) != ZXC_OK ||
+        zxc_dctx_get_param(d, ZXC_D_THREADS, &v) != ZXC_OK || v != 0 ||
+        zxc_dctx_get_param(d, ZXC_D_CHECKSUM, &v) != ZXC_OK || v != 0 || p->dict != NULL ||
+        p->dict_size != 0 || p->dict_huf != NULL || p->progress_cb != NULL ||
+        p->user_data != NULL) {
+        printf("  [FAIL] reset must restore the defaults and detach dict and callback\n");
+        fails++;
+    }
+    if (!fails) printf("  [PASS] setters, reset detaches the dictionary and the callback\n");
+
+    /* What the parameters change. A flipped digest: caught with ZXC_D_CHECKSUM,
+     * ignored after a reset. A dictionary-bound archive: decodes with the
+     * dictionary attached, ZXC_ERROR_DICT_REQUIRED after a reset. */
+    enum { N = 20000 };
+    uint8_t* const src = malloc(N);
+    const size_t cap = zxc_compress_bound(N);
+    uint8_t* const arc = malloc(cap);
+    uint8_t* const out = malloc(N);
+    if (!src || !arc || !out) {
+        printf("  [FAIL] malloc\n");
+        fails++;
+    } else {
+        gen_lz_data(src, N);
+        const int64_t n = test_compress_cfg(src, N, arc, cap, 3, 0, 1, 0);
+        const size_t digest_at = n > 0 ? (size_t)n - test_footer_len(arc, (size_t)n) : 0;
+        if (n <= 0 || digest_at == 0) {
+            printf("  [FAIL] checksummed archive: %lld\n", (long long)n);
+            fails++;
+        } else {
+            arc[digest_at] ^= 0xFF;
+            const int64_t r1 = zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1) == ZXC_OK
+                                   ? zxc_decompress_dctx(d, arc, (size_t)n, out, N)
+                                   : ZXC_ERROR_BAD_PARAM;
+            const int64_t r2 = zxc_dctx_reset(d) == ZXC_OK
+                                   ? zxc_decompress_dctx(d, arc, (size_t)n, out, N)
+                                   : ZXC_ERROR_NULL_INPUT;
+            if (r1 != ZXC_ERROR_BAD_CHECKSUM || r2 != N || memcmp(out, src, N) != 0) {
+                printf("  [FAIL] flipped digest: verified %lld, after reset %lld\n", (long long)r1,
+                       (long long)r2);
+                fails++;
             }
         }
-        printf("  [PASS] %s API: zero fields mean defaults; failures not remembered\n", api);
+        zxc_cctx* const c = zxc_create_cctx();
+        int64_t dn = c ? ZXC_OK : ZXC_ERROR_MEMORY;
+        if (dn == ZXC_OK) dn = zxc_cctx_set_dict(c, dict, sizeof(dict), NULL);
+        if (dn == ZXC_OK) dn = zxc_compress_cctx(c, src, N, arc, cap);
+        zxc_free_cctx(c);
+        const int64_t r3 = dn > 0 && zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) == ZXC_OK
+                               ? zxc_decompress_dctx(d, arc, (size_t)dn, out, N)
+                               : dn;
+        const int64_t r4 = dn > 0 && zxc_dctx_reset(d) == ZXC_OK
+                               ? zxc_decompress_dctx(d, arc, (size_t)dn, out, N)
+                               : dn;
+        if (dn <= 0 || r3 != N || memcmp(out, src, N) != 0 || r4 != ZXC_ERROR_DICT_REQUIRED) {
+            printf("  [FAIL] dictionary archive %lld: with dict %lld, after reset %lld\n",
+                   (long long)dn, (long long)r3, (long long)r4);
+            fails++;
+        }
+        if (!fails) printf("  [PASS] checksum and dictionary take effect, reset drops them\n");
     }
-    ok = 1;
-    printf("PASS\n\n");
-
-done:
     free(src);
-    free(ref[0]);
-    free(ref[1]);
+    free(arc);
     free(out);
-    return ok;
+    zxc_free_dctx(d);
+    if (fails) return 0;
+    printf("PASS\n\n");
+    return 1;
 }
 
 /* Block size declared by archive @p arc (@p n bytes); 0 if unreadable. */
@@ -308,95 +575,131 @@ static size_t frame_block_size(const uint8_t* arc, const int64_t n) {
     return info.block_size;
 }
 
-/* #532: zero fields mean the creation values even after a call with others;
- * an invalid block_size is refused whatever the source; the block API
- * remembers the block_size asked for, not the carve, and reuses a larger carve. */
-int test_cctx_zero_opts_creation_values(void) {
-    printf("=== TEST: Opaque Context API - zero opts fields keep the creation values (#532) ===\n");
-    enum { BS = 4096, SRC = 3000, BIG = 600000 };
-    const size_t cap = zxc_compress_bound(SRC), bcap = zxc_compress_block_bound(BIG);
-    uint8_t src[SRC];
-    uint8_t* const big = malloc(BIG);
-    uint8_t* const arc = malloc(cap);
-    uint8_t* const ref = malloc(cap);
+/* What a configured context writes: with only the level set, the one-shot's
+ * bytes at every level; with checksum, seek table and block size, an archive
+ * that carries them all and that a fresh context configured alike reproduces;
+ * a parameter changed between calls takes effect on the next one; the block
+ * API remembers the block size asked for, not the carve. */
+int test_cctx_configured_archives(void) {
+    printf("=== TEST: Context API - configured archives ===\n");
+    enum { N = 100000, BS = 4096, SRC = 3000, BIG = 600000 };
+    const size_t cap = zxc_compress_bound(BIG);
+    const size_t bcap = zxc_compress_block_bound(BIG);
+    uint8_t* const src = malloc(BIG);
+    uint8_t* const a = malloc(cap);
+    uint8_t* const b = malloc(cap);
     uint8_t* const blk = malloc(bcap);
-    const zxc_compress_opts_t create = {.level = ZXC_LEVEL_FASTEST, .block_size = BS};
-    zxc_cctx* const c = zxc_create_cctx(&create);
-    zxc_cctx* const fresh = zxc_create_cctx(NULL);
+    uint8_t* const out = malloc(N);
+    zxc_cctx* const c = zxc_create_cctx();
+    zxc_cctx* const fresh = zxc_create_cctx();
     int ok = 0;
-    if (!big || !arc || !ref || !blk || !c || !fresh) goto done;
-    gen_lz_data(src, sizeof(src));
-    gen_lz_data(big, BIG);
-
-    /* Other values first, so creation and last call differ from here on. */
-    const zxc_compress_opts_t other = {.level = 3, .block_size = 65536};
-    int64_t n = zxc_compress_block(c, src, SRC, blk, bcap, &other);
-    if (n <= 0) {
-        printf("  [FAIL] setup call: %lld\n", (long long)n);
+    if (!src || !a || !b || !blk || !out || !c || !fresh) {
+        printf("  [FAIL] setup\n");
         goto done;
     }
+    gen_lz_data(src, BIG);
 
-    /* Block call with level only: the next NULL frame declares 4 KiB, not 64. */
-    const zxc_compress_opts_t lvl3 = {.level = 3};
-    n = zxc_compress_block(c, src, SRC, blk, bcap, &lvl3);
-    if (n > 0) n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
-    if (frame_block_size(arc, n) != BS) {
-        printf("  [FAIL] block call then NULL frame: %lld, declares %zu, want %d\n", (long long)n,
-               frame_block_size(arc, n), (int)BS);
+    /* 1. Level only: the one-shot's bytes, at every level. */
+    for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++) {
+        const int64_t na = zxc_cctx_set_param(c, ZXC_C_LEVEL, lvl) == ZXC_OK
+                               ? zxc_compress_cctx(c, src, N, a, cap)
+                               : ZXC_ERROR_BAD_LEVEL;
+        const int64_t nb = zxc_compress(src, N, b, cap, lvl);
+        if (na <= 0 || nb != na || memcmp(a, b, (size_t)na) != 0) {
+            printf("  [FAIL] level %d: context %lld, one-shot %lld\n", lvl, (long long)na,
+                   (long long)nb);
+            goto done;
+        }
+    }
+    printf("  [PASS] level only: the one-shot's bytes at levels 1-7\n");
+
+    /* 2. Checksum + seek table + 4 KiB blocks at level 5: the archive carries
+     *    all three, a fresh context configured alike writes the same bytes,
+     *    the seekable reader opens it and a verifying decode round-trips. */
+    const zxc_cparam_t ps[] = {ZXC_C_LEVEL, ZXC_C_BLOCK_SIZE, ZXC_C_CHECKSUM, ZXC_C_SEEKABLE};
+    const int64_t vs[] = {5, BS, 1, 1};
+    for (size_t k = 0; k < 4; k++) {
+        if (zxc_cctx_set_param(c, ps[k], vs[k]) != ZXC_OK ||
+            zxc_cctx_set_param(fresh, ps[k], vs[k]) != ZXC_OK) {
+            printf("  [FAIL] set_param %d\n", (int)ps[k]);
+            goto done;
+        }
+    }
+    const int64_t na = zxc_compress_cctx(c, src, N, a, cap);
+    const int64_t nb = zxc_compress_cctx(fresh, src, N, b, cap);
+    zxc_frame_info_t fi;
+    memset(&fi, 0, sizeof(fi));
+    if (na <= 0 || nb != na || memcmp(a, b, (size_t)na) != 0 ||
+        zxc_get_frame_info(a, (size_t)na, &fi, sizeof(fi)) != ZXC_OK || !fi.has_checksum ||
+        !fi.has_seek_table || fi.block_size != BS || fi.decompressed_size != N) {
+        printf("  [FAIL] configured archive: reused %lld, fresh %lld, flags %d/%d, block %u\n",
+               (long long)na, (long long)nb, fi.has_checksum, fi.has_seek_table,
+               (unsigned)fi.block_size);
         goto done;
     }
-
-    /* Frame call with level only: byte-identical to the one-shot at {5, 4 KiB}. */
-    const zxc_compress_opts_t lvl5 = {.level = 5};
-    const zxc_compress_opts_t lvl5_bs = {.level = 5, .block_size = BS};
-    n = zxc_compress_cctx(c, src, SRC, arc, cap, &lvl5);
-    const int64_t r = zxc_compress(src, SRC, ref, cap, &lvl5_bs);
-    if (n <= 0 || n != r || memcmp(arc, ref, (size_t)n) != 0) {
-        printf("  [FAIL] {.level = 5} on a 4 KiB context: %lld, one-shot %lld\n", (long long)n,
+    zxc_seekable* const s = zxc_seekable_open(a, (size_t)na);
+    const uint64_t blocks = s ? zxc_seekable_get_num_blocks(s) : 0;
+    const int64_t r = s ? zxc_seekable_decompress_range(s, out, N, N / 2, 1000) : -1;
+    zxc_seekable_free(s);
+    if (!s || blocks != (N + BS - 1) / BS || r != 1000 || memcmp(out, src + N / 2, 1000) != 0 ||
+        test_decompress_verified(a, (size_t)na, out, N) != N || memcmp(out, src, N) != 0) {
+        printf("  [FAIL] configured archive: %llu blocks, range %lld\n", (unsigned long long)blocks,
                (long long)r);
         goto done;
     }
+    printf("  [PASS] checksum + seek table + 4 KiB blocks: carried, reproducible, readable\n");
 
-    /* Invalid block_size refused whether the source fits it or not; sticky survives. */
-    const zxc_compress_opts_t bad = {.block_size = 10000};
-    const int64_t e1 = zxc_compress_block(c, src, SRC, blk, bcap, &bad);
-    const int64_t e2 = zxc_compress_block(c, big, BIG, blk, bcap, &bad);
-    n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
-    if (e1 != ZXC_ERROR_BAD_BLOCK_SIZE || e2 != ZXC_ERROR_BAD_BLOCK_SIZE || n != r ||
-        memcmp(arc, ref, (size_t)n) != 0) {
-        printf("  [FAIL] invalid block_size: %lld / %lld, NULL call after it %lld\n", (long long)e1,
-               (long long)e2, (long long)n);
+    /* 3. A parameter changed between calls takes effect on the next call: the
+     *    seek table goes, the rest stays. */
+    const int64_t nc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, 0) == ZXC_OK
+                           ? zxc_compress_cctx(c, src, N, a, cap)
+                           : ZXC_ERROR_BAD_PARAM;
+    const int64_t nd = test_compress_cfg(src, N, b, cap, 5, BS, 1, 0);
+    if (nc <= 0 || nd != nc || memcmp(a, b, (size_t)nc) != 0 ||
+        (a[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) || !(a[6] & ZXC_FILE_FLAG_HAS_CHECKSUM)) {
+        printf("  [FAIL] seekable off: %lld, fresh %lld, flags 0x%02x\n", (long long)nc,
+               (long long)nd, a[6]);
         goto done;
     }
+    printf("  [PASS] a parameter changed between calls applies to the next call\n");
 
-    /* 600 KB block on NULL: carved at 1 MiB, remembered block_size still 4 KiB;
-     * a small block then encodes in that carve as on a fresh context. */
-    n = zxc_compress_block(c, big, BIG, blk, bcap, NULL);
-    if (n > 0) n = zxc_compress_cctx(c, src, SRC, arc, cap, NULL);
-    if (frame_block_size(arc, n) != BS) {
-        printf("  [FAIL] 600 KB block then NULL frame: %lld, declares %zu, want %d\n", (long long)n,
-               frame_block_size(arc, n), (int)BS);
+    /* 4. Block API on a 4 KiB context: a 600 KB block is carved at 1 MiB, the
+     *    next frame still declares 4 KiB, and a small block then encodes in
+     *    that carve as on a fresh context. */
+    if (zxc_cctx_reset(c) != ZXC_OK || zxc_cctx_reset(fresh) != ZXC_OK ||
+        zxc_cctx_set_param(c, ZXC_C_LEVEL, ZXC_LEVEL_FASTEST) != ZXC_OK ||
+        zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, BS) != ZXC_OK ||
+        zxc_cctx_set_param(fresh, ZXC_C_LEVEL, ZXC_LEVEL_FASTEST) != ZXC_OK ||
+        zxc_cctx_set_param(fresh, ZXC_C_BLOCK_SIZE, BS) != ZXC_OK) {
+        printf("  [FAIL] reconfigure for the block API\n");
         goto done;
     }
-    uint8_t* const blk2 = ref; /* cap >= a 3000-byte block's bound */
-    n = zxc_compress_block(c, src, SRC, blk, bcap, &lvl3);
-    const int64_t f = zxc_compress_block(fresh, src, SRC, blk2, cap, &lvl3);
-    if (n <= 0 || n != f || memcmp(blk, blk2, (size_t)n) != 0) {
+    int64_t n = zxc_compress_block(c, src, BIG, blk, bcap);
+    if (n > 0) n = zxc_compress_cctx(c, src, SRC, a, cap);
+    if (frame_block_size(a, n) != BS) {
+        printf("  [FAIL] 600 KB block then frame: %lld, declares %zu, want %d\n", (long long)n,
+               frame_block_size(a, n), (int)BS);
+        goto done;
+    }
+    n = zxc_compress_block(c, src, SRC, blk, bcap);
+    const int64_t f = zxc_compress_block(fresh, src, SRC, b, cap);
+    if (n <= 0 || n != f || memcmp(blk, b, (size_t)n) != 0) {
         printf("  [FAIL] block in a 1 MiB carve: %lld, fresh context %lld\n", (long long)n,
                (long long)f);
         goto done;
     }
+    printf("  [PASS] block API: block size remembered as asked, larger carve reused\n");
     ok = 1;
-    printf("  [PASS] creation values kept; invalid block_size refused; carve kept\n");
     printf("PASS\n\n");
 
 done:
     zxc_free_cctx(c);
     zxc_free_cctx(fresh);
-    free(big);
-    free(arc);
-    free(ref);
+    free(src);
+    free(a);
+    free(b);
     free(blk);
+    free(out);
     return ok;
 }
 
@@ -483,8 +786,7 @@ int test_context_api_seekable_frame(void) {
     static uint8_t body[16384], arc[24576], out[16384];
     for (size_t i = 0; i < sizeof(body); i++) body[i] = (uint8_t)('a' + (i % 23));
 
-    zxc_compress_opts_t co = {.level = 3, .block_size = 4096, .seekable = 1};
-    const int64_t n = zxc_compress(body, sizeof(body), arc, sizeof(arc), &co);
+    const int64_t n = test_compress_cfg(body, sizeof(body), arc, sizeof(arc), 3, 4096, 0, 1);
     if (n <= 0) {
         printf("  [FAIL] seekable compress returned %lld\n", (long long)n);
         return 0;
@@ -494,12 +796,12 @@ int test_context_api_seekable_frame(void) {
         printf("  [FAIL] zxc_create_dctx\n");
         return 0;
     }
-    const int64_t d1 = zxc_decompress(arc, (size_t)n, out, sizeof(out), NULL);
+    const int64_t d1 = zxc_decompress(arc, (size_t)n, out, sizeof(out));
     memset(out, 0, sizeof(out));
-    const int64_t d2 = zxc_decompress_dctx(dctx, arc, (size_t)n, out, sizeof(out), NULL);
+    const int64_t d2 = zxc_decompress_dctx(dctx, arc, (size_t)n, out, sizeof(out));
     const int same = (d2 == (int64_t)sizeof(body)) && memcmp(out, body, sizeof(body)) == 0;
-    const int64_t p1 = zxc_decompress(arc, (size_t)n, NULL, 0, NULL);
-    const int64_t p2 = zxc_decompress_dctx(dctx, arc, (size_t)n, NULL, 0, NULL);
+    const int64_t p1 = zxc_decompress(arc, (size_t)n, NULL, 0);
+    const int64_t p2 = zxc_decompress_dctx(dctx, arc, (size_t)n, NULL, 0);
     zxc_free_dctx(dctx);
 
     if (d1 != (int64_t)sizeof(body) || !same || p1 != ZXC_ERROR_DST_TOO_SMALL || p1 != p2) {
@@ -512,24 +814,41 @@ int test_context_api_seekable_frame(void) {
     return 1;
 }
 
-/* cctx with ctx_opts (NULL = sticky) and zxc_compress() with ref must write the
- * same bytes, which must open as seekable and serve a range across blocks. */
+/* A seekable configuration on @p c: 4 KiB blocks, @p level, @p checksum, and
+ * @p dict (NULL detaches). ZXC_OK or the first refusal. */
+static int configure_seekable(zxc_cctx* c, const int level, const int checksum, const void* dict,
+                              const size_t dict_size) {
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, 4096);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, 1);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_dict(c, dict, dict_size, NULL);
+    return rc;
+}
+
+/* @p cctx, as its caller configured it, and a fresh context configured with
+ * (@p level, @p checksum, @p dict) must write the same bytes, which must open
+ * as seekable and serve a range across blocks. */
 static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t* src,
-                                 const size_t n, const zxc_compress_opts_t* ctx_opts,
-                                 const zxc_compress_opts_t* ref) {
+                                 const size_t n, const int level, const int checksum,
+                                 const void* dict, const size_t dict_size) {
     const size_t cap = zxc_compress_bound(n);
     uint8_t* const a = malloc(cap);
     uint8_t* const b = malloc(cap);
     uint8_t* const out = malloc(n + 1);
+    zxc_cctx* const ref = zxc_create_cctx();
     int ok = 0;
-    if (!a || !b || !out) {
+    if (!a || !b || !out || !ref) {
         printf("  [FAIL] %s: malloc\n", what);
         goto done;
     }
-    const int64_t na = zxc_compress(src, n, a, cap, ref);
-    const int64_t nb = zxc_compress_cctx(cctx, src, n, b, cap, ctx_opts);
+    const int64_t na = configure_seekable(ref, level, checksum, dict, dict_size) == ZXC_OK
+                           ? zxc_compress_cctx(ref, src, n, a, cap)
+                           : ZXC_ERROR_BAD_PARAM;
+    const int64_t nb = zxc_compress_cctx(cctx, src, n, b, cap);
     if (na <= 0 || nb != na || memcmp(a, b, (size_t)na) != 0) {
-        printf("  [FAIL] %s: one-shot %lld, context %lld\n", what, (long long)na, (long long)nb);
+        printf("  [FAIL] %s: fresh context %lld, context under test %lld\n", what, (long long)na,
+               (long long)nb);
         goto done;
     }
     zxc_seekable* const s = zxc_seekable_open(b, (size_t)nb);
@@ -537,8 +856,8 @@ static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t
         printf("  [FAIL] %s: zxc_seekable_open refused the context's archive\n", what);
         goto done;
     }
-    if (ref->dict) {
-        const int rc = zxc_seekable_set_dict(s, ref->dict, ref->dict_size, ref->dict_huf);
+    if (dict) {
+        const int rc = zxc_seekable_set_dict(s, dict, dict_size, NULL);
         if (rc != ZXC_OK) {
             printf("  [FAIL] %s: zxc_seekable_set_dict returned %d\n", what, rc);
             zxc_seekable_free(s);
@@ -554,6 +873,7 @@ static int cctx_seekable_matches(const char* what, zxc_cctx* cctx, const uint8_t
     }
     ok = 1;
 done:
+    zxc_free_cctx(ref);
     free(a);
     free(b);
     free(out);
@@ -576,7 +896,7 @@ static int all_blocks_raw(const uint8_t* arc, const size_t n, const int checksum
 /* The context API used to drop .seekable; it now writes the table without
  * allocating, static contexts included. */
 int test_context_api_seekable_compress(void) {
-    printf("=== TEST: Context API - seekable compression matches the one-shot ===\n");
+    printf("=== TEST: Context API - seekable compression across configurations ===\n");
     /* 74 blocks of 4 KB: two seek-table groups, the second one partial. */
     const size_t n = 74 * 4096 - 123;
     uint8_t* const src = malloc(n);
@@ -593,24 +913,26 @@ int test_context_api_seekable_compress(void) {
     for (size_t i = 0; i < sizeof(dict); i++) dict[i] = (uint8_t)('a' + (i % 13));
 
     int fails = 0;
-    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_cctx* cctx = zxc_create_cctx();
     if (!cctx) {
         printf("  [FAIL] zxc_create_cctx\n");
         free(src);
         return 0;
     }
-    const zxc_compress_opts_t plain = {.level = 3, .block_size = 4096, .seekable = 1};
-    const zxc_compress_opts_t cs = {
-        .level = 5, .block_size = 4096, .checksum_enabled = 1, .seekable = 1};
-    zxc_compress_opts_t with_dict = cs;
-    with_dict.dict = dict;
-    with_dict.dict_size = sizeof(dict);
-    fails += !cctx_seekable_matches("level 3", cctx, src, n, &plain, &plain);
-    fails += !cctx_seekable_matches("checksums", cctx, src, n, &cs, &cs);
-    fails += !cctx_seekable_matches("sticky (NULL opts)", cctx, src, n, NULL, &cs);
-    fails += !cctx_seekable_matches("dictionary", cctx, src, n, &with_dict, &with_dict);
-    fails += !cctx_seekable_matches("one block", cctx, src, 1000, &plain, &plain);
-    fails += !cctx_seekable_matches("empty input", cctx, src, 0, &cs, &cs);
+    /* One context reconfigured between calls: nothing leaks from one
+     * configuration into the next. */
+    fails += configure_seekable(cctx, 3, 0, NULL, 0) != ZXC_OK;
+    fails += !cctx_seekable_matches("level 3", cctx, src, n, 3, 0, NULL, 0);
+    fails += configure_seekable(cctx, 5, 1, NULL, 0) != ZXC_OK;
+    fails += !cctx_seekable_matches("checksums", cctx, src, n, 5, 1, NULL, 0);
+    fails += !cctx_seekable_matches("reused, unchanged", cctx, src, n, 5, 1, NULL, 0);
+    fails += configure_seekable(cctx, 5, 1, dict, sizeof(dict)) != ZXC_OK;
+    fails += !cctx_seekable_matches("dictionary", cctx, src, n, 5, 1, dict, sizeof(dict));
+    fails += configure_seekable(cctx, 3, 0, NULL, 0) != ZXC_OK;
+    fails += !cctx_seekable_matches("dictionary detached", cctx, src, n, 3, 0, NULL, 0);
+    fails += !cctx_seekable_matches("one block", cctx, src, 1000, 3, 0, NULL, 0);
+    fails += configure_seekable(cctx, 5, 1, NULL, 0) != ZXC_OK;
+    fails += !cctx_seekable_matches("empty input", cctx, src, 0, 5, 1, NULL, 0);
 
     /* Incompressible input: every data block is RAW, whose comp_size the table
      * reads back like any other. */
@@ -622,12 +944,12 @@ int test_context_api_seekable_compress(void) {
         if (noise && rarc) {
             zxc_test_srand(0x5EEDU);
             for (size_t i = 0; i < rn; i++) noise[i] = (uint8_t)zxc_test_rand();
-            const int64_t rl = zxc_compress(noise, rn, rarc, rcap, &cs);
+            const int64_t rl = zxc_compress_cctx(cctx, noise, rn, rarc, rcap);
             if (rl <= 0 || !all_blocks_raw(rarc, (size_t)rl, 1)) {
                 printf("  [FAIL] incompressible fixture is not all RAW (%lld)\n", (long long)rl);
                 fails++;
             }
-            fails += !cctx_seekable_matches("all RAW, checksums", cctx, noise, rn, &cs, &cs);
+            fails += !cctx_seekable_matches("all RAW, checksums", cctx, noise, rn, 5, 1, NULL, 0);
         } else {
             fails++;
         }
@@ -636,65 +958,72 @@ int test_context_api_seekable_compress(void) {
     }
     zxc_free_cctx(cctx);
 
-    /* Created seekable, then used with NULL opts. */
-    cctx = zxc_create_cctx(&plain);
-    fails += !cctx || !cctx_seekable_matches("seekable from create", cctx, src, n, NULL, &plain);
-    zxc_free_cctx(cctx);
-
     /* A static context cannot allocate: the table must still be written. */
     const size_t ws_size = zxc_static_cctx_workspace_size(4096, 3);
     void* const ws = test_aligned_alloc(64, ws_size);
-    cctx = ws ? zxc_init_static_cctx(ws, ws_size, &plain) : NULL;
-    fails += !cctx || !cctx_seekable_matches("static context", cctx, src, n, NULL, &plain);
+    cctx = ws ? zxc_init_static_cctx(ws, ws_size, 4096, 3) : NULL;
+    fails += !cctx || zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1) != ZXC_OK ||
+             !cctx_seekable_matches("static context", cctx, src, n, 3, 0, NULL, 0);
 
-    /* A cut through the seek table or the footer: both entry points refuse it. */
-    if (cctx) {
+    /* A cut through the seek table or the footer: heap and static contexts
+     * refuse it alike. */
+    zxc_cctx* const heap = zxc_create_cctx();
+    if (cctx && heap && configure_seekable(heap, 3, 0, NULL, 0) == ZXC_OK) {
         const size_t cap = zxc_compress_bound(n);
         uint8_t* const arc = malloc(cap);
-        const int64_t full = arc ? zxc_compress(src, n, arc, cap, &plain) : -1;
+        const int64_t full = arc ? zxc_compress_cctx(heap, src, n, arc, cap) : -1;
         const size_t table = zxc_seek_table_size(74);
         const size_t fl = full > 0 ? test_footer_len(arc, (size_t)full) : 0;
         const size_t cuts[] = {1, fl, fl + 1, fl + table - 1, fl + table};
         for (size_t i = 0; full > 0 && i < sizeof(cuts) / sizeof(cuts[0]); i++) {
             const size_t c = (size_t)full - cuts[i];
-            const int64_t r1 = zxc_compress(src, n, arc, c, &plain);
-            const int64_t r2 = zxc_compress_cctx(cctx, src, n, arc, c, NULL);
+            const int64_t r1 = zxc_compress_cctx(heap, src, n, arc, c);
+            const int64_t r2 = zxc_compress_cctx(cctx, src, n, arc, c);
             if (r1 != ZXC_ERROR_DST_TOO_SMALL || r2 != r1) {
-                printf("  [FAIL] capacity %zu (archive %lld): one-shot %lld, context %lld\n", c,
+                printf("  [FAIL] capacity %zu (archive %lld): heap %lld, static %lld\n", c,
                        (long long)full, (long long)r1, (long long)r2);
                 fails++;
             }
         }
         if (full <= 0) fails++;
         free(arc);
+    } else {
+        fails++;
     }
+    zxc_free_cctx(heap);
     test_aligned_free(ws);
     free(src);
 
     if (fails) return 0;
-    printf("  [PASS] heap, sticky, dictionary, empty and static contexts\n");
+    printf("  [PASS] heap, reused, dictionary, empty and static contexts\n");
     printf("PASS\n\n");
     return 1;
 }
 
-/* Pins both halves of the no-destination contract, through both entry points:
- * what the probe answers, and what a real decode of the same bytes answers.
- * They agree on every archive that reports an empty payload. On one that stores
- * data the probe decodes nothing and can only say "give me a buffer", so the
- * two verdicts are pinned separately rather than assumed equal. */
+/* Pins both halves of the no-destination contract: what the probe answers,
+ * and what a real decode of the same bytes answers. They agree on every
+ * archive that reports an empty payload. On one that stores data the probe
+ * decodes nothing and can only say "give me a buffer", so the two verdicts are
+ * pinned separately rather than assumed equal. A plain configuration (no
+ * checksum, no dictionary) goes through both entry points, which must agree;
+ * the one-shot has no checksum verification and no dictionary, so a configured
+ * decode goes through the context alone. */
 static int probe_and_decode(const char* what, const uint8_t* arc, const size_t n,
-                            const zxc_decompress_opts_t* opts, const int64_t want_probe,
-                            const int64_t want_decode) {
+                            const int checksum, const void* dict, const size_t dict_size,
+                            const int64_t want_probe, const int64_t want_decode) {
     static uint8_t out[8192];
     zxc_dctx* dctx = zxc_create_dctx();
-    if (!dctx) {
-        printf("  [FAIL] %s: zxc_create_dctx\n", what);
+    if (!dctx || zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, checksum) != ZXC_OK ||
+        zxc_dctx_set_dict(dctx, dict, dict_size, NULL) != ZXC_OK) {
+        printf("  [FAIL] %s: dctx setup\n", what);
+        zxc_free_dctx(dctx);
         return 0;
     }
-    const int64_t p1 = zxc_decompress(arc, n, NULL, 0, opts);
-    const int64_t p2 = zxc_decompress_dctx(dctx, arc, n, NULL, 0, opts);
-    const int64_t d1 = zxc_decompress(arc, n, out, sizeof(out), opts);
-    const int64_t d2 = zxc_decompress_dctx(dctx, arc, n, out, sizeof(out), opts);
+    const int plain = !checksum && !dict;
+    const int64_t p2 = zxc_decompress_dctx(dctx, arc, n, NULL, 0);
+    const int64_t d2 = zxc_decompress_dctx(dctx, arc, n, out, sizeof(out));
+    const int64_t p1 = plain ? zxc_decompress(arc, n, NULL, 0) : p2;
+    const int64_t d1 = plain ? zxc_decompress(arc, n, out, sizeof(out)) : d2;
     zxc_free_dctx(dctx);
     if (p1 == want_probe && p2 == want_probe && d1 == want_decode && d2 == want_decode) return 1;
     printf("  [FAIL] %s: probe %lld %lld (want %lld), decode %lld %lld (want %lld)\n", what,
@@ -703,13 +1032,26 @@ static int probe_and_decode(const char* what, const uint8_t* arc, const size_t n
     return 0;
 }
 
+/* The FILE* writer on an empty input, configured by @p cfg: the independent
+ * writer of the empty archive, read back into @p out. */
+static int64_t stream_empty_archive(const zxc_cctx* cfg, uint8_t* out, const size_t cap) {
+    FILE* const fi = tmpfile();
+    FILE* const fo = tmpfile();
+    int64_t n = (fi && fo) ? zxc_stream_compress(fi, fo, cfg) : ZXC_ERROR_IO;
+    if (n > 0 && ((size_t)n > cap || fseek(fo, 0, SEEK_SET) != 0 ||
+                  fread(out, 1, (size_t)n, fo) != (size_t)n))
+        n = ZXC_ERROR_IO;
+    if (fi) fclose(fi);
+    if (fo) fclose(fo);
+    return n;
+}
+
 /* An empty source is a valid frame: the reusable context must write the same
  * archive as the one-shot entry point, and stay usable afterwards. */
 int test_context_api_empty_input(void) {
     printf("=== TEST: Context API - empty input matches the one-shot ===\n");
     uint8_t one_shot[64], from_ctx[64];
-    const zxc_compress_opts_t co = {.level = 3};
-    zxc_cctx* cctx = zxc_create_cctx(NULL);
+    zxc_cctx* cctx = zxc_create_cctx();
     int ok = 0;
     do {
         if (!cctx) {
@@ -719,8 +1061,8 @@ int test_context_api_empty_input(void) {
         /* Footer of an empty frame: size 0, compressed size 27, lengths byte. */
         const int64_t expected =
             ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE;
-        const int64_t n1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &co);
-        const int64_t n2 = zxc_compress_cctx(cctx, NULL, 0, from_ctx, sizeof(from_ctx), &co);
+        const int64_t n1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), 3);
+        const int64_t n2 = zxc_compress_cctx(cctx, NULL, 0, from_ctx, sizeof(from_ctx));
         if (n1 != expected || n2 != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
             printf("  [FAIL] one-shot %lld, context %lld (expected %lld)\n", (long long)n1,
                    (long long)n2, (long long)expected);
@@ -728,7 +1070,7 @@ int test_context_api_empty_input(void) {
         }
         /* The other accepted shape: a real pointer with a zero size. */
         uint8_t probe = 0;
-        const int64_t n2b = zxc_compress_cctx(cctx, &probe, 0, from_ctx, sizeof(from_ctx), &co);
+        const int64_t n2b = zxc_compress_cctx(cctx, &probe, 0, from_ctx, sizeof(from_ctx));
         if (n2b != n1 || memcmp(one_shot, from_ctx, (size_t)n1) != 0) {
             printf("  [FAIL] non-NULL source with a zero size: %lld\n", (long long)n2b);
             break;
@@ -737,11 +1079,11 @@ int test_context_api_empty_input(void) {
          * than tested one by one, so a regression shows every shape it broke. */
         const uint8_t junk[36] = {0};
         int disagreed = 0;
-        disagreed += !probe_and_decode("empty archive", from_ctx, (size_t)n2, NULL, 0, 0);
-        disagreed += !probe_and_decode("zeroed junk", junk, sizeof(junk), NULL, ZXC_ERROR_BAD_MAGIC,
-                                       ZXC_ERROR_BAD_MAGIC);
-        disagreed += !probe_and_decode("header without footer", from_ctx, ZXC_FILE_HEADER_SIZE,
-                                       NULL, ZXC_ERROR_SRC_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL);
+        disagreed += !probe_and_decode("empty archive", from_ctx, (size_t)n2, 0, NULL, 0, 0, 0);
+        disagreed += !probe_and_decode("zeroed junk", junk, sizeof(junk), 0, NULL, 0,
+                                       ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_MAGIC);
+        disagreed += !probe_and_decode("header without footer", from_ctx, ZXC_FILE_HEADER_SIZE, 0,
+                                       NULL, 0, ZXC_ERROR_SRC_TOO_SMALL, ZXC_ERROR_SRC_TOO_SMALL);
 
         /* Crafted block headers, each rewritten through zxc_write_block_header
          * so its hash8 stays valid: a broken hash masks the shape check behind
@@ -758,20 +1100,19 @@ int test_context_api_empty_input(void) {
 
         bh.comp_size = 7; /* EOF carries no payload */
         zxc_write_block_header(bad + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
-        disagreed += !probe_and_decode("EOF with a payload size", bad, (size_t)n2, NULL,
+        disagreed += !probe_and_decode("EOF with a payload size", bad, (size_t)n2, 0, NULL, 0,
                                        ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_HEADER);
 
         bh = eof;
         bh.block_type = ZXC_BLOCK_RAW; /* an empty archive stores no data block */
         zxc_write_block_header(bad + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &bh);
-        disagreed += !probe_and_decode("data block where EOF belongs", bad, (size_t)n2, NULL,
+        disagreed += !probe_and_decode("data block where EOF belongs", bad, (size_t)n2, 0, NULL, 0,
                                        ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_HEADER);
 
         /* A corrupted block checksum: the probe stops on capacity, the decode names it. */
         static const char ck_text[] = "a block checksum only the decode reaches";
-        const zxc_compress_opts_t cs_co = {.level = 3, .checksum_enabled = 1};
-        const zxc_decompress_opts_t cs_do = {.checksum_enabled = 1};
-        const int64_t cn = zxc_compress(ck_text, sizeof(ck_text) - 1, bad, sizeof(bad), &cs_co);
+        const int64_t cn =
+            test_compress_cfg(ck_text, sizeof(ck_text) - 1, bad, sizeof(bad), 3, 0, 1, 0);
         const int64_t ck_at =
             cn > 0 ? cn - (int64_t)(test_footer_len(bad, (size_t)cn) + ZXC_BLOCK_HEADER_SIZE) - 1
                    : -1;
@@ -780,31 +1121,32 @@ int test_context_api_empty_input(void) {
             break;
         }
         bad[ck_at] ^= 0xFF; /* its checksum */
-        disagreed += !probe_and_decode("corrupted block checksum", bad, (size_t)cn, &cs_do,
+        disagreed += !probe_and_decode("corrupted block checksum", bad, (size_t)cn, 1, NULL, 0,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_BAD_CHECKSUM);
 
         /* An unsupplied dictionary is only caught by the frame walk, so the
          * probe has to reach it. */
         static uint8_t dict[8192];
         memset(dict, 'x', sizeof(dict));
-        zxc_compress_opts_t dict_co = {.level = 3};
-        dict_co.dict = dict;
-        dict_co.dict_size = sizeof(dict);
-        zxc_decompress_opts_t dict_do = {0};
-        dict_do.dict = dict;
-        dict_do.dict_size = sizeof(dict);
-        const int64_t dn = zxc_compress(NULL, 0, bad, sizeof(bad), &dict_co);
+        if (zxc_cctx_set_dict(cctx, dict, sizeof(dict), NULL) != ZXC_OK) {
+            printf("  [FAIL] zxc_cctx_set_dict\n");
+            break;
+        }
+        const int64_t dn = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad));
         if (dn <= (int64_t)ZXC_FILE_FOOTER_MIN_SIZE) {
             printf("  [FAIL] empty+dict setup: %lld\n", (long long)dn);
             break;
         }
-        disagreed += !probe_and_decode("dictionary not supplied", bad, (size_t)dn, NULL,
+        disagreed += !probe_and_decode("dictionary not supplied", bad, (size_t)dn, 0, NULL, 0,
                                        ZXC_ERROR_DICT_REQUIRED, ZXC_ERROR_DICT_REQUIRED);
 
         /* A forged stored size is corrupt data, not "destination too small". */
         static const char payload[] = "a forged footer must read as corrupt data, not as size";
-        const int64_t fn =
-            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &co);
+        if (zxc_cctx_set_dict(cctx, NULL, 0, NULL) != ZXC_OK) {
+            printf("  [FAIL] zxc_cctx_set_dict(NULL)\n");
+            break;
+        }
+        const int64_t fn = zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad));
         uint8_t forged[256];
         const size_t forged_n =
             fn > 0 ? test_forge_footer_size(bad, (size_t)fn, forged, sizeof(forged), UINT64_MAX)
@@ -813,63 +1155,60 @@ int test_context_api_empty_input(void) {
             printf("  [FAIL] forged footer setup: compress returned %lld\n", (long long)fn);
             break;
         }
-        disagreed += !probe_and_decode("forged stored size", forged, forged_n, NULL,
+        disagreed += !probe_and_decode("forged stored size", forged, forged_n, 0, NULL, 0,
                                        ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_CORRUPT_DATA);
 
         /* Archives that store data: the probe has no buffer to decode into, so
          * it reports DST_TOO_SMALL where the decode names the real fault. Both
          * sides are pinned: neither half follows from the other. */
-        const int64_t pn =
-            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &co);
+        const int64_t pn = zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad));
         if (pn <= (int64_t)ZXC_FILE_FOOTER_MIN_SIZE) {
             printf("  [FAIL] payload archive setup: %lld\n", (long long)pn);
             break;
         }
-        disagreed += !probe_and_decode("intact payload", bad, (size_t)pn, NULL,
+        disagreed += !probe_and_decode("intact payload", bad, (size_t)pn, 0, NULL, 0,
                                        ZXC_ERROR_DST_TOO_SMALL, (int64_t)(sizeof(payload) - 1));
         /* A footer claiming an empty payload the blocks contradict. */
         uint8_t zeroed[256];
         const size_t zn = test_forge_footer_size(bad, (size_t)pn, zeroed, sizeof(zeroed), 0);
-        disagreed += !probe_and_decode("payload behind a zeroed size", zeroed, zn, NULL,
+        disagreed += !probe_and_decode("payload behind a zeroed size", zeroed, zn, 0, NULL, 0,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_CORRUPT_DATA);
         /* Same, with the dictionary the archive needs: the probe still refuses
          * on capacity, through the dictionary bounce path this time. */
-        const int64_t pdn =
-            zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad), &dict_co);
+        if (zxc_cctx_set_dict(cctx, dict, sizeof(dict), NULL) != ZXC_OK) {
+            printf("  [FAIL] zxc_cctx_set_dict\n");
+            break;
+        }
+        const int64_t pdn = zxc_compress_cctx(cctx, payload, sizeof(payload) - 1, bad, sizeof(bad));
         if (pdn <= (int64_t)ZXC_FILE_FOOTER_MIN_SIZE) {
             printf("  [FAIL] dict payload archive setup: %lld\n", (long long)pdn);
             break;
         }
-        disagreed += !probe_and_decode("payload behind a dictionary", bad, (size_t)pdn, &dict_do,
-                                       ZXC_ERROR_DST_TOO_SMALL, (int64_t)(sizeof(payload) - 1));
+        disagreed += !probe_and_decode("payload behind a dictionary", bad, (size_t)pdn, 0, dict,
+                                       sizeof(dict), ZXC_ERROR_DST_TOO_SMALL,
+                                       (int64_t)(sizeof(payload) - 1));
 
-        /* A dictionary size the library cannot honour is a caller error, not an
-         * archive fault, so it outranks both the payload refusal and anything
-         * the header could be rejected for. */
-        zxc_decompress_opts_t huge_do = {0};
-        huge_do.dict = dict;
-        huge_do.dict_size = (size_t)ZXC_DICT_SIZE_MAX + 1;
-        disagreed +=
-            !probe_and_decode("oversized dictionary, empty archive", from_ctx, (size_t)n2, &huge_do,
-                              ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DICT_TOO_LARGE);
-        disagreed +=
-            !probe_and_decode("oversized dictionary, payload archive", bad, (size_t)pdn, &huge_do,
-                              ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DICT_TOO_LARGE);
-        /* Including over a source too short to hold a frame: the caller's fault
-         * is settled before anything is read from it. */
-        disagreed += !probe_and_decode("oversized dictionary, truncated source", from_ctx,
-                                       ZXC_FILE_HEADER_SIZE, &huge_do, ZXC_ERROR_DICT_TOO_LARGE,
-                                       ZXC_ERROR_DICT_TOO_LARGE);
-
-        /* A NULL destination with a non-zero capacity is a caller mistake, not
-         * a probe, and both entry points have to say so. */
+        /* A dictionary size the library cannot honour is a caller error: the
+         * setter refuses it before any archive is read, and the context goes
+         * on decoding without it. */
         zxc_dctx* nd = zxc_create_dctx();
         if (!nd) {
             printf("  [FAIL] zxc_create_dctx\n");
             break;
         }
-        const int64_t z1 = zxc_decompress(from_ctx, (size_t)n2, NULL, 64, NULL);
-        const int64_t z2 = zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 64, NULL);
+        const int huge = zxc_dctx_set_dict(nd, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL);
+        const int64_t after_huge = zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 0);
+        if (huge != ZXC_ERROR_DICT_TOO_LARGE || after_huge != 0) {
+            printf("  [FAIL] oversized dictionary: setter %d, probe after %lld\n", huge,
+                   (long long)after_huge);
+            zxc_free_dctx(nd);
+            break;
+        }
+
+        /* A NULL destination with a non-zero capacity is a caller mistake, not
+         * a probe, and both entry points have to say so. */
+        const int64_t z1 = zxc_decompress(from_ctx, (size_t)n2, NULL, 64);
+        const int64_t z2 = zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 64);
         zxc_free_dctx(nd);
         if (z1 != ZXC_ERROR_NULL_INPUT || z2 != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] NULL destination with capacity 64: %lld %lld\n", (long long)z1,
@@ -884,9 +1223,12 @@ int test_context_api_empty_input(void) {
         static const char text[] = "the quick brown fox jumps over the lazy dog, twice over";
         const size_t len = sizeof(text) - 1;
         uint8_t comp[256], back[256];
-        const int64_t n3 = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp), &co);
-        const int64_t back_len =
-            n3 > 0 ? zxc_decompress(comp, (size_t)n3, back, sizeof(back), NULL) : n3;
+        if (zxc_cctx_set_dict(cctx, NULL, 0, NULL) != ZXC_OK) {
+            printf("  [FAIL] zxc_cctx_set_dict(NULL)\n");
+            break;
+        }
+        const int64_t n3 = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp));
+        const int64_t back_len = n3 > 0 ? zxc_decompress(comp, (size_t)n3, back, sizeof(back)) : n3;
         if (back_len != (int64_t)len || memcmp(back, text, len) != 0) {
             printf("  [FAIL] next call: %lld -> %lld\n", (long long)n3, (long long)back_len);
             break;
@@ -895,42 +1237,56 @@ int test_context_api_empty_input(void) {
 
         /* An archive with a payload is the one case where the two answers must
          * differ: nothing is wrong with it, there is just nowhere to put it. */
-        if (zxc_decompress(comp, (size_t)n3, NULL, 0, NULL) != ZXC_ERROR_DST_TOO_SMALL) {
+        if (zxc_decompress(comp, (size_t)n3, NULL, 0) != ZXC_ERROR_DST_TOO_SMALL) {
             printf("  [FAIL] probing a non-empty archive should be DST_TOO_SMALL\n");
             break;
         }
 
-        /* The empty-source fast path skips the option plumbing a normal call
-         * runs. Pin what it must still produce: the one-shot's bytes for the
-         * same options, and a dictionary left intact for the next call. */
-        const zxc_compress_opts_t cs_only = {.level = 3, .checksum_enabled = 1};
-        const int64_t e1 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &cs_only);
-        const int64_t e2 = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad), &cs_only);
-        if (e1 <= 0 || e2 != e1 || memcmp(one_shot, bad, (size_t)e1) != 0) {
-            printf("  [FAIL] empty + checksum: one-shot %lld, context %lld\n", (long long)e1,
+        /* The empty-source fast path skips the parameter plumbing a normal call
+         * runs. Pin what it must still produce: the FILE* writer's bytes for
+         * the same configuration, and a dictionary left intact for the next
+         * call. */
+        if (zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) != ZXC_OK) {
+            printf("  [FAIL] set_param(checksum)\n");
+            break;
+        }
+        const int64_t e1 = stream_empty_archive(cctx, one_shot, sizeof(one_shot));
+        const int64_t e2 = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad));
+        if (e1 <= 0 || e2 != e1 || memcmp(one_shot, bad, (size_t)e1) != 0 ||
+            !(bad[6] & ZXC_FILE_FLAG_HAS_CHECKSUM)) {
+            printf("  [FAIL] empty + checksum: FILE* %lld, context %lld\n", (long long)e1,
                    (long long)e2);
             break;
         }
-        const int64_t e3 = zxc_compress(NULL, 0, one_shot, sizeof(one_shot), &dict_co);
-        const int64_t e4 = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad), &dict_co);
-        if (e3 <= 0 || e4 != e3 || memcmp(one_shot, bad, (size_t)e3) != 0) {
-            printf("  [FAIL] empty + dictionary: one-shot %lld, context %lld\n", (long long)e3,
+        if (zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 0) != ZXC_OK ||
+            zxc_cctx_set_dict(cctx, dict, sizeof(dict), NULL) != ZXC_OK) {
+            printf("  [FAIL] reconfigure for empty + dictionary\n");
+            break;
+        }
+        const int64_t e3 = stream_empty_archive(cctx, one_shot, sizeof(one_shot));
+        const int64_t e4 = zxc_compress_cctx(cctx, NULL, 0, bad, sizeof(bad));
+        if (e3 <= 0 || e4 != e3 || memcmp(one_shot, bad, (size_t)e3) != 0 ||
+            zxc_get_dict_id(bad, (size_t)e4) == 0) {
+            printf("  [FAIL] empty + dictionary: FILE* %lld, context %lld\n", (long long)e3,
                    (long long)e4);
             break;
         }
-        const int64_t dc = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp), &dict_co);
-        const int64_t dr =
-            dc > 0 ? zxc_decompress(comp, (size_t)dc, back, sizeof(back), &dict_do) : dc;
+        zxc_dctx* const dd = zxc_create_dctx();
+        const int64_t dc = zxc_compress_cctx(cctx, text, len, comp, sizeof(comp));
+        const int64_t dr = dd && dc > 0 && zxc_dctx_set_dict(dd, dict, sizeof(dict), NULL) == ZXC_OK
+                               ? zxc_decompress_dctx(dd, comp, (size_t)dc, back, sizeof(back))
+                               : dc;
+        zxc_free_dctx(dd);
         if (dr != (int64_t)len || memcmp(back, text, len) != 0) {
             printf("  [FAIL] dictionary lost across the empty call: %lld -> %lld\n", (long long)dc,
                    (long long)dr);
             break;
         }
-        printf("  [PASS] the empty fast path keeps checksum and dictionary options\n");
+        printf("  [PASS] the empty fast path keeps checksum and dictionary parameters\n");
 
         /* The block API keeps its documented [1, MAX] contract: a real pointer
          * with a zero size must be refused on the size alone. */
-        if (zxc_compress_block(cctx, text, 0, comp, sizeof(comp), &co) != ZXC_ERROR_NULL_INPUT) {
+        if (zxc_compress_block(cctx, text, 0, comp, sizeof(comp)) != ZXC_ERROR_NULL_INPUT) {
             printf("  [FAIL] the block API should refuse an empty block\n");
             break;
         }

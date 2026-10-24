@@ -392,9 +392,50 @@ static int g_verbose = 0;
  * force (one line per update off-tty), never = disable. -q suppresses all. */
 enum { ZXC_PROGRESS_AUTO = 0, ZXC_PROGRESS_ALWAYS, ZXC_PROGRESS_NEVER };
 static int g_progress_mode = ZXC_PROGRESS_AUTO;
-/* Shared literal Huffman table from the -D .zxd file (malloc'd copy), passed
- * through the compress/decompress opts. NULL when the dict carries none. */
+/* Shared literal Huffman table from the -D .zxd file (malloc'd copy), set on
+ * the contexts with the dictionary. NULL when the dict carries none. */
 static void* g_dict_huf = NULL;
+
+/* Builds a compression context from the command line. ZXC_OK and *out set, or
+ * the refusing setter's error with *out NULL. */
+static int cli_cctx(zxc_cctx** out, int threads, int level, size_t block_size, int checksum,
+                    int seekable, const void* dict, size_t dict_size, const void* dict_huf,
+                    zxc_progress_callback_t cb, void* user_data) {
+    *out = NULL;
+    zxc_cctx* const c = zxc_create_cctx();
+    if (!c) return ZXC_ERROR_MEMORY;
+    int rc = zxc_cctx_set_param(c, ZXC_C_THREADS, threads);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, (int64_t)block_size);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum != 0);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, seekable != 0);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_dict(c, dict, dict_size, dict_huf);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_progress(c, cb, user_data);
+    if (rc != ZXC_OK) {
+        zxc_free_cctx(c);
+        return rc;
+    }
+    *out = c;
+    return ZXC_OK;
+}
+
+/* Decompression twin of cli_cctx(). */
+static int cli_dctx(zxc_dctx** out, int threads, int checksum, const void* dict, size_t dict_size,
+                    const void* dict_huf, zxc_progress_callback_t cb, void* user_data) {
+    *out = NULL;
+    zxc_dctx* const d = zxc_create_dctx();
+    if (!d) return ZXC_ERROR_MEMORY;
+    int rc = zxc_dctx_set_param(d, ZXC_D_THREADS, threads);
+    if (rc == ZXC_OK) rc = zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum != 0);
+    if (rc == ZXC_OK) rc = zxc_dctx_set_dict(d, dict, dict_size, dict_huf);
+    if (rc == ZXC_OK) rc = zxc_dctx_set_progress(d, cb, user_data);
+    if (rc != ZXC_OK) {
+        zxc_free_dctx(d);
+        return rc;
+    }
+    *out = d;
+    return ZXC_OK;
+}
 // --no-preserve clears it
 static int g_preserve = 1;
 
@@ -1471,33 +1512,21 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     const double t0 = zxc_now();
     int64_t bytes;
+    const zxc_progress_callback_t progress_cb = show_progress ? &cli_progress_callback : NULL;
     if (mode == MODE_COMPRESS) {
-        zxc_compress_opts_t copts = {
-            .n_threads = num_threads,
-            .level = level,
-            .block_size = block_size,
-            .checksum_enabled = checksum_enabled,
-            .seekable = seekable,
-            .dict = dict,
-            .dict_size = dict_size,
-            .dict_huf = g_dict_huf,
-            .progress_cb = show_progress ? &cli_progress_callback : NULL,
-            .user_data = &pctx,
-        };
-        bytes = zxc_stream_compress(f_in, f_out, &copts);
+        zxc_cctx* cctx = NULL;
+        bytes = cli_cctx(&cctx, num_threads, level, block_size, checksum_enabled, seekable, dict,
+                         dict_size, g_dict_huf, progress_cb, &pctx);
+        if (bytes == ZXC_OK) bytes = zxc_stream_compress(f_in, f_out, cctx);
+        zxc_free_cctx(cctx);
     } else if (pass_through) {
         bytes = zxc_copy_stream(f_in, f_out);
     } else {
-        zxc_decompress_opts_t dopts = {
-            .n_threads = num_threads,
-            .checksum_enabled = checksum_enabled,
-            .dict = dict,
-            .dict_size = dict_size,
-            .dict_huf = g_dict_huf,
-            .progress_cb = show_progress ? &cli_progress_callback : NULL,
-            .user_data = &pctx,
-        };
-        bytes = zxc_stream_decompress(f_in, f_out, &dopts);
+        zxc_dctx* dctx = NULL;
+        bytes = cli_dctx(&dctx, num_threads, checksum_enabled, dict, dict_size, g_dict_huf,
+                         progress_cb, &pctx);
+        if (bytes == ZXC_OK) bytes = zxc_stream_decompress(f_in, f_out, dctx);
+        zxc_free_dctx(dctx);
     }
     const double dt = zxc_now() - t0;
 
@@ -2140,31 +2169,49 @@ int main(int argc, char** argv) {
                                   (g_progress_mode == ZXC_PROGRESS_ALWAYS || stderr_tty);
         double last_line = -1.0;
 
-        const zxc_compress_opts_t bench_copts = {.n_threads = num_threads,
-                                                 .level = level,
-                                                 .block_size = block_size,
-                                                 .checksum_enabled = checksum,
-                                                 .dict = dict,
-                                                 .dict_size = dict_size,
-                                                 .dict_huf = g_dict_huf};
-        const zxc_decompress_opts_t bench_dopts = {.n_threads = num_threads,
-                                                   .checksum_enabled = checksum,
-                                                   .dict = dict,
-                                                   .dict_size = dict_size,
-                                                   .dict_huf = g_dict_huf};
+        zxc_cctx* bench_cctx = NULL;
+        zxc_dctx* bench_dctx = NULL;
+        FILE* f_in = NULL;
+        int bench_rc = cli_cctx(&bench_cctx, num_threads, level, block_size, checksum, 0, dict,
+                                dict_size, g_dict_huf, NULL, NULL);
+        if (bench_rc == ZXC_OK)
+            bench_rc = cli_dctx(&bench_dctx, num_threads, checksum, dict, dict_size, g_dict_huf,
+                                NULL, NULL);
+        if (bench_rc != ZXC_OK) {
+            zxc_log("Error: Cannot configure the benchmark: %s\n", zxc_error_name(bench_rc));
+            goto bench_cleanup;
+        }
 
-        FILE* f_in = fopen(resolved_path, "rb");
-        if (!f_in) goto bench_cleanup;
+        f_in = fopen(resolved_path, "rb");
+        if (!f_in) {
+            zxc_log("Error: Cannot open '%s': %s\n", in_path, strerror(errno));
+            goto bench_cleanup;
+        }
 
-        if (fseeko(f_in, 0, SEEK_END) != 0) goto bench_cleanup;
+        if (fseeko(f_in, 0, SEEK_END) != 0) {
+            zxc_log("Error: Cannot seek in '%s': %s\n", in_path, strerror(errno));
+            goto bench_cleanup;
+        }
         const long long fsize = ftello(f_in);
-        if (fsize <= 0) goto bench_cleanup;
+        if (fsize <= 0) {
+            zxc_log("Error: '%s' is empty or not a regular file\n", in_path);
+            goto bench_cleanup;
+        }
         const size_t in_size = (size_t)fsize;
-        if (fseeko(f_in, 0, SEEK_SET) != 0) goto bench_cleanup;
+        if (fseeko(f_in, 0, SEEK_SET) != 0) {
+            zxc_log("Error: Cannot seek in '%s': %s\n", in_path, strerror(errno));
+            goto bench_cleanup;
+        }
 
         ram = malloc(in_size);
-        if (!ram) goto bench_cleanup;
-        if (fread(ram, 1, in_size, f_in) != in_size) goto bench_cleanup;
+        if (!ram) {
+            zxc_log("Error: Out of memory (%llu bytes)\n", (unsigned long long)in_size);
+            goto bench_cleanup;
+        }
+        if (fread(ram, 1, in_size, f_in) != in_size) {
+            zxc_log("Error: Short read on '%s'\n", in_path);
+            goto bench_cleanup;
+        }
         fclose(f_in);
         f_in = NULL;
 
@@ -2184,7 +2231,10 @@ int main(int argc, char** argv) {
 #else
         fm = fmemopen(ram, in_size, "rb");
 #endif
-        if (!fm) goto bench_cleanup;
+        if (!fm) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
+            goto bench_cleanup;
+        }
 
         double best_compress = 1e30;
         int compress_iters = 0;
@@ -2193,7 +2243,7 @@ int main(int argc, char** argv) {
         while (zxc_now() < compress_deadline) {
             rewind(fm);
             const double t0 = zxc_now();
-            zxc_stream_compress(fm, NULL, &bench_copts);
+            zxc_stream_compress(fm, NULL, bench_cctx);
             const double dt = zxc_now() - t0;
             if (dt < best_compress) best_compress = dt;
             compress_iters++;
@@ -2207,12 +2257,16 @@ int main(int argc, char** argv) {
 
         const uint64_t max_c = zxc_compress_bound(in_size);
         c_dat = malloc((size_t)max_c);
-        if (!c_dat) goto bench_cleanup;
+        if (!c_dat) {
+            zxc_log("Error: Out of memory (%llu bytes)\n", (unsigned long long)max_c);
+            goto bench_cleanup;
+        }
 
 #ifdef _WIN32
         FILE* fm_in = tmpfile();
         FILE* fm_out = tmpfile();
         if (!fm_in || !fm_out) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
             if (fm_in) fclose(fm_in);
             if (fm_out) fclose(fm_out);
             goto bench_cleanup;
@@ -2223,14 +2277,16 @@ int main(int argc, char** argv) {
         FILE* fm_in = fmemopen(ram, in_size, "rb");
         FILE* fm_out = fmemopen(c_dat, max_c, "wb");
         if (!fm_in || !fm_out) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
             if (fm_in) fclose(fm_in);
             if (fm_out) fclose(fm_out);
             goto bench_cleanup;
         }
 #endif
 
-        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, &bench_copts);
+        const int64_t c_sz = zxc_stream_compress(fm_in, fm_out, bench_cctx);
         if (c_sz < 0) {
+            zxc_log("Error: Compression failed: %s\n", zxc_error_name((int)c_sz));
             fclose(fm_in);
             fclose(fm_out);
             fm_in = NULL;
@@ -2241,6 +2297,7 @@ int main(int argc, char** argv) {
 #ifdef _WIN32
         rewind(fm_out);
         if (fread(c_dat, 1, (size_t)c_sz, fm_out) != (size_t)c_sz) {
+            zxc_log("Error: Short read on the compressed stream\n");
             fclose(fm_in);
             fclose(fm_out);
             fm_in = NULL;
@@ -2256,12 +2313,18 @@ int main(int argc, char** argv) {
 
 #ifdef _WIN32
         FILE* fc = tmpfile();
-        if (!fc) goto bench_cleanup;
+        if (!fc) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
+            goto bench_cleanup;
+        }
         fwrite(c_dat, 1, (size_t)c_sz, fc);
         rewind(fc);
 #else
         FILE* fc = fmemopen(c_dat, (size_t)c_sz, "rb");
-        if (!fc) goto bench_cleanup;
+        if (!fc) {
+            zxc_log("Error: Cannot create the in-memory stream: %s\n", strerror(errno));
+            goto bench_cleanup;
+        }
 #endif
 
         double best_decompress = 1e30;
@@ -2272,7 +2335,7 @@ int main(int argc, char** argv) {
         while (zxc_now() < decompress_deadline) {
             rewind(fc);
             const double t0 = zxc_now();
-            zxc_stream_decompress(fc, NULL, &bench_dopts);
+            zxc_stream_decompress(fc, NULL, bench_dctx);
             const double dt = zxc_now() - t0;
             if (dt < best_decompress) best_decompress = dt;
             decompress_iters++;
@@ -2318,6 +2381,8 @@ int main(int argc, char** argv) {
         ret = 0;
 
     bench_cleanup:
+        zxc_free_cctx(bench_cctx);
+        zxc_free_dctx(bench_dctx);
         if (fm) fclose(fm);
         if (f_in) fclose(f_in);
         free(ram);

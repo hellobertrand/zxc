@@ -47,11 +47,13 @@ console.log(`Ratio: ${((compressed.length / data.length) * 100).toFixed(1)}%`);
 
 Compress a Buffer.
 
-| Parameter          | Type      | Default         | Description             |
-| ------------------ | --------- | --------------- | ----------------------- |
-| `data`             | `Buffer`  | -               | Input data              |
-| `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (1–7) |
-| `options.checksum` | `boolean` | `false`         | Enable checksum         |
+| Parameter          | Type      | Default         | Description                                  |
+| ------------------ | --------- | --------------- | -------------------------------------------- |
+| `data`             | `Buffer`  | -               | Input data                                   |
+| `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (1–7); out of range throws |
+| `options.checksum` | `boolean` | `false`         | Enable checksum                              |
+| `options.seekable` | `boolean` | `false`         | Append a seek table (see `Seekable`)         |
+| `options.dict`     | `Buffer`  | -               | Pre-trained dictionary (or a `Dictionary`)   |
 
 Returns: `Buffer` - compressed data.
 
@@ -59,11 +61,12 @@ Returns: `Buffer` - compressed data.
 
 Decompress a ZXC compressed Buffer.
 
-| Parameter          | Type      | Default | Description                |
-| ------------------ | --------- | ------- | -------------------------- |
-| `data`             | `Buffer`  | -       | Compressed data            |
-| `options.size`     | `number`  | auto    | Expected decompressed size |
-| `options.checksum` | `boolean` | `false` | Verify checksum            |
+| Parameter          | Type      | Default | Description                                |
+| ------------------ | --------- | ------- | ------------------------------------------ |
+| `data`             | `Buffer`  | -       | Compressed data                            |
+| `options.size`     | `number`  | auto    | Expected decompressed size                 |
+| `options.checksum` | `boolean` | `false` | Verify checksum                            |
+| `options.dict`     | `Buffer`  | -       | Dictionary the archive was compressed with |
 
 Returns: `Buffer` - decompressed data.
 
@@ -71,6 +74,10 @@ Returns: `Buffer` - decompressed data.
 
 Reusable contexts: the working buffers are carved once instead of once per
 call, which pays off when compressing many payloads with the same settings.
+The options are set on the native context at construction and apply to every
+call; an invalid value throws from the constructor with the zxc error `code`
+(for example `ERROR_BAD_LEVEL` for a level outside 1–7, which every entry
+point refuses rather than clamps).
 
 | Parameter          | Type      | Default         | Description                      |
 | ------------------ | --------- | --------------- | -------------------------------- |

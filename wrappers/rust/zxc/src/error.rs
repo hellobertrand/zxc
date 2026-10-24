@@ -10,7 +10,7 @@
 use zxc_sys::{
     ZXC_ERROR_BAD_BLOCK_SIZE, ZXC_ERROR_BAD_BLOCK_TYPE, ZXC_ERROR_BAD_CHECKSUM,
     ZXC_ERROR_BAD_HEADER, ZXC_ERROR_BAD_LEVEL, ZXC_ERROR_BAD_MAGIC, ZXC_ERROR_BAD_OFFSET,
-    ZXC_ERROR_BAD_VERSION, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_DICT_MISMATCH,
+    ZXC_ERROR_BAD_PARAM, ZXC_ERROR_BAD_VERSION, ZXC_ERROR_CORRUPT_DATA, ZXC_ERROR_DICT_MISMATCH,
     ZXC_ERROR_DICT_REQUIRED, ZXC_ERROR_DICT_TOO_LARGE, ZXC_ERROR_DICT_UNSUPPORTED,
     ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_IO, ZXC_ERROR_MEMORY, ZXC_ERROR_NULL_INPUT,
     ZXC_ERROR_OVERFLOW, ZXC_ERROR_SRC_TOO_SMALL,
@@ -99,6 +99,11 @@ pub enum Error {
     #[error("dictionary not supported by this context's workspace")]
     DictUnsupported,
 
+    /// A context parameter is unknown or its value out of bounds (e.g. a
+    /// thread count above the library maximum)
+    #[error("context parameter unknown or out of bounds")]
+    BadParam,
+
     /// Shared literal Huffman table is not `ZXC_HUF_TABLE_SIZE` bytes
     #[error("shared literal Huffman table must be ZXC_HUF_TABLE_SIZE bytes")]
     BadHufTable,
@@ -138,6 +143,7 @@ pub(crate) fn error_from_code(code: i64) -> Error {
         ZXC_ERROR_DICT_TOO_LARGE => Error::DictTooLarge,
         ZXC_ERROR_BAD_LEVEL => Error::BadLevel,
         ZXC_ERROR_DICT_UNSUPPORTED => Error::DictUnsupported,
+        ZXC_ERROR_BAD_PARAM => Error::BadParam,
         _ => Error::Unknown(code as i32),
     }
 }

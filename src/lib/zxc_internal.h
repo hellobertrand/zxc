@@ -911,17 +911,36 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
 #define ZXC_HUF_MIN_LITERALS 139
 /** @} */
 
-/** @brief Clamps a resolved compression level to 1..7.
- *
- *         Never rejected, at every compress entry point and so in every
- *         binding: 99 behaves as ULTRA, -5 as FASTEST. Level 0 resolves to
- *         the caller's default first. */
-static inline int zxc_level_clamp(const int level) {
-    if (level < ZXC_LEVEL_FASTEST) return ZXC_LEVEL_FASTEST;
-    return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
-}
+/**
+ * @brief Compression parameters of a @ref zxc_cctx, the private form of what
+ *        zxc_cctx_set_param() / zxc_cctx_set_dict() / zxc_cctx_set_progress()
+ *        configure. Zero means the default for level and block_size.
+ */
+typedef struct {
+    int n_threads;
+    int level;
+    size_t block_size;
+    int checksum_enabled;
+    int seekable;
+    const void* dict;
+    size_t dict_size;
+    const void* dict_huf;
+    zxc_progress_callback_t progress_cb;
+    void* user_data;
+} zxc_cparams_t;
 
-/** @brief Dictionary length from a (possibly NULL) options struct.
+/** @brief Decompression parameters of a @ref zxc_dctx; see @ref zxc_cparams_t. */
+typedef struct {
+    int n_threads;
+    int checksum_enabled;
+    const void* dict;
+    size_t dict_size;
+    const void* dict_huf;
+    zxc_progress_callback_t progress_cb;
+    void* user_data;
+} zxc_dparams_t;
+
+/** @brief Dictionary length from a (possibly NULL) parameter struct.
  *
  *  Gated on @c dict itself: no dictionary pointer means no dictionary, whatever
  *  the sibling fields hold. Macros rather than functions because the compression
@@ -930,8 +949,8 @@ static inline int zxc_level_clamp(const int level) {
 /** @brief Shared literal Huffman table, gated on @c dict the same way. */
 #define ZXC_OPTS_DICT_HUF(o) \
     (((o) && (o)->dict && (o)->dict_size > 0) ? (const uint8_t*)(o)->dict_huf : NULL)
-/** @brief Compression level, 0 meaning the default, clamped to 1..7. */
-#define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level != 0) ? (o)->level : (dflt))
+/** @brief Compression level, 0 meaning the default. */
+#define ZXC_OPTS_LEVEL(o, dflt) (((o) && (o)->level != 0) ? (o)->level : (dflt))
 /** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
 /** @name Per-block match splitting (zxc_spl_match_split_block), a level-table policy
@@ -2098,8 +2117,12 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
 /** @brief @ref zxc_compress_block, its checksum seeded with @p block_index (public entry: 0). */
 int64_t zxc_compress_block_at(zxc_cctx* cctx, const void* RESTRICT src, size_t src_size,
-                              void* RESTRICT dst, size_t dst_capacity,
-                              const zxc_compress_opts_t* opts, uint64_t block_index);
+                              void* RESTRICT dst, size_t dst_capacity, const zxc_cparams_t* opts,
+                              uint64_t block_index);
+
+/** @brief Parameters a public context carries, for the FILE* and push paths. */
+const zxc_cparams_t* zxc_cctx_params(const zxc_cctx* cctx);
+const zxc_dparams_t* zxc_dctx_params(const zxc_dctx* dctx);
 
 // ---------------------------------------------------------------------------
 // Internal frame primitives.

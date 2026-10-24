@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -18,6 +19,78 @@
 extern "C" {
 #include "zxc.h"
 #include "zxc_seekable.h"
+}
+
+static Napi::Value ThrowZxcError(Napi::Env env, int code);
+
+// =============================================================================
+// Context configuration helpers
+// =============================================================================
+//
+// The C API carries every parameter on a context: the JS option objects
+// ({ level, checksum, seekable, blockSize, dict, dictHuf }) are translated
+// into setter calls on a zxc_cctx / zxc_dctx, which is then either used for
+// the call (one-shot, Cctx, Dctx) or handed to a stream creator as
+// configuration and freed (CStream, DStream).
+
+using CctxPtr = std::unique_ptr<zxc_cctx, decltype(&zxc_free_cctx)>;
+using DctxPtr = std::unique_ptr<zxc_dctx, decltype(&zxc_free_dctx)>;
+
+// Each setter throws the zxc error (with its `code`) and returns false when
+// the library refuses the value, so a constructor or call can bail out.
+static bool SetCParam(Napi::Env env, zxc_cctx* c, zxc_cparam_t param, int64_t value) {
+    const int r = zxc_cctx_set_param(c, param, value);
+    if (r != ZXC_OK) {
+        ThrowZxcError(env, r);
+        return false;
+    }
+    return true;
+}
+
+// An absent (undefined or null) `level` keeps *level; anything but an integer
+// (7.9, NaN, 2^32 + 5, "3") is refused as ERROR_BAD_LEVEL rather than coerced.
+static bool ReadLevel(Napi::Env env, Napi::Value v, int64_t* level) {
+    if (v.IsUndefined() || v.IsNull()) return true;
+    const double d = v.IsNumber() ? v.As<Napi::Number>().DoubleValue()
+                                  : std::numeric_limits<double>::quiet_NaN();
+    if (!(std::trunc(d) == d && std::fabs(d) <= std::numeric_limits<int32_t>::max())) {
+        ThrowZxcError(env, ZXC_ERROR_BAD_LEVEL);
+        return false;
+    }
+    *level = static_cast<int64_t>(d);
+    return true;
+}
+
+static bool SetDParam(Napi::Env env, zxc_dctx* d, zxc_dparam_t param, int64_t value) {
+    const int r = zxc_dctx_set_param(d, param, value);
+    if (r != ZXC_OK) {
+        ThrowZxcError(env, r);
+        return false;
+    }
+    return true;
+}
+
+// A NULL / empty dictionary is a no-op: the context stays without one.
+static bool SetCDict(Napi::Env env, zxc_cctx* c, const void* dict, size_t dict_size,
+                     const void* dict_huf) {
+    if (!dict || dict_size == 0) return true;
+    const int r = zxc_cctx_set_dict(c, dict, dict_size, dict_huf);
+    if (r != ZXC_OK) {
+        ThrowZxcError(env, r);
+        return false;
+    }
+    return true;
+}
+
+static bool SetDDict(Napi::Env env, zxc_dctx* d, const void* dict, size_t dict_size,
+                     const void* dict_huf) {
+    if (!dict || dict_size == 0) return true;
+    const int r = zxc_dctx_set_dict(d, dict, dict_size, dict_huf);
+    if (r != ZXC_OK) {
+        ThrowZxcError(env, r);
+        return false;
+    }
+    return true;
 }
 
 // =============================================================================
@@ -56,10 +129,8 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     static const uint8_t kEmptySrc = 0;
     const void* src = src_size > 0 ? static_cast<const void*>(src_buf.Data()) : &kEmptySrc;
 
-    int level = ZXC_LEVEL_DEFAULT;
-    if (info.Length() >= 2 && info[1].IsNumber()) {
-        level = info[1].As<Napi::Number>().Int32Value();
-    }
+    int64_t level = ZXC_LEVEL_DEFAULT;
+    if (!ReadLevel(env, info[1], &level)) return env.Undefined();
 
     int checksum = 0;
     if (info.Length() >= 3 && info[2].IsBoolean()) {
@@ -104,15 +175,20 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
         return env.Undefined();
     }
 
-    zxc_compress_opts_t opts = {0};
-    opts.level = level;
-    opts.checksum_enabled = checksum;
-    opts.seekable = seekable;
-    opts.dict = dict;
-    opts.dict_size = dict_size;
-    opts.dict_huf = dict_huf;
+    CctxPtr cctx(zxc_create_cctx(), &zxc_free_cctx);
+    if (!cctx) {
+        Napi::Error::New(env, "zxc_create_cctx failed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    if (!SetCParam(env, cctx.get(), ZXC_C_LEVEL, level) ||
+        !SetCParam(env, cctx.get(), ZXC_C_CHECKSUM, checksum) ||
+        !SetCParam(env, cctx.get(), ZXC_C_SEEKABLE, seekable) ||
+        !SetCDict(env, cctx.get(), dict, dict_size, dict_huf)) {
+        return env.Undefined();
+    }
 
-    int64_t nwritten = zxc_compress(src, src_size, dst.get(), static_cast<size_t>(bound), &opts);
+    int64_t nwritten =
+        zxc_compress_cctx(cctx.get(), src, src_size, dst.get(), static_cast<size_t>(bound));
 
     if (nwritten < 0) {
         auto err_code = static_cast<int>(nwritten);
@@ -176,13 +252,17 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     void* dst =
         decompress_size > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 
-    zxc_decompress_opts_t dopts = {0};
-    dopts.checksum_enabled = checksum;
-    dopts.dict = dict;
-    dopts.dict_size = dict_size;
-    dopts.dict_huf = dict_huf;
+    DctxPtr dctx(zxc_create_dctx(), &zxc_free_dctx);
+    if (!dctx) {
+        Napi::Error::New(env, "zxc_create_dctx failed").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    if (!SetDParam(env, dctx.get(), ZXC_D_CHECKSUM, checksum) ||
+        !SetDDict(env, dctx.get(), dict, dict_size, dict_huf)) {
+        return env.Undefined();
+    }
 
-    int64_t nwritten = zxc_decompress(src, src_size, dst, decompress_size, &dopts);
+    int64_t nwritten = zxc_decompress_dctx(dctx.get(), src, src_size, dst, decompress_size);
 
     if (nwritten < 0) {
         auto err_code = static_cast<int>(nwritten);
@@ -256,8 +336,6 @@ static Napi::Value GetFrameInfo(const Napi::CallbackInfo& info) {
 // =============================================================================
 // Dictionary API
 // =============================================================================
-
-static Napi::Value ThrowZxcError(Napi::Env env, int code);
 
 // trainDict(samples: Buffer[], maxSize?: number): Buffer
 static Napi::Value TrainDict(const Napi::CallbackInfo& info) {
@@ -540,14 +618,14 @@ static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out, size_t out_len,
 // =============================================================================
 
 // Reads {level, checksum, dict, dictHuf}, copying the dictionary and table so
-// they outlive the caller's Buffers.
-static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int* level, int* checksum,
-                           std::vector<uint8_t>* dict, std::vector<uint8_t>* huf) {
+// they outlive the caller's Buffers: the context keeps pointers into them.
+// `level` is left untouched (0) when absent, which the setter reads as the
+// default.
+static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int64_t* level,
+                           int* checksum, std::vector<uint8_t>* dict, std::vector<uint8_t>* huf) {
     if (info.Length() < 1 || !info[0].IsObject()) return true;
     Napi::Object o = info[0].As<Napi::Object>();
-    if (level && o.Has("level") && o.Get("level").IsNumber()) {
-        *level = o.Get("level").As<Napi::Number>().Int32Value();
-    }
+    if (level && o.Has("level") && !ReadLevel(env, o.Get("level"), level)) return false;
     if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
         *checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
     }
@@ -579,15 +657,24 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
 
     explicit CctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CctxWrap>(info) {
         Napi::Env env = info.Env();
-        if (!ReadCtxOptions(env, info, &level_, &checksum_, &dict_, &huf_)) return;
+        int64_t level = 0;
+        int checksum = 0;
+        if (!ReadCtxOptions(env, info, &level, &checksum, &dict_, &huf_)) return;
 
-        zxc_compress_opts_t opts = {0};
-        opts.level = level_;
-        opts.checksum_enabled = checksum_;
-        cctx_ = zxc_create_cctx(&opts);
+        cctx_ = zxc_create_cctx();
         if (!cctx_) {
             Napi::Error::New(env, "zxc_create_cctx failed").ThrowAsJavaScriptException();
+            return;
         }
+        // The parameters live on the context from here on; every compress()
+        // call reads them. A refused value (ERROR_BAD_LEVEL, ...) throws
+        // from the constructor, the destructor frees the half-built context.
+        if (!SetCParam(env, cctx_, ZXC_C_LEVEL, level) ||
+            !SetCParam(env, cctx_, ZXC_C_CHECKSUM, checksum)) {
+            return;
+        }
+        SetCDict(env, cctx_, dict_.empty() ? nullptr : dict_.data(), dict_.size(),
+                 huf_.empty() ? nullptr : huf_.data());
     }
 
     ~CctxWrap() {
@@ -596,10 +683,9 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
 
    private:
     zxc_cctx* cctx_ = nullptr;
+    // Dictionary bytes the context points at; released with it in Close().
     std::vector<uint8_t> dict_;
     std::vector<uint8_t> huf_;
-    int level_ = ZXC_LEVEL_DEFAULT;
-    int checksum_ = 0;
 
     Napi::Value Compress(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
@@ -621,14 +707,7 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
             return env.Undefined();
         }
 
-        zxc_compress_opts_t opts = {0};
-        opts.level = level_;
-        opts.checksum_enabled = checksum_;
-        opts.dict = dict_.empty() ? nullptr : dict_.data();
-        opts.dict_size = dict_.size();
-        opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
-
-        int64_t n = zxc_compress_cctx(cctx_, src.Data(), src_size, dst.get(), bound, &opts);
+        int64_t n = zxc_compress_cctx(cctx_, src.Data(), src_size, dst.get(), bound);
         if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
         return Napi::Buffer<uint8_t>::Copy(env, dst.get(), static_cast<size_t>(n));
     }
@@ -656,12 +735,17 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
 
     explicit DctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DctxWrap>(info) {
         Napi::Env env = info.Env();
-        if (!ReadCtxOptions(env, info, nullptr, &checksum_, &dict_, &huf_)) return;
+        int checksum = 0;
+        if (!ReadCtxOptions(env, info, nullptr, &checksum, &dict_, &huf_)) return;
 
         dctx_ = zxc_create_dctx();
         if (!dctx_) {
             Napi::Error::New(env, "zxc_create_dctx failed").ThrowAsJavaScriptException();
+            return;
         }
+        if (!SetDParam(env, dctx_, ZXC_D_CHECKSUM, checksum)) return;
+        SetDDict(env, dctx_, dict_.empty() ? nullptr : dict_.data(), dict_.size(),
+                 huf_.empty() ? nullptr : huf_.data());
     }
 
     ~DctxWrap() {
@@ -670,9 +754,9 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
 
    private:
     zxc_dctx* dctx_ = nullptr;
+    // Dictionary bytes the context points at; released with it in Close().
     std::vector<uint8_t> dict_;
     std::vector<uint8_t> huf_;
-    int checksum_ = 0;
 
     Napi::Value Decompress(const Napi::CallbackInfo& info) {
         Napi::Env env = info.Env();
@@ -692,13 +776,7 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
         static uint8_t kEmptyDst = 0;
         void* dst = orig > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
 
-        zxc_decompress_opts_t opts = {0};
-        opts.checksum_enabled = checksum_;
-        opts.dict = dict_.empty() ? nullptr : dict_.data();
-        opts.dict_size = dict_.size();
-        opts.dict_huf = huf_.empty() ? nullptr : huf_.data();
-
-        int64_t n = zxc_decompress_dctx(dctx_, src.Data(), src.Length(), dst, orig, &opts);
+        int64_t n = zxc_decompress_dctx(dctx_, src.Data(), src.Length(), dst, orig);
         if (n < 0) return ThrowZxcError(env, static_cast<int>(n));
         // napi buffers come uninitialised: slice a short write, never expose
         // the stale tail.
@@ -732,24 +810,35 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
 
     explicit CStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CStreamWrap>(info) {
         Napi::Env env = info.Env();
-        zxc_compress_opts_t opts = {0};
-        opts.level = ZXC_LEVEL_DEFAULT;
+        int64_t level = 0;
+        int64_t checksum = 0;
+        int64_t block_size = 0;
 
         if (info.Length() >= 1 && info[0].IsObject()) {
             Napi::Object o = info[0].As<Napi::Object>();
-            if (o.Has("level") && o.Get("level").IsNumber()) {
-                opts.level = o.Get("level").As<Napi::Number>().Int32Value();
-            }
+            if (o.Has("level") && !ReadLevel(env, o.Get("level"), &level)) return;
             if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
-                opts.checksum_enabled = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
+                checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
             }
             if (o.Has("blockSize") && o.Get("blockSize").IsNumber()) {
-                opts.block_size =
-                    static_cast<size_t>(o.Get("blockSize").As<Napi::Number>().Int64Value());
+                block_size = o.Get("blockSize").As<Napi::Number>().Int64Value();
             }
         }
 
-        cs_ = zxc_cstream_create(&opts);
+        // The stream copies the configuration at creation: the context is
+        // only the carrier of the parameters and is freed right after.
+        CctxPtr cfg(zxc_create_cctx(), &zxc_free_cctx);
+        if (!cfg) {
+            Napi::Error::New(env, "zxc_create_cctx failed").ThrowAsJavaScriptException();
+            return;
+        }
+        if (!SetCParam(env, cfg.get(), ZXC_C_LEVEL, level) ||
+            !SetCParam(env, cfg.get(), ZXC_C_CHECKSUM, checksum) ||
+            !SetCParam(env, cfg.get(), ZXC_C_BLOCK_SIZE, block_size)) {
+            return;
+        }
+
+        cs_ = zxc_cstream_create(cfg.get());
         if (!cs_) {
             Napi::Error::New(env, "zxc_cstream_create failed").ThrowAsJavaScriptException();
         }
@@ -872,14 +961,23 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
 
     explicit DStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DStreamWrap>(info) {
         Napi::Env env = info.Env();
-        zxc_decompress_opts_t opts = {0};
+        int64_t checksum = 0;
         if (info.Length() >= 1 && info[0].IsObject()) {
             Napi::Object o = info[0].As<Napi::Object>();
             if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
-                opts.checksum_enabled = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
+                checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
             }
         }
-        ds_ = zxc_dstream_create(&opts);
+
+        // Configuration carrier only, freed once the stream has copied it.
+        DctxPtr cfg(zxc_create_dctx(), &zxc_free_dctx);
+        if (!cfg) {
+            Napi::Error::New(env, "zxc_create_dctx failed").ThrowAsJavaScriptException();
+            return;
+        }
+        if (!SetDParam(env, cfg.get(), ZXC_D_CHECKSUM, checksum)) return;
+
+        ds_ = zxc_dstream_create(cfg.get());
         if (!ds_) {
             Napi::Error::New(env, "zxc_dstream_create failed").ThrowAsJavaScriptException();
         }
@@ -1415,6 +1513,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("ERROR_DICT_TOO_LARGE", Napi::Number::New(env, ZXC_ERROR_DICT_TOO_LARGE));
     exports.Set("ERROR_BAD_LEVEL", Napi::Number::New(env, ZXC_ERROR_BAD_LEVEL));
     exports.Set("ERROR_DICT_UNSUPPORTED", Napi::Number::New(env, ZXC_ERROR_DICT_UNSUPPORTED));
+    exports.Set("ERROR_BAD_PARAM", Napi::Number::New(env, ZXC_ERROR_BAD_PARAM));
 
     return exports;
 }

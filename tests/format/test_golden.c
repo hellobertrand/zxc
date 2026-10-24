@@ -452,11 +452,12 @@ static int validate_roundtrip(const char* ctx, const golden_case_t* gc, const ui
         uint8_t* out = (uint8_t*)malloc(in_size);
         /* Dictionary cases must be decoded with their dictionary (and, for the
          * shared-table case, its Huffman table -- dict_id binds the pair). */
-        zxc_decompress_opts_t dopts = {0};
-        dopts.dict = gc->opts.dict;
-        dopts.dict_size = gc->opts.dict_size;
-        if (gc->use_dict_huf) dopts.dict_huf = gc_dict_huf_table();
-        int64_t r = zxc_decompress(buf, size, out, in_size, &dopts);
+        zxc_dctx* const dctx = zxc_create_dctx();
+        int64_t r = dctx ? zxc_dctx_set_dict(dctx, gc->opts.dict, gc->opts.dict_size,
+                                             gc->use_dict_huf ? gc_dict_huf_table() : NULL)
+                         : ZXC_ERROR_MEMORY;
+        if (r == ZXC_OK) r = zxc_decompress_dctx(dctx, buf, size, out, in_size);
+        zxc_free_dctx(dctx);
         if (r < 0) {
             fprintf(stderr, "    FAIL [%s]: decompress -> %s\n", ctx, zxc_error_name((int)r));
             ok = 0;
@@ -482,9 +483,8 @@ static int validate_recipe(const char* ctx, const golden_case_t* gc, const uint8
         return 0;
     }
 
-    zxc_compress_opts_t opts = gc->opts;
-    if (gc->use_dict_huf) opts.dict_huf = gc_dict_huf_table();
-    const int64_t csize = zxc_compress(input, in_size, out, cap, &opts);
+    const int64_t csize = recipe_compress(&gc->opts, gc->use_dict_huf ? gc_dict_huf_table() : NULL,
+                                          input, in_size, out, cap);
 
     int ok = 0;
     if (csize <= 0) {

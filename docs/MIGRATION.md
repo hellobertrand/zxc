@@ -56,6 +56,109 @@ the seek table:
 > A v8 build is ZXC **0.14.x**. Keep it until every archive you care about is
 > transcoded — it is the only thing that can read v8 data.
 
+### C API: option structs become context parameters (0.15.x)
+
+This is a **source and ABI break for C callers**, independent of the format
+change: the SOVERSION moves from 5 to **6**. The two option structs
+`zxc_compress_opts_t` / `zxc_decompress_opts_t`, their size helpers
+`zxc_compress_opts_size()` / `zxc_decompress_opts_size()` and the trailing
+`opts` argument of every entry point are gone. Settings now live on a context
+and are set one at a time by identifier (`zxc_cparam_t`, `zxc_dparam_t` in
+`zxc_opts.h`); the one-shot forms take a level and nothing else. Two new
+symbols report the bounds, `zxc_cparam_bounds()` / `zxc_dparam_bounds()`, and
+one error code is new, `ZXC_ERROR_BAD_PARAM` (-20). The full contract is in
+[API.md §6.1 and §9](API.md#61-parameter-identifiers).
+
+The same SOVERSION break renames the dictionary functions under one `zxc_dict_`
+prefix, makes the bound functions return `size_t` and adds
+`zxc_version_number()`:
+
+| 0.14.x | 0.15.x |
+| :--- | :--- |
+| `zxc_train_dict(...)` | `zxc_dict_train_content(...)` (same arguments) |
+| `zxc_train_dict_huf(...)` | `zxc_dict_train_huf(...)` (same arguments) |
+| `zxc_dict_id(dict, size, huf)` | `zxc_dict_compute_id(dict, size, huf)` |
+| `zxc_dict_get_id(buf, size)` | `zxc_dict_read_id(buf, size)` |
+| `uint64_t zxc_compress_bound()`, `zxc_compress_block_bound()`, `zxc_decompress_block_bound()`, `zxc_estimate_cctx_size()` | the same functions return `size_t`; 0 still means "too large for this platform" |
+| — | `zxc_version_number()`: `MAJOR*10000 + MINOR*100 + PATCH` of the loaded library, with the `ZXC_VERSION_NUMBER` macro for the headers |
+
+Option structs and their call sites:
+
+| 0.14.x | 0.15.x |
+| :--- | :--- |
+| `zxc_compress(src, n, dst, cap, NULL)` | `zxc_compress(src, n, dst, cap, 0)` (0 = default level) |
+| `zxc_compress(src, n, dst, cap, &(zxc_compress_opts_t){.level = 5})` | `zxc_compress(src, n, dst, cap, 5)` |
+| `zxc_compress(..., &(zxc_compress_opts_t){.level = 5, .block_size = 65536, .checksum_enabled = 1})` | `zxc_cctx* c = zxc_create_cctx();`<br>`zxc_cctx_set_param(c, ZXC_C_LEVEL, 5);`<br>`zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, 65536);`<br>`zxc_cctx_set_param(c, ZXC_C_CHECKSUM, 1);`<br>`zxc_compress_cctx(c, src, n, dst, cap);`<br>`zxc_free_cctx(c);` |
+| `zxc_decompress(src, n, dst, cap, NULL)` | `zxc_decompress(src, n, dst, cap)` |
+| `zxc_decompress(src, n, dst, cap, &(zxc_decompress_opts_t){.checksum_enabled = 1})` | `zxc_dctx* d = zxc_create_dctx();`<br>`zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1);`<br>`zxc_decompress_dctx(d, src, n, dst, cap);`<br>`zxc_free_dctx(d);` |
+| `zxc_decompress_inplace(buf, cap, comp_size, opts)` | `zxc_decompress_inplace(buf, cap, comp_size)`, or `zxc_decompress_inplace_dctx(d, buf, cap, comp_size)` with a configured `d` |
+| `zxc_create_cctx(&opts)` | `zxc_create_cctx()` then `zxc_cctx_set_param()` per setting |
+| `zxc_compress_cctx(c, src, n, dst, cap, &opts)` | `zxc_compress_cctx(c, src, n, dst, cap)`; change a setting between calls with `zxc_cctx_set_param()` |
+| `zxc_compress_block(c, ..., &opts)` / `zxc_decompress_block(d, ..., &opts)` / `zxc_decompress_block_safe(d, ..., &opts)` | same calls without the last argument |
+| `zxc_decompress_dctx(d, src, n, dst, cap, &opts)` | `zxc_decompress_dctx(d, src, n, dst, cap)` |
+| `.dict`, `.dict_size`, `.dict_huf` | `zxc_cctx_set_dict(c, dict, size, huf)` / `zxc_dctx_set_dict(d, dict, size, huf)`; NULL `dict` detaches |
+| `.progress_cb`, `.user_data` | `zxc_cctx_set_progress(c, cb, ud)` / `zxc_dctx_set_progress(d, cb, ud)` |
+| `.n_threads` | `ZXC_C_THREADS` / `ZXC_D_THREADS` |
+| `.seekable = 1` | `zxc_cctx_set_param(c, ZXC_C_SEEKABLE, 1)` |
+| `zxc_init_static_cctx(ws, sz, &(zxc_compress_opts_t){.level = L, .block_size = B, .checksum_enabled = 1})` | `zxc_cctx* c = zxc_init_static_cctx(ws, sz, B, L);`<br>`zxc_cctx_set_param(c, ZXC_C_CHECKSUM, 1);` |
+| `zxc_stream_compress(fin, fout, &opts)` / `zxc_stream_decompress(fin, fout, &opts)` | `zxc_stream_compress(fin, fout, c)` / `zxc_stream_decompress(fin, fout, d)` with a configured context (`NULL` still means defaults) |
+| `zxc_cstream_create(&opts)` / `zxc_dstream_create(&opts)` | `zxc_cstream_create(c)` / `zxc_dstream_create(d)`; the parameters are copied, the context can be freed right after |
+| `zxc_compress_opts_size()` / `zxc_decompress_opts_size()` | gone; bindings use `zxc_cparam_bounds()` / `zxc_dparam_bounds()` to discover what the loaded library knows |
+
+Behaviour changes to know about, beyond the mechanical rewrite:
+
+- **The simple `zxc_decompress()` no longer verifies checksums**, and neither
+  does `zxc_decompress_inplace()`: with no options argument there is nothing to
+  turn verification on with. An archive that carries checksums decodes
+  unverified. To keep the check, decode through a `zxc_dctx` with
+  `zxc_dctx_set_param(d, ZXC_D_CHECKSUM, 1)` (`zxc_decompress_dctx()`,
+  `zxc_decompress_inplace_dctx()`). The same holds for the push stream
+  (`zxc_dstream_create(NULL)` verifies nothing) and the `FILE*` pipeline
+  (`zxc_stream_decompress(fin, fout, NULL)`). Dictionary archives likewise need
+  a `zxc_dctx` with `zxc_dctx_set_dict()`: the simple form returns
+  `ZXC_ERROR_DICT_REQUIRED`.
+- **A setter refuses instead of clamping.** The structs let any `level` through
+  and clamped it to 1–7; `zxc_cctx_set_param(c, ZXC_C_LEVEL, 9)` returns
+  `ZXC_ERROR_BAD_LEVEL` and leaves the level unchanged. An invalid
+  `ZXC_C_BLOCK_SIZE` is `ZXC_ERROR_BAD_BLOCK_SIZE`; an out-of-bounds thread
+  count, checksum or seekable flag, or an unknown identifier, is
+  `ZXC_ERROR_BAD_PARAM`. The one-shot `zxc_compress(..., level)` refuses too:
+  `zxc_compress(..., 99)`, ULTRA in 0.14, is now `ZXC_ERROR_BAD_LEVEL`. Check
+  the return value of each setter.
+- **`0` means default, not "keep".** The structs' zero field fell back to the
+  creation value; `zxc_cctx_set_param(c, ZXC_C_LEVEL, 0)` restores the library
+  default (3), whatever the context held before. `zxc_cctx_reset()` /
+  `zxc_dctx_reset()` restore everything and detach the dictionary and callback.
+- **`zxc_decompress_dctx()` reports the same error codes as `zxc_decompress()`.**
+  A truncated input is `ZXC_ERROR_SRC_TOO_SMALL` and a malformed header
+  reports what the header parse found (`ZXC_ERROR_BAD_MAGIC`,
+  `ZXC_ERROR_BAD_VERSION`, `ZXC_ERROR_BAD_BLOCK_SIZE`), where 0.14 flattened
+  both to `ZXC_ERROR_NULL_INPUT` or `ZXC_ERROR_BAD_HEADER`.
+- **Settings persist by construction.** There is no "sticky" rule to remember:
+  a parameter stays in force until set again. Code that passed a fresh struct
+  to each call to override one field now calls `zxc_cctx_set_param()` once and
+  compresses as many times as it likes.
+- **Static-context errors move to the setters.** On a context from
+  `zxc_init_static_cctx()`, a different block size
+  (`ZXC_ERROR_BAD_BLOCK_SIZE`), a level raise into 6–7 on a workspace carved
+  below it (`ZXC_ERROR_BAD_LEVEL`) and a dictionary
+  (`ZXC_ERROR_DICT_UNSUPPORTED`, also on a static `zxc_dctx`) are refused by
+  `zxc_cctx_set_param()` / `zxc_*ctx_set_dict()`, no longer by the compress or
+  decompress call. `zxc_init_static_cctx()` takes its block size and level as
+  explicit arguments; `0` is invalid there, not a default.
+- **Dictionary pointers are kept, not copied.** As with the struct fields, the
+  context stores the `dict` / `dict_huf` pointers; the bytes must outlive every
+  call that uses them (`zxc_seekable_set_dict()` still copies).
+- **The `FILE*` and push creators take a context.** `zxc_stream_compress()` /
+  `zxc_stream_decompress()` read a `const zxc_cctx*` / `const zxc_dctx*` for
+  their parameters and never touch its buffers, so one context can configure a
+  one-shot call and a pipeline alike; `zxc_cstream_create()` /
+  `zxc_dstream_create()` copy the parameters at creation. A dictionary on the
+  context passed to a push creator fails creation (returns `NULL`), as the
+  dictionary fields did.
+- **SOVERSION 6.** Binaries built against `libzxc.so.5` do not load against
+  this release; rebuild them against the new headers.
+
 ### Windows archives (0.15.x)
 
 The Windows archives are now built with MinGW-w64 (UCRT) and ship the shared

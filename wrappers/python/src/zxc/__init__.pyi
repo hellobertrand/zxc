@@ -36,6 +36,7 @@ ERROR_DICT_MISMATCH: int
 ERROR_DICT_TOO_LARGE: int
 ERROR_BAD_LEVEL: int
 ERROR_DICT_UNSUPPORTED: int
+ERROR_BAD_PARAM: int
 
 # ---------- types ----------
 class FileLike(Protocol):

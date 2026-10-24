@@ -5,12 +5,154 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-//! Block API: reusable single-block compression / decompression contexts.
+//! Block API: reusable single-block compression / decompression contexts,
+//! and the crate-private context handles every other API configures from
+//! the option structs.
 
-use std::ffi::c_void;
+use std::ffi::{c_int, c_void};
 
 use crate::error::error_from_code;
-use crate::{CompressOptions, DecompressOptions, Error, Result};
+use crate::{CompressOptions, DecompressOptions, Error, Level, Result};
+
+/// Maps a setter's return code to a `Result`.
+fn check(rc: c_int) -> Result<()> {
+    if rc < 0 {
+        Err(error_from_code(rc as i64))
+    } else {
+        Ok(())
+    }
+}
+
+/// Thread count for the `FILE*` pipeline: `None` is 0, auto-detect; a value
+/// above `i64` is left to the library to refuse ([`Error::BadParam`]).
+pub(crate) fn thread_param(threads: Option<usize>) -> i64 {
+    threads.map_or(0, |n| i64::try_from(n).unwrap_or(i64::MAX))
+}
+
+/// Owned heap `zxc_cctx*`, freed on drop. The C context carries every
+/// parameter: the option structs are translated into setter calls here, so
+/// the one-shot, block, `FILE*` and push APIs share one translation.
+pub(crate) struct RawCctx(*mut zxc_sys::zxc_cctx);
+
+impl RawCctx {
+    /// Creates a context with every parameter at its default.
+    pub(crate) fn new() -> Result<Self> {
+        let ptr = unsafe { zxc_sys::zxc_create_cctx() };
+        if ptr.is_null() {
+            Err(Error::Memory)
+        } else {
+            Ok(Self(ptr))
+        }
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut zxc_sys::zxc_cctx {
+        self.0
+    }
+
+    fn set_param(&mut self, param: zxc_sys::zxc_cparam_t, value: i64) -> Result<()> {
+        check(unsafe { zxc_sys::zxc_cctx_set_param(self.0, param, value) })
+    }
+
+    /// Sets level, checksum, seek table and thread count. `threads` is read
+    /// by the `FILE*` pipeline only; the other APIs ignore it.
+    pub(crate) fn set_params(
+        &mut self,
+        level: Level,
+        checksum: bool,
+        seekable: bool,
+        threads: i64,
+    ) -> Result<()> {
+        self.set_param(zxc_sys::ZXC_C_LEVEL, level as i64)?;
+        self.set_param(zxc_sys::ZXC_C_CHECKSUM, checksum as i64)?;
+        self.set_param(zxc_sys::ZXC_C_SEEKABLE, seekable as i64)?;
+        self.set_param(zxc_sys::ZXC_C_THREADS, threads)
+    }
+
+    /// Attaches the dictionary slices from [`crate::dict_parts`] (empty
+    /// detaches). The context keeps the pointers only: the slices must stay
+    /// alive, unmoved, until the next `set_dict` or the last call using them.
+    pub(crate) fn set_dict(&mut self, dict: &[u8], dict_huf: &[u8]) -> Result<()> {
+        check(unsafe {
+            zxc_sys::zxc_cctx_set_dict(
+                self.0,
+                crate::dict_ptr(dict),
+                dict.len(),
+                crate::dict_ptr(dict_huf),
+            )
+        })
+    }
+
+    /// Applies a whole [`CompressOptions`], dictionary included, plus the
+    /// thread count the struct does not carry. The dictionary slices are
+    /// borrowed from `opts`, so the caller keeps `opts` alive for the call.
+    pub(crate) fn configure(&mut self, opts: &CompressOptions, threads: i64) -> Result<()> {
+        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
+        self.set_params(opts.level, opts.checksum, opts.seekable, threads)?;
+        self.set_dict(dict, dict_huf)
+    }
+}
+
+impl Drop for RawCctx {
+    fn drop(&mut self) {
+        unsafe { zxc_sys::zxc_free_cctx(self.0) };
+    }
+}
+
+/// Owned heap `zxc_dctx*`, freed on drop; see [`RawCctx`].
+pub(crate) struct RawDctx(*mut zxc_sys::zxc_dctx);
+
+impl RawDctx {
+    /// Creates a context with every parameter at its default.
+    pub(crate) fn new() -> Result<Self> {
+        let ptr = unsafe { zxc_sys::zxc_create_dctx() };
+        if ptr.is_null() {
+            Err(Error::Memory)
+        } else {
+            Ok(Self(ptr))
+        }
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut zxc_sys::zxc_dctx {
+        self.0
+    }
+
+    fn set_param(&mut self, param: zxc_sys::zxc_dparam_t, value: i64) -> Result<()> {
+        check(unsafe { zxc_sys::zxc_dctx_set_param(self.0, param, value) })
+    }
+
+    /// Sets checksum verification and the thread count (`FILE*` pipeline only).
+    pub(crate) fn set_params(&mut self, verify_checksum: bool, threads: i64) -> Result<()> {
+        self.set_param(zxc_sys::ZXC_D_CHECKSUM, verify_checksum as i64)?;
+        self.set_param(zxc_sys::ZXC_D_THREADS, threads)
+    }
+
+    /// Attaches the dictionary slices (empty detaches); same lifetime rule as
+    /// [`RawCctx::set_dict`].
+    pub(crate) fn set_dict(&mut self, dict: &[u8], dict_huf: &[u8]) -> Result<()> {
+        check(unsafe {
+            zxc_sys::zxc_dctx_set_dict(
+                self.0,
+                crate::dict_ptr(dict),
+                dict.len(),
+                crate::dict_ptr(dict_huf),
+            )
+        })
+    }
+
+    /// Applies a whole [`DecompressOptions`], dictionary included; the caller
+    /// keeps `opts` alive for the call.
+    pub(crate) fn configure(&mut self, opts: &DecompressOptions, threads: i64) -> Result<()> {
+        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
+        self.set_params(opts.verify_checksum, threads)?;
+        self.set_dict(dict, dict_huf)
+    }
+}
+
+impl Drop for RawDctx {
+    fn drop(&mut self) {
+        unsafe { zxc_sys::zxc_free_dctx(self.0) };
+    }
+}
 
 /// Reusable compression context for the Block API.
 ///
@@ -28,7 +170,7 @@ use crate::{CompressOptions, DecompressOptions, Error, Result};
 /// let n = cctx.compress_block(block, &mut out, &opts)?;
 /// ```
 pub struct Cctx {
-    inner: *mut zxc_sys::zxc_cctx,
+    inner: RawCctx,
     dict: Option<Vec<u8>>,
     dict_huf: Option<Vec<u8>>,
 }
@@ -40,37 +182,23 @@ unsafe impl Send for Cctx {}
 impl Cctx {
     /// Creates a new compression context.
     ///
-    /// When `opts` is `Some`, internal buffers are pre-allocated for its level
-    /// and block size; `None` defers allocation. A dictionary given here is
-    /// validated and then applies to every call that omits one, as in the Go,
-    /// Python and Node bindings.
+    /// When `opts` is `Some`, its level, checksum and seek-table settings are
+    /// set on the context (the working buffers are sized on the first call);
+    /// `None` keeps the library defaults. A dictionary given here is validated
+    /// and then applies to every call that omits one, as in the Go, Python and
+    /// Node bindings. Each [`Cctx::compress_block`] call sets its own options
+    /// on top.
     pub fn new(opts: Option<&CompressOptions>) -> Result<Self> {
+        let mut inner = RawCctx::new()?;
         if let Some(o) = opts {
             crate::dict_parts(o.dict.as_deref(), o.dict_huf.as_deref())?;
+            inner.set_params(o.level, o.checksum, o.seekable, 0)?;
         }
-        let c_opts = opts.map(|o| zxc_sys::zxc_compress_opts_t {
-            level: o.level as i32,
-            checksum_enabled: o.checksum as i32,
-            seekable: o.seekable as i32,
-            ..Default::default()
-        });
-        let ptr = unsafe {
-            zxc_sys::zxc_create_cctx(
-                c_opts
-                    .as_ref()
-                    .map(|o| o as *const _)
-                    .unwrap_or(std::ptr::null()),
-            )
-        };
-        if ptr.is_null() {
-            Err(Error::Memory)
-        } else {
-            Ok(Self {
-                inner: ptr,
-                dict: opts.and_then(|o| o.dict.clone()),
-                dict_huf: opts.and_then(|o| o.dict_huf.clone()),
-            })
-        }
+        Ok(Self {
+            inner,
+            dict: opts.and_then(|o| o.dict.clone()),
+            dict_huf: opts.and_then(|o| o.dict_huf.clone()),
+        })
     }
 
     /// Compresses a single block (no file framing).
@@ -88,25 +216,21 @@ impl Cctx {
             opts.dict.as_deref().or(self.dict.as_deref()),
             opts.dict_huf.as_deref().or(self.dict_huf.as_deref()),
         )?;
-        let copts = zxc_sys::zxc_compress_opts_t {
-            level: opts.level as i32,
-            checksum_enabled: opts.checksum as i32,
-            seekable: opts.seekable as i32,
-            dict: crate::dict_ptr(dict),
-            dict_size: dict.len(),
-            dict_huf: crate::dict_ptr(dict_huf),
-            ..Default::default()
-        };
+        self.inner
+            .set_params(opts.level, opts.checksum, opts.seekable, 0)?;
+        self.inner.set_dict(dict, dict_huf)?;
         let res = unsafe {
             zxc_sys::zxc_compress_block(
-                self.inner,
+                self.inner.as_ptr(),
                 src.as_ptr() as *const c_void,
                 src.len(),
                 dst.as_mut_ptr() as *mut c_void,
                 dst.len(),
-                &copts,
             )
         };
+        // The slices may belong to `opts`, gone after this call: detach them
+        // so the context never holds a pointer past its owner.
+        self.inner.set_dict(&[], &[])?;
         if res < 0 {
             Err(error_from_code(res))
         } else {
@@ -115,17 +239,11 @@ impl Cctx {
     }
 }
 
-impl Drop for Cctx {
-    fn drop(&mut self) {
-        unsafe { zxc_sys::zxc_free_cctx(self.inner) };
-    }
-}
-
 /// Reusable decompression context for the Block API.
 ///
 /// Internally wraps an opaque `zxc_dctx*` freed automatically on drop.
 pub struct Dctx {
-    inner: *mut zxc_sys::zxc_dctx,
+    inner: RawDctx,
 }
 
 unsafe impl Send for Dctx {}
@@ -133,11 +251,25 @@ unsafe impl Send for Dctx {}
 impl Dctx {
     /// Creates a new decompression context.
     pub fn new() -> Result<Self> {
-        let ptr = unsafe { zxc_sys::zxc_create_dctx() };
-        if ptr.is_null() {
-            Err(Error::Memory)
+        Ok(Self {
+            inner: RawDctx::new()?,
+        })
+    }
+
+    /// Sets `opts` on the context, runs `call` on the raw handle and detaches
+    /// the borrowed dictionary afterwards.
+    fn with_options(
+        &mut self,
+        opts: &DecompressOptions,
+        call: impl FnOnce(*mut zxc_sys::zxc_dctx) -> i64,
+    ) -> Result<usize> {
+        self.inner.configure(opts, 0)?;
+        let res = call(self.inner.as_ptr());
+        self.inner.set_dict(&[], &[])?;
+        if res < 0 {
+            Err(error_from_code(res))
         } else {
-            Ok(Self { inner: ptr })
+            Ok(res as usize)
         }
     }
 
@@ -153,29 +285,15 @@ impl Dctx {
         dst: &mut [u8],
         opts: &DecompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
-        let dopts = zxc_sys::zxc_decompress_opts_t {
-            checksum_enabled: opts.verify_checksum as i32,
-            dict: crate::dict_ptr(dict),
-            dict_size: dict.len(),
-            dict_huf: crate::dict_ptr(dict_huf),
-            ..Default::default()
-        };
-        let res = unsafe {
+        self.with_options(opts, |dctx| unsafe {
             zxc_sys::zxc_decompress_block(
-                self.inner,
+                dctx,
                 src.as_ptr() as *const c_void,
                 src.len(),
                 dst.as_mut_ptr() as *mut c_void,
                 dst.len(),
-                &dopts,
             )
-        };
-        if res < 0 {
-            Err(error_from_code(res))
-        } else {
-            Ok(res as usize)
-        }
+        })
     }
 
     /// Strict-sized variant of [`Dctx::decompress_block`]: accepts
@@ -189,35 +307,15 @@ impl Dctx {
         dst: &mut [u8],
         opts: &DecompressOptions,
     ) -> Result<usize> {
-        let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
-        let dopts = zxc_sys::zxc_decompress_opts_t {
-            checksum_enabled: opts.verify_checksum as i32,
-            dict: crate::dict_ptr(dict),
-            dict_size: dict.len(),
-            dict_huf: crate::dict_ptr(dict_huf),
-            ..Default::default()
-        };
-        let res = unsafe {
+        self.with_options(opts, |dctx| unsafe {
             zxc_sys::zxc_decompress_block_safe(
-                self.inner,
+                dctx,
                 src.as_ptr() as *const c_void,
                 src.len(),
                 dst.as_mut_ptr() as *mut c_void,
                 dst.len(),
-                &dopts,
             )
-        };
-        if res < 0 {
-            Err(error_from_code(res))
-        } else {
-            Ok(res as usize)
-        }
-    }
-}
-
-impl Drop for Dctx {
-    fn drop(&mut self) {
-        unsafe { zxc_sys::zxc_free_dctx(self.inner) };
+        })
     }
 }
 

@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "../include/zxc_buffer.h"
+#include "../include/zxc_error.h"
 
 #define FUZZ_BLOCK_MAX_INPUT (256 << 10) /* 256 KiB of fuzzer bytes */
 #define FUZZ_BLOCK_CTRL 4                /* control bytes consumed below */
@@ -36,8 +37,8 @@
 static const size_t kBlockSizes[N_SIZES] = {4096, 65536, 262144};
 
 /* Static contexts: workspaces allocated once, re-initialised every run so a
- * crash reproduces from its input alone. */
-static zxc_dctx* static_dctx(const size_t k) {
+ * crash reproduces from its input alone; @p checksum is the verification setting. */
+static zxc_dctx* static_dctx(const size_t k, const int checksum) {
     static void* ws[N_SIZES];
     static size_t ws_size[N_SIZES];
     if (!ws[k]) {
@@ -45,16 +46,18 @@ static zxc_dctx* static_dctx(const size_t k) {
         ws[k] = aligned_alloc(64, ws_size[k]);
         if (!ws[k]) return NULL;
     }
-    return zxc_init_static_dctx(ws[k], ws_size[k], kBlockSizes[k]);
+    zxc_dctx* const d = zxc_init_static_dctx(ws[k], ws_size[k], kBlockSizes[k]);
+    if (d && zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum) != ZXC_OK) return NULL;
+    return d;
 }
 
 /* Decodes @p src into a fresh exactly-sized buffer; the result, the bytes in @p out. */
 static int64_t decode(zxc_dctx* d, const int safe, const uint8_t* src, const size_t len,
-                      const size_t cap, const zxc_decompress_opts_t* o, uint8_t** out) {
+                      const size_t cap, uint8_t** out) {
     uint8_t* const dst = (uint8_t*)malloc(cap);
     if (!dst) return INT64_MIN;
-    const int64_t r = safe ? zxc_decompress_block_safe(d, src, len, dst, cap, o)
-                           : zxc_decompress_block(d, src, len, dst, cap, o);
+    const int64_t r = safe ? zxc_decompress_block_safe(d, src, len, dst, cap)
+                           : zxc_decompress_block(d, src, len, dst, cap);
     assert(r < 0 || (size_t)r <= cap);
     *out = dst;
     return r;
@@ -80,19 +83,22 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     size -= FUZZ_BLOCK_CTRL;
     if (size == 0) return 0;
 
-    const zxc_decompress_opts_t o = {.checksum_enabled = checksum};
     zxc_dctx* const heap = zxc_create_dctx();
     if (!heap) return 0;
+    if (zxc_dctx_set_param(heap, ZXC_D_CHECKSUM, checksum) != ZXC_OK) {
+        zxc_free_dctx(heap);
+        return 0;
+    }
 
     /* 1. Raw input as a block. */
     {
         uint8_t *fast = NULL, *safe = NULL, *stat = NULL;
-        const int64_t rf = decode(heap, 0, data, size, raw_cap, &o, &fast);
-        const int64_t rs = decode(heap, 1, data, size, raw_cap, &o, &safe);
+        const int64_t rf = decode(heap, 0, data, size, raw_cap, &fast);
+        const int64_t rs = decode(heap, 1, data, size, raw_cap, &safe);
         agree(rf, fast, rs, safe);
-        zxc_dctx* const sd = static_dctx(k);
+        zxc_dctx* const sd = static_dctx(k, checksum);
         if (sd) {
-            const int64_t rt = decode(sd, 1, data, size, raw_cap, &o, &stat);
+            const int64_t rt = decode(sd, 1, data, size, raw_cap, &stat);
             agree(rs, safe, rt, stat);
         }
         free(fast);
@@ -102,35 +108,37 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     /* 2. Round trip of one block of at most bs bytes. */
     const size_t n = size < bs ? size : bs;
-    const zxc_compress_opts_t co = {.level = level, .checksum_enabled = checksum, .block_size = bs};
     const size_t cb = zxc_compress_block_bound(n);
-    zxc_cctx* const cctx = zxc_create_cctx(&co);
+    zxc_cctx* const cctx = zxc_create_cctx();
+    const int configured = cctx && zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
+                           zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, checksum) == ZXC_OK &&
+                           zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, (int64_t)bs) == ZXC_OK;
     uint8_t* const comp = cb ? (uint8_t*)malloc(cb) : NULL;
-    const int64_t c = (cctx && comp) ? zxc_compress_block(cctx, data, n, comp, cb, &co) : -1;
+    const int64_t c = (configured && comp) ? zxc_compress_block(cctx, data, n, comp, cb) : -1;
     if (c > 0) {
         const size_t len = (size_t)c;
         const size_t padded = (size_t)zxc_decompress_block_bound(n);
         uint8_t* out = NULL;
         int64_t r;
 
-        r = decode(heap, 0, comp, len, padded, &o, &out);
+        r = decode(heap, 0, comp, len, padded, &out);
         assert(r == (int64_t)n && memcmp(out, data, n) == 0);
         free(out);
-        r = decode(heap, 0, comp, len, n, &o, &out);
+        r = decode(heap, 0, comp, len, n, &out);
         assert(r == (int64_t)n && memcmp(out, data, n) == 0);
         free(out);
-        r = decode(heap, 1, comp, len, n, &o, &out);
+        r = decode(heap, 1, comp, len, n, &out);
         assert(r == (int64_t)n && memcmp(out, data, n) == 0);
         free(out);
-        zxc_dctx* const sd = static_dctx(k);
+        zxc_dctx* const sd = static_dctx(k, checksum);
         if (sd) {
-            r = decode(sd, 1, comp, len, n, &o, &out);
+            r = decode(sd, 1, comp, len, n, &out);
             assert(r == (int64_t)n && memcmp(out, data, n) == 0);
             free(out);
         }
 
         // Truncated: a block's length is part of its header, so any cut fails.
-        r = decode(heap, 1, comp, len - 1, n, &o, &out);
+        r = decode(heap, 1, comp, len - 1, n, &out);
         assert(r < 0);
         free(out);
         (void)r;

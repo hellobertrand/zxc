@@ -31,25 +31,43 @@ static int cb_put(cbuf_t* b, const void* src, const size_t n) {
     return 1;
 }
 
-static int cb_frame(cbuf_t* b, const uint8_t* src, const size_t n, const zxc_compress_opts_t* co) {
+/* Geometry of one frame; a zero field keeps the parameter's default. */
+typedef struct {
+    int level;
+    size_t block_size;
+    int checksum_enabled;
+    int seekable;
+    const void* dict;
+    size_t dict_size;
+} frame_cfg_t;
+
+static int cb_frame(cbuf_t* b, const uint8_t* src, const size_t n, const frame_cfg_t* co) {
     const size_t cap = zxc_compress_bound(n);
     uint8_t* const arc = malloc(cap);
-    const int64_t len = arc ? zxc_compress(src, n, arc, cap, co) : -1;
+    zxc_cctx* const cctx = zxc_create_cctx();
+    int64_t len = -1;
+    if (arc && cctx && zxc_cctx_set_param(cctx, ZXC_C_LEVEL, co->level) == ZXC_OK &&
+        zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, (int64_t)co->block_size) == ZXC_OK &&
+        zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, co->checksum_enabled) == ZXC_OK &&
+        zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, co->seekable) == ZXC_OK &&
+        zxc_cctx_set_dict(cctx, co->dict, co->dict_size, NULL) == ZXC_OK)
+        len = zxc_compress_cctx(cctx, src, n, arc, cap);
     const int ok = len > 0 && cb_put(b, arc, (size_t)len);
+    zxc_free_cctx(cctx);
     free(arc);
     return ok;
 }
 
 /* FILE* decode of @p arc; writes the output to @p out (capacity @p cap). */
 static int64_t file_decode(const uint8_t* arc, const size_t n, uint8_t* out, const size_t cap,
-                           const zxc_decompress_opts_t* opts, int64_t* size_query) {
+                           const zxc_dctx* cfg, int64_t* size_query) {
     FILE* const fi = tmpfile();
     FILE* const fo = tmpfile();
     int64_t r = -1;
     *size_query = -1;
     if (fi && fo && fwrite(arc, 1, n, fi) == n && fseek(fi, 0, SEEK_SET) == 0) {
         *size_query = zxc_stream_get_decompressed_size(fi);
-        r = zxc_stream_decompress(fi, fo, opts);
+        r = zxc_stream_decompress(fi, fo, cfg);
         if (r > 0) {
             if ((size_t)r > cap || fseek(fo, 0, SEEK_SET) != 0 ||
                 fread(out, 1, (size_t)r, fo) != (size_t)r)
@@ -64,8 +82,8 @@ static int64_t file_decode(const uint8_t* arc, const size_t n, uint8_t* out, con
 /* Push decode of @p arc in 7-byte pieces, so frame boundaries fall anywhere. Input
  * that stops before a footer is not finished: SRC_TOO_SMALL here. */
 static int64_t push_decode(const uint8_t* arc, const size_t n, uint8_t* out, const size_t cap,
-                           const zxc_decompress_opts_t* opts) {
-    zxc_dstream* const ds = zxc_dstream_create(opts);
+                           const zxc_dctx* cfg) {
+    zxc_dstream* const ds = zxc_dstream_create(cfg);
     if (!ds) return ZXC_ERROR_MEMORY;
     zxc_outbuf_t ob = {out, cap, 0};
     int64_t r = 0;
@@ -81,28 +99,41 @@ static int64_t push_decode(const uint8_t* arc, const size_t n, uint8_t* out, con
     return r;
 }
 
-/* Decodes @p arc every way; each must return @p want (@p want_file for the FILE*
- * decoder, which sees a cut frame as a short read; @p want_push for the push one,
- * which cannot tell input that stopped from input still coming) and produce
- * @p expect. The size queries report @p want on success, nothing on failure. */
-static int check2(const char* what, const uint8_t* arc, const size_t n,
-                  const zxc_decompress_opts_t* opts, const int64_t want, const int64_t want_file,
-                  const int64_t want_push, const uint8_t* expect) {
+/* Decodes @p arc every way, under @p cfg's parameters (NULL: defaults); each must
+ * return @p want (@p want_file for the FILE* decoder, which sees a cut frame as a
+ * short read; @p want_push for the push one, which cannot tell input that stopped
+ * from input still coming) and produce @p expect. The size queries report @p want
+ * on success, nothing on failure. The buffer decode is the one-shot call, or a
+ * context used once when @p cfg asks for checksums, which the one-shot never
+ * verifies; the context decode reuses @p cfg itself across calls. */
+static int check2(const char* what, const uint8_t* arc, const size_t n, zxc_dctx* cfg,
+                  const int64_t want, const int64_t want_file, const int64_t want_push,
+                  const uint8_t* expect) {
     // Room for every frame before the fault, so the verdict is the fault's.
     const size_t cap = (want > 0 ? (size_t)want : 0) + n * 8 + (1 << 20);
     uint8_t* const o1 = malloc(cap);
     uint8_t* const o2 = malloc(cap);
     uint8_t* const o3 = malloc(cap);
     uint8_t* const o4 = malloc(cap);
-    zxc_dctx* const dctx = zxc_create_dctx();
-    int ok = o1 && o2 && o3 && o4 && dctx;
+    zxc_dctx* const once = zxc_create_dctx();
+    int64_t checksum = 0, threads = 0;
+    int ok = o1 && o2 && o3 && o4 && once;
     if (!ok) printf("  [FAIL] %s: allocation\n", what);
+    if (ok && cfg) {
+        ok = zxc_dctx_get_param(cfg, ZXC_D_CHECKSUM, &checksum) == ZXC_OK &&
+             zxc_dctx_get_param(cfg, ZXC_D_THREADS, &threads) == ZXC_OK &&
+             zxc_dctx_set_param(once, ZXC_D_CHECKSUM, checksum) == ZXC_OK &&
+             zxc_dctx_set_param(once, ZXC_D_THREADS, threads) == ZXC_OK;
+        if (!ok) printf("  [FAIL] %s: parameters\n", what);
+    }
 
-    const int64_t r1 = ok ? zxc_decompress(arc, n, o1, cap, opts) : -1;
-    const int64_t r2 = ok ? zxc_decompress_dctx(dctx, arc, n, o2, cap, opts) : -1;
+    const int64_t r1 = !ok        ? -1
+                       : checksum ? zxc_decompress_dctx(once, arc, n, o1, cap)
+                                  : zxc_decompress(arc, n, o1, cap);
+    const int64_t r2 = ok ? zxc_decompress_dctx(cfg ? cfg : once, arc, n, o2, cap) : -1;
     int64_t sq = -1;
-    const int64_t r3 = ok ? file_decode(arc, n, o3, cap, opts, &sq) : -1;
-    const int64_t r4 = ok ? push_decode(arc, n, o4, cap, opts) : -1;
+    const int64_t r3 = ok ? file_decode(arc, n, o3, cap, cfg, &sq) : -1;
+    const int64_t r4 = ok ? push_decode(arc, n, o4, cap, cfg) : -1;
     const uint64_t bq = zxc_get_decompressed_size(arc, n);
 
     if (ok && (r1 != want || r2 != want || r3 != want_file || r4 != want_push)) {
@@ -123,7 +154,7 @@ static int check2(const char* what, const uint8_t* arc, const size_t n,
                (long long)sq, (long long)want);
         ok = 0;
     }
-    zxc_free_dctx(dctx);
+    zxc_free_dctx(once);
     free(o1);
     free(o2);
     free(o3);
@@ -131,9 +162,9 @@ static int check2(const char* what, const uint8_t* arc, const size_t n,
     return ok;
 }
 
-static int check(const char* what, const uint8_t* arc, const size_t n,
-                 const zxc_decompress_opts_t* opts, const int64_t want, const uint8_t* expect) {
-    return check2(what, arc, n, opts, want, want, want, expect);
+static int check(const char* what, const uint8_t* arc, const size_t n, zxc_dctx* cfg,
+                 const int64_t want, const uint8_t* expect) {
+    return check2(what, arc, n, cfg, want, want, want, expect);
 }
 
 int test_container_concat(void) {
@@ -145,19 +176,20 @@ int test_container_concat(void) {
     if (ok) gen_lz_data(src, na + nb + nc);
 
     /* Mixed geometry: small blocks with checksums, a seek table, an empty frame. */
-    const zxc_compress_opts_t ca = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
-    const zxc_compress_opts_t cb = {.level = 5, .seekable = 1, .checksum_enabled = 1};
-    const zxc_compress_opts_t cc = {.level = 1, .block_size = 8192, .seekable = 1};
+    const frame_cfg_t ca = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
+    const frame_cfg_t cb = {.level = 5, .seekable = 1, .checksum_enabled = 1};
+    const frame_cfg_t cc = {.level = 1, .block_size = 8192, .seekable = 1};
     ok = ok && cb_frame(&b, src, na, &ca) && cb_frame(&b, NULL, 0, &cc) &&
          cb_frame(&b, src + na, nb, &cb) && cb_frame(&b, src + na + nb, nc, &cc);
-    const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
+    zxc_dctx* const verify = zxc_create_dctx();
+    ok = ok && verify && zxc_dctx_set_param(verify, ZXC_D_CHECKSUM, 1) == ZXC_OK;
     ok = ok && check("four frames", b.p, b.n, NULL, (int64_t)(na + nb + nc), src);
-    ok = ok && check("four frames, checksums", b.p, b.n, &verify, (int64_t)(na + nb + nc), src);
+    ok = ok && check("four frames, checksums", b.p, b.n, verify, (int64_t)(na + nb + nc), src);
 
     /* A destination that ends inside the second payload. */
     if (ok) {
         uint8_t* const out = malloc(na + 100);
-        const int64_t r = out ? zxc_decompress(b.p, b.n, out, na + 100, NULL) : -1;
+        const int64_t r = out ? zxc_decompress(b.p, b.n, out, na + 100) : -1;
         if (r != ZXC_ERROR_DST_TOO_SMALL) {
             printf("  [FAIL] short destination: %lld\n", (long long)r);
             ok = 0;
@@ -189,7 +221,7 @@ int test_container_concat(void) {
         const size_t cap = (size_t)(na + nb + nc) + b.n + 65536;
         uint8_t* const buf = malloc(cap);
         if (buf) memcpy(buf + cap - b.n, b.p, b.n);
-        const int64_t r = buf ? zxc_decompress_inplace(buf, cap, b.n, NULL) : 0;
+        const int64_t r = buf ? zxc_decompress_inplace(buf, cap, b.n) : 0;
         if (r >= 0) {
             printf("  [FAIL] in-place decode of a multi-frame input: %lld\n", (long long)r);
             ok = 0;
@@ -197,6 +229,7 @@ int test_container_concat(void) {
         free(buf);
     }
 
+    zxc_free_dctx(verify);
     free(b.p);
     free(src);
     if (!ok) return 0;
@@ -215,16 +248,16 @@ static void max_progress(const uint64_t done, const uint64_t total, const void* 
  * between runs: output, input position, progress and faults. */
 int test_container_engine_reuse(void) {
     printf("=== TEST: Container - FILE* engine reused across frames ===\n");
-    const size_t n = 3 * 4096 + 17, nbig = 300000;
-    uint8_t* const src = malloc(5 * n + 2 * nbig);
+    const size_t n = 3 * 4096 + 17, nbig = 300000, total = 5 * n + 2 * nbig;
+    uint8_t* const src = malloc(total);
     cbuf_t b = {0};
     size_t ends[7] = {0};
     int ok = src != NULL;
-    if (ok) gen_lz_data(src, 5 * n + 2 * nbig);
+    if (ok) gen_lz_data(src, total);
 
     // Three small frames, two with large blocks (positioned reads), two small again.
-    const zxc_compress_opts_t small = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
-    const zxc_compress_opts_t big = {.level = 2, .block_size = 65536, .checksum_enabled = 1};
+    const frame_cfg_t small = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
+    const frame_cfg_t big = {.level = 2, .block_size = 65536, .checksum_enabled = 1};
     size_t at = 0;
     for (int i = 0; ok && i < 7; i++) {
         const int is_big = i == 3 || i == 4;
@@ -233,8 +266,10 @@ int test_container_engine_reuse(void) {
         at += len;
         ends[i] = b.n;
     }
-    const zxc_decompress_opts_t verify = {.checksum_enabled = 1, .n_threads = 4};
-    ok = ok && check("seven frames, three runs", b.p, b.n, &verify, (int64_t)at, src);
+    zxc_dctx* const verify = zxc_create_dctx();
+    ok = ok && verify && zxc_dctx_set_param(verify, ZXC_D_CHECKSUM, 1) == ZXC_OK &&
+         zxc_dctx_set_param(verify, ZXC_D_THREADS, 4) == ZXC_OK;
+    ok = ok && check("seven frames, three runs", b.p, b.n, verify, (int64_t)at, src);
 
     // Positioned reads leave the FILE* where the input ends.
     if (ok) {
@@ -242,10 +277,10 @@ int test_container_engine_reuse(void) {
         int64_t r = -1;
         long pos = -1;
         if (fi && fwrite(b.p, 1, b.n, fi) == b.n && fseek(fi, 0, SEEK_SET) == 0) {
-            r = zxc_stream_decompress(fi, NULL, &verify);
+            r = zxc_stream_decompress(fi, NULL, verify);
             pos = ftell(fi);
         }
-        if (r != (int64_t)at || pos != (long)b.n) {
+        if (r < 0 || (size_t)r != at || pos != (long)b.n) {
             printf("  [FAIL] input position: decoded %lld, at %ld (want %zu)\n", (long long)r, pos,
                    b.n);
             ok = 0;
@@ -256,16 +291,18 @@ int test_container_engine_reuse(void) {
     // Progress reaches the total across frames and engine restarts.
     if (ok) {
         uint64_t seen = 0;
-        const zxc_decompress_opts_t po = {
-            .n_threads = 4, .progress_cb = max_progress, .user_data = &seen};
-        uint8_t* const out = malloc(at);
+        zxc_dctx* const po = zxc_create_dctx();
+        uint8_t* const out = malloc(total);
         int64_t sq = 0;
-        const int64_t r = out ? file_decode(b.p, b.n, out, at, &po, &sq) : -1;
-        if (r != (int64_t)at || seen != (uint64_t)at) {
+        const int configured = po && zxc_dctx_set_param(po, ZXC_D_THREADS, 4) == ZXC_OK &&
+                               zxc_dctx_set_progress(po, max_progress, &seen) == ZXC_OK;
+        const int64_t r = out && configured ? file_decode(b.p, b.n, out, total, po, &sq) : -1;
+        if (r < 0 || (size_t)r != at || seen != (uint64_t)at) {
             printf("  [FAIL] progress: decoded %lld, last progress %llu (want %zu)\n", (long long)r,
                    (unsigned long long)seen, at);
             ok = 0;
         }
+        zxc_free_dctx(po);
         free(out);
     }
 
@@ -280,10 +317,11 @@ int test_container_engine_reuse(void) {
         }
         ok = ok &&
              check(k ? "digest fault in a reused engine" : "payload fault in a reused engine", t.p,
-                   t.n, &verify, k ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA, NULL);
+                   t.n, verify, k ? ZXC_ERROR_BAD_CHECKSUM : ZXC_ERROR_CORRUPT_DATA, NULL);
         free(t.p);
     }
 
+    zxc_free_dctx(verify);
     free(b.p);
     free(src);
     if (!ok) return 0;
@@ -296,10 +334,10 @@ int test_container_engine_reuse(void) {
 int test_container_frame_walk(void) {
     printf("=== TEST: Container - walking frames back from the end ===\n");
     const size_t sizes[] = {3 * 4096 + 17, 0, 70000, 1000};
-    const zxc_compress_opts_t opts[] = {{.level = 3, .block_size = 4096, .checksum_enabled = 1},
-                                        {.level = 1, .block_size = 8192, .seekable = 1},
-                                        {.level = 5, .seekable = 1, .checksum_enabled = 1},
-                                        {.level = 1, .block_size = 8192}};
+    const frame_cfg_t opts[] = {{.level = 3, .block_size = 4096, .checksum_enabled = 1},
+                                {.level = 1, .block_size = 8192, .seekable = 1},
+                                {.level = 5, .seekable = 1, .checksum_enabled = 1},
+                                {.level = 1, .block_size = 8192}};
     enum { K = 4 };
     uint8_t* const src = malloc(80000);
     cbuf_t b = {0};
@@ -378,7 +416,7 @@ int test_container_frame_walk(void) {
 int test_container_seekable(void) {
     printf("=== TEST: Container - seekable reader over concatenated frames ===\n");
     const size_t sizes[] = {5 * 4096 + 100, 0, 70000, 1000};
-    const zxc_compress_opts_t opts[] = {
+    const frame_cfg_t opts[] = {
         {.level = 3, .block_size = 4096, .checksum_enabled = 1, .seekable = 1},
         {.level = 1, .block_size = 8192, .seekable = 1},
         {.level = 5, .seekable = 1},
@@ -455,8 +493,8 @@ int test_container_seekable(void) {
         while (*w && i < 80000) text[i++] = (uint8_t)*w++;
     }
     for (int t = 0; ok && t < 2; t++) {
-        const zxc_compress_opts_t s7 = {.level = 7, .block_size = 4096, .seekable = 1};
-        const zxc_compress_opts_t l7 = {.level = 7, .seekable = 1};
+        const frame_cfg_t s7 = {.level = 7, .block_size = 4096, .seekable = 1};
+        const frame_cfg_t l7 = {.level = 7, .seekable = 1};
         cbuf_t m = {0};
         ok = text && cb_frame(&m, text, 9000, &s7) && cb_frame(&m, text + 9000, 70000, &l7);
         zxc_seekable* const s = ok ? zxc_seekable_open(m.p, m.n) : NULL;
@@ -478,7 +516,7 @@ int test_container_seekable(void) {
     /* A forged SEK header before the last frame: the open succeeds, that frame
      * refuses its ranges, the other still reads. */
     if (ok) {
-        const zxc_compress_opts_t so = {.level = 3, .block_size = 4096, .seekable = 1};
+        const frame_cfg_t so = {.level = 3, .block_size = 4096, .seekable = 1};
         cbuf_t m = {0};
         ok = cb_frame(&m, src, 9000, &so);
         const size_t first = m.n;
@@ -507,14 +545,14 @@ int test_container_seekable(void) {
 
     /* At most 2^20 frames: one more fails the open. */
     if (ok) {
-        const zxc_compress_opts_t so = {.level = 1, .seekable = 1};
-        uint8_t one[128];
-        const int64_t fl = zxc_compress("x", 1, one, sizeof(one), &so);
+        const frame_cfg_t so = {.level = 1, .seekable = 1};
+        cbuf_t one = {0};
+        const size_t fl = cb_frame(&one, (const uint8_t*)"x", 1, &so) ? one.n : 0;
         const size_t count = ((size_t)1 << 20) + 1;
-        uint8_t* const many = fl > 0 ? malloc(count * (size_t)fl) : NULL;
-        for (size_t i = 0; many && i < count; i++) memcpy(many + i * (size_t)fl, one, (size_t)fl);
-        zxc_seekable* const s = many ? zxc_seekable_open(many, count * (size_t)fl) : NULL;
-        zxc_seekable* const s1 = many ? zxc_seekable_open(many, (size_t)fl) : NULL;
+        uint8_t* const many = fl > 0 ? malloc(count * fl) : NULL;
+        for (size_t i = 0; many && i < count; i++) memcpy(many + i * fl, one.p, fl);
+        zxc_seekable* const s = many ? zxc_seekable_open(many, count * fl) : NULL;
+        zxc_seekable* const s1 = many ? zxc_seekable_open(many, fl) : NULL;
         if (!many || s || !s1) {
             printf("  [FAIL] 2^20 + 1 frames: opened %d, one frame opened %d\n", s != NULL,
                    s1 != NULL);
@@ -523,11 +561,12 @@ int test_container_seekable(void) {
         zxc_seekable_free(s);
         zxc_seekable_free(s1);
         free(many);
+        free(one.p);
     }
 
     /* A frame without a table refuses the open. */
     if (ok) {
-        const zxc_compress_opts_t plain = {.level = 3};
+        const frame_cfg_t plain = {.level = 3};
         cbuf_t m = {0};
         ok = cb_put(&m, b.p, b.n) && cb_frame(&m, src, 3000, &plain);
         zxc_seekable* const s = ok ? zxc_seekable_open(m.p, m.n) : NULL;
@@ -547,7 +586,7 @@ int test_container_seekable(void) {
         memcpy(db, src + 15000, sizeof(db));
         memset(dc, 's', sizeof(dc));
     }
-    const zxc_compress_opts_t dopts[] = {
+    const frame_cfg_t dopts[] = {
         {.level = 3, .seekable = 1, .dict = da, .dict_size = sizeof(da), .checksum_enabled = 1},
         {.level = 3, .block_size = 4096, .seekable = 1},
         {.level = 5, .block_size = 8192, .seekable = 1, .dict = db, .dict_size = sizeof(db)},

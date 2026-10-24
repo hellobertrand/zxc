@@ -43,12 +43,15 @@ func NewCStream(opts ...Option) (*CStream, error) {
 	if len(o.dict) > 0 || len(o.dictHuf) > 0 {
 		return nil, ErrDictUnsupported
 	}
-	var copts C.zxc_compress_opts_t
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
+	// The stream copies its parameters from a configured context at creation.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	cctx, err := createCctx(o, &pinner)
+	if err != nil {
+		return nil, err
 	}
-	ptr := C.zxc_cstream_create(&copts)
+	defer C.zxc_free_cctx(cctx)
+	ptr := C.zxc_cstream_create(cctx)
 	if ptr == nil {
 		return nil, ErrMemory
 	}
@@ -177,11 +180,14 @@ func NewDStream(opts ...Option) (*DStream, error) {
 	if len(o.dict) > 0 || len(o.dictHuf) > 0 {
 		return nil, ErrDictUnsupported
 	}
-	var dopts C.zxc_decompress_opts_t
-	if o.checksum {
-		dopts.checksum_enabled = 1
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	dctx, err := createDctx(o, &pinner)
+	if err != nil {
+		return nil, err
 	}
-	ptr := C.zxc_dstream_create(&dopts)
+	defer C.zxc_free_dctx(dctx)
+	ptr := C.zxc_dstream_create(dctx)
 	if ptr == nil {
 		return nil, ErrMemory
 	}

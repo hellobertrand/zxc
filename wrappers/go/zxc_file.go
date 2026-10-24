@@ -11,10 +11,86 @@ package zxc
 */
 import "C"
 import (
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"sync/atomic"
 )
+
+// outputFile is the destination of a file pipeline. A regular or new output
+// is written to a sibling temporary file renamed over it on success, so a
+// failed call leaves the previous content intact. Any other output (device,
+// FIFO) is written in place.
+type outputFile struct {
+	*os.File
+	final string // rename target; empty once in place
+}
+
+var tmpSeq atomic.Uint32
+
+func createOutput(path string) (*outputFile, error) {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		path = p // replace a link's target, not the link
+	}
+	// Opening the existing output fails where os.Create would, tells a
+	// device or FIFO apart, and gives the mode the replacement keeps.
+	var mode os.FileMode
+	if f, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
+		st, err := f.Stat()
+		if err == nil && !st.Mode().IsRegular() {
+			return &outputFile{File: f}, nil
+		}
+		f.Close()
+		if err != nil {
+			return nil, err
+		}
+		mode = st.Mode().Perm()
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	for {
+		tmp := fmt.Sprintf("%s.%d-%d.zxc-tmp", path, os.Getpid(), tmpSeq.Add(1))
+		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
+		if errors.Is(err, os.ErrExist) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		out := &outputFile{File: f, final: path}
+		if mode != 0 {
+			if err := f.Chmod(mode); err != nil {
+				out.discard()
+				return nil, err
+			}
+		}
+		return out, nil
+	}
+}
+
+// commit closes the output and, for a temporary file, renames it into place.
+func (o *outputFile) commit() error {
+	if err := o.Close(); err != nil {
+		return err
+	}
+	if o.final != "" {
+		if err := os.Rename(o.Name(), o.final); err != nil {
+			return err
+		}
+		o.final = ""
+	}
+	return nil
+}
+
+// discard closes an uncommitted output and removes its temporary file.
+func (o *outputFile) discard() {
+	o.Close()
+	if o.final != "" {
+		os.Remove(o.Name())
+	}
+}
 
 // ============================================================================
 // Streaming API (file-based)
@@ -25,12 +101,24 @@ import (
 // This is the recommended method for large files. It uses an asynchronous
 // pipeline with separate reader, worker, and writer threads.
 //
-// Options: [WithLevel], [WithChecksum], [WithThreads].
+// Options: [WithLevel], [WithChecksum], [WithThreads], [WithSeekable],
+// [WithDict].
 //
 //	n, err := zxc.CompressFile("input.bin", "output.zxc",
 //	    zxc.WithLevel(zxc.LevelCompact), zxc.WithThreads(4))
 func CompressFile(input, output string, opts ...Option) (int64, error) {
 	o := applyOptions(opts)
+
+	// The pipeline reads its parameters from a configured context, built
+	// first so a refused option touches no file. It is freed before the
+	// dictionary it points at is unpinned.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	cctx, err := createCctx(o, &pinner)
+	if err != nil {
+		return 0, err
+	}
+	defer C.zxc_free_cctx(cctx)
 
 	fIn, err := os.Open(input)
 	if err != nil {
@@ -38,11 +126,11 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	defer fIn.Close()
 
-	fOut, err := os.Create(output)
+	fOut, err := createOutput(output)
 	if err != nil {
 		return 0, fmt.Errorf("zxc: create output: %w", err)
 	}
-	defer fOut.Close()
+	defer fOut.discard()
 
 	// Duplicate file descriptors so the C FILE* owns its own fd.
 	cIn, err := dupFileRead(fIn)
@@ -51,7 +139,7 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	defer C.fclose(cIn)
 
-	cOut, err := dupFileWrite(fOut)
+	cOut, err := dupFileWrite(fOut.File)
 	if err != nil {
 		return 0, err
 	}
@@ -62,22 +150,7 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 		}
 	}()
 
-	var copts C.zxc_compress_opts_t
-	copts.n_threads = C.int(o.threads)
-	copts.level = C.int(o.level)
-	if o.checksum {
-		copts.checksum_enabled = 1
-	}
-	if o.seekable {
-		copts.seekable = 1
-	}
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	if err := setCompressDict(&copts, o, &pinner); err != nil {
-		return 0, err
-	}
-
-	result := C.zxc_stream_compress(cIn, cOut, &copts)
+	result := C.zxc_stream_compress(cIn, cOut, cctx)
 
 	// fclose flushes the last stdio buffer of compressed output; a failure
 	// here (ENOSPC, EIO) means the archive tail never reached the OS, so it
@@ -89,6 +162,9 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	if closeRC != 0 {
 		return 0, ErrIO
+	}
+	if err := fOut.commit(); err != nil {
+		return 0, fmt.Errorf("zxc: write output: %w", err)
 	}
 	return int64(result), nil
 }
@@ -118,11 +194,20 @@ func FileDecompressedSize(path string) (int64, error) {
 
 // DecompressFile decompresses src to dst using multi-threaded streaming.
 //
-// Options: [WithChecksum], [WithThreads].
+// Options: [WithChecksum], [WithThreads], [WithDict].
 //
 //	n, err := zxc.DecompressFile("compressed.zxc", "output.bin")
 func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	o := applyOptions(opts)
+
+	// See CompressFile.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+	dctx, err := createDctx(o, &pinner)
+	if err != nil {
+		return 0, err
+	}
+	defer C.zxc_free_dctx(dctx)
 
 	fIn, err := os.Open(input)
 	if err != nil {
@@ -130,11 +215,11 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	defer fIn.Close()
 
-	fOut, err := os.Create(output)
+	fOut, err := createOutput(output)
 	if err != nil {
 		return 0, fmt.Errorf("zxc: create output: %w", err)
 	}
-	defer fOut.Close()
+	defer fOut.discard()
 
 	cIn, err := dupFileRead(fIn)
 	if err != nil {
@@ -142,7 +227,7 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	defer C.fclose(cIn)
 
-	cOut, err := dupFileWrite(fOut)
+	cOut, err := dupFileWrite(fOut.File)
 	if err != nil {
 		return 0, err
 	}
@@ -153,18 +238,7 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 		}
 	}()
 
-	var dopts C.zxc_decompress_opts_t
-	dopts.n_threads = C.int(o.threads)
-	if o.checksum {
-		dopts.checksum_enabled = 1
-	}
-	var pinner runtime.Pinner
-	defer pinner.Unpin()
-	if err := setDecompressDict(&dopts, o, &pinner); err != nil {
-		return 0, err
-	}
-
-	result := C.zxc_stream_decompress(cIn, cOut, &dopts)
+	result := C.zxc_stream_decompress(cIn, cOut, dctx)
 
 	// See CompressFile: the fclose flush result is part of the success path.
 	outClosed = true
@@ -174,6 +248,9 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 	}
 	if closeRC != 0 {
 		return 0, ErrIO
+	}
+	if err := fOut.commit(); err != nil {
+		return 0, fmt.Errorf("zxc: write output: %w", err)
 	}
 	return int64(result), nil
 }
