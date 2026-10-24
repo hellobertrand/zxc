@@ -41,8 +41,8 @@ static int generate(const char* dir, const valid_case_t* vc) {
     }
 
     /* The .zxd carries the content and its Huffman table; both feed the dict_id. */
-    const void* dict = NULL;
     size_t dict_size = 0;
+    const void* dict = NULL;
     const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
     if (vc->dict) {

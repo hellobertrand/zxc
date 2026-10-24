@@ -1371,8 +1371,8 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
     char* dst = PyBytes_AsString(out);
     int64_t nwritten;
     Py_BEGIN_ALLOW_THREADS;
-    nwritten = zxc_decompress_dctx(h->dctx, view.buf, (size_t)view.len, dst,
-                                   (size_t)decompress_size);
+    nwritten =
+        zxc_decompress_dctx(h->dctx, view.buf, (size_t)view.len, dst, (size_t)decompress_size);
     Py_END_ALLOW_THREADS;
 
     PyBuffer_Release(&view);
