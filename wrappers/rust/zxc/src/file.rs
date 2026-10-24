@@ -7,9 +7,10 @@
 
 //! File-based multi-threaded streaming API.
 
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
@@ -17,6 +18,88 @@ use std::os::unix::io::AsRawFd;
 use crate::ctx::{RawCctx, RawDctx, thread_param};
 use crate::error::error_from_code;
 use crate::{Error, Level};
+
+/// Destination of a file pipeline. A regular or new output is written to a
+/// sibling temporary file renamed over it on success, so a failed call leaves
+/// the previous content intact. Any other output (device, FIFO) is written in
+/// place.
+struct Output {
+    /// Taken on commit, so the file is closed before the rename.
+    file: Option<File>,
+    /// Temporary path and its rename target; `None` once in place.
+    pending: Option<(PathBuf, PathBuf)>,
+}
+
+static TMP_SEQ: AtomicU32 = AtomicU32::new(0);
+
+impl Output {
+    fn create(path: &Path) -> io::Result<Self> {
+        // Replace a link's target, not the link.
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // Opening the existing output fails where File::create would, tells a
+        // device or FIFO apart, and gives the mode the replacement keeps.
+        let mode = match OpenOptions::new().write(true).open(&path) {
+            Ok(file) => {
+                let meta = file.metadata()?;
+                if !meta.is_file() {
+                    return Ok(Self {
+                        file: Some(file),
+                        pending: None,
+                    });
+                }
+                Some(meta.permissions())
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
+        let (file, tmp) = loop {
+            let mut tmp = path.clone().into_os_string();
+            tmp.push(format!(
+                ".{}-{}.zxc-tmp",
+                std::process::id(),
+                TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+                Ok(file) => break (file, PathBuf::from(tmp)),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) => return Err(e),
+            }
+        };
+        let out = Self {
+            file: Some(file),
+            pending: Some((tmp, path)),
+        };
+        if let Some(mode) = mode {
+            out.file().set_permissions(mode)?; // drop removes the temporary file
+        }
+        Ok(out)
+    }
+
+    fn file(&self) -> &File {
+        self.file.as_ref().expect("output is open")
+    }
+
+    /// Closes the output and, for a temporary file, renames it into place.
+    fn commit(mut self) -> io::Result<()> {
+        self.file = None;
+        match self.pending.take() {
+            Some((tmp, target)) => fs::rename(&tmp, target).inspect_err(|_| {
+                let _ = fs::remove_file(&tmp);
+            }),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for Output {
+    /// Removes the temporary file of an uncommitted output.
+    fn drop(&mut self) {
+        self.file = None;
+        if let Some((tmp, _)) = self.pending.take() {
+            let _ = fs::remove_file(tmp);
+        }
+    }
+}
 
 /// Options for streaming compression operations.
 #[derive(Debug, Clone)]
@@ -390,11 +473,11 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
     )?;
 
     let f_in = File::open(input)?;
-    let f_out = File::create(output)?;
+    let f_out = Output::create(output.as_ref())?;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
-        let c_out = file_to_c_file_write(&f_out);
+        let c_out = file_to_c_file_write(f_out.file());
 
         // Check for errors and cleanup on failure
         if c_in.is_null() {
@@ -418,6 +501,7 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::BufferError(error_from_code(result)));
         }
         closed?;
+        f_out.commit()?;
         Ok(result as u64)
     }
 }
@@ -473,11 +557,11 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
     cfg.set_params(opts.verify_checksum, thread_param(opts.threads))?;
 
     let f_in = File::open(input)?;
-    let f_out = File::create(output)?;
+    let f_out = Output::create(output.as_ref())?;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
-        let c_out = file_to_c_file_write(&f_out);
+        let c_out = file_to_c_file_write(f_out.file());
 
         // Check for errors and cleanup on failure
         if c_in.is_null() {
@@ -501,6 +585,7 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::BufferError(error_from_code(result)));
         }
         closed?;
+        f_out.commit()?;
         Ok(result as u64)
     }
 }
@@ -604,6 +689,52 @@ mod tests {
         let _ = fs::remove_file(&input_path);
         let _ = fs::remove_file(&compressed_path);
         let _ = fs::remove_file(&output_path);
+    }
+
+    /// A failed call, refused option or bad data, leaves an existing output
+    /// untouched and no temporary file behind; a successful one replaces it.
+    #[test]
+    fn test_file_failure_keeps_output() {
+        let dir = std::path::PathBuf::from(temp_path("failure_keeps_output"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (input, arc, corrupt, out) = (
+            dir.join("in"),
+            dir.join("arc"),
+            dir.join("corrupt"),
+            dir.join("out"),
+        );
+        let payload = b"file pipeline input ".repeat(500);
+        fs::write(&input, &payload).unwrap();
+        compress_file(&input, &arc, Level::Default, None, Some(true)).unwrap();
+        let mut bad = fs::read(&arc).unwrap();
+        let mid = bad.len() / 2;
+        bad[mid] ^= 0xFF;
+        fs::write(&corrupt, &bad).unwrap();
+        let keep = b"previous content must survive";
+        fs::write(&out, keep).unwrap();
+
+        assert!(compress_file(&input, &out, Level::Default, Some(1000), None).is_err());
+        assert!(decompress_file(&corrupt, &out, None).is_err());
+        assert_eq!(fs::read(&out).unwrap(), keep);
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            4,
+            "temporary file left behind"
+        );
+
+        decompress_file(&arc, &out, None).unwrap();
+        assert_eq!(fs::read(&out).unwrap(), payload);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&out, fs::Permissions::from_mode(0o600)).unwrap();
+            decompress_file(&arc, &out, None).unwrap();
+            let mode = fs::metadata(&out).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "output mode not kept");
+            decompress_file(&arc, &std::path::PathBuf::from("/dev/null"), None).unwrap();
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

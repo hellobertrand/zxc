@@ -10,6 +10,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -197,30 +198,62 @@ func TestParamRefusal(t *testing.T) {
 	}
 }
 
-// The file pipeline validates its options before it creates the output, so a
-// refused option leaves an existing destination file untouched.
-func TestFileRefusalKeepsOutput(t *testing.T) {
+// A failed file call, refused option or bad data, leaves an existing output
+// untouched and no temporary file behind; a successful one replaces it.
+func TestFileFailureKeepsOutput(t *testing.T) {
 	dir := t.TempDir()
 	in := filepath.Join(dir, "in")
+	arc := filepath.Join(dir, "arc")
 	out := filepath.Join(dir, "out")
-	if err := os.WriteFile(in, []byte("file pipeline input"), 0o644); err != nil {
+	payload := bytes.Repeat([]byte("file pipeline input "), 500)
+	if err := os.WriteFile(in, payload, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	keep := []byte("previous content must survive")
-	if err := os.WriteFile(out, keep, 0o644); err != nil {
+	if _, err := CompressFile(in, arc, WithChecksum(true)); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := CompressFile(in, out, WithLevel(Level(MaxLevel()+1))); !errors.Is(err, ErrBadLevel) {
-		t.Fatalf("CompressFile(level 8): want ErrBadLevel, got %v", err)
-	}
-	if _, err := DecompressFile(in, out, WithThreads(-1)); !errors.Is(err, ErrBadParam) {
-		t.Fatalf("DecompressFile(threads -1): want ErrBadParam, got %v", err)
-	}
-	got, err := os.ReadFile(out)
+	bad, err := os.ReadFile(arc)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(got, keep) {
-		t.Fatalf("output truncated by a refused option: %q", got)
+	bad[len(bad)/2] ^= 0xFF
+	corrupt := filepath.Join(dir, "corrupt")
+	if err := os.WriteFile(corrupt, bad, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	keep := []byte("previous content must survive")
+	if err := os.WriteFile(out, keep, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := CompressFile(in, out, WithLevel(Level(MaxLevel()+1))); !errors.Is(err, ErrBadLevel) {
+		t.Fatalf("CompressFile(level 8): want ErrBadLevel, got %v", err)
+	}
+	if _, err := DecompressFile(arc, out, WithThreads(-1)); !errors.Is(err, ErrBadParam) {
+		t.Fatalf("DecompressFile(threads -1): want ErrBadParam, got %v", err)
+	}
+	if _, err := DecompressFile(corrupt, out, WithChecksum(true)); err == nil {
+		t.Fatal("DecompressFile(corrupt): want an error")
+	}
+	if got, _ := os.ReadFile(out); !bytes.Equal(got, keep) {
+		t.Fatalf("output changed by a failed call: %q", got)
+	}
+	if ents, _ := os.ReadDir(dir); len(ents) != 4 {
+		t.Fatalf("temporary file left behind: %d entries", len(ents))
+	}
+
+	if _, err := DecompressFile(arc, out); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := os.ReadFile(out); !bytes.Equal(got, payload) {
+		t.Fatal("successful call did not replace the output")
+	}
+	if st, err := os.Stat(out); err != nil || (runtime.GOOS != "windows" && st.Mode().Perm() != 0o600) {
+		t.Fatalf("output mode not kept: %v %v", st.Mode(), err)
+	}
+	if runtime.GOOS != "windows" {
+		if _, err := DecompressFile(arc, os.DevNull); err != nil {
+			t.Fatalf("DecompressFile to %s: %v", os.DevNull, err)
+		}
 	}
 }

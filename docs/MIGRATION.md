@@ -122,8 +122,9 @@ Behaviour changes to know about, beyond the mechanical rewrite:
   `ZXC_ERROR_BAD_LEVEL` and leaves the level unchanged. An invalid
   `ZXC_C_BLOCK_SIZE` is `ZXC_ERROR_BAD_BLOCK_SIZE`; an out-of-bounds thread
   count, checksum or seekable flag, or an unknown identifier, is
-  `ZXC_ERROR_BAD_PARAM`. The one-shot `zxc_compress(..., level)` is the only
-  call that still clamps. Check the return value of each setter.
+  `ZXC_ERROR_BAD_PARAM`. The one-shot `zxc_compress(..., level)` refuses too:
+  `zxc_compress(..., 99)`, ULTRA in 0.14, is now `ZXC_ERROR_BAD_LEVEL`. Check
+  the return value of each setter.
 - **`0` means default, not "keep".** The structs' zero field fell back to the
   creation value; `zxc_cctx_set_param(c, ZXC_C_LEVEL, 0)` restores the library
   default (3), whatever the context held before. `zxc_cctx_reset()` /

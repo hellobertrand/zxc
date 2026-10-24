@@ -151,58 +151,37 @@ int test_cctx_level_raise_reinit(void) {
     }
     printf("  [PASS] level 3 -> 6 raise through the block API\n");
 
-    /* 3. The one-shot clamps: level 99 must produce the exact archive level 7
-     *    produces, and 0 the level-3 one. The setter refuses instead, and the
-     *    context keeps its level. */
-    uint8_t* comp7 = malloc(comp_cap);
-    if (!comp7) goto fail;
-    const int64_t c7 = zxc_compress(src, src_sz, comp7, comp_cap, ZXC_LEVEL_ULTRA);
-    const int64_t c99 = zxc_compress(src, src_sz, comp, comp_cap, 99);
-    if (c7 <= 0 || c99 != c7 || memcmp(comp, comp7, (size_t)c7) != 0) {
-        printf("  [FAIL] zxc_compress(level=99) must clamp to ULTRA (c7=%lld c99=%lld)\n",
-               (long long)c7, (long long)c99);
-        free(comp7);
+    /* 3. Out-of-range levels: the one-shot and the setter both refuse them,
+     *    the setter keeps its level and the context stays usable. 0 means the
+     *    default: the one-shot must produce the exact level-3 archive. */
+    const int bad_levels[] = {99, ZXC_LEVEL_ULTRA + 1, -5, -1};
+    int64_t lvl = 0;
+    for (size_t i = 0; i < sizeof(bad_levels) / sizeof(bad_levels[0]); i++) {
+        const int bad = bad_levels[i];
+        if (zxc_compress(src, src_sz, comp, comp_cap, bad) != ZXC_ERROR_BAD_LEVEL ||
+            zxc_cctx_set_param(cctx, ZXC_C_LEVEL, bad) != ZXC_ERROR_BAD_LEVEL ||
+            zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &lvl) != ZXC_OK || lvl != ZXC_LEVEL_DENSITY) {
+            printf("  [FAIL] level %d must be refused everywhere, setter level kept (now %lld)\n",
+                   bad, (long long)lvl);
+            goto fail;
+        }
+    }
+    if (zxc_compress_block(cctx, src, src_sz, comp, comp_cap) <= 0) {
+        printf("  [FAIL] context unusable after refused levels\n");
         goto fail;
     }
-    const int64_t c3 = zxc_compress(src, src_sz, comp7, comp_cap, ZXC_LEVEL_DEFAULT);
+    uint8_t* comp3 = malloc(comp_cap);
+    if (!comp3) goto fail;
+    const int64_t c3 = zxc_compress(src, src_sz, comp3, comp_cap, ZXC_LEVEL_DEFAULT);
     const int64_t c0 = zxc_compress(src, src_sz, comp, comp_cap, 0);
-    if (c3 <= 0 || c0 != c3 || memcmp(comp, comp7, (size_t)c3) != 0) {
+    const int same = c3 > 0 && c0 == c3 && memcmp(comp, comp3, (size_t)c3) == 0;
+    free(comp3);
+    if (!same) {
         printf("  [FAIL] zxc_compress(level=0) must mean the default (c3=%lld c0=%lld)\n",
                (long long)c3, (long long)c0);
-        free(comp7);
         goto fail;
     }
-    free(comp7);
-    int64_t lvl = 0;
-    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 99) != ZXC_ERROR_BAD_LEVEL ||
-        zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_ULTRA + 1) != ZXC_ERROR_BAD_LEVEL ||
-        zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &lvl) != ZXC_OK || lvl != ZXC_LEVEL_DENSITY) {
-        printf("  [FAIL] set_param(level 99) must be refused, level kept (now %lld)\n",
-               (long long)lvl);
-        goto fail;
-    }
-    printf("  [PASS] level 99: clamped by the one-shot, refused by the setter\n");
-
-    /* 4. Negative levels: the one-shot clamps to FASTEST, not the default; the
-     *    setter refuses them too. */
-    uint8_t* comp1 = malloc(comp_cap);
-    if (!comp1) goto fail;
-    const int64_t c1 = zxc_compress(src, src_sz, comp1, comp_cap, ZXC_LEVEL_FASTEST);
-    const int64_t cneg = zxc_compress(src, src_sz, comp, comp_cap, -5);
-    if (c1 <= 0 || cneg != c1 || memcmp(comp, comp1, (size_t)c1) != 0) {
-        printf("  [FAIL] zxc_compress(level=-5) must clamp to FASTEST (c1=%lld cneg=%lld)\n",
-               (long long)c1, (long long)cneg);
-        free(comp1);
-        goto fail;
-    }
-    free(comp1);
-    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, -5) != ZXC_ERROR_BAD_LEVEL ||
-        zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &lvl) != ZXC_OK || lvl != ZXC_LEVEL_DENSITY ||
-        zxc_compress_block(cctx, src, src_sz, comp, comp_cap) <= 0) {
-        printf("  [FAIL] set_param(level -5) must be refused, context still usable\n");
-        goto fail;
-    }
-    printf("  [PASS] level -5: clamped by the one-shot, refused by the setter\n");
+    printf("  [PASS] out-of-range levels refused by one-shot and setter, 0 is the default\n");
 
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);

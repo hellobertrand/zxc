@@ -150,6 +150,29 @@ describe("Cctx / Dctx", () => {
     ).toBe(true);
   });
 
+  test("refuse a non-integer level instead of coercing it", () => {
+    const payload = Buffer.from("level coercion");
+    const code = (fn) => {
+      try {
+        fn();
+      } catch (e) {
+        return e.code;
+      }
+      return undefined;
+    };
+    for (const level of [2 ** 32 + 5, 7.9, 0.5, NaN, Infinity, "3"]) {
+      expect(code(() => zxc.compress(payload, { level }))).toBe(
+        zxc.ERROR_BAD_LEVEL,
+      );
+      expect(code(() => new zxc.Cctx({ level }))).toBe(zxc.ERROR_BAD_LEVEL);
+      expect(code(() => new zxc.CStream({ level }))).toBe(zxc.ERROR_BAD_LEVEL);
+    }
+    // null, like undefined, selects the default.
+    expect(
+      new zxc.Cctx({ level: null }).compress(payload).length,
+    ).toBeGreaterThan(0);
+  });
+
   test("refuse calls after close", () => {
     const payload = Buffer.concat(samples());
     const cctx = new zxc.Cctx();

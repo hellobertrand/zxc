@@ -404,8 +404,8 @@ function decompress(data, options = {}) {
  * Reusable compression context: one archive per `compress()` call, buffers
  * carved once. Options: `level`, `checksum`, `dict`, `dictHuf`; a dictionary
  * applies to every call. The options are set on the native context at
- * construction: a `level` outside 1-7 throws with `code === ERROR_BAD_LEVEL`
- * (no clamping, as with the one-shot {@link compress}). Not thread-safe;
+ * construction: a `level` outside 1-7 throws with `code === ERROR_BAD_LEVEL`.
+ * Not thread-safe;
  * `close()` when done.
  *
  * @example

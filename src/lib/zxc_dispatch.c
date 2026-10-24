@@ -648,6 +648,7 @@ static int64_t zxc_compress_params(const void* RESTRICT src, const size_t src_si
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const int seekable = opts ? opts->seekable : 0;
     const int level = ZXC_OPTS_LEVEL(opts, ZXC_LEVEL_DEFAULT);
+    if (UNLIKELY(level < ZXC_LEVEL_FASTEST || level > ZXC_LEVEL_ULTRA)) return ZXC_ERROR_BAD_LEVEL;
     const size_t block_size = ZXC_OPTS_BLOCK_SIZE(opts, ZXC_BLOCK_SIZE_DEFAULT);
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
     const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
@@ -1149,13 +1150,13 @@ static int zxc_ctx_sync_dict_huf(zxc_cctx_t* RESTRICT inner, uint8_t* RESTRICT c
     return ZXC_OK;
 }
 
-/** @brief Per-call options from a parameter set, library defaults for zero fields. */
+/** @brief Per-call options of a context; its level and block size are always
+ *         resolved and in range (setters, defaults, static init). */
 static zxc_cctx_opts_t zxc_cparams_resolve(const zxc_cparams_t* p) {
-    return (zxc_cctx_opts_t){
-        .level = zxc_level_clamp(p->level != 0 ? p->level : ZXC_LEVEL_DEFAULT),
-        .checksum = p->checksum_enabled,
-        .seekable = p->seekable,
-        .block_size = p->block_size > 0 ? p->block_size : ZXC_BLOCK_SIZE_DEFAULT};
+    return (zxc_cctx_opts_t){.level = p->level,
+                             .checksum = p->checksum_enabled,
+                             .seekable = p->seekable,
+                             .block_size = p->block_size};
 }
 
 /** @brief The parameters every public context starts from. */
