@@ -129,7 +129,7 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
         if (n < 0 || (size_t)n >= sizeof(path)) continue;
         size_t sz = 0;
         uint8_t* buf = vio_read_file(path, &sz);
-        if (buf && zxc_dict_get_id(buf, sz) == target_id) {
+        if (buf && zxc_dict_read_id(buf, sz) == target_id) {
             if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
                 FindClose(hf);
                 return buf;
@@ -149,7 +149,7 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
         if (n < 0 || (size_t)n >= sizeof(path)) continue;
         size_t sz = 0;
         uint8_t* buf = vio_read_file(path, &sz);
-        if (buf && zxc_dict_get_id(buf, sz) == target_id) {
+        if (buf && zxc_dict_read_id(buf, sz) == target_id) {
             if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
                 closedir(dp);
                 return buf;
@@ -479,7 +479,7 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
     }
 
     if (dict_ok) {
-        size_t cap = (size_t)zxc_compress_bound(in_size) + 4096;
+        size_t cap = zxc_compress_bound(in_size) + 4096;
         uint8_t* out = (uint8_t*)malloc(cap);
         if (!out) {
             fprintf(stderr, "FAIL: %s  OOM\n", vc->name);

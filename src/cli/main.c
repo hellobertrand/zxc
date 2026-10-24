@@ -1014,7 +1014,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
         uint8_t probe[ZXC_DICT_HEADER_SIZE];
         if (fseeko(f, 0, SEEK_SET) == 0 &&
             fread(probe, 1, ZXC_DICT_HEADER_SIZE, f) == ZXC_DICT_HEADER_SIZE &&
-            zxc_dict_get_id(probe, ZXC_DICT_HEADER_SIZE) != 0) {
+            zxc_dict_read_id(probe, ZXC_DICT_HEADER_SIZE) != 0) {
             uint8_t* dbuf = (uint8_t*)malloc((size_t)file_size);
             int r = 1;
             if (dbuf && fseeko(f, 0, SEEK_SET) == 0 &&
@@ -2007,8 +2007,8 @@ int main(int argc, char** argv) {
             return 1;
         }
 
-        int64_t dict_sz = zxc_train_dict((const void* const*)samples, sample_sizes,
-                                         (size_t)n_loaded, dict_buf, dict_cap);
+        int64_t dict_sz = zxc_dict_train_content((const void* const*)samples, sample_sizes,
+                                                 (size_t)n_loaded, dict_buf, dict_cap);
 
         /* Train the shared literal Huffman table on the same samples (needs
          * the trained dict for the post-LZ literal distribution). The .zxd
@@ -2016,7 +2016,7 @@ int main(int argc, char** argv) {
         uint8_t huf_lengths[ZXC_HUF_TABLE_SIZE];
         int huf_rc = ZXC_ERROR_NULL_INPUT;
         if (dict_sz > 0) {
-            huf_rc = zxc_train_dict_huf((const void* const*)samples, sample_sizes, (size_t)n_loaded,
+            huf_rc = zxc_dict_train_huf((const void* const*)samples, sample_sizes, (size_t)n_loaded,
                                         dict_buf, (size_t)dict_sz, huf_lengths);
         }
 
@@ -2062,7 +2062,7 @@ int main(int argc, char** argv) {
          * name inside it; otherwise write to the -o path verbatim. The id must be
          * computed before opening the file so it can name it.
          */
-        const uint32_t trained_id = zxc_dict_get_id(zxd, (size_t)zxd_sz);
+        const uint32_t trained_id = zxc_dict_read_id(zxd, (size_t)zxd_sz);
         char final_path[4096];
         if (!output_path) {
             snprintf(final_path, sizeof(final_path), "dictionary_%08x.zxd", trained_id);

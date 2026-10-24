@@ -25,7 +25,7 @@ use crate::{CompressOptions, DecompressOptions, Error, Level, Result};
 /// assert!(bound > 1024); // Accounts for headers and worst-case expansion
 /// ```
 #[inline]
-pub fn compress_bound(input_size: usize) -> u64 {
+pub fn compress_bound(input_size: usize) -> usize {
     unsafe { zxc_sys::zxc_compress_bound(input_size) }
 }
 
@@ -78,7 +78,7 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
 /// # Ok::<(), zxc::Error>(())
 /// ```
 pub fn compress_with_options(data: &[u8], options: &CompressOptions) -> Result<Vec<u8>> {
-    let bound = compress_bound(data.len()) as usize;
+    let bound = compress_bound(data.len());
     let mut output = Vec::with_capacity(bound);
 
     let written = unsafe { impl_compress(data, output.as_mut_ptr(), output.capacity(), options)? };
@@ -148,7 +148,7 @@ unsafe fn impl_compress(
 /// use zxc::{compress_to, compress_bound, CompressOptions};
 ///
 /// let data = b"Hello, world!";
-/// let mut output = vec![0u8; compress_bound(data.len()) as usize];
+/// let mut output = vec![0u8; compress_bound(data.len())];
 /// let size = compress_to(data, &mut output, &CompressOptions::default())?;
 /// output.truncate(size);
 /// # Ok::<(), zxc::Error>(())
@@ -544,7 +544,7 @@ mod tests {
     #[test]
     fn test_compress_to_buffer() {
         let data = b"Testing compress_to with pre-allocated buffer";
-        let mut output = vec![0u8; compress_bound(data.len()) as usize];
+        let mut output = vec![0u8; compress_bound(data.len())];
 
         let size = compress_to(data, &mut output, &CompressOptions::default()).unwrap();
         output.truncate(size);

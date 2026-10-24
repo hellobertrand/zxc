@@ -37,6 +37,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "zxc_constants.h"
 #include "zxc_export.h"
 #include "zxc_opts.h"
 
@@ -78,6 +79,15 @@ ZXC_EXPORT int zxc_default_level(void);
  */
 ZXC_EXPORT const char* zxc_version_string(void);
 
+/**
+ * @brief Library version as one integer, @ref ZXC_VERSION_NUMBER of the loaded library.
+ *
+ * Compare with the header's @ref ZXC_VERSION_NUMBER to detect a runtime
+ * library older than the one compiled against.
+ * @return MAJOR * 10000 + MINOR * 100 + PATCH.
+ */
+ZXC_EXPORT unsigned zxc_version_number(void);
+
 /** @} */ /* end of library_info */
 
 /**
@@ -93,9 +103,10 @@ ZXC_EXPORT const char* zxc_version_string(void);
  * incompressible data. Use it to size the destination buffer.
  *
  * @param[in] input_size Input size in bytes.
- * @return Required destination capacity in bytes.
+ * @return Required destination capacity in bytes, or 0 when that capacity
+ *         would not fit a @c size_t on this platform (no buffer could hold it).
  */
-ZXC_EXPORT uint64_t zxc_compress_bound(const size_t input_size);
+ZXC_EXPORT size_t zxc_compress_bound(const size_t input_size);
 
 /**
  * @brief Compresses a buffer into a complete ZXC archive.
@@ -217,7 +228,10 @@ ZXC_EXPORT int64_t zxc_decompress_inplace(void* buffer, const size_t buffer_capa
 ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_size);
 
 /**
- * @brief Reads the dictionary ID from an archive header, without decoding.
+ * @brief Reads the dictionary ID an archive requires, from its header.
+ *
+ * Also reported as zxc_frame_info_t::dict_id. For the ID of a `.zxd` file see
+ * zxc_dict_read_id(); to compute one from content, zxc_dict_compute_id().
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.
@@ -339,7 +353,7 @@ typedef struct zxc_dctx_s zxc_dctx;
  * @return Upper bound on the compressed block size, or 0 if @p input_size is
  *         out of range for the Block API or would overflow.
  */
-ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
+ZXC_EXPORT size_t zxc_compress_block_bound(size_t input_size);
 
 /**
  * @brief Minimum @c dst_capacity zxc_decompress_block() needs for a block of
@@ -356,7 +370,7 @@ ZXC_EXPORT uint64_t zxc_compress_block_bound(size_t input_size);
  * @return Minimum @c dst_capacity, or 0 if @p uncompressed_size is out of
  *         range for the Block API or would overflow.
  */
-ZXC_EXPORT uint64_t zxc_decompress_block_bound(const size_t uncompressed_size);
+ZXC_EXPORT size_t zxc_decompress_block_bound(const size_t uncompressed_size);
 
 /**
  * @brief Compresses a single block without file framing.
@@ -485,7 +499,7 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
  *                     scratch.
  * @return Estimated peak cctx memory in bytes, or 0 if @p src_size is 0.
  */
-ZXC_EXPORT uint64_t zxc_estimate_cctx_size(size_t src_size, int level);
+ZXC_EXPORT size_t zxc_estimate_cctx_size(size_t src_size, int level);
 
 /** @} */ /* end of block_api */
 

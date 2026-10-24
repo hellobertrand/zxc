@@ -24,7 +24,7 @@ use crate::{CompressOptions, DecompressOptions, Error, Result};
 ///
 /// let mut cctx = Cctx::new(None)?;
 /// let opts = CompressOptions::default().with_level(Level::Default);
-/// let mut out = vec![0u8; zxc::compress_block_bound(block.len()) as usize];
+/// let mut out = vec![0u8; zxc::compress_block_bound(block.len())];
 /// let n = cctx.compress_block(block, &mut out, &opts)?;
 /// ```
 pub struct Cctx {
@@ -223,7 +223,7 @@ impl Drop for Dctx {
 
 /// Returns the maximum compressed size for a single block of `input_size`
 /// bytes (no file framing).
-pub fn compress_block_bound(input_size: usize) -> u64 {
+pub fn compress_block_bound(input_size: usize) -> usize {
     unsafe { zxc_sys::zxc_compress_block_bound(input_size) }
 }
 
@@ -233,7 +233,7 @@ pub fn compress_block_bound(input_size: usize) -> u64 {
 /// Accounts for the wild-copy tail pad used by the fast decoder. For a
 /// strictly-sized destination, use [`Dctx::decompress_block_safe`] instead
 /// and size the buffer to exactly the uncompressed length.
-pub fn decompress_block_bound(uncompressed_size: usize) -> u64 {
+pub fn decompress_block_bound(uncompressed_size: usize) -> usize {
     unsafe { zxc_sys::zxc_decompress_block_bound(uncompressed_size) }
 }
 
@@ -274,14 +274,14 @@ mod tests {
             .with_dict_huf(huf.clone());
         let mut cctx = Cctx::new(Some(&create)).expect("Cctx::new");
 
-        let mut inherited = vec![0u8; compress_block_bound(block.len()) as usize];
+        let mut inherited = vec![0u8; compress_block_bound(block.len())];
         let n_inherited = cctx
             .compress_block(block, &mut inherited, &CompressOptions::default())
             .expect("compress_block with inherited dict");
 
         // The same block through a dictionary-less context, for contrast.
         let mut plain_ctx = Cctx::new(None).expect("Cctx::new");
-        let mut plain = vec![0u8; compress_block_bound(block.len()) as usize];
+        let mut plain = vec![0u8; compress_block_bound(block.len())];
         let n_plain = plain_ctx
             .compress_block(block, &mut plain, &CompressOptions::default())
             .expect("compress_block without dict");
@@ -310,8 +310,8 @@ mod tests {
         let block = &corpus[7];
         let mut cctx = Cctx::new(None).unwrap();
         let mut dctx = Dctx::new().unwrap();
-        let mut comp = vec![0u8; compress_block_bound(block.len()) as usize];
-        let mut out = vec![0u8; decompress_block_bound(block.len()) as usize];
+        let mut comp = vec![0u8; compress_block_bound(block.len())];
+        let mut out = vec![0u8; decompress_block_bound(block.len())];
         let mut exact = vec![0u8; block.len()];
 
         for (level, table) in [(Level::Default, false), (Level::Ultra, true)] {
@@ -347,7 +347,7 @@ mod tests {
         let dict = train_dict(&samples, 4096).expect("train_dict");
         let block = &corpus[3];
         let mut cctx = Cctx::new(None).unwrap();
-        let mut comp = vec![0u8; compress_block_bound(block.len()) as usize];
+        let mut comp = vec![0u8; compress_block_bound(block.len())];
         let copts = CompressOptions::default()
             .with_dict(dict.clone())
             .with_dict_huf(vec![0u8; 7]);

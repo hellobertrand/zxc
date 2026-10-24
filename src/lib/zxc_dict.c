@@ -26,8 +26,8 @@
  * over the packed Huffman lengths seeded by the first, so a single id covers
  * both. Stored in the archive header and re-checked on decode.
  */
-uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
-                     const void* RESTRICT huf_lengths) {
+uint32_t zxc_dict_compute_id(const void* RESTRICT dict, const size_t dict_size,
+                             const void* RESTRICT huf_lengths) {
     if (UNLIKELY(!dict || dict_size == 0)) return 0;
     const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
     if (!huf_lengths) return base;
@@ -54,7 +54,7 @@ uint32_t zxc_dict_id(const void* RESTRICT dict, const size_t dict_size,
  *
  * Public API; see @c zxc_dict.h. Reads the header field without recomputing it.
  */
-uint32_t zxc_dict_get_id(const void* buf, const size_t buf_size) {
+uint32_t zxc_dict_read_id(const void* buf, const size_t buf_size) {
     if (UNLIKELY(!buf || buf_size < ZXC_DICT_HEADER_SIZE)) return 0;
     const uint8_t* p = (const uint8_t*)buf;
     if (UNLIKELY(zxc_le32(p) != ZXC_DICT_MAGIC)) return 0;
@@ -91,7 +91,8 @@ int64_t zxc_dict_save(const void* RESTRICT content, const size_t content_size,
     dst[4] = ZXC_DICT_VERSION;
     dst[5] = 0; /* flags: reserved */
     zxc_store_le16(dst + 6, (uint16_t)content_size);
-    zxc_store_le32(dst + 8, zxc_dict_id(content, content_size, (const uint8_t*)huf_lengths));
+    zxc_store_le32(dst + 8,
+                   zxc_dict_compute_id(content, content_size, (const uint8_t*)huf_lengths));
     zxc_store_le32(dst + 12, 0); /* reserved (0x0C) + checksum (0x0E), zeroed before hashing */
     const uint16_t sum = zxc_hash16(dst);
     zxc_store_le16(dst + 14, sum);
@@ -136,7 +137,7 @@ int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
     const uint8_t* huf = content + content_size;
 
     // Verify dict_id matches the (content, table) pair.
-    const uint32_t id = zxc_dict_id(content, content_size, huf);
+    const uint32_t id = zxc_dict_compute_id(content, content_size, huf);
     if (UNLIKELY(zxc_le32(src + 8) != id)) return ZXC_ERROR_BAD_CHECKSUM;
 
     *content_out = content;
@@ -260,9 +261,9 @@ static void zxc_dict_sort_segs_desc(zxc_dict_seg_t* RESTRICT a, const size_t n) 
  * Picks are emitted in reverse so the highest-coverage bytes land at the dict's
  * end, where match offsets are smallest.
  */
-int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
-                       const size_t n_samples, void* RESTRICT dict_buf,
-                       const size_t dict_capacity) {
+int64_t zxc_dict_train_content(const void* const* RESTRICT samples,
+                               const size_t* RESTRICT sample_sizes, const size_t n_samples,
+                               void* RESTRICT dict_buf, const size_t dict_capacity) {
     if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !dict_buf || dict_capacity == 0))
         return ZXC_ERROR_NULL_INPUT;  // LCOV_EXCL_LINE
     if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
@@ -434,7 +435,7 @@ done:
  * Public API; see @c zxc_dict.h and the algorithm note above. Slices are
  * sub-sampled to a fixed budget.
  */
-int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
+int zxc_dict_train_huf(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
                        const size_t n_samples, const void* RESTRICT dict, const size_t dict_size,
                        uint8_t* RESTRICT huf_lengths_out) {
     if (UNLIKELY(!samples || !sample_sizes || n_samples == 0 || !dict || dict_size == 0 ||
@@ -451,7 +452,7 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
     uint32_t freq[ZXC_HUF_NUM_SYMBOLS] = {0};
     cctx.lit_freq_acc = freq;
 
-    const size_t out_cap = (size_t)zxc_compress_bound(eff_chunk);
+    const size_t out_cap = zxc_compress_bound(eff_chunk);
     uint8_t* out_scratch = (uint8_t*)ZXC_MALLOC(out_cap);
     if (UNLIKELY(!out_scratch)) {
         // LCOV_EXCL_START
@@ -533,8 +534,8 @@ int zxc_train_dict_huf(const void* const* RESTRICT samples, const size_t* RESTRI
 /**
  * @brief One-shot training: sample buffers in, ready-to-write .zxd bytes out.
  *
- * Public API; see @c zxc_dict.h. Trains the content (@ref zxc_train_dict), then
- * the shared table from that content (@ref zxc_train_dict_huf), then serializes
+ * Public API; see @c zxc_dict.h. Trains the content (@ref zxc_dict_train_content), then
+ * the shared table from that content (@ref zxc_dict_train_huf), then serializes
  * both (@ref zxc_dict_save). The two phases are a real data dependency.
  */
 int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRICT sample_sizes,
@@ -551,7 +552,7 @@ int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRI
 
     int64_t out;
     const int64_t content_size =
-        zxc_train_dict(samples, sample_sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
+        zxc_dict_train_content(samples, sample_sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
     if (UNLIKELY(content_size <= 0)) {
         // LCOV_EXCL_START
         out = (content_size < 0) ? content_size : ZXC_ERROR_SRC_TOO_SMALL;
@@ -561,7 +562,7 @@ int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRI
 
     {
         uint8_t huf[ZXC_HUF_TABLE_SIZE];
-        const int hrc = zxc_train_dict_huf(samples, sample_sizes, n_samples, content,
+        const int hrc = zxc_dict_train_huf(samples, sample_sizes, n_samples, content,
                                            (size_t)content_size, huf);
         if (UNLIKELY(hrc != ZXC_OK)) {
             // LCOV_EXCL_START

@@ -30,7 +30,7 @@ int main(void) {
     size_t original_size = strlen(original) + 1;  // Include null terminator
 
     // Step 1: Calculate maximum compressed size
-    uint64_t max_compressed_size = zxc_compress_bound(original_size);
+    size_t max_compressed_size = zxc_compress_bound(original_size);
 
     // Step 2: Allocate buffers
     void* compressed   = malloc(max_compressed_size);
@@ -263,7 +263,7 @@ int main(void) {
         return 1;
     }
 
-    const size_t comp_cap = (size_t)zxc_compress_bound(BLOCK_SIZE);
+    const size_t comp_cap = zxc_compress_bound(BLOCK_SIZE);
     uint8_t* comp = malloc(comp_cap);
     uint8_t* src  = malloc(BLOCK_SIZE);
     uint8_t* dec  = malloc(BLOCK_SIZE);
@@ -488,7 +488,7 @@ int main(void) {
     for (size_t i = 0; i < n; i++) { t += 1000000 + (int64_t)(i % 7); ts[i] = t; }
 
     const size_t raw = n * sizeof *ts;
-    size_t cap = (size_t)zxc_compress_bound(raw);
+    size_t cap = zxc_compress_bound(raw);
     void *comp = malloc(cap);
     zxc_compress_opts_t opts = { .level = 3 };
 
@@ -596,7 +596,7 @@ int main(void) {
     /* 3. Compress WITH the dictionary (level 6 to engage the shared table). */
     const char *msg  = "{\"event\":\"login\",\"user_id\":2003,\"ok\":true}";
     size_t      n    = strlen(msg) + 1;
-    size_t      cap  = (size_t)zxc_compress_bound(n);
+    size_t      cap  = zxc_compress_bound(n);
     uint8_t    *comp = malloc(cap);
 
     zxc_compress_opts_t copts = { .level = 6, .dict = content,
@@ -624,8 +624,8 @@ int main(void) {
 
 > The `content` and `table` pointers returned by `zxc_dict_load()` aim **into**
 > `zxd` (zero-copy), so keep `zxd` alive until you're done compressing or
-> decompressing. The lower-level primitives (`zxc_train_dict` +
-> `zxc_train_dict_huf` + `zxc_dict_save`, and `zxc_dict_huf`) remain available
+> decompressing. The lower-level primitives (`zxc_dict_train_content` +
+> `zxc_dict_train_huf` + `zxc_dict_save`, and `zxc_dict_huf`) remain available
 > for advanced use — e.g. a **raw content-only dictionary** with no table
 > (`dict` set, `dict_huf = NULL`) for ad-hoc window priming where a trained
 > table adds nothing.
@@ -639,10 +639,10 @@ static int64_t build_zxd(const void* const* samples, const size_t* sizes, size_t
     uint8_t* content = malloc(ZXC_DICT_SIZE_MAX);   /* 64 KB: too big for the stack */
     if (!content) return ZXC_ERROR_MEMORY;
 
-    const int64_t csize = zxc_train_dict(samples, sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
+    const int64_t csize = zxc_dict_train_content(samples, sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
     if (csize <= 0) { free(content); return csize; }
 
-    const int rc = zxc_train_dict_huf(samples, sizes, n_samples, content, (size_t)csize, table);
+    const int rc = zxc_dict_train_huf(samples, sizes, n_samples, content, (size_t)csize, table);
     if (rc != ZXC_OK) { free(content); return rc; }
 
     const int64_t zsize = zxc_dict_save(content, (size_t)csize, table, zxd_buf, zxd_cap);

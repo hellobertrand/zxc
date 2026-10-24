@@ -41,6 +41,15 @@
     ZXC_STR(ZXC_VERSION_MAJOR) \
     "." ZXC_STR(ZXC_VERSION_MINOR) "." ZXC_STR(ZXC_VERSION_PATCH)
 
+/**
+ * @brief Version as one integer, MAJOR * 10000 + MINOR * 100 + PATCH (e.g. 1500 for 0.15.0).
+ *
+ * Orders like the version triple, so a header requirement reads
+ * `#if ZXC_VERSION_NUMBER >= 10000`. zxc_version_number() returns the same
+ * value for the library actually loaded, which may differ from this header.
+ */
+#define ZXC_VERSION_NUMBER (ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH)
+
 /** @} */ /* end of version */
 
 /**
@@ -81,7 +90,7 @@
 #define ZXC_DICT_HEADER_SIZE 16
 /** @brief Size of a packed literal Huffman code-lengths table (256 symbols,
  *         4 bits each): the shared table in a .zxd file, and internally the
- *         per-block lengths header. See zxc_train_dict_huf() / zxc_dict_huf(). */
+ *         per-block lengths header. See zxc_dict_train_huf() / zxc_dict_huf(). */
 #define ZXC_HUF_TABLE_SIZE 128
 /** @} */ /* end of dictionary */
 

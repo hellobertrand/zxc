@@ -173,7 +173,7 @@ int test_encoder_output_pinned(void) {
 
     static const size_t k_block_sizes[] = {0 /* default */, 32 * 1024};
     static const size_t k_dict_block_size[] = {4096};
-    const size_t cap = (size_t)zxc_compress_bound(PIN_INPUT_SIZE);
+    const size_t cap = zxc_compress_bound(PIN_INPUT_SIZE);
 
     uint8_t* const src = (uint8_t*)malloc((size_t)PIN_N_INPUTS * PIN_INPUT_SIZE);
     uint8_t* const comp = (uint8_t*)malloc(cap);
@@ -207,8 +207,8 @@ int test_encoder_output_pinned(void) {
     }
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
     const int64_t dict_size =
-        ok ? zxc_train_dict(samples, sample_sizes, n_samples, dict, PIN_DICT_CAP) : -1;
-    if (ok && (dict_size <= 0 || zxc_train_dict_huf(samples, sample_sizes, n_samples, dict,
+        ok ? zxc_dict_train_content(samples, sample_sizes, n_samples, dict, PIN_DICT_CAP) : -1;
+    if (ok && (dict_size <= 0 || zxc_dict_train_huf(samples, sample_sizes, n_samples, dict,
                                                     (size_t)dict_size, huf) != ZXC_OK)) {
         printf("  [FAIL] dictionary training (%lld)\n", (long long)dict_size);
         ok = 0;

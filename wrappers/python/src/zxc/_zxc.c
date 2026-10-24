@@ -778,7 +778,7 @@ static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwar
 
     int64_t dict_size;
     Py_BEGIN_ALLOW_THREADS dict_size =
-        zxc_train_dict(ptrs, sizes, (size_t)n, dict_buf, (size_t)max_size);
+        zxc_dict_train_content(ptrs, sizes, (size_t)n, dict_buf, (size_t)max_size);
     Py_END_ALLOW_THREADS
 
         for (Py_ssize_t i = 0; i < n; i++) PyBuffer_Release(&views[i]);
@@ -848,7 +848,7 @@ static PyObject* pyzxc_train_dict_huf(PyObject* self, PyObject* args, PyObject* 
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
     if (acquired == n) {
         Py_BEGIN_ALLOW_THREADS rc =
-            zxc_train_dict_huf(ptrs, sizes, (size_t)n, dict_view.buf, (size_t)dict_view.len, huf);
+            zxc_dict_train_huf(ptrs, sizes, (size_t)n, dict_view.buf, (size_t)dict_view.len, huf);
         Py_END_ALLOW_THREADS
     }
 
@@ -869,7 +869,7 @@ static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
     if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
-    uint32_t id = zxc_dict_id(view.buf, (size_t)view.len, NULL);
+    uint32_t id = zxc_dict_compute_id(view.buf, (size_t)view.len, NULL);
     PyBuffer_Release(&view);
     return PyLong_FromUnsignedLong(id);
 }
@@ -889,7 +889,7 @@ static PyObject* pyzxc_dict_get_id(PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
     if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
-    uint32_t id = zxc_dict_get_id(view.buf, (size_t)view.len);
+    uint32_t id = zxc_dict_read_id(view.buf, (size_t)view.len);
     PyBuffer_Release(&view);
     return PyLong_FromUnsignedLong(id);
 }

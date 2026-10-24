@@ -68,7 +68,7 @@ add_library(zxc::zxc_lib ALIAS zxc_lib)
 # ABI Versioning (Debian/Linux shared libraries)
 # =============================================================================
 # Increment this number ONLY when breaking the ABI.
-set(ZXC_SOVERSION 5)
+set(ZXC_SOVERSION 6)
 
 set_target_properties(zxc_lib PROPERTIES
     OUTPUT_NAME zxc
