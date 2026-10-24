@@ -21,8 +21,9 @@ use crate::{Error, Level};
 
 /// Destination of a file pipeline. A regular or new output is written to a
 /// sibling temporary file renamed over it on success, so a failed call leaves
-/// the previous content intact. Any other output (device, FIFO) is written in
-/// place.
+/// the previous content intact. It is written in place when that is
+/// impossible: a device or FIFO, or a directory that refuses the temporary
+/// file.
 struct Output {
     /// Taken on commit, so the file is closed before the rename.
     file: Option<File>,
@@ -37,8 +38,9 @@ impl Output {
         // Replace a link's target, not the link.
         let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
         // Opening the existing output fails where File::create would, tells a
-        // device or FIFO apart, and gives the mode the replacement keeps.
-        let mode = match OpenOptions::new().write(true).open(&path) {
+        // device or FIFO apart, gives the mode the replacement keeps, and is
+        // the handle to fall back on.
+        let mut existing = match OpenOptions::new().write(true).open(&path) {
             Ok(file) => {
                 let meta = file.metadata()?;
                 if !meta.is_file() {
@@ -47,7 +49,7 @@ impl Output {
                         pending: None,
                     });
                 }
-                Some(meta.permissions())
+                Some((file, meta.permissions()))
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
@@ -62,6 +64,17 @@ impl Output {
             match OpenOptions::new().write(true).create_new(true).open(&tmp) {
                 Ok(file) => break (file, PathBuf::from(tmp)),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => match existing.take() {
+                    // The directory refuses a sibling: truncate the output in place.
+                    Some((file, _)) => {
+                        file.set_len(0)?;
+                        return Ok(Self {
+                            file: Some(file),
+                            pending: None,
+                        });
+                    }
+                    None => return Err(e),
+                },
                 Err(e) => return Err(e),
             }
         };
@@ -69,7 +82,7 @@ impl Output {
             file: Some(file),
             pending: Some((tmp, path)),
         };
-        if let Some(mode) = mode {
+        if let Some((_, mode)) = existing {
             out.file().set_permissions(mode)?; // drop removes the temporary file
         }
         Ok(out)
@@ -689,6 +702,37 @@ mod tests {
         let _ = fs::remove_file(&input_path);
         let _ = fs::remove_file(&compressed_path);
         let _ = fs::remove_file(&output_path);
+    }
+
+    /// A writable output in a directory that refuses new files is written in
+    /// place.
+    #[cfg(unix)]
+    #[test]
+    fn test_file_in_place_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root writes anywhere
+        }
+        let dir = std::path::PathBuf::from(temp_path("in_place_fallback"));
+        let locked = dir.join("locked");
+        let _ = fs::set_permissions(&locked, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&locked).unwrap();
+        let (input, out) = (dir.join("in"), locked.join("out"));
+        let payload = b"in-place fallback";
+        fs::write(&input, payload).unwrap();
+        fs::write(&out, b"old").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = compress_file(&input, &out, Level::Default, None, None);
+        let arc = fs::read(&out).unwrap();
+        let left = fs::read_dir(&locked).unwrap().count();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+
+        result.expect("compress_file into a read-only directory");
+        assert_eq!(decompress(&arc).unwrap(), payload);
+        assert_eq!(left, 1, "temporary file left behind");
     }
 
     /// A failed call, refused option or bad data, leaves an existing output

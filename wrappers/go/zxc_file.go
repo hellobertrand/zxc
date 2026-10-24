@@ -21,8 +21,9 @@ import (
 
 // outputFile is the destination of a file pipeline. A regular or new output
 // is written to a sibling temporary file renamed over it on success, so a
-// failed call leaves the previous content intact. Any other output (device,
-// FIFO) is written in place.
+// failed call leaves the previous content intact. It is written in place when
+// that is impossible: a device or FIFO, or a directory that refuses the
+// temporary file.
 type outputFile struct {
 	*os.File
 	final string // rename target; empty once in place
@@ -36,6 +37,7 @@ func createOutput(path string) (*outputFile, error) {
 	}
 	// Opening the existing output fails where os.Create would, tells a
 	// device or FIFO apart, and gives the mode the replacement keeps.
+	exists := false
 	var mode os.FileMode
 	if f, err := os.OpenFile(path, os.O_WRONLY, 0); err == nil {
 		st, err := f.Stat()
@@ -46,21 +48,28 @@ func createOutput(path string) (*outputFile, error) {
 		if err != nil {
 			return nil, err
 		}
-		mode = st.Mode().Perm()
+		exists, mode = true, st.Mode().Perm()
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return nil, err
 	}
 	for {
 		tmp := fmt.Sprintf("%s.%d-%d.zxc-tmp", path, os.Getpid(), tmpSeq.Add(1))
 		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
-		if errors.Is(err, os.ErrExist) {
+		switch {
+		case errors.Is(err, os.ErrExist):
 			continue
-		}
-		if err != nil {
+		case errors.Is(err, os.ErrPermission) && exists:
+			// The directory refuses a sibling: truncate the output in place.
+			f, err = os.OpenFile(path, os.O_WRONLY|os.O_TRUNC, 0)
+			if err != nil {
+				return nil, err
+			}
+			return &outputFile{File: f}, nil
+		case err != nil:
 			return nil, err
 		}
 		out := &outputFile{File: f, final: path}
-		if mode != 0 {
+		if exists {
 			if err := f.Chmod(mode); err != nil {
 				out.discard()
 				return nil, err

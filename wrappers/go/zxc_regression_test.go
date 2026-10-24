@@ -198,6 +198,44 @@ func TestParamRefusal(t *testing.T) {
 	}
 }
 
+// A writable output in a directory that refuses new files is written in place.
+func TestFileInPlaceFallback(t *testing.T) {
+	if runtime.GOOS == "windows" || os.Getuid() == 0 {
+		t.Skip("needs a directory the process cannot write to")
+	}
+	dir := t.TempDir()
+	in := filepath.Join(dir, "in")
+	locked := filepath.Join(dir, "locked")
+	out := filepath.Join(locked, "out")
+	payload := []byte("in-place fallback")
+	if err := os.WriteFile(in, payload, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(locked, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(out, []byte("old"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(locked, 0o555); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Chmod(locked, 0o755) // so TempDir can clean up
+	if _, err := CompressFile(in, out); err != nil {
+		t.Fatalf("CompressFile into a read-only directory: %v", err)
+	}
+	arc, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dec, err := Decompress(arc); err != nil || !bytes.Equal(dec, payload) {
+		t.Fatalf("in-place output does not decode: %v", err)
+	}
+	if ents, _ := os.ReadDir(locked); len(ents) != 1 {
+		t.Fatalf("temporary file left behind: %d entries", len(ents))
+	}
+}
+
 // A failed file call, refused option or bad data, leaves an existing output
 // untouched and no temporary file behind; a successful one replaces it.
 func TestFileFailureKeepsOutput(t *testing.T) {

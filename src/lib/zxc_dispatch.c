@@ -2110,9 +2110,9 @@ zxc_dctx* zxc_init_static_dctx(void* RESTRICT workspace, const size_t workspace_
  * @brief Compresses at @p level with every other parameter at its default.
  *
  * Public API; full contract in @c zxc_buffer.h. The frame walk of
- * zxc_compress_cctx(), on a context that lives for the call: 0 selects
- * @ref ZXC_LEVEL_DEFAULT and a level above @ref ZXC_LEVEL_ULTRA is clamped,
- * as the resolve step does for every context.
+ * zxc_compress_cctx() on a context that lives for the call: 0 selects
+ * @ref ZXC_LEVEL_DEFAULT, any other level outside 1..7 is refused as the
+ * setter would refuse it.
  */
 int64_t zxc_compress(const void* RESTRICT src, const size_t src_size, void* RESTRICT dst,
                      const size_t dst_capacity, const int level) {
