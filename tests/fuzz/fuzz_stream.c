@@ -30,6 +30,7 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_constants.h"
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_stream.h"
 
 #define FUZZ_STREAM_MAX_INPUT (256 << 10) /* 256 KiB, before tiling */
@@ -47,8 +48,8 @@ static void fuzz_raw(const uint8_t* src, const size_t n, const int n_threads, co
     if (!in) return;
     (void)zxc_stream_get_decompressed_size(in); /* restores the position */
     zxc_dctx* const cfg = zxc_create_dctx();
-    if (cfg && zxc_dctx_set_param(cfg, ZXC_D_THREADS, n_threads) == 0 &&
-        zxc_dctx_set_param(cfg, ZXC_D_CHECKSUM, checksum) == 0) {
+    if (cfg && zxc_dctx_set_param(cfg, ZXC_D_THREADS, n_threads) == ZXC_OK &&
+        zxc_dctx_set_param(cfg, ZXC_D_CHECKSUM, checksum) == ZXC_OK) {
         (void)zxc_stream_decompress(in, NULL, cfg); /* no output: a bomb costs CPU, not memory */
     }
     zxc_free_dctx(cfg);
@@ -125,17 +126,18 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const void* const dict = dict_size ? data : NULL;
     zxc_cctx* const co = zxc_create_cctx();
     zxc_dctx* const dopts = zxc_create_dctx();
-    const int configured = co && dopts && zxc_cctx_set_param(co, ZXC_C_THREADS, n_threads) == 0 &&
-                           zxc_cctx_set_param(co, ZXC_C_LEVEL, level) == 0 &&
-                           zxc_cctx_set_param(co, ZXC_C_BLOCK_SIZE, (int64_t)block_size) == 0 &&
-                           zxc_cctx_set_param(co, ZXC_C_CHECKSUM, checksum) == 0 &&
-                           zxc_cctx_set_param(co, ZXC_C_SEEKABLE, seekable) == 0 &&
-                           zxc_cctx_set_dict(co, dict, dict_size, NULL) == 0 &&
-                           zxc_cctx_set_progress(co, cb, NULL) == 0 &&
-                           zxc_dctx_set_param(dopts, ZXC_D_THREADS, n_threads) == 0 &&
-                           zxc_dctx_set_param(dopts, ZXC_D_CHECKSUM, checksum) == 0 &&
-                           zxc_dctx_set_dict(dopts, dict, dict_size, NULL) == 0 &&
-                           zxc_dctx_set_progress(dopts, cb, NULL) == 0;
+    const int configured =
+        co && dopts && zxc_cctx_set_param(co, ZXC_C_THREADS, n_threads) == ZXC_OK &&
+        zxc_cctx_set_param(co, ZXC_C_LEVEL, level) == ZXC_OK &&
+        zxc_cctx_set_param(co, ZXC_C_BLOCK_SIZE, (int64_t)block_size) == ZXC_OK &&
+        zxc_cctx_set_param(co, ZXC_C_CHECKSUM, checksum) == ZXC_OK &&
+        zxc_cctx_set_param(co, ZXC_C_SEEKABLE, seekable) == ZXC_OK &&
+        zxc_cctx_set_dict(co, dict, dict_size, NULL) == ZXC_OK &&
+        zxc_cctx_set_progress(co, cb, NULL) == ZXC_OK &&
+        zxc_dctx_set_param(dopts, ZXC_D_THREADS, n_threads) == ZXC_OK &&
+        zxc_dctx_set_param(dopts, ZXC_D_CHECKSUM, checksum) == ZXC_OK &&
+        zxc_dctx_set_dict(dopts, dict, dict_size, NULL) == ZXC_OK &&
+        zxc_dctx_set_progress(dopts, cb, NULL) == ZXC_OK;
     if (configured) roundtrip(plain, total, co, dopts);
     zxc_free_cctx(co);
     zxc_free_dctx(dopts);

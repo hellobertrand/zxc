@@ -128,6 +128,11 @@ Behaviour changes to know about, beyond the mechanical rewrite:
   creation value; `zxc_cctx_set_param(c, ZXC_C_LEVEL, 0)` restores the library
   default (3), whatever the context held before. `zxc_cctx_reset()` /
   `zxc_dctx_reset()` restore everything and detach the dictionary and callback.
+- **`zxc_decompress_dctx()` reports the same error codes as `zxc_decompress()`.**
+  A truncated input is `ZXC_ERROR_SRC_TOO_SMALL` and a malformed header
+  reports what the header parse found (`ZXC_ERROR_BAD_MAGIC`,
+  `ZXC_ERROR_BAD_VERSION`, `ZXC_ERROR_BAD_BLOCK_SIZE`), where 0.14 flattened
+  both to `ZXC_ERROR_NULL_INPUT` or `ZXC_ERROR_BAD_HEADER`.
 - **Settings persist by construction.** There is no "sticky" rule to remember:
   a parameter stays in force until set again. Code that passed a fresh struct
   to each call to override one field now calls `zxc_cctx_set_param()` once and

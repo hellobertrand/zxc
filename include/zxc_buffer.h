@@ -531,11 +531,10 @@ ZXC_EXPORT void zxc_free_cctx(zxc_cctx* cctx);
 /**
  * @brief Sets one parameter on @p cctx; 0 restores its default.
  *
- * Takes effect on the next call. A value outside zxc_cparam_bounds() is
- * refused and the parameter keeps its value: @ref ZXC_ERROR_BAD_LEVEL for
- * @ref ZXC_C_LEVEL, @ref ZXC_ERROR_BAD_BLOCK_SIZE for @ref ZXC_C_BLOCK_SIZE
- * (a non-power-of-two included), @ref ZXC_ERROR_BAD_PARAM otherwise. An
- * unknown @p param is @ref ZXC_ERROR_BAD_PARAM. On a static context
+ * Takes effect on the next call. A value outside zxc_cparam_bounds(), or an
+ * unknown @p param, is refused and the parameter keeps its value
+ * (@ref ZXC_ERROR_BAD_LEVEL, @ref ZXC_ERROR_BAD_BLOCK_SIZE or
+ * @ref ZXC_ERROR_BAD_PARAM). On a static context
  * (zxc_init_static_cctx()) the block size is pinned, a level raise into
  * @ref ZXC_LEVEL_DENSITY is refused when the workspace was carved below it,
  * and 0 restores the pinned block size and level.
@@ -564,8 +563,7 @@ ZXC_EXPORT int zxc_cctx_get_param(const zxc_cctx* cctx, zxc_cparam_t param, int6
  * The context keeps the pointers only: the bytes stay caller-owned and must
  * outlive every call that uses them. @p dict_huf, when non-NULL, is the
  * @ref ZXC_HUF_TABLE_SIZE-byte shared literal table (zxc_dict_huf()), used at
- * levels 6-7 and part of the archive's dict_id binding. The shared table is
- * rebuilt only when its bytes change between calls.
+ * levels 6-7 and part of the archive's dict_id binding.
  *
  * @param[in,out] cctx      Context to configure.
  * @param[in]     dict      Dictionary content, or NULL for none.
@@ -605,18 +603,13 @@ ZXC_EXPORT int zxc_cctx_reset(zxc_cctx* cctx);
 /**
  * @brief Compresses data using a reusable context.
  *
- * Like zxc_compress(), but reuses @p cctx's buffers instead of allocating per
- * call. The context re-initialises itself when block_size changes, or when a
- * level raise into @ref ZXC_LEVEL_DENSITY needs the optimal-parser scratch
- * that lower-level inits skip. On a static (caller-workspace) context such a
- * raise returns @ref ZXC_ERROR_BAD_LEVEL instead, since the workspace cannot
- * grow.
- *
- * The parameters in force are the context's: level, block size, checksum,
- * seek table (zxc_cctx_set_param()), dictionary (zxc_cctx_set_dict()). They
- * stay from call to call; the shared literal table is rebuilt only when it
- * changes. @ref ZXC_C_SEEKABLE appends the seek table without allocating,
- * static contexts included.
+ * Like zxc_compress(), but with the context's parameters (level, block size,
+ * checksum, seek table, dictionary) and its buffers, which are re-carved only
+ * when the block size or the dictionary changes, or when the level rises into
+ * @ref ZXC_LEVEL_DENSITY for the first time. A static (caller-workspace)
+ * context cannot grow: such a raise returns @ref ZXC_ERROR_BAD_LEVEL there.
+ * @ref ZXC_C_SEEKABLE appends the seek table without allocating, static
+ * contexts included.
  *
  * @param[in,out] cctx         Configured compression context.
  * @param[in]     src          Source data; may be NULL when @p src_size is 0.
@@ -723,13 +716,6 @@ ZXC_EXPORT int zxc_dctx_reset(zxc_dctx* dctx);
  * @par Asking without a destination
  * Same probe as zxc_decompress(), answered under this context's rules: a static
  * context still rejects a foreign block size and a dictionary-bound archive.
- *
- * @par Error codes changed after v0.14.0
- * They now match zxc_decompress() exactly. A truncated input reports
- * @ref ZXC_ERROR_SRC_TOO_SMALL and a malformed header reports what the header
- * parse found (@ref ZXC_ERROR_BAD_MAGIC, @ref ZXC_ERROR_BAD_VERSION,
- * @ref ZXC_ERROR_BAD_BLOCK_SIZE), where both used to flatten to
- * @ref ZXC_ERROR_NULL_INPUT or @ref ZXC_ERROR_BAD_HEADER.
  *
  * @param[in,out] dctx         Reusable decompression context.
  * @param[in]     src          Compressed data.

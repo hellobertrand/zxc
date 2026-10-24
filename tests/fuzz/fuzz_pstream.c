@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_pstream.h"
 
 /* Cap aligned with the maximum supported block size (2 MiB). */
@@ -138,8 +139,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
      * and buffer-API fuzzers (roundtrip, decompress) already exercise the
      * level dimension. Cheaper compression = more iterations/sec. */
     zxc_cctx* const copts = zxc_create_cctx();
-    if (!copts || zxc_cctx_set_param(copts, ZXC_C_LEVEL, 1) != 0 ||
-        zxc_cctx_set_param(copts, ZXC_C_CHECKSUM, checksum_enabled) != 0) {
+    if (!copts || zxc_cctx_set_param(copts, ZXC_C_LEVEL, 1) != ZXC_OK ||
+        zxc_cctx_set_param(copts, ZXC_C_CHECKSUM, checksum_enabled) != ZXC_OK) {
         zxc_free_cctx(copts);
         return 0;
     }
