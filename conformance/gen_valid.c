@@ -68,7 +68,7 @@ static int generate(const char* dir, const valid_case_t* vc) {
         fprintf(stderr, "  FAIL %s: out of memory\n", vc->name);
     } else {
         const int64_t csize =
-            vc_recipe_compress(&vc->opts, dict, dict_size, dict_huf, input, in_size, out, cap);
+            recipe_compress(&vc->opts, dict, dict_size, dict_huf, input, in_size, out, cap);
         if (csize <= 0) {
             fprintf(stderr, "  FAIL %s: compress -> %s\n", vc->name, zxc_error_name((int)csize));
         } else {
