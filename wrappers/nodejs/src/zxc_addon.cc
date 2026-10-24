@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstdint>
 #include <cstring>
 #include <limits>
 #include <memory>
@@ -43,6 +44,20 @@ static bool SetCParam(Napi::Env env, zxc_cctx* c, zxc_cparam_t param, int64_t va
         ThrowZxcError(env, r);
         return false;
     }
+    return true;
+}
+
+// An absent (undefined or null) `level` keeps *level; anything but an integer
+// (7.9, NaN, 2^32 + 5, "3") is refused as ERROR_BAD_LEVEL rather than coerced.
+static bool ReadLevel(Napi::Env env, Napi::Value v, int64_t* level) {
+    if (v.IsUndefined() || v.IsNull()) return true;
+    const double d = v.IsNumber() ? v.As<Napi::Number>().DoubleValue()
+                                  : std::numeric_limits<double>::quiet_NaN();
+    if (!(std::trunc(d) == d && std::fabs(d) <= std::numeric_limits<int32_t>::max())) {
+        ThrowZxcError(env, ZXC_ERROR_BAD_LEVEL);
+        return false;
+    }
+    *level = static_cast<int64_t>(d);
     return true;
 }
 
@@ -114,10 +129,8 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     static const uint8_t kEmptySrc = 0;
     const void* src = src_size > 0 ? static_cast<const void*>(src_buf.Data()) : &kEmptySrc;
 
-    int level = ZXC_LEVEL_DEFAULT;
-    if (info.Length() >= 2 && info[1].IsNumber()) {
-        level = info[1].As<Napi::Number>().Int32Value();
-    }
+    int64_t level = ZXC_LEVEL_DEFAULT;
+    if (!ReadLevel(env, info[1], &level)) return env.Undefined();
 
     int checksum = 0;
     if (info.Length() >= 3 && info[2].IsBoolean()) {
@@ -608,13 +621,11 @@ static bool GrowOutput(Napi::Env env, std::vector<uint8_t>& out, size_t out_len,
 // they outlive the caller's Buffers: the context keeps pointers into them.
 // `level` is left untouched (0) when absent, which the setter reads as the
 // default.
-static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int* level, int* checksum,
-                           std::vector<uint8_t>* dict, std::vector<uint8_t>* huf) {
+static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int64_t* level,
+                           int* checksum, std::vector<uint8_t>* dict, std::vector<uint8_t>* huf) {
     if (info.Length() < 1 || !info[0].IsObject()) return true;
     Napi::Object o = info[0].As<Napi::Object>();
-    if (level && o.Has("level") && o.Get("level").IsNumber()) {
-        *level = o.Get("level").As<Napi::Number>().Int32Value();
-    }
+    if (level && o.Has("level") && !ReadLevel(env, o.Get("level"), level)) return false;
     if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
         *checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
     }
@@ -646,7 +657,7 @@ class CctxWrap : public Napi::ObjectWrap<CctxWrap> {
 
     explicit CctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CctxWrap>(info) {
         Napi::Env env = info.Env();
-        int level = 0;
+        int64_t level = 0;
         int checksum = 0;
         if (!ReadCtxOptions(env, info, &level, &checksum, &dict_, &huf_)) return;
 
@@ -805,9 +816,7 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
 
         if (info.Length() >= 1 && info[0].IsObject()) {
             Napi::Object o = info[0].As<Napi::Object>();
-            if (o.Has("level") && o.Get("level").IsNumber()) {
-                level = o.Get("level").As<Napi::Number>().Int32Value();
-            }
+            if (o.Has("level") && !ReadLevel(env, o.Get("level"), &level)) return;
             if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
                 checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
             }

@@ -126,13 +126,13 @@ ZXC_EXPORT size_t zxc_compress_bound(const size_t input_size);
  * @param[out] dst          Destination buffer.
  * @param[in]  dst_capacity Capacity of @p dst.
  * @param[in]  level        Compression level, 1 to 7 (@ref zxc_compression_level_t);
- *                          0 selects @ref ZXC_LEVEL_DEFAULT, others are
- *                          silently clamped.
+ *                          0 selects @ref ZXC_LEVEL_DEFAULT.
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t
- *         (e.g. @ref ZXC_ERROR_DST_TOO_SMALL).
+ * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t:
+ *         @ref ZXC_ERROR_BAD_LEVEL for any other @p level,
+ *         @ref ZXC_ERROR_DST_TOO_SMALL, ...
  */
 ZXC_EXPORT int64_t zxc_compress(const void* src, const size_t src_size, void* dst,
                                 const size_t dst_capacity, int level);
@@ -400,8 +400,7 @@ ZXC_EXPORT size_t zxc_decompress_block_bound(const size_t uncompressed_size);
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p src_size exceeds
  *         @ref ZXC_BLOCK_SIZE_MAX or @c block_size is not a power of two in
  *         range; @ref ZXC_ERROR_BAD_LEVEL on a static
- *         context for a level raise its workspace cannot accommodate (levels
- *         above @ref ZXC_LEVEL_ULTRA are otherwise silently clamped);
+ *         context for a level raise its workspace cannot accommodate;
  *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context with a dictionary.
  */
 ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t src_size, void* dst,

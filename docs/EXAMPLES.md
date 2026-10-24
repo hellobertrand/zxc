@@ -43,7 +43,8 @@ int main(void) {
     // Step 1: Calculate maximum compressed size
     size_t max_compressed_size = zxc_compress_bound(original_size);
 
-    // Step 2: Allocate buffers and contexts
+    // Step 2: Allocate buffers and contexts (each free below accepts NULL)
+    int rc = 1;
     void* compressed   = malloc(max_compressed_size);
     void* decompressed = malloc(original_size);
     zxc_cctx* cctx = zxc_create_cctx();   // every parameter at its default
@@ -51,11 +52,7 @@ int main(void) {
 
     if (!compressed || !decompressed || !cctx || !dctx) {
         fprintf(stderr, "Allocation failed\n");
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        free(compressed);
-        free(decompressed);
-        return 1;
+        goto cleanup;
     }
 
     // Step 3: Compress data (level 3, checksum enabled, default 512 KB block size).
@@ -63,11 +60,7 @@ int main(void) {
     if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) != ZXC_OK ||
         zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) != ZXC_OK) {
         fprintf(stderr, "Bad compression parameter\n");
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        free(compressed);
-        free(decompressed);
-        return 1;
+        goto cleanup;
     }
     int64_t compressed_size = zxc_compress_cctx(
         cctx,                // Configured context
@@ -79,11 +72,7 @@ int main(void) {
 
     if (compressed_size <= 0) {
         fprintf(stderr, "Compression failed (error %lld)\n", (long long)compressed_size);
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        free(compressed);
-        free(decompressed);
-        return 1;
+        goto cleanup;
     }
 
     printf("Original size:   %zu bytes\n", original_size);
@@ -92,7 +81,10 @@ int main(void) {
            100.0 * (double)compressed_size / (double)original_size);
 
     // Step 4: Decompress data (checksum verification enabled)
-    zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1);
+    if (zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) != ZXC_OK) {
+        fprintf(stderr, "Bad decompression parameter\n");
+        goto cleanup;
+    }
     int64_t decompressed_size = zxc_decompress_dctx(
         dctx,                // Configured context
         compressed,          // Source buffer
@@ -103,28 +95,25 @@ int main(void) {
 
     if (decompressed_size <= 0) {
         fprintf(stderr, "Decompression failed (error %lld)\n", (long long)decompressed_size);
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        free(compressed);
-        free(decompressed);
-        return 1;
+        goto cleanup;
     }
 
     // Step 5: Verify integrity
-    if ((size_t)decompressed_size == original_size &&
-        memcmp(original, decompressed, original_size) == 0) {
-        printf("Success! Data integrity verified.\n");
-        printf("Decompressed: %s\n", (char*)decompressed);
-    } else {
+    if ((size_t)decompressed_size != original_size ||
+        memcmp(original, decompressed, original_size) != 0) {
         fprintf(stderr, "Data mismatch after decompression\n");
+        goto cleanup;
     }
+    printf("Success! Data integrity verified.\n");
+    printf("Decompressed: %s\n", (char*)decompressed);
+    rc = 0;
 
-    // Cleanup
+cleanup:
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
     free(compressed);
     free(decompressed);
-    return 0;
+    return rc;
 }
 ```
 
@@ -280,27 +269,23 @@ an out-of-bounds value is refused (`ZXC_ERROR_BAD_LEVEL`,
 int main(void) {
     // Create the contexts, then configure the compressor: level 3, 64 KB
     // blocks, no checksum (the default). The settings persist across calls.
+    int rc = 1;
     zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
-
-    if (!cctx || !dctx) {
-        fprintf(stderr, "Context creation failed\n");
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        return 1;
-    }
-    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) != ZXC_OK ||
-        zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, BLOCK_SIZE) != ZXC_OK) {
-        fprintf(stderr, "Bad parameter\n");
-        zxc_free_cctx(cctx);
-        zxc_free_dctx(dctx);
-        return 1;
-    }
-
     const size_t comp_cap = zxc_compress_bound(BLOCK_SIZE);
     uint8_t* comp = malloc(comp_cap);
     uint8_t* src  = malloc(BLOCK_SIZE);
     uint8_t* dec  = malloc(BLOCK_SIZE);
+
+    if (!cctx || !dctx || !comp || !src || !dec) {
+        fprintf(stderr, "Allocation failed\n");
+        goto cleanup;
+    }
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 3) != ZXC_OK ||
+        zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, BLOCK_SIZE) != ZXC_OK) {
+        fprintf(stderr, "Bad parameter\n");
+        goto cleanup;
+    }
 
     for (int i = 0; i < NUM_BLOCKS; i++) {
         // Fill block with pseudo-random data
@@ -309,29 +294,40 @@ int main(void) {
         // Compress under the context's configuration. The working buffers are
         // carved on the first call and reused afterwards: no malloc/free inside.
         int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap);
-        if (csz <= 0) { fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz); break; }
+        if (csz <= 0) {
+            fprintf(stderr, "Block %d: compress error %lld\n", i, (long long)csz);
+            goto cleanup;
+        }
 
         // Decompress - no malloc/free inside
         int64_t dsz = zxc_decompress_dctx(dctx, comp, (size_t)csz, dec, BLOCK_SIZE);
         if (dsz != BLOCK_SIZE || memcmp(src, dec, BLOCK_SIZE) != 0) {
             fprintf(stderr, "Block %d: roundtrip mismatch\n", i);
-            break;
+            goto cleanup;
         }
     }
-
-    // Switch to level 5. The block size is untouched, so no re-allocation;
-    // every later call runs at level 5 until the parameter changes again.
-    zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 5);
-    int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap);
-    printf("Level-5 compressed: %lld bytes\n", (long long)csz);
-
     printf("Processed %d blocks of %d KB - no per-block allocation.\n",
            NUM_BLOCKS, BLOCK_SIZE / 1024);
 
+    // Switch to level 5. The block size is untouched, so no re-allocation;
+    // every later call runs at level 5 until the parameter changes again.
+    if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 5) != ZXC_OK) {
+        fprintf(stderr, "Bad parameter\n");
+        goto cleanup;
+    }
+    int64_t csz = zxc_compress_cctx(cctx, src, BLOCK_SIZE, comp, comp_cap);
+    if (csz <= 0) {
+        fprintf(stderr, "Level-5 compress error %lld\n", (long long)csz);
+        goto cleanup;
+    }
+    printf("Level-5 compressed: %lld bytes\n", (long long)csz);
+    rc = 0;
+
+cleanup:
     zxc_free_cctx(cctx);
     zxc_free_dctx(dctx);
     free(src); free(comp); free(dec);
-    return 0;
+    return rc;
 }
 ```
 

@@ -248,12 +248,12 @@ static void max_progress(const uint64_t done, const uint64_t total, const void* 
  * between runs: output, input position, progress and faults. */
 int test_container_engine_reuse(void) {
     printf("=== TEST: Container - FILE* engine reused across frames ===\n");
-    const size_t n = 3 * 4096 + 17, nbig = 300000;
-    uint8_t* const src = malloc(5 * n + 2 * nbig);
+    const size_t n = 3 * 4096 + 17, nbig = 300000, total = 5 * n + 2 * nbig;
+    uint8_t* const src = malloc(total);
     cbuf_t b = {0};
     size_t ends[7] = {0};
     int ok = src != NULL;
-    if (ok) gen_lz_data(src, 5 * n + 2 * nbig);
+    if (ok) gen_lz_data(src, total);
 
     // Three small frames, two with large blocks (positioned reads), two small again.
     const frame_cfg_t small = {.level = 3, .block_size = 4096, .checksum_enabled = 1};
@@ -292,8 +292,6 @@ int test_container_engine_reuse(void) {
     if (ok) {
         uint64_t seen = 0;
         zxc_dctx* const po = zxc_create_dctx();
-        // The frames' total, as a constant: the sum above is what the decode must reach.
-        const size_t total = 5 * n + 2 * nbig;
         uint8_t* const out = malloc(total);
         int64_t sq = 0;
         const int configured = po && zxc_dctx_set_param(po, ZXC_D_THREADS, 4) == ZXC_OK &&

@@ -911,16 +911,6 @@ static inline int zxc_ss_prem_huf_q8(const int level) {
 #define ZXC_HUF_MIN_LITERALS 139
 /** @} */
 
-/** @brief Clamps a resolved compression level to 1..7.
- *
- *         Never rejected, at every compress entry point and so in every
- *         binding: 99 behaves as ULTRA, -5 as FASTEST. Level 0 resolves to
- *         the caller's default first. */
-static inline int zxc_level_clamp(const int level) {
-    if (level < ZXC_LEVEL_FASTEST) return ZXC_LEVEL_FASTEST;
-    return (level > ZXC_LEVEL_ULTRA) ? ZXC_LEVEL_ULTRA : level;
-}
-
 /**
  * @brief Compression parameters of a @ref zxc_cctx, the private form of what
  *        zxc_cctx_set_param() / zxc_cctx_set_dict() / zxc_cctx_set_progress()
@@ -959,8 +949,8 @@ typedef struct {
 /** @brief Shared literal Huffman table, gated on @c dict the same way. */
 #define ZXC_OPTS_DICT_HUF(o) \
     (((o) && (o)->dict && (o)->dict_size > 0) ? (const uint8_t*)(o)->dict_huf : NULL)
-/** @brief Compression level, 0 meaning the default, clamped to 1..7. */
-#define ZXC_OPTS_LEVEL(o, dflt) zxc_level_clamp(((o) && (o)->level != 0) ? (o)->level : (dflt))
+/** @brief Compression level, 0 meaning the default. */
+#define ZXC_OPTS_LEVEL(o, dflt) (((o) && (o)->level != 0) ? (o)->level : (dflt))
 /** @brief Block size, 0 meaning the default. */
 #define ZXC_OPTS_BLOCK_SIZE(o, dflt) (((o) && (o)->block_size > 0) ? (o)->block_size : (dflt))
 /** @name Per-block match splitting (zxc_spl_match_split_block), a level-table policy

@@ -220,10 +220,10 @@ Levels 1..5 produce data decompressible at essentially the **same speed**;
 levels 6 and 7 add a per-block Huffman decode step — literals at level 6,
 literals *and* sequence tokens at level 7 — trading some decode throughput for
 denser output (level 7 is the densest and carries the largest decode cost).
-`0` means `ZXC_LEVEL_DEFAULT` everywhere a level is given, with one difference
-in how out-of-range values are treated: the one-shot `zxc_compress()` clamps
-them to 1–7, while `zxc_cctx_set_param(cctx, ZXC_C_LEVEL, n)` refuses them with
-`ZXC_ERROR_BAD_LEVEL`. `zxc_init_static_cctx()` takes an explicit 1–7.
+`0` means `ZXC_LEVEL_DEFAULT` everywhere a level is given; any other value
+outside 1–7 is refused with `ZXC_ERROR_BAD_LEVEL`, by the one-shot
+`zxc_compress()` as by `zxc_cctx_set_param(cctx, ZXC_C_LEVEL, n)`.
+`zxc_init_static_cctx()` takes an explicit 1–7.
 
 ### 5.4 Error Codes
 
@@ -421,15 +421,14 @@ ZXC_EXPORT int64_t zxc_compress(
     size_t      src_size,
     void*       dst,
     size_t      dst_capacity,
-    int         level         // 1..7; 0 = ZXC_LEVEL_DEFAULT, others clamped
+    int         level         // 1..7; 0 = ZXC_LEVEL_DEFAULT
 );
 ```
 
 The simple form: compresses `src` into `dst` at `level`, every other parameter
 at its default (512 KB blocks, no checksum, no seek table, no dictionary).
-Single-threaded. `level` is the one place in the API where an out-of-range
-value is clamped into 1–7 instead of refused. For any other setting configure
-a context and call `zxc_compress_cctx()` (§9).
+Single-threaded. A `level` outside 1–7 (other than 0) is `ZXC_ERROR_BAD_LEVEL`.
+For any other setting configure a context and call `zxc_compress_cctx()` (§9).
 
 **Returns**: compressed size (> 0) on success, or negative `zxc_error_t`. A
 zero `src_size` (with `src` NULL or not) writes the empty archive: 32 bytes.
@@ -846,8 +845,8 @@ context until changed again or `zxc_cctx_reset()` / `zxc_dctx_reset()`:
   `zxc_cparam_bounds()` / `zxc_dparam_bounds()` leaves the parameter as it was
   and returns `ZXC_ERROR_BAD_LEVEL` (`ZXC_C_LEVEL`), `ZXC_ERROR_BAD_BLOCK_SIZE`
   (`ZXC_C_BLOCK_SIZE`, non-powers of two included) or `ZXC_ERROR_BAD_PARAM`
-  (every other parameter, and any unknown identifier). The only clamp left in
-  the API is the `level` argument of the one-shot `zxc_compress()`.
+  (every other parameter, and any unknown identifier). The `level` argument of
+  the one-shot `zxc_compress()` follows the same rule.
 - **Static contexts pin block size and level** (§9b). On a context from
   `zxc_init_static_cctx()`, `ZXC_C_BLOCK_SIZE` accepts only the pinned value,
   a raise into `ZXC_LEVEL_DENSITY` on a workspace carved below it is
