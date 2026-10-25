@@ -35,6 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "../../include/zxc_error.h"
 #include "../../include/zxc_pstream.h"
 
 /* Cap aligned with the maximum supported block size (2 MiB). */
@@ -63,8 +64,13 @@ static size_t derive_chunk_size(uint8_t b) {
  * ---------------------------------------------------------------- */
 static int64_t drip_decompress(const uint8_t* comp, size_t csize, uint8_t* out, size_t out_cap,
                                size_t in_chunk, int checksum_enabled) {
-    zxc_decompress_opts_t opts = {.checksum_enabled = checksum_enabled};
-    zxc_dstream* ds = zxc_dstream_create(&opts);
+    zxc_dctx* const cfg = zxc_create_dctx();
+    if (!cfg || zxc_dctx_set_param(cfg, ZXC_D_CHECKSUM, checksum_enabled) != 0) {
+        zxc_free_dctx(cfg);
+        return -1;
+    }
+    zxc_dstream* ds = zxc_dstream_create(cfg);
+    zxc_free_dctx(cfg);
     if (!ds) return -1;
 
     size_t in_pos = 0;
@@ -132,17 +138,17 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
      * resumption, sticky errors) is independent of compression strength,
      * and buffer-API fuzzers (roundtrip, decompress) already exercise the
      * level dimension. Cheaper compression = more iterations/sec. */
-    zxc_compress_opts_t copts = {
-        .level = 1,
-        .checksum_enabled = checksum_enabled,
-    };
-    zxc_cstream* cs = zxc_cstream_create(&copts);
+    zxc_cctx* const copts = zxc_create_cctx();
+    if (!copts || zxc_cctx_set_param(copts, ZXC_C_LEVEL, 1) != ZXC_OK ||
+        zxc_cctx_set_param(copts, ZXC_C_CHECKSUM, checksum_enabled) != ZXC_OK) {
+        zxc_free_cctx(copts);
+        return 0;
+    }
+    zxc_cstream* cs = zxc_cstream_create(copts);
+    zxc_free_cctx(copts);
     if (!cs) return 0;
 
     /* Sized so the compressor never runs out - bound is a safe upper limit. */
-    /* Use the public buffer-API bound function via a local extern declaration
-     * to avoid pulling zxc_buffer.h (kept narrow on purpose). */
-    extern size_t zxc_compress_bound(size_t input_size);
     const size_t bound = zxc_compress_bound(size);
     if (bound == 0) {
         zxc_cstream_free(cs);
@@ -236,8 +242,12 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         uint8_t scratch[FUZZ_PSTREAM_OUT_CAP];
         const size_t parser_chunk = derive_chunk_size(raw_data[raw_size - 1]);
 
-        zxc_decompress_opts_t opts = {.checksum_enabled = checksum_enabled};
-        zxc_dstream* ds = zxc_dstream_create(&opts);
+        zxc_dctx* const cfg = zxc_create_dctx();
+        zxc_dstream* ds = NULL;
+        if (cfg && zxc_dctx_set_param(cfg, ZXC_D_CHECKSUM, checksum_enabled) == 0) {
+            ds = zxc_dstream_create(cfg);
+        }
+        zxc_free_dctx(cfg);
         if (ds) {
             size_t pos = 0;
             int rounds = 0;

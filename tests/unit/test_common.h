@@ -18,12 +18,12 @@
 #include <share.h>
 #endif
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_error.h"
-#include "../include/zxc_pstream.h"
-#include "../include/zxc_seekable.h"
-#include "../include/zxc_stream.h"
-#include "../src/lib/zxc_internal.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_error.h"
+#include "../../include/zxc_pstream.h"
+#include "../../include/zxc_seekable.h"
+#include "../../include/zxc_stream.h"
+#include "../../src/lib/zxc_internal.h"
 
 /* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo } */
 #define TEST_CASE(fn) {#fn, fn}
@@ -110,6 +110,17 @@ void fill_seek_data(uint8_t* buf, size_t size, uint8_t seed);
 int test_round_trip(const char* test_name, const uint8_t* input, size_t size, int level,
                     int checksum_enabled);
 
+/* --- Configured one-shot calls ------------------------------------------ */
+
+/* zxc_compress_cctx() on a throwaway context: level, block size (0 = default),
+ * block checksums, seek table. Negative zxc_error_t on failure. */
+int64_t test_compress_cfg(const void* src, size_t n, void* dst, size_t cap, int level,
+                          size_t block_size, int checksum, int seekable);
+
+/* zxc_decompress_dctx() on a throwaway context that verifies the checksums,
+ * which the one-shot zxc_decompress() no longer does. */
+int64_t test_decompress_verified(const void* src, size_t n, void* dst, size_t cap);
+
 /* --- Test function prototypes ------------------------------------------ */
 
 /* Buffer API */
@@ -141,8 +152,10 @@ int test_context_api_empty_input(void);
 int test_context_api_seekable_frame(void);
 int test_context_api_seekable_compress(void);
 int test_cctx_level_raise_reinit(void);
-int test_cctx_zero_opts_defaults(void);
-int test_cctx_zero_opts_creation_values(void);
+int test_cctx_param_contract(void);
+int test_dctx_param_contract(void);
+int test_ctx_dict_copied(void);
+int test_cctx_configured_archives(void);
 int test_estimate_cctx_size(void);
 
 /* Static Context API */

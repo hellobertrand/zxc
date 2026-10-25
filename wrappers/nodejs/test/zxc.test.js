@@ -204,6 +204,10 @@ describe("error handling", () => {
     expect(zxc.ERROR_NULL_INPUT).toBe(-12);
     expect(zxc.ERROR_BAD_BLOCK_TYPE).toBe(-13);
     expect(zxc.ERROR_BAD_BLOCK_SIZE).toBe(-14);
+    expect(zxc.ERROR_BAD_LEVEL).toBe(-18);
+    expect(zxc.ERROR_DICT_UNSUPPORTED).toBe(-19);
+    expect(zxc.ERROR_BAD_PARAM).toBe(-20);
+    expect(zxc.errorName(zxc.ERROR_BAD_PARAM)).toBe("ZXC_ERROR_BAD_PARAM");
   });
 
   test("errorName works", () => {
@@ -281,6 +285,39 @@ describe("pstream roundtrip", () => {
     const data = Buffer.alloc(1536 * 1024);
     for (let i = 0; i < data.length; i++) data[i] = (i * 7) % 256;
     expect(pstreamRoundtrip(data).equals(data)).toBe(true);
+  });
+});
+
+describe("pstream options", () => {
+  test("honour blockSize", () => {
+    const data = Buffer.alloc(40 * 1024);
+    for (let i = 0; i < data.length; i++) data[i] = (i * 13) % 256;
+    const cs = new zxc.CStream({ blockSize: 4096 });
+    expect(cs.inSize()).toBe(4096);
+    const compressed = Buffer.concat([cs.compress(data), cs.end()]);
+    cs.close();
+    expect(zxc.getFrameInfo(compressed).blockSize).toBe(4096);
+    expect(zxc.decompress(compressed).equals(data)).toBe(true);
+  });
+
+  test("refuse an invalid blockSize or level with the zxc code", () => {
+    let err;
+    try {
+      new zxc.CStream({ blockSize: 5000 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err.code).toBe(zxc.ERROR_BAD_BLOCK_SIZE);
+
+    err = undefined;
+    try {
+      new zxc.CStream({ level: 99 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err.code).toBe(zxc.ERROR_BAD_LEVEL);
   });
 });
 

@@ -262,7 +262,7 @@ pub use dict::{
 };
 pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 
-/// The dictionary content and shared table for a C options struct, as slices
+/// The dictionary content and shared table to attach to a C context, as slices
 /// borrowed from the caller's options: empty means absent, and a table only
 /// accompanies a dictionary, then in `ZXC_HUF_TABLE_SIZE` bytes. Slices rather
 /// than pointers keep the borrow checker in charge of the FFI call's lifetime.

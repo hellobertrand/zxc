@@ -55,20 +55,9 @@ export default async function createZXC(moduleOverrides, factory) {
   const Module = await ZXCModule(moduleOverrides || {});
 
   // --- Wrap C functions via cwrap ------------------------------------------
-  const _compress = Module.cwrap("zxc_compress", "number", [
-    "number",
-    "number",
-    "number",
-    "number",
-    "number",
-  ]);
-  const _decompress = Module.cwrap("zxc_decompress", "number", [
-    "number",
-    "number",
-    "number",
-    "number",
-    "number",
-  ]);
+  // The one-shot zxc_compress / zxc_decompress are exported too, but every
+  // option object of this wrapper goes through a configured context: see the
+  // "Context parameters" section below.
   const _compress_bound = Module.cwrap("zxc_compress_bound", "number", [
     "number",
   ]);
@@ -84,10 +73,25 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
   ]);
 
-  const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
+  // Contexts carry every parameter (zxc_opts.h): the option objects of the
+  // public API are translated into setter calls on a context. The value of
+  // zxc_cctx_set_param / zxc_dctx_set_param is an int64_t, which cwrap cannot
+  // pass without -sWASM_BIGINT=1: the zxcw_* shims in wasm_entry.c take an
+  // i32, enough for every parameter (level, block size, threads, flags).
+  const _create_cctx = Module.cwrap("zxc_create_cctx", "number", []);
   const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
-  const _compress_cctx = Module.cwrap("zxc_compress_cctx", "number", [
+  const _cctx_set_param = Module.cwrap("zxcw_cctx_set_param", "number", [
     "number",
+    "number",
+    "number",
+  ]);
+  const _cctx_set_dict = Module.cwrap("zxc_cctx_set_dict", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _compress_cctx = Module.cwrap("zxc_compress_cctx", "number", [
     "number",
     "number",
     "number",
@@ -97,8 +101,18 @@ export default async function createZXC(moduleOverrides, factory) {
 
   const _create_dctx = Module.cwrap("zxc_create_dctx", "number", []);
   const _free_dctx = Module.cwrap("zxc_free_dctx", "void", ["number"]);
-  const _decompress_dctx = Module.cwrap("zxc_decompress_dctx", "number", [
+  const _dctx_set_param = Module.cwrap("zxcw_dctx_set_param", "number", [
     "number",
+    "number",
+    "number",
+  ]);
+  const _dctx_set_dict = Module.cwrap("zxc_dctx_set_dict", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _decompress_dctx = Module.cwrap("zxc_decompress_dctx", "number", [
     "number",
     "number",
     "number",
@@ -306,22 +320,7 @@ export default async function createZXC(moduleOverrides, factory) {
     return hi * 0x100000000 + lo;
   }
 
-  // --- Options struct layout -----------------------------------------------
-  // zxc_compress_opts_t (WASM32 layout, all fields 4-byte aligned):
-  //   int n_threads (off 0)  | int level (4)  | size_t block_size (8)
-  //   int checksum_enabled (12) | int seekable (16)
-  //   const void* dict (20) | size_t dict_size (24) | const void* dict_huf (28)
-  //   ptr progress_cb (32) | ptr user_data (36)
-  // Total: 40 bytes in WASM32
-  const COMPRESS_OPTS_SIZE = 40;
-
-  // zxc_decompress_opts_t:
-  //   int n_threads (0) | int checksum_enabled (4)
-  //   const void* dict (8) | size_t dict_size (12) | const void* dict_huf (16)
-  //   ptr progress_cb (20) | ptr user_data (24)
-  // Total: 28 bytes in WASM32
-  const DECOMPRESS_OPTS_SIZE = 28;
-
+  // --- Struct layouts ------------------------------------------------------
   // zxc_frame_info_t:
   //   u64 decompressed_size (0) | u64 compressed_size (8) | u64 digest (16)
   //   size_t block_size (24) | u32 dict_id (28)
@@ -329,27 +328,17 @@ export default async function createZXC(moduleOverrides, factory) {
   // Total: 40 bytes in WASM32 (8-byte alignment)
   const FRAME_INFO_SIZE = 40;
 
-  // Layout guard: the offsets above are hand-mirrored from zxc_opts.h. The
-  // library exports its compiled sizeof()s; a mismatch means the C structs
+  // Layout guard: the offsets above are hand-mirrored from zxc_buffer.h. The
+  // library exports its compiled sizeof(); a mismatch means the C struct
   // changed without this file being updated -- fail loudly at load time
   // instead of silently reading fields at wrong offsets.
   {
-    const _copts_size = Module.cwrap("zxc_compress_opts_size", "number", []);
-    const _dopts_size = Module.cwrap("zxc_decompress_opts_size", "number", []);
     const _finfo_size = Module.cwrap("zxc_frame_info_size", "number", []);
-    const cSize = _copts_size();
-    const dSize = _dopts_size();
     const fSize = _finfo_size();
-    if (
-      cSize !== COMPRESS_OPTS_SIZE ||
-      dSize !== DECOMPRESS_OPTS_SIZE ||
-      fSize !== FRAME_INFO_SIZE
-    ) {
+    if (fSize !== FRAME_INFO_SIZE) {
       throw new Error(
-        `ZXC: options struct layout drift detected -- ` +
-          `zxc_compress_opts_t is ${cSize} bytes (wrapper assumes ${COMPRESS_OPTS_SIZE}), ` +
-          `zxc_decompress_opts_t is ${dSize} bytes (wrapper assumes ${DECOMPRESS_OPTS_SIZE}), ` +
-          `zxc_frame_info_t is ${fSize} bytes (wrapper assumes ${FRAME_INFO_SIZE}). ` +
+        `ZXC: struct layout drift detected -- zxc_frame_info_t is ${fSize} ` +
+          `bytes (wrapper assumes ${FRAME_INFO_SIZE}). ` +
           `Update the struct layout section of zxc_wasm.js.`,
       );
     }
@@ -360,53 +349,20 @@ export default async function createZXC(moduleOverrides, factory) {
   // Total: 12 bytes in WASM32
   const IO_BUF_SIZE = 12;
 
-  /**
-   * Write a zxc_compress_opts_t struct into WASM memory.
-   * @returns {number} Pointer to the struct (caller must free).
-   */
-  function _writeCompressOpts(
-    level,
-    checksum,
-    seekable,
-    dictPtr,
-    dictSize,
-    dictHufPtr,
-  ) {
-    const ptr = _alloc(COMPRESS_OPTS_SIZE);
-    // Zero-fill covers n_threads (0), block_size (8, default),
-    // progress_cb (32) and user_data (36).
-    Module.HEAPU8.fill(0, ptr, ptr + COMPRESS_OPTS_SIZE);
-    // level (offset 4)
-    Module.HEAP32[(ptr >> 2) + 1] = level;
-    // checksum_enabled (offset 12)
-    Module.HEAP32[(ptr >> 2) + 3] = checksum ? 1 : 0;
-    // seekable (offset 16)
-    Module.HEAP32[(ptr >> 2) + 4] = seekable ? 1 : 0;
-    // dict (offset 20), dict_size (offset 24), dict_huf (offset 28)
-    Module.HEAPU32[(ptr >> 2) + 5] = dictPtr || 0;
-    Module.HEAPU32[(ptr >> 2) + 6] = dictSize || 0;
-    Module.HEAPU32[(ptr >> 2) + 7] = dictHufPtr || 0;
-    return ptr;
-  }
+  // --- Context parameters --------------------------------------------------
+  // Identifiers from zxc_opts.h; stable by contract (new ones are appended).
+  const ZXC_C_LEVEL = 1;
+  const ZXC_C_CHECKSUM = 4;
+  const ZXC_C_SEEKABLE = 5;
+  const ZXC_D_CHECKSUM = 2;
+  const ZXC_ERROR_BAD_LEVEL = -18;
 
-  /**
-   * Write a zxc_decompress_opts_t struct into WASM memory.
-   * @returns {number} Pointer to the struct (caller must free).
-   */
-  function _writeDecompressOpts(checksum, dictPtr, dictSize, dictHufPtr) {
-    const ptr = _alloc(DECOMPRESS_OPTS_SIZE);
-    // Zero-fill covers n_threads (0), progress_cb (20) and user_data (24).
-    Module.HEAPU8.fill(0, ptr, ptr + DECOMPRESS_OPTS_SIZE);
-    // checksum_enabled (offset 4)
-    Module.HEAP32[(ptr >> 2) + 1] = checksum ? 1 : 0;
-    // dict (offset 8), dict_size (offset 12), dict_huf (offset 16)
-    Module.HEAPU32[(ptr >> 2) + 2] = dictPtr || 0;
-    Module.HEAPU32[(ptr >> 2) + 3] = dictSize || 0;
-    Module.HEAPU32[(ptr >> 2) + 4] = dictHufPtr || 0;
-    return ptr;
+  /** Throw a descriptive error when a context setter returns a code. */
+  function _checkParam(r, what) {
+    if (r < 0) {
+      throw new Error(`ZXC ${what} error: ${_error_name(r)} (${r})`);
+    }
   }
-
-  // --- Public API ----------------------------------------------------------
 
   /**
    * Accept a {@link Dictionary} or raw `(dict, dictHuf)` pieces in options.
@@ -425,39 +381,114 @@ export default async function createZXC(moduleOverrides, factory) {
   }
 
   /**
-   * Copy the dictionary options of `opts` into WASM memory and write the C
-   * options struct.
+   * Stage a dictionary in WASM memory for the time of a setter call: the
+   * context keeps its own copy.
    *
-   * @param {object} [opts] - Caller options ({dict, dictHuf, ...}).
-   * @param {Function} writeOpts - (dictPtr, dictSize, dictHufPtr) -> optsPtr.
-   * @returns {{optsPtr: number, release: Function}} `release()` frees both.
+   * @param {{dict: Uint8Array|null, dictHuf: Uint8Array|null}} split
+   * @param {Function} setDict - (dictPtr, dictSize, dictHufPtr) -> int.
    */
-  function _allocDictOpts(opts, writeOpts) {
-    const { dict, dictHuf } = _splitDictOption(opts);
+  function _attachDict(split, setDict) {
+    const { dict, dictHuf } = split;
+    if (!dict || dict.length === 0) return;
     let dictPtr = 0;
     let dictHufPtr = 0;
-    let optsPtr;
     try {
-      dictPtr = dict && dict.length > 0 ? _alloc(dict.length) : 0;
-      if (dictPtr) Module.HEAPU8.set(dict, dictPtr);
+      dictPtr = _alloc(dict.length);
+      Module.HEAPU8.set(dict, dictPtr);
       // A table only travels with a dictionary, as the C side reads it.
-      dictHufPtr = dictPtr && dictHuf ? _alloc(ZXC_HUF_TABLE_SIZE) : 0;
-      if (dictHufPtr) Module.HEAPU8.set(dictHuf, dictHufPtr);
-      optsPtr = writeOpts(dictPtr, dictPtr ? dict.length : 0, dictHufPtr);
-    } catch (e) {
+      if (dictHuf) {
+        dictHufPtr = _alloc(ZXC_HUF_TABLE_SIZE);
+        Module.HEAPU8.set(dictHuf, dictHufPtr);
+      }
+      _checkParam(setDict(dictPtr, dict.length, dictHufPtr), "set_dict");
+    } finally {
       if (dictPtr) _free(dictPtr);
       if (dictHufPtr) _free(dictHufPtr);
+    }
+  }
+
+  /**
+   * Create a compression context configured from an option object
+   * ({level, checksum, seekable, dict, dictHuf}).
+   *
+   * Every parameter not given keeps the library default (0 restores it).
+   * A value the library refuses (level out of range, ...) throws with
+   * its error name.
+   *
+   * @returns {{cctx: number, release: Function}} `release()` frees the
+   *   context.
+   */
+  /**
+   * An absent (undefined or null) level selects the default; anything but an
+   * integer (2.5, NaN, 2 ** 32 + 3, "3") is refused rather than truncated by
+   * the i32 shim.
+   */
+  function _readLevel(opts) {
+    const level = opts == null ? null : opts.level;
+    if (level == null) return 0;
+    if (!Number.isInteger(level) || Math.abs(level) > 0x7fffffff) {
+      _checkParam(ZXC_ERROR_BAD_LEVEL, "set_param");
+    }
+    return level;
+  }
+
+  function _createCctx(opts) {
+    // Validated before anything is allocated, so a rejected option leaks nothing.
+    const split = _splitDictOption(opts);
+    const level = _readLevel(opts);
+    const checksum = (opts && opts.checksum) || false;
+    const seekable = (opts && opts.seekable) || false;
+
+    const cctx = _create_cctx();
+    if (cctx === 0) {
+      throw new Error("ZXC: failed to create compression context");
+    }
+    try {
+      if (level) {
+        _checkParam(_cctx_set_param(cctx, ZXC_C_LEVEL, level), "set_param");
+      }
+      if (checksum) {
+        _checkParam(_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1), "set_param");
+      }
+      if (seekable) {
+        _checkParam(_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1), "set_param");
+      }
+      _attachDict(split, (d, n, h) => _cctx_set_dict(cctx, d, n, h));
+    } catch (e) {
+      _free_cctx(cctx);
       throw e;
     }
-    return {
-      optsPtr,
-      release() {
-        _free(optsPtr);
-        if (dictPtr) _free(dictPtr);
-        if (dictHufPtr) _free(dictHufPtr);
-      },
-    };
+    return { cctx, release: () => _free_cctx(cctx) };
   }
+
+  /**
+   * Create a decompression context configured from an option object
+   * ({checksum, dict, dictHuf}).
+   *
+   * @returns {{dctx: number, release: Function}} `release()` frees the
+   *   context.
+   */
+  function _createDctx(opts) {
+    const split = _splitDictOption(opts);
+    const checksum = (opts && opts.checksum) || false;
+
+    const dctx = _create_dctx();
+    if (dctx === 0) {
+      throw new Error("ZXC: failed to create decompression context");
+    }
+    try {
+      if (checksum) {
+        _checkParam(_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1), "set_param");
+      }
+      _attachDict(split, (d, n, h) => _dctx_set_dict(dctx, d, n, h));
+    } catch (e) {
+      _free_dctx(dctx);
+      throw e;
+    }
+    return { dctx, release: () => _free_dctx(dctx) };
+  }
+
+  // --- Public API ----------------------------------------------------------
 
   /**
    * Compress a Uint8Array.
@@ -473,19 +504,15 @@ export default async function createZXC(moduleOverrides, factory) {
    *   (128 bytes, from {@link trainDictHuf} or {@link dictHuf}); ignored
    *   without `opts.dict`, redundant with a {@link Dictionary}.
    * @returns {Uint8Array} Compressed data.
-   * @throws {Error} On compression failure.
+   * @throws {Error} On compression failure, or on a level outside 1-7
+   *   (`ZXC_ERROR_BAD_LEVEL`: the context parameters are not clamped).
    */
   function compress(data, opts) {
-    const level = (opts && opts.level) || _default_level();
-    const checksum = (opts && opts.checksum) || false;
-    const seekable = (opts && opts.seekable) || false;
-
     const bound = _compress_bound(data.length);
     if (bound === 0) throw new Error("ZXC: compress_bound returned 0");
 
-    const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
-      _writeCompressOpts(level, checksum, seekable, d, n, h),
-    );
+    // The options become parameters of a context that lives for this call.
+    const { cctx, release } = _createCctx(opts);
     let srcPtr = 0;
     let dstPtr = 0;
 
@@ -493,7 +520,7 @@ export default async function createZXC(moduleOverrides, factory) {
       srcPtr = _alloc(data.length);
       dstPtr = _alloc(bound);
       Module.HEAPU8.set(data, srcPtr);
-      const result = _compress(srcPtr, data.length, dstPtr, bound, optsPtr);
+      const result = _compress_cctx(cctx, srcPtr, data.length, dstPtr, bound);
       if (result < 0) {
         throw new Error(
           `ZXC compress error: ${_error_name(result)} (${result})`,
@@ -522,11 +549,8 @@ export default async function createZXC(moduleOverrides, factory) {
    * @throws {Error} On decompression failure.
    */
   function decompress(data, opts) {
-    const checksum = (opts && opts.checksum) || false;
-    // Validated and allocated first, so a rejected table leaks nothing.
-    const { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
-      _writeDecompressOpts(checksum, d, n, h),
-    );
+    // The options become parameters of a context that lives for this call.
+    const { dctx, release } = _createDctx(opts);
 
     let srcPtr = 0;
     let dstPtr = 0;
@@ -546,12 +570,12 @@ export default async function createZXC(moduleOverrides, factory) {
       }
       dstPtr = _alloc(origSize);
 
-      const result = _decompress(
+      const result = _decompress_dctx(
+        dctx,
         srcPtr,
         data.length,
         dstPtr,
         origSize,
-        optsPtr,
       );
       if (result < 0) {
         throw new Error(
@@ -642,21 +666,8 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {{ compress: Function, free: Function }}
    */
   function createCompressContext(opts) {
-    const level = (opts && opts.level) || _default_level();
-    const checksum = (opts && opts.checksum) || false;
-    const seekable = (opts && opts.seekable) || false;
-
-    // The options struct and the dictionary copies live as long as the context.
-    let { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
-      _writeCompressOpts(level, checksum, seekable, d, n, h),
-    );
-    let cctx = _create_cctx(optsPtr);
-
-    if (cctx === 0) {
-      release();
-      optsPtr = 0;
-      throw new Error("ZXC: failed to create compression context");
-    }
+    // The parameters and the dictionary copies live as long as the context.
+    let { cctx, release } = _createCctx(opts);
 
     return {
       /**
@@ -679,7 +690,6 @@ export default async function createZXC(moduleOverrides, factory) {
             data.length,
             dstPtr,
             bound,
-            optsPtr,
           );
           if (result < 0) {
             throw new Error(
@@ -695,10 +705,8 @@ export default async function createZXC(moduleOverrides, factory) {
       /** Free the context and release WASM memory. Idempotent. */
       free() {
         if (!cctx) return;
-        _free_cctx(cctx);
         cctx = 0;
         release();
-        optsPtr = 0;
       },
     };
   }
@@ -715,17 +723,8 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {{ decompress: Function, free: Function }}
    */
   function createDecompressContext(opts) {
-    const checksum = (opts && opts.checksum) || false;
-    // The options struct and the dictionary copies live as long as the context.
-    let { optsPtr, release } = _allocDictOpts(opts, (d, n, h) =>
-      _writeDecompressOpts(checksum, d, n, h),
-    );
-    let dctx = _create_dctx();
-    if (dctx === 0) {
-      release();
-      optsPtr = 0;
-      throw new Error("ZXC: failed to create decompression context");
-    }
+    // The parameters and the dictionary copies live as long as the context.
+    let { dctx, release } = _createDctx(opts);
 
     return {
       /**
@@ -753,7 +752,6 @@ export default async function createZXC(moduleOverrides, factory) {
             data.length,
             dstPtr,
             origSize,
-            optsPtr,
           );
           if (result < 0) {
             throw new Error(
@@ -769,10 +767,8 @@ export default async function createZXC(moduleOverrides, factory) {
       /** Free the context and release WASM memory. Idempotent. */
       free() {
         if (!dctx) return;
-        _free_dctx(dctx);
         dctx = 0;
         release();
-        optsPtr = 0;
       },
     };
   }
@@ -818,12 +814,19 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {{ compress(Uint8Array): Uint8Array, end(): Uint8Array, free(): void, inSize(): number, outSize(): number }}
    */
   function createCStream(opts) {
-    const level = (opts && opts.level) || _default_level();
-    const checksum = (opts && opts.checksum) || false;
-
-    const optsPtr = _writeCompressOpts(level, checksum, false);
-    let cs = _cstream_create(optsPtr);
-    _free(optsPtr);
+    // The stream copies the parameters of a configuration context at
+    // creation; only level and checksum apply here (push streams take no
+    // dictionary and no seek table), and the context is freed right after.
+    const cfg = _createCctx({
+      level: opts && opts.level,
+      checksum: opts && opts.checksum,
+    });
+    let cs;
+    try {
+      cs = _cstream_create(cfg.cctx);
+    } finally {
+      cfg.release();
+    }
     if (cs === 0) throw new Error("ZXC: failed to create cstream");
 
     // Reusable scratch buffers in the WASM heap. The compress/end calls
@@ -930,10 +933,14 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {{ decompress(Uint8Array): Uint8Array, finished(): boolean, free(): void, inSize(): number, outSize(): number }}
    */
   function createDStream(opts) {
-    const checksum = (opts && opts.checksum) || false;
-    const optsPtr = _writeDecompressOpts(checksum);
-    let ds = _dstream_create(optsPtr);
-    _free(optsPtr);
+    // Same as createCStream: only checksum applies to a push stream.
+    const cfg = _createDctx({ checksum: opts && opts.checksum });
+    let ds;
+    try {
+      ds = _dstream_create(cfg.dctx);
+    } finally {
+      cfg.release();
+    }
     if (ds === 0) throw new Error("ZXC: failed to create dstream");
 
     let inDescPtr = 0;

@@ -19,6 +19,7 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
+#include "recipe.h"
 /* Private header: zxc_hash8/zxc_hash16 to re-sign patched headers. */
 #include "zxc_internal.h"
 
@@ -113,13 +114,12 @@ static size_t make_text(uint8_t** out) {
     return n;
 }
 
-/* Compress @p in with @p opts into a fresh buffer. Returns size, 0 on failure. */
-static size_t build_base(const uint8_t* in, size_t in_size, const zxc_compress_opts_t* opts,
-                         uint8_t** out) {
+/* Compress @p in with recipe @p r into a fresh buffer. Returns size, 0 on failure. */
+static size_t build_base(const uint8_t* in, size_t in_size, const recipe_t* r, uint8_t** out) {
     const size_t cap = zxc_compress_bound(in_size) + 4096;
     uint8_t* buf = (uint8_t*)malloc(cap);
     if (!buf) return 0;
-    const int64_t n = zxc_compress(in, in_size, buf, cap, opts);
+    const int64_t n = recipe_compress(r, NULL, 0, NULL, in, in_size, buf, cap);
     if (n <= 0) {
         fprintf(stderr, "  compress failed: %s\n", zxc_error_name((int)n));
         free(buf);
@@ -181,19 +181,19 @@ static int invalid_bases(invalid_bases_t* b) {
         return 0;
     }
 
-    /* Zero-initialised is the documented "safe defaults" form. */
-    zxc_compress_opts_t plain = {0};
+    /* One recipe, then one trait changed per base. */
+    recipe_t plain = {0};
     plain.level = 3;
     plain.block_size = 4096;
     plain.checksum_enabled = 0;
 
-    zxc_compress_opts_t chk = plain;
+    recipe_t chk = plain;
     chk.checksum_enabled = 1;
 
-    zxc_compress_opts_t pak = plain;
+    recipe_t pak = plain;
     pak.level = 1; /* levels 1-2 emit PAK blocks */
 
-    zxc_compress_opts_t seek = plain;
+    recipe_t seek = plain;
     seek.seekable = 1; /* appends the SEK block sek_forged_entry patches */
 
     b->n_plain = build_base(text, text_n, &plain, &b->plain);

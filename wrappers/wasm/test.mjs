@@ -66,7 +66,6 @@ async function main() {
     "number",
     "number",
     "number",
-    "number",
   ]);
   const _compress_bound = Module.cwrap("zxc_compress_bound", "number", [
     "number",
@@ -112,6 +111,7 @@ async function main() {
     const dstPtr = Module._malloc(bound);
     Module.HEAPU8.set(input, srcPtr);
 
+    // Level 0 selects the default.
     const csize = _compress(srcPtr, input.length, dstPtr, bound, 0);
     assert(csize > 0, `Compressed ${input.length} -> ${csize} bytes`);
     assert(
@@ -137,7 +137,7 @@ async function main() {
 
     // Decompress
     const outPtr = Module._malloc(origSize);
-    const dsize = _decompress(csrcPtr, compressed.length, outPtr, origSize, 0);
+    const dsize = _decompress(csrcPtr, compressed.length, outPtr, origSize);
     assert(dsize === input.length, `Decompressed ${dsize} bytes`);
 
     const output = new Uint8Array(Module.HEAPU8.buffer, outPtr, dsize).slice();
@@ -149,6 +149,44 @@ async function main() {
     Module._free(outPtr);
   }
 
+  // Context API bindings, shared by sections 5 and 6. The parameter value of
+  // zxc_cctx_set_param / zxc_dctx_set_param is an int64_t, which cwrap cannot
+  // carry without -sWASM_BIGINT=1: use the i32 shims from wasm_entry.c.
+  const _create_cctx = Module.cwrap("zxc_create_cctx", "number", []);
+  const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
+  const _cctx_set_param = Module.cwrap("zxcw_cctx_set_param", "number", [
+    "number",
+    "number",
+    "number",
+  ]);
+  const _compress_cctx = Module.cwrap("zxc_compress_cctx", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  const _create_dctx = Module.cwrap("zxc_create_dctx", "number", []);
+  const _free_dctx = Module.cwrap("zxc_free_dctx", "void", ["number"]);
+  const _dctx_set_param = Module.cwrap("zxcw_dctx_set_param", "number", [
+    "number",
+    "number",
+    "number",
+  ]);
+  const _decompress_dctx = Module.cwrap("zxc_decompress_dctx", "number", [
+    "number",
+    "number",
+    "number",
+    "number",
+    "number",
+  ]);
+  // Parameter identifiers (zxc_opts.h).
+  const ZXC_C_LEVEL = 1;
+  const ZXC_C_CHECKSUM = 4;
+  const ZXC_D_CHECKSUM = 2;
+  const ZXC_ERROR_BAD_LEVEL = -18;
+  const ZXC_ERROR_BAD_PARAM = -20;
+
   // --- 5. Roundtrip: all compression levels ---
   console.log("\n5. Roundtrip: All Compression Levels");
   {
@@ -159,23 +197,25 @@ async function main() {
     }
     const bound = _compress_bound(input.length);
 
+    // One context per side; the level changes between calls.
+    const cctx = _create_cctx();
+    assert(_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) === 0, "cctx checksum on");
+    const dctx = _create_dctx();
+    assert(_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) === 0, "dctx checksum on");
+
     for (let level = 1; level <= 7; level++) {
       const srcPtr = Module._malloc(input.length);
       const dstPtr = Module._malloc(bound);
       Module.HEAPU8.set(input, srcPtr);
 
-      // Build opts struct (full 40-byte zxc_compress_opts_t so the
-      // dict/progress fields the library reads are zeroed, not heap
-      // garbage): {n_threads=0, level, block_size=0, checksum=1, ...}
-      const optsPtr = Module._malloc(40);
-      for (let i = 0; i < 40; i++) Module.HEAPU8[optsPtr + i] = 0;
-      Module.HEAP32[(optsPtr >> 2) + 1] = level; // level
-      Module.HEAP32[(optsPtr >> 2) + 3] = 1; // checksum_enabled
-
-      const csize = _compress(srcPtr, input.length, dstPtr, bound, optsPtr);
+      assert(
+        _cctx_set_param(cctx, ZXC_C_LEVEL, level) === 0,
+        `Level ${level}: set on the context`,
+      );
+      const csize = _compress_cctx(cctx, srcPtr, input.length, dstPtr, bound);
       assert(csize > 0, `Level ${level}: compressed to ${csize} bytes`);
 
-      // Decompress with checksum verification (28-byte zxc_decompress_opts_t)
+      // Decompress with checksum verification.
       const compressed = new Uint8Array(
         Module.HEAPU8.buffer,
         dstPtr,
@@ -184,17 +224,13 @@ async function main() {
       const csrcPtr = Module._malloc(compressed.length);
       Module.HEAPU8.set(compressed, csrcPtr);
 
-      const dOptsPtr = Module._malloc(28);
-      for (let i = 0; i < 28; i++) Module.HEAPU8[dOptsPtr + i] = 0;
-      Module.HEAP32[(dOptsPtr >> 2) + 1] = 1; // checksum_enabled
-
       const outPtr = Module._malloc(input.length);
-      const dsize = _decompress(
+      const dsize = _decompress_dctx(
+        dctx,
         csrcPtr,
         compressed.length,
         outPtr,
         input.length,
-        dOptsPtr,
       );
       const output = new Uint8Array(
         Module.HEAPU8.buffer,
@@ -205,38 +241,31 @@ async function main() {
 
       Module._free(srcPtr);
       Module._free(dstPtr);
-      Module._free(optsPtr);
       Module._free(csrcPtr);
-      Module._free(dOptsPtr);
       Module._free(outPtr);
     }
+
+    // The setters refuse instead of clamping; unknown ids are BAD_PARAM.
+    assert(
+      _cctx_set_param(cctx, ZXC_C_LEVEL, 8) === ZXC_ERROR_BAD_LEVEL,
+      "Level 8 refused by the setter (ZXC_ERROR_BAD_LEVEL)",
+    );
+    assert(
+      _cctx_set_param(cctx, 999, 1) === ZXC_ERROR_BAD_PARAM,
+      "Unknown compression parameter is ZXC_ERROR_BAD_PARAM",
+    );
+    assert(
+      _dctx_set_param(dctx, ZXC_D_CHECKSUM, 2) === ZXC_ERROR_BAD_PARAM,
+      "Checksum flag outside 0/1 is ZXC_ERROR_BAD_PARAM",
+    );
+    _free_cctx(cctx);
+    _free_dctx(dctx);
   }
 
   // --- 6. Reusable context API ---
   console.log("\n6. Reusable Context API");
   {
-    const _create_cctx = Module.cwrap("zxc_create_cctx", "number", ["number"]);
-    const _free_cctx = Module.cwrap("zxc_free_cctx", "void", ["number"]);
-    const _compress_cctx = Module.cwrap("zxc_compress_cctx", "number", [
-      "number",
-      "number",
-      "number",
-      "number",
-      "number",
-      "number",
-    ]);
-    const _create_dctx = Module.cwrap("zxc_create_dctx", "number", []);
-    const _free_dctx = Module.cwrap("zxc_free_dctx", "void", ["number"]);
-    const _decompress_dctx = Module.cwrap("zxc_decompress_dctx", "number", [
-      "number",
-      "number",
-      "number",
-      "number",
-      "number",
-      "number",
-    ]);
-
-    const cctx = _create_cctx(0);
+    const cctx = _create_cctx();
     assert(cctx !== 0, "Created compression context");
 
     const dctx = _create_dctx();
@@ -253,14 +282,7 @@ async function main() {
       const dstPtr = Module._malloc(bound);
       Module.HEAPU8.set(input, srcPtr);
 
-      const csize = _compress_cctx(
-        cctx,
-        srcPtr,
-        input.length,
-        dstPtr,
-        bound,
-        0,
-      );
+      const csize = _compress_cctx(cctx, srcPtr, input.length, dstPtr, bound);
       assert(csize > 0, `Context compress trial ${trial}: ${csize} bytes`);
 
       const compressed = new Uint8Array(
@@ -278,7 +300,6 @@ async function main() {
         compressed.length,
         outPtr,
         input.length,
-        0,
       );
       const output = new Uint8Array(
         Module.HEAPU8.buffer,
@@ -312,7 +333,7 @@ async function main() {
     const gPtr = Module._malloc(garbage.length);
     const outPtr = Module._malloc(1024);
     Module.HEAPU8.set(garbage, gPtr);
-    const result = _decompress(gPtr, garbage.length, outPtr, 1024, 0);
+    const result = _decompress(gPtr, garbage.length, outPtr, 1024);
     assert(
       result < 0,
       `Garbage decompression returns error: ${result} (${_error_name(result)})`,
@@ -420,6 +441,24 @@ async function main() {
       threw = true;
     }
     assert(threw, "frame info refuses a trailing byte");
+
+    // A non-integer level is refused, not truncated by the i32 shim.
+    for (const level of [2.5, NaN, Infinity, 2 ** 32 + 3, "3"]) {
+      let msg = "";
+      try {
+        zxc.compress(data, { level });
+      } catch (e) {
+        msg = e.message;
+      }
+      assert(
+        msg.includes("ZXC_ERROR_BAD_LEVEL"),
+        `level ${String(level)} refused (${msg || "no throw"})`,
+      );
+    }
+    assert(
+      zxc.compress(data, { level: null }).length > 0,
+      "level null selects the default",
+    );
   }
 
   // --- 9. WHATWG TransformStream adapters -------------------------------

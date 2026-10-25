@@ -67,6 +67,40 @@ static int grow_output(uint8_t** buf, size_t* cap, size_t out_len, size_t want) 
 }
 
 // =============================================================================
+// Context configuration
+// =============================================================================
+//
+// The library reads its parameters from a configured context. The keyword
+// arguments of the Python API are translated into setter calls here: the
+// one-shot and FILE* functions configure a throw-away context, the push
+// streams copy one at creation, Cctx / Dctx keep theirs.
+
+/* Applies the compression keyword arguments to a context. 0 keeps the library
+ * default for level, block_size and n_threads (negative thread counts mean
+ * auto, as before); the setters refuse an out-of-range value instead of
+ * clamping it, the level included. Returns ZXC_OK or the first setter error. */
+static int pyzxc_cctx_configure(zxc_cctx* c, int level, int64_t block_size, int n_threads,
+                                int checksum, int seekable, const void* dict, size_t dict_size,
+                                const void* dict_huf) {
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, block_size);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_THREADS, n_threads > 0 ? n_threads : 0);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum ? 1 : 0);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, seekable ? 1 : 0);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_dict(c, dict, dict_size, dict_huf);
+    return rc;
+}
+
+/* Decompression counterpart of pyzxc_cctx_configure. */
+static int pyzxc_dctx_configure(zxc_dctx* d, int n_threads, int checksum, const void* dict,
+                                size_t dict_size, const void* dict_huf) {
+    int rc = zxc_dctx_set_param(d, ZXC_D_THREADS, n_threads > 0 ? n_threads : 0);
+    if (rc == ZXC_OK) rc = zxc_dctx_set_param(d, ZXC_D_CHECKSUM, checksum ? 1 : 0);
+    if (rc == ZXC_OK) rc = zxc_dctx_set_dict(d, dict, dict_size, dict_huf);
+    return rc;
+}
+
+// =============================================================================
 // Wrapper functions
 // =============================================================================
 
@@ -254,6 +288,7 @@ PyMODINIT_FUNC PyInit__zxc(void) {
     PyModule_AddIntConstant(m, "ERROR_DICT_TOO_LARGE", ZXC_ERROR_DICT_TOO_LARGE);
     PyModule_AddIntConstant(m, "ERROR_BAD_LEVEL", ZXC_ERROR_BAD_LEVEL);
     PyModule_AddIntConstant(m, "ERROR_DICT_UNSUPPORTED", ZXC_ERROR_DICT_UNSUPPORTED);
+    PyModule_AddIntConstant(m, "ERROR_BAD_PARAM", ZXC_ERROR_BAD_PARAM);
 
     return m;
 }
@@ -329,25 +364,30 @@ static PyObject* pyzxc_compress(PyObject* self, PyObject* args, PyObject* kwargs
     char* dst = PyBytes_AsString(out);  // Return a pointer to the contents
     int64_t nwritten;                   // The number of bytes written to dst
 
-    zxc_compress_opts_t copts = {0};
-    copts.level = level;
-    copts.checksum_enabled = checksum;
-    copts.seekable = seekable;
-    if (have_dict) {
-        copts.dict = dict_view.buf;
-        copts.dict_size = (size_t)dict_view.len;
-        copts.dict_huf = dict_huf;
-    }
-
-    Py_BEGIN_ALLOW_THREADS nwritten = zxc_compress(view.buf,  // Source buffer
-                                                   src_size,  // Source size
-                                                   dst,       // Destination buffer
-                                                   bound,     // Destination capacity
-                                                   &copts     // Options
-    );
-    Py_END_ALLOW_THREADS
-
+    zxc_cctx* cctx = zxc_create_cctx();
+    if (!cctx) {
+        Py_DECREF(out);
         PyBuffer_Release(&view);
+        if (have_dict) PyBuffer_Release(&dict_view);
+        return PyErr_NoMemory();
+    }
+    const int rc = pyzxc_cctx_configure(cctx, level, 0, 0, checksum, seekable,
+                                        have_dict ? dict_view.buf : NULL,
+                                        have_dict ? (size_t)dict_view.len : 0, dict_huf);
+    if (rc == ZXC_OK) {
+        Py_BEGIN_ALLOW_THREADS nwritten = zxc_compress_cctx(cctx,      // Configured context
+                                                            view.buf,  // Source buffer
+                                                            src_size,  // Source size
+                                                            dst,       // Destination buffer
+                                                            bound      // Destination capacity
+        );
+        Py_END_ALLOW_THREADS
+    } else {
+        nwritten = rc;
+    }
+    zxc_free_cctx(cctx);
+
+    PyBuffer_Release(&view);
     if (have_dict) PyBuffer_Release(&dict_view);
 
     if (nwritten < 0) {
@@ -465,23 +505,30 @@ static PyObject* pyzxc_decompress(PyObject* self, PyObject* args, PyObject* kwar
     char* dst = PyBytes_AsString(out);  // Return a pointer to the contents
     int64_t nwritten;                   // The number of bytes written to dst
 
-    zxc_decompress_opts_t dopts = {0};
-    dopts.checksum_enabled = checksum;
-    if (have_dict) {
-        dopts.dict = dict_view.buf;
-        dopts.dict_size = (size_t)dict_view.len;
-        dopts.dict_huf = dict_huf;
-    }
-
-    Py_BEGIN_ALLOW_THREADS nwritten = zxc_decompress(view.buf,         // Source buffer
-                                                     src_size,         // Source size
-                                                     dst,              // Destination buffer
-                                                     decompress_size,  // Destination capacity
-                                                     &dopts            // Options
-    );
-    Py_END_ALLOW_THREADS
-
+    zxc_dctx* dctx = zxc_create_dctx();
+    if (!dctx) {
+        Py_DECREF(out);
         PyBuffer_Release(&view);
+        if (have_dict) PyBuffer_Release(&dict_view);
+        return PyErr_NoMemory();
+    }
+    const int rc = pyzxc_dctx_configure(dctx, 0, checksum, have_dict ? dict_view.buf : NULL,
+                                        have_dict ? (size_t)dict_view.len : 0, dict_huf);
+    if (rc == ZXC_OK) {
+        Py_BEGIN_ALLOW_THREADS nwritten =
+            zxc_decompress_dctx(dctx,                    // Configured context
+                                view.buf,                // Source buffer
+                                src_size,                // Source size
+                                dst,                     // Destination buffer
+                                (size_t)decompress_size  // Destination capacity
+            );
+        Py_END_ALLOW_THREADS
+    } else {
+        nwritten = rc;
+    }
+    zxc_free_dctx(dctx);
+
+    PyBuffer_Release(&view);
     if (have_dict) PyBuffer_Release(&dict_view);
 
     if (nwritten < 0) {
@@ -580,25 +627,34 @@ static PyObject* pyzxc_stream_compress(PyObject* self, PyObject* args, PyObject*
 
     int64_t nwritten;
 
-    zxc_compress_opts_t scopts = {0};
-    scopts.n_threads = nthreads;
-    scopts.level = level;
-    scopts.checksum_enabled = checksum;
-    scopts.seekable = seekable;
-    if (have_dict) {
-        scopts.dict = dict_view.buf;
-        scopts.dict_size = (size_t)dict_view.len;
-        scopts.dict_huf = dict_huf;
+    /* Configuration only: the pipeline carves its own buffers per worker. */
+    zxc_cctx* cfg = zxc_create_cctx();
+    if (!cfg) {
+        fclose(fsrc);
+        fclose(fdst);
+        if (have_dict) PyBuffer_Release(&dict_view);
+        return PyErr_NoMemory();
+    }
+    const int cfg_rc = pyzxc_cctx_configure(cfg, level, 0, nthreads, checksum, seekable,
+                                            have_dict ? dict_view.buf : NULL,
+                                            have_dict ? (size_t)dict_view.len : 0, dict_huf);
+    if (cfg_rc != ZXC_OK) {
+        zxc_free_cctx(cfg);
+        fclose(fsrc);
+        fclose(fdst);
+        if (have_dict) PyBuffer_Release(&dict_view);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(cfg_rc));
     }
 
     int out_rc, out_errno = 0;
-    Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_compress(fsrc, fdst, &scopts);
+    Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_compress(fsrc, fdst, cfg);
     /* The library flushed fdst; close() can still fail on its own (e.g. NFS). */
     out_rc = fclose(fdst);
     if (out_rc != 0) out_errno = errno;
     Py_END_ALLOW_THREADS
 
         fclose(fsrc);
+    zxc_free_cctx(cfg);
     if (have_dict) PyBuffer_Release(&dict_view);
 
     if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)nwritten));
@@ -656,18 +712,30 @@ static PyObject* pyzxc_stream_decompress(PyObject* self, PyObject* args, PyObjec
 
     int64_t nwritten;
 
-    zxc_decompress_opts_t sdopts = {0};
-    sdopts.n_threads = nthreads;
-    sdopts.checksum_enabled = checksum;
+    /* Configuration only: the pipeline carves its own buffers per worker. */
+    zxc_dctx* cfg = zxc_create_dctx();
+    if (!cfg) {
+        fclose(fsrc);
+        fclose(fdst);
+        return PyErr_NoMemory();
+    }
+    const int cfg_rc = pyzxc_dctx_configure(cfg, nthreads, checksum, NULL, 0, NULL);
+    if (cfg_rc != ZXC_OK) {
+        zxc_free_dctx(cfg);
+        fclose(fsrc);
+        fclose(fdst);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(cfg_rc));
+    }
 
     int out_rc, out_errno = 0;
-    Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_decompress(fsrc, fdst, &sdopts);
+    Py_BEGIN_ALLOW_THREADS nwritten = zxc_stream_decompress(fsrc, fdst, cfg);
     /* The library flushed fdst; close() can still fail on its own (e.g. NFS). */
     out_rc = fclose(fdst);
     if (out_rc != 0) out_errno = errno;
     Py_END_ALLOW_THREADS
 
         fclose(fsrc);
+    zxc_free_dctx(cfg);
 
     if (nwritten < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name((int)nwritten));
     if (out_rc != 0) {
@@ -1048,37 +1116,24 @@ static PyObject* pyzxc_dict_huf(PyObject* self, PyObject* arg) {
 // =============================================================================
 //
 // PyCapsule handles like the push streams, wrapped by the Cctx / Dctx classes
-// in __init__.py. A dictionary given at creation is copied and applies to
-// every call.
+// in __init__.py. The keyword arguments are set on the context at creation
+// and stay for every call; the context copies its dictionary.
 
 #define ZXC_CCTX_CAPSULE "zxc_cctx"
 #define ZXC_DCTX_CAPSULE "zxc_dctx"
 
 typedef struct {
     zxc_cctx* cctx;
-    uint8_t* dict;  // owned copy, NULL when absent
-    size_t dict_size;
-    uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    int has_huf;
-    int level;
-    int checksum;
-    int seekable;
 } pyzxc_cctx_holder_t;
 
 typedef struct {
     zxc_dctx* dctx;
-    uint8_t* dict;
-    size_t dict_size;
-    uint8_t huf[ZXC_HUF_TABLE_SIZE];
-    int has_huf;
-    int checksum;
 } pyzxc_dctx_holder_t;
 
 static void cctx_capsule_destructor(PyObject* capsule) {
     pyzxc_cctx_holder_t* h = (pyzxc_cctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_CCTX_CAPSULE);
     if (h) {
         if (h->cctx) zxc_free_cctx(h->cctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
     }
 }
@@ -1087,52 +1142,42 @@ static void dctx_capsule_destructor(PyObject* capsule) {
     pyzxc_dctx_holder_t* h = (pyzxc_dctx_holder_t*)PyCapsule_GetPointer(capsule, ZXC_DCTX_CAPSULE);
     if (h) {
         if (h->dctx) zxc_free_dctx(h->dctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
     }
 }
 
-// Copies the dictionary and its table into the holder. Returns 0, or -1 with
-// an exception set.
-static int pyzxc_ctx_take_dict(PyObject* dict_obj, PyObject* huf_obj, uint8_t** out_dict,
-                               size_t* out_size, uint8_t* out_huf, int* out_has_huf) {
-    *out_dict = NULL;
-    *out_size = 0;
-    *out_has_huf = 0;
+/* Dictionary buffers borrowed for one configure call; the context copies them.
+ * Released by pyzxc_dict_views_release(), also after a failed acquire. */
+typedef struct {
+    Py_buffer dict;
+    Py_buffer huf;
+    int have_dict, have_huf;
+} pyzxc_dict_views_t;
 
+static void pyzxc_dict_views_release(pyzxc_dict_views_t* v) {
+    if (v->have_dict) PyBuffer_Release(&v->dict);
+    if (v->have_huf) PyBuffer_Release(&v->huf);
+    v->have_dict = v->have_huf = 0;
+}
+
+/* Returns 0, or -1 with an exception set. */
+static int pyzxc_dict_views_acquire(pyzxc_dict_views_t* v, PyObject* dict_obj, PyObject* huf_obj) {
+    memset(v, 0, sizeof(*v));
+    if (dict_obj && dict_obj != Py_None) {
+        if (PyObject_GetBuffer(dict_obj, &v->dict, PyBUF_SIMPLE) < 0) return -1;
+        v->have_dict = 1;
+    }
     if (huf_obj && huf_obj != Py_None) {
-        Py_buffer hv;
-        if (PyObject_GetBuffer(huf_obj, &hv, PyBUF_SIMPLE) < 0) return -1;
-        if (hv.len != ZXC_HUF_TABLE_SIZE) {
-            PyBuffer_Release(&hv);
+        if (PyObject_GetBuffer(huf_obj, &v->huf, PyBUF_SIMPLE) < 0) {
+            pyzxc_dict_views_release(v);
+            return -1;
+        }
+        v->have_huf = 1;
+        if (v->huf.len != ZXC_HUF_TABLE_SIZE) {
+            pyzxc_dict_views_release(v);
             PyErr_SetString(PyExc_ValueError, "dict_huf must be exactly 128 bytes");
             return -1;
         }
-        memcpy(out_huf, hv.buf, ZXC_HUF_TABLE_SIZE);
-        PyBuffer_Release(&hv);
-        *out_has_huf = 1;
-    }
-
-    if (dict_obj && dict_obj != Py_None) {
-        Py_buffer dv;
-        if (PyObject_GetBuffer(dict_obj, &dv, PyBUF_SIMPLE) < 0) return -1;
-        if ((size_t)dv.len > ZXC_DICT_SIZE_MAX) {
-            PyBuffer_Release(&dv);
-            PyErr_SetString(PyExc_RuntimeError, zxc_error_name(ZXC_ERROR_DICT_TOO_LARGE));
-            return -1;
-        }
-        if (dv.len > 0) {
-            uint8_t* copy = (uint8_t*)PyMem_Malloc((size_t)dv.len);
-            if (!copy) {
-                PyBuffer_Release(&dv);
-                PyErr_NoMemory();
-                return -1;
-            }
-            memcpy(copy, dv.buf, (size_t)dv.len);
-            *out_dict = copy;
-            *out_size = (size_t)dv.len;
-        }
-        PyBuffer_Release(&dv);
     }
     return 0;
 }
@@ -1151,34 +1196,26 @@ static PyObject* pyzxc_cctx_create(PyObject* self, PyObject* args, PyObject* kwa
         return NULL;
     }
 
+    pyzxc_dict_views_t v;
+    if (pyzxc_dict_views_acquire(&v, dict_obj, huf_obj) < 0) return NULL;
     pyzxc_cctx_holder_t* h = (pyzxc_cctx_holder_t*)PyMem_Malloc(sizeof(*h));
-    if (!h) return PyErr_NoMemory();
-    memset(h, 0, sizeof(*h));
-    h->level = level;
-    h->checksum = checksum;
-    h->seekable = seekable;
-    if (pyzxc_ctx_take_dict(dict_obj, huf_obj, &h->dict, &h->dict_size, h->huf, &h->has_huf) < 0) {
-        PyMem_Free(h);
-        return NULL;
+    if (!h) {
+        pyzxc_dict_views_release(&v);
+        return PyErr_NoMemory();
     }
-
-    zxc_compress_opts_t copts = {0};
-    copts.level = level;
-    copts.checksum_enabled = checksum;
-    copts.seekable = seekable;
-    h->cctx = zxc_create_cctx(&copts);
-    if (!h->cctx) {
-        PyMem_Free(h->dict);
-        PyMem_Free(h);
-        Py_Return_Err(PyExc_MemoryError, "zxc_create_cctx failed");
-    }
-
-    PyObject* cap = PyCapsule_New(h, ZXC_CCTX_CAPSULE, cctx_capsule_destructor);
+    h->cctx = zxc_create_cctx();
+    const int rc = h->cctx ? pyzxc_cctx_configure(h->cctx, level, 0, 0, checksum, seekable,
+                                                  v.have_dict ? v.dict.buf : NULL,
+                                                  v.have_dict ? (size_t)v.dict.len : 0,
+                                                  v.have_huf ? v.huf.buf : NULL)
+                           : ZXC_ERROR_MEMORY;
+    pyzxc_dict_views_release(&v);
+    PyObject* const cap =
+        rc == ZXC_OK ? PyCapsule_New(h, ZXC_CCTX_CAPSULE, cctx_capsule_destructor) : NULL;
     if (!cap) {
         zxc_free_cctx(h->cctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
-        return NULL;
+        if (rc != ZXC_OK) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     }
     return cap;
 }
@@ -1195,28 +1232,26 @@ static PyObject* pyzxc_dctx_create(PyObject* self, PyObject* args, PyObject* kwa
         return NULL;
     }
 
+    pyzxc_dict_views_t v;
+    if (pyzxc_dict_views_acquire(&v, dict_obj, huf_obj) < 0) return NULL;
     pyzxc_dctx_holder_t* h = (pyzxc_dctx_holder_t*)PyMem_Malloc(sizeof(*h));
-    if (!h) return PyErr_NoMemory();
-    memset(h, 0, sizeof(*h));
-    h->checksum = checksum;
-    if (pyzxc_ctx_take_dict(dict_obj, huf_obj, &h->dict, &h->dict_size, h->huf, &h->has_huf) < 0) {
-        PyMem_Free(h);
-        return NULL;
+    if (!h) {
+        pyzxc_dict_views_release(&v);
+        return PyErr_NoMemory();
     }
-
     h->dctx = zxc_create_dctx();
-    if (!h->dctx) {
-        PyMem_Free(h->dict);
-        PyMem_Free(h);
-        Py_Return_Err(PyExc_MemoryError, "zxc_create_dctx failed");
-    }
-
-    PyObject* cap = PyCapsule_New(h, ZXC_DCTX_CAPSULE, dctx_capsule_destructor);
+    const int rc = h->dctx
+                       ? pyzxc_dctx_configure(h->dctx, 0, checksum, v.have_dict ? v.dict.buf : NULL,
+                                              v.have_dict ? (size_t)v.dict.len : 0,
+                                              v.have_huf ? v.huf.buf : NULL)
+                       : ZXC_ERROR_MEMORY;
+    pyzxc_dict_views_release(&v);
+    PyObject* const cap =
+        rc == ZXC_OK ? PyCapsule_New(h, ZXC_DCTX_CAPSULE, dctx_capsule_destructor) : NULL;
     if (!cap) {
         zxc_free_dctx(h->dctx);
-        PyMem_Free(h->dict);
         PyMem_Free(h);
-        return NULL;
+        if (rc != ZXC_OK) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
     }
     return cap;
 }
@@ -1248,18 +1283,10 @@ static PyObject* pyzxc_cctx_compress(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    zxc_compress_opts_t copts = {0};
-    copts.level = h->level;
-    copts.checksum_enabled = h->checksum;
-    copts.seekable = h->seekable;
-    copts.dict = h->dict;
-    copts.dict_size = h->dict_size;
-    copts.dict_huf = h->has_huf ? h->huf : NULL;
-
     char* dst = PyBytes_AsString(out);
     int64_t nwritten;
     Py_BEGIN_ALLOW_THREADS;
-    nwritten = zxc_compress_cctx(h->cctx, view.buf, src_size, dst, bound, &copts);
+    nwritten = zxc_compress_cctx(h->cctx, view.buf, src_size, dst, bound);
     Py_END_ALLOW_THREADS;
 
     PyBuffer_Release(&view);
@@ -1303,17 +1330,11 @@ static PyObject* pyzxc_dctx_decompress(PyObject* self, PyObject* args) {
         return NULL;
     }
 
-    zxc_decompress_opts_t dopts = {0};
-    dopts.checksum_enabled = h->checksum;
-    dopts.dict = h->dict;
-    dopts.dict_size = h->dict_size;
-    dopts.dict_huf = h->has_huf ? h->huf : NULL;
-
     char* dst = PyBytes_AsString(out);
     int64_t nwritten;
     Py_BEGIN_ALLOW_THREADS;
-    nwritten = zxc_decompress_dctx(h->dctx, view.buf, (size_t)view.len, dst,
-                                   (size_t)decompress_size, &dopts);
+    nwritten =
+        zxc_decompress_dctx(h->dctx, view.buf, (size_t)view.len, dst, (size_t)decompress_size);
     Py_END_ALLOW_THREADS;
 
     PyBuffer_Release(&view);
@@ -1427,12 +1448,17 @@ static PyObject* pyzxc_cstream_create(PyObject* self, PyObject* args, PyObject* 
                      ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX, block_size);
         return NULL;
     }
-    zxc_compress_opts_t copts = {0};
-    copts.level = level;
-    copts.checksum_enabled = checksum;
-    copts.block_size = (size_t)block_size;
-
-    zxc_cstream* cs = zxc_cstream_create(&copts);
+    /* The stream copies the parameters at creation; the context is configuration only. */
+    zxc_cctx* cfg = zxc_create_cctx();
+    if (!cfg) return PyErr_NoMemory();
+    const int rc =
+        pyzxc_cctx_configure(cfg, level, (int64_t)block_size, 0, checksum, 0, NULL, 0, NULL);
+    if (rc != ZXC_OK) {
+        zxc_free_cctx(cfg);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
+    }
+    zxc_cstream* cs = zxc_cstream_create(cfg);
+    zxc_free_cctx(cfg);
     if (!cs) Py_Return_Err(PyExc_MemoryError, "zxc_cstream_create failed");
 
     pyzxc_cstream_holder_t* h = (pyzxc_cstream_holder_t*)PyMem_Malloc(sizeof(*h));
@@ -1620,10 +1646,16 @@ static PyObject* pyzxc_dstream_create(PyObject* self, PyObject* args, PyObject* 
     static char* kwlist[] = {"checksum", NULL};
     if (!PyArg_ParseTupleAndKeywords(args, kwargs, "|p", kwlist, &checksum)) return NULL;
 
-    zxc_decompress_opts_t dopts = {0};
-    dopts.checksum_enabled = checksum;
-
-    zxc_dstream* ds = zxc_dstream_create(&dopts);
+    /* The stream copies the parameters at creation; the context is configuration only. */
+    zxc_dctx* cfg = zxc_create_dctx();
+    if (!cfg) return PyErr_NoMemory();
+    const int rc = pyzxc_dctx_configure(cfg, 0, checksum, NULL, 0, NULL);
+    if (rc != ZXC_OK) {
+        zxc_free_dctx(cfg);
+        Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
+    }
+    zxc_dstream* ds = zxc_dstream_create(cfg);
+    zxc_free_dctx(cfg);
     if (!ds) Py_Return_Err(PyExc_MemoryError, "zxc_dstream_create failed");
 
     pyzxc_dstream_holder_t* h = (pyzxc_dstream_holder_t*)PyMem_Malloc(sizeof(*h));

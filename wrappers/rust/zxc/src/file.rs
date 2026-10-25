@@ -7,22 +7,120 @@
 
 //! File-based multi-threaded streaming API.
 
-use std::fs::File;
+use std::fs::{self, File, OpenOptions};
 use std::io;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(unix)]
 use std::os::unix::io::AsRawFd;
 
+use crate::ctx::{RawCctx, RawDctx, thread_param};
 use crate::error::error_from_code;
 use crate::{Error, Level};
+
+/// Destination of a file pipeline. A regular or new output is written to a
+/// sibling temporary file renamed over it on success, so a failed call leaves
+/// the previous content intact. It is written in place when that is
+/// impossible: a device or FIFO, or a directory that refuses the temporary
+/// file.
+struct Output {
+    /// Taken on commit, so the file is closed before the rename.
+    file: Option<File>,
+    /// Temporary path and its rename target; `None` once in place.
+    pending: Option<(PathBuf, PathBuf)>,
+}
+
+static TMP_SEQ: AtomicU32 = AtomicU32::new(0);
+
+impl Output {
+    fn create(path: &Path) -> io::Result<Self> {
+        // Replace a link's target, not the link.
+        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        // Opening the existing output fails where File::create would, tells a
+        // device or FIFO apart, gives the mode the replacement keeps, and is
+        // the handle to fall back on.
+        let mut existing = match OpenOptions::new().write(true).open(&path) {
+            Ok(file) => {
+                let meta = file.metadata()?;
+                if !meta.is_file() {
+                    return Ok(Self {
+                        file: Some(file),
+                        pending: None,
+                    });
+                }
+                Some((file, meta.permissions()))
+            }
+            Err(e) if e.kind() == io::ErrorKind::NotFound => None,
+            Err(e) => return Err(e),
+        };
+        let (file, tmp) = loop {
+            let mut tmp = path.clone().into_os_string();
+            tmp.push(format!(
+                ".{}-{}.zxc-tmp",
+                std::process::id(),
+                TMP_SEQ.fetch_add(1, Ordering::Relaxed)
+            ));
+            match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+                Ok(file) => break (file, PathBuf::from(tmp)),
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+                Err(e) if e.kind() == io::ErrorKind::PermissionDenied => match existing.take() {
+                    // The directory refuses a sibling: truncate the output in place.
+                    Some((file, _)) => {
+                        file.set_len(0)?;
+                        return Ok(Self {
+                            file: Some(file),
+                            pending: None,
+                        });
+                    }
+                    None => return Err(e),
+                },
+                Err(e) => return Err(e),
+            }
+        };
+        let out = Self {
+            file: Some(file),
+            pending: Some((tmp, path)),
+        };
+        if let Some((_, mode)) = existing {
+            out.file().set_permissions(mode)?; // drop removes the temporary file
+        }
+        Ok(out)
+    }
+
+    fn file(&self) -> &File {
+        self.file.as_ref().expect("output is open")
+    }
+
+    /// Closes the output and, for a temporary file, renames it into place.
+    fn commit(mut self) -> io::Result<()> {
+        self.file = None;
+        match self.pending.take() {
+            Some((tmp, target)) => fs::rename(&tmp, target).inspect_err(|_| {
+                let _ = fs::remove_file(&tmp);
+            }),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for Output {
+    /// Removes the temporary file of an uncommitted output.
+    fn drop(&mut self) {
+        self.file = None;
+        if let Some((tmp, _)) = self.pending.take() {
+            let _ = fs::remove_file(tmp);
+        }
+    }
+}
 
 /// Options for streaming compression operations.
 #[derive(Debug, Clone)]
 pub struct StreamCompressOptions {
     /// Compression level (default: `Level::Default`)
     pub level: Level,
-    /// Number of worker threads (default: `None` = auto-detect CPU cores)
+    /// Number of worker threads (default: `None` = auto-detect CPU cores).
+    /// At most the library maximum (512); more is [`Error::BadParam`].
     pub threads: Option<usize>,
     /// Enable checksum for data integrity (default: `true`)
     pub checksum: bool,
@@ -72,7 +170,8 @@ impl StreamCompressOptions {
 /// Options for streaming decompression operations.
 #[derive(Debug, Clone)]
 pub struct StreamDecompressOptions {
-    /// Number of worker threads (default: `None` = auto-detect CPU cores)
+    /// Number of worker threads (default: `None` = auto-detect CPU cores).
+    /// At most the library maximum (512); more is [`Error::BadParam`].
     pub threads: Option<usize>,
     /// Verify checksum during decompression (default: `true`)
     pub verify_checksum: bool,
@@ -376,12 +475,22 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
     output: P,
     opts: &StreamCompressOptions,
 ) -> StreamResult<u64> {
+    // The pipeline reads its parameters from a configured context; validate
+    // them before touching the files.
+    let mut cfg = RawCctx::new()?;
+    cfg.set_params(
+        opts.level,
+        opts.checksum,
+        opts.seekable,
+        thread_param(opts.threads),
+    )?;
+
     let f_in = File::open(input)?;
-    let f_out = File::create(output)?;
+    let f_out = Output::create(output.as_ref())?;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
-        let c_out = file_to_c_file_write(&f_out);
+        let c_out = file_to_c_file_write(f_out.file());
 
         // Check for errors and cleanup on failure
         if c_in.is_null() {
@@ -395,17 +504,7 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::Io(io::Error::last_os_error()));
         }
 
-        let result = zxc_sys::zxc_stream_compress(
-            c_in,
-            c_out,
-            &zxc_sys::zxc_compress_opts_t {
-                n_threads: opts.threads.unwrap_or(0) as i32,
-                level: opts.level as i32,
-                checksum_enabled: opts.checksum as i32,
-                seekable: opts.seekable as i32,
-                ..Default::default()
-            },
-        );
+        let result = zxc_sys::zxc_stream_compress(c_in, c_out, cfg.as_ptr());
 
         // Always close C FILE handles (they own duplicated fds)
         let closed = close_output(c_out);
@@ -415,6 +514,7 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::BufferError(error_from_code(result)));
         }
         closed?;
+        f_out.commit()?;
         Ok(result as u64)
     }
 }
@@ -466,15 +566,15 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
     output: P,
     opts: &StreamDecompressOptions,
 ) -> StreamResult<u64> {
-    let f_in = File::open(input)?;
-    let f_out = File::create(output)?;
+    let mut cfg = RawDctx::new()?;
+    cfg.set_params(opts.verify_checksum, thread_param(opts.threads))?;
 
-    let n_threads = opts.threads.unwrap_or(0) as i32;
-    let checksum_enabled = opts.verify_checksum as i32;
+    let f_in = File::open(input)?;
+    let f_out = Output::create(output.as_ref())?;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
-        let c_out = file_to_c_file_write(&f_out);
+        let c_out = file_to_c_file_write(f_out.file());
 
         // Check for errors and cleanup on failure
         if c_in.is_null() {
@@ -488,15 +588,7 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::Io(io::Error::last_os_error()));
         }
 
-        let result = zxc_sys::zxc_stream_decompress(
-            c_in,
-            c_out,
-            &zxc_sys::zxc_decompress_opts_t {
-                n_threads,
-                checksum_enabled,
-                ..Default::default()
-            },
-        );
+        let result = zxc_sys::zxc_stream_decompress(c_in, c_out, cfg.as_ptr());
 
         // Always close C FILE handles (they own duplicated fds)
         let closed = close_output(c_out);
@@ -506,6 +598,7 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
             return Err(StreamError::BufferError(error_from_code(result)));
         }
         closed?;
+        f_out.commit()?;
         Ok(result as u64)
     }
 }
@@ -609,6 +702,83 @@ mod tests {
         let _ = fs::remove_file(&input_path);
         let _ = fs::remove_file(&compressed_path);
         let _ = fs::remove_file(&output_path);
+    }
+
+    /// A writable output in a directory that refuses new files is written in
+    /// place.
+    #[cfg(unix)]
+    #[test]
+    fn test_file_in_place_fallback() {
+        use std::os::unix::fs::PermissionsExt;
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root writes anywhere
+        }
+        let dir = std::path::PathBuf::from(temp_path("in_place_fallback"));
+        let locked = dir.join("locked");
+        let _ = fs::set_permissions(&locked, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&locked).unwrap();
+        let (input, out) = (dir.join("in"), locked.join("out"));
+        let payload = b"in-place fallback";
+        fs::write(&input, payload).unwrap();
+        fs::write(&out, b"old").unwrap();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let result = compress_file(&input, &out, Level::Default, None, None);
+        let arc = fs::read(&out).unwrap();
+        let left = fs::read_dir(&locked).unwrap().count();
+        fs::set_permissions(&locked, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+
+        result.expect("compress_file into a read-only directory");
+        assert_eq!(decompress(&arc).unwrap(), payload);
+        assert_eq!(left, 1, "temporary file left behind");
+    }
+
+    /// A failed call, refused option or bad data, leaves an existing output
+    /// untouched and no temporary file behind; a successful one replaces it.
+    #[test]
+    fn test_file_failure_keeps_output() {
+        let dir = std::path::PathBuf::from(temp_path("failure_keeps_output"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (input, arc, corrupt, out) = (
+            dir.join("in"),
+            dir.join("arc"),
+            dir.join("corrupt"),
+            dir.join("out"),
+        );
+        let payload = b"file pipeline input ".repeat(500);
+        fs::write(&input, &payload).unwrap();
+        compress_file(&input, &arc, Level::Default, None, Some(true)).unwrap();
+        let mut bad = fs::read(&arc).unwrap();
+        let mid = bad.len() / 2;
+        bad[mid] ^= 0xFF;
+        fs::write(&corrupt, &bad).unwrap();
+        let keep = b"previous content must survive";
+        fs::write(&out, keep).unwrap();
+
+        assert!(compress_file(&input, &out, Level::Default, Some(1000), None).is_err());
+        assert!(decompress_file(&corrupt, &out, None).is_err());
+        assert_eq!(fs::read(&out).unwrap(), keep);
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            4,
+            "temporary file left behind"
+        );
+
+        decompress_file(&arc, &out, None).unwrap();
+        assert_eq!(fs::read(&out).unwrap(), payload);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&out, fs::Permissions::from_mode(0o600)).unwrap();
+            decompress_file(&arc, &out, None).unwrap();
+            let mode = fs::metadata(&out).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600, "output mode not kept");
+            decompress_file(&arc, &std::path::PathBuf::from("/dev/null"), None).unwrap();
+        }
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

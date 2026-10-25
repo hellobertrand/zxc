@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-#include "../include/zxc_stream.h"
+#include "../../include/zxc_stream.h"
 #include "test_common.h"
 
 int test_seekable_table_sizes(void) {
@@ -85,9 +85,8 @@ int test_seekable_roundtrip(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = ZXC_LEVEL_DEFAULT, .block_size = 64 * 1024, .checksum_enabled = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize =
+        test_compress_cfg(src, SRC_SIZE, dst, dst_cap, ZXC_LEVEL_DEFAULT, 64 * 1024, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -99,11 +98,8 @@ int test_seekable_roundtrip(void) {
     {
         const size_t SMALL = 60 * 1024; /* fits in one 64KB block */
         memset(dec, 0, SMALL);
-        zxc_compress_opts_t opts_a = {.level = ZXC_LEVEL_DEFAULT,
-                                      .block_size = 64 * 1024,
-                                      .checksum_enabled = 1,
-                                      .seekable = 0};
-        const int64_t a_csize = zxc_compress(src, SMALL, dst, dst_cap, &opts_a);
+        const int64_t a_csize =
+            test_compress_cfg(src, SMALL, dst, dst_cap, ZXC_LEVEL_DEFAULT, 64 * 1024, 1, 0);
         if (a_csize <= 0) {
             printf("Failed: single-block 64KB compress (%lld)\n", (long long)a_csize);
             free(src);
@@ -111,8 +107,7 @@ int test_seekable_roundtrip(void) {
             free(dec);
             return 0;
         }
-        zxc_decompress_opts_t ad = {.checksum_enabled = 1};
-        const int64_t a_dsize = zxc_decompress(dst, (size_t)a_csize, dec, SMALL, &ad);
+        const int64_t a_dsize = test_decompress_verified(dst, (size_t)a_csize, dec, SMALL);
         if (a_dsize != (int64_t)SMALL || memcmp(src, dec, SMALL) != 0) {
             printf("Failed: single-block 64KB roundtrip (dsize=%lld)\n", (long long)a_dsize);
             if (a_dsize == (int64_t)SMALL) {
@@ -135,11 +130,8 @@ int test_seekable_roundtrip(void) {
     {
         const size_t TWO = 128 * 1024;
         memset(dec, 0, TWO);
-        zxc_compress_opts_t opts_b = {.level = ZXC_LEVEL_DEFAULT,
-                                      .block_size = 64 * 1024,
-                                      .checksum_enabled = 1,
-                                      .seekable = 0};
-        const int64_t b_csize = zxc_compress(src, TWO, dst, dst_cap, &opts_b);
+        const int64_t b_csize =
+            test_compress_cfg(src, TWO, dst, dst_cap, ZXC_LEVEL_DEFAULT, 64 * 1024, 1, 0);
         if (b_csize <= 0) {
             printf("Failed: 2-block 64KB compress (%lld)\n", (long long)b_csize);
             free(src);
@@ -147,8 +139,7 @@ int test_seekable_roundtrip(void) {
             free(dec);
             return 0;
         }
-        zxc_decompress_opts_t bd = {.checksum_enabled = 1};
-        const int64_t b_dsize = zxc_decompress(dst, (size_t)b_csize, dec, TWO, &bd);
+        const int64_t b_dsize = test_decompress_verified(dst, (size_t)b_csize, dec, TWO);
         if (b_dsize != (int64_t)TWO || memcmp(src, dec, TWO) != 0) {
             printf("Failed: 2-block 64KB roundtrip (dsize=%lld)\n", (long long)b_dsize);
             if (b_dsize == (int64_t)TWO) {
@@ -170,11 +161,8 @@ int test_seekable_roundtrip(void) {
     /* Sub-test C: full 256KB (4 blocks x 64KB) */
     {
         memset(dec, 0, SRC_SIZE);
-        zxc_compress_opts_t opts_ns = {.level = ZXC_LEVEL_DEFAULT,
-                                       .block_size = 64 * 1024,
-                                       .checksum_enabled = 1,
-                                       .seekable = 0};
-        const int64_t ns_csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts_ns);
+        const int64_t ns_csize =
+            test_compress_cfg(src, SRC_SIZE, dst, dst_cap, ZXC_LEVEL_DEFAULT, 64 * 1024, 1, 0);
         if (ns_csize <= 0) {
             printf("Failed: non-seekable compress (%lld)\n", (long long)ns_csize);
             free(src);
@@ -182,8 +170,7 @@ int test_seekable_roundtrip(void) {
             free(dec);
             return 0;
         }
-        zxc_decompress_opts_t nd = {.checksum_enabled = 1};
-        const int64_t ns_dsize = zxc_decompress(dst, (size_t)ns_csize, dec, SRC_SIZE, &nd);
+        const int64_t ns_dsize = test_decompress_verified(dst, (size_t)ns_csize, dec, SRC_SIZE);
         if (ns_dsize != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
             printf("Failed: non-seekable 64KB block_size roundtrip (dsize=%lld)\n",
                    (long long)ns_dsize);
@@ -206,7 +193,8 @@ int test_seekable_roundtrip(void) {
 
     /* Re-compress with seekable=1 for the actual test */
     memset(dec, 0, SRC_SIZE);
-    const int64_t csize2 = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize2 =
+        test_compress_cfg(src, SRC_SIZE, dst, dst_cap, ZXC_LEVEL_DEFAULT, 64 * 1024, 1, 1);
     if (csize2 <= 0) {
         printf("Failed: seekable re-compress (%lld)\n", (long long)csize2);
         free(src);
@@ -216,8 +204,7 @@ int test_seekable_roundtrip(void) {
     }
 
     /* Full decompression with standard API (backward compatibility) */
-    zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-    const int64_t dsize = zxc_decompress(dst, (size_t)csize2, dec, SRC_SIZE, &dopts);
+    const int64_t dsize = test_decompress_verified(dst, (size_t)csize2, dec, SRC_SIZE);
     if (dsize != (int64_t)SRC_SIZE || memcmp(src, dec, SRC_SIZE) != 0) {
         printf("Failed: decompress mismatch (csize=%lld dsize=%lld expected=%zu)\n",
                (long long)csize2, (long long)dsize, SRC_SIZE);
@@ -257,8 +244,7 @@ int test_seekable_open_query(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 2, .block_size = 64 * 1024, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 2, 64 * 1024, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -333,8 +319,7 @@ int test_seekable_random_access(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 3, .block_size = 64 * 1024, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, 64 * 1024, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -453,8 +438,7 @@ int test_seekable_non_seekable_reject(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 0};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 0, 0);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -492,8 +476,7 @@ int test_seekable_single_block(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -552,8 +535,7 @@ int test_seekable_all_levels(void) {
     }
 
     for (int lvl = 1; lvl <= 5; lvl++) {
-        zxc_compress_opts_t opts = {.level = lvl, .block_size = 32 * 1024, .seekable = 1};
-        const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+        const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, lvl, 32 * 1024, 0, 1);
         if (csize <= 0) {
             printf("Failed: compress level %d\n", lvl);
             free(src);
@@ -622,9 +604,8 @@ int test_seekable_many_blocks(void) {
     }
 
     /* Compress with minimum block_size = 4096 */
-    zxc_compress_opts_t opts = {
-        .level = ZXC_LEVEL_DEFAULT, .block_size = 4096, .checksum_enabled = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize =
+        test_compress_cfg(src, SRC_SIZE, dst, dst_cap, ZXC_LEVEL_DEFAULT, 4096, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress (%lld)\n", (long long)csize);
         free(src);
@@ -717,9 +698,8 @@ int test_seekable_open_file(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = ZXC_LEVEL_DEFAULT, .block_size = 32 * 1024, .checksum_enabled = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize =
+        test_compress_cfg(src, SRC_SIZE, dst, dst_cap, ZXC_LEVEL_DEFAULT, 32 * 1024, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress (%lld)\n", (long long)csize);
         free(src);
@@ -832,8 +812,7 @@ int test_seekable_cross_boundary(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 3, .block_size = BLK, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, BLK, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -916,8 +895,7 @@ int test_seekable_truncated_input(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -957,8 +935,7 @@ int test_seekable_truncated_input(void) {
 
     /* A checksummed archive carries an 8-byte digest on top of its sizes: cut
      * below that floor it is short of its own footer. */
-    zxc_compress_opts_t chk = {.level = 1, .seekable = 1, .checksum_enabled = 1};
-    const int64_t csize_chk = zxc_compress(src, SRC_SIZE, dst, dst_cap, &chk);
+    const int64_t csize_chk = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 1, 1);
     if (csize_chk <= 0) {
         printf("Failed: compress with checksums\n");
         free(src);
@@ -997,8 +974,7 @@ int test_seekable_corrupted_sek(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -1047,8 +1023,7 @@ int test_seekable_range_out_of_bounds(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -1108,8 +1083,7 @@ int test_seekable_dst_too_small(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, 0, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -1153,8 +1127,7 @@ int test_seekable_empty_file(void) {
     if (!dst) return 0;
 
     /* Buffer API: NULL src with size 0 produces a valid empty frame */
-    zxc_compress_opts_t opts = {.level = 3, .seekable = 1};
-    const int64_t csize = zxc_compress(NULL, 0, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(NULL, 0, dst, dst_cap, 3, 0, 0, 1);
     if (csize <= 0) {
         printf("Failed: expected valid empty frame (got %lld)\n", (long long)csize);
         free(dst);
@@ -1171,7 +1144,12 @@ int test_seekable_empty_file(void) {
     FILE* fin = tmpfile();
     FILE* fout = tmpfile();
     if (fin && fout) {
-        int64_t stream_sz = zxc_stream_compress(fin, fout, &opts);
+        zxc_cctx* const cfg = zxc_create_cctx();
+        int64_t stream_sz = ZXC_ERROR_MEMORY;
+        if (cfg && zxc_cctx_set_param(cfg, ZXC_C_LEVEL, 3) == ZXC_OK &&
+            zxc_cctx_set_param(cfg, ZXC_C_SEEKABLE, 1) == ZXC_OK)
+            stream_sz = zxc_stream_compress(fin, fout, cfg);
+        zxc_free_cctx(cfg);
         if (stream_sz < 0) {
             printf("Failed: stream compress empty (got %lld)\n", (long long)stream_sz);
             fclose(fin);
@@ -1183,8 +1161,7 @@ int test_seekable_empty_file(void) {
         rewind(fout);
         FILE* fdec = tmpfile();
         if (fdec) {
-            zxc_decompress_opts_t dopts = {.checksum_enabled = 0};
-            int64_t dsz = zxc_stream_decompress(fout, fdec, &dopts);
+            int64_t dsz = zxc_stream_decompress(fout, fdec, NULL);
             if (dsz != 0) {
                 printf("Failed: stream decompress empty should return 0 (got %lld)\n",
                        (long long)dsz);
@@ -1221,9 +1198,7 @@ int test_seekable_no_checksum(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = 3, .block_size = 64 * 1024, .seekable = 1, .checksum_enabled = 0};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, 64 * 1024, 0, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -1272,8 +1247,7 @@ int test_seekable_no_checksum(void) {
         free(dst);
         return 0;
     }
-    zxc_decompress_opts_t dopts = {.checksum_enabled = 0};
-    int64_t dsize = zxc_decompress(dst, (size_t)csize, full, SRC_SIZE, &dopts);
+    int64_t dsize = zxc_decompress(dst, (size_t)csize, full, SRC_SIZE);
     if (dsize != (int64_t)SRC_SIZE || memcmp(src, full, SRC_SIZE) != 0) {
         printf("Failed: full decompress mismatch\n");
         free(full);
@@ -1369,9 +1343,7 @@ int test_seekable_open_reader(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = 3, .block_size = 64 * 1024, .checksum_enabled = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, 64 * 1024, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress (%lld)\n", (long long)csize);
         free(src);
@@ -1557,9 +1529,7 @@ int test_seekable_open_reader_mt(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = 3, .block_size = 64 * 1024, .checksum_enabled = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, 64 * 1024, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress (%lld)\n", (long long)csize);
         free(src);
@@ -1619,8 +1589,7 @@ int test_seekable_range_reports_short_reads(void) {
     int ok = 0;
     do {
         if (!dst) break;
-        zxc_compress_opts_t opts = {.level = 3, .block_size = BLK, .seekable = 1};
-        const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+        const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, BLK, 0, 1);
         if (csize <= 0) {
             printf("  [FAIL] compress -> %lld\n", (long long)csize);
             break;
@@ -1693,9 +1662,7 @@ int test_seekable_swapped_blocks_caught(void) {
         rng = rng * 1103515245U + 12345U;
         src[i] = (uint8_t)(rng >> 16);
     }
-    const zxc_compress_opts_t co = {
-        .level = 3, .block_size = BLK, .seekable = 1, .checksum_enabled = 1};
-    const int64_t n = zxc_compress(src, sizeof(src), arc, sizeof(arc), &co);
+    const int64_t n = test_compress_cfg(src, sizeof(src), arc, sizeof(arc), 3, BLK, 1, 1);
     const size_t b0 = ZXC_FILE_HEADER_SIZE, b1 = b0 + SPAN;
     uint8_t out[64];
     int ok = 0;
@@ -1721,8 +1688,7 @@ int test_seekable_swapped_blocks_caught(void) {
         const int64_t st = zxc_seekable_decompress_range(s, out, sizeof(out), 0, sizeof(out));
         const int64_t mt = zxc_seekable_decompress_range_mt(s, out, sizeof(out), BLK - 32, 64, 2);
         zxc_seekable_free(s);
-        const zxc_decompress_opts_t verify = {.checksum_enabled = 1};
-        const int64_t frame = zxc_decompress(arc, (size_t)n, dec, sizeof(dec), &verify);
+        const int64_t frame = test_decompress_verified(arc, (size_t)n, dec, sizeof(dec));
 
         if (!moved || st != ZXC_ERROR_BAD_CHECKSUM || mt != ZXC_ERROR_BAD_CHECKSUM ||
             frame != ZXC_ERROR_BAD_CHECKSUM) {
@@ -1757,9 +1723,7 @@ int test_seekable_corrupted_block_checksum(void) {
         free(src);
         return 0;
     }
-    zxc_compress_opts_t opts = {
-        .level = 3, .block_size = BLK, .seekable = 1, .checksum_enabled = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, BLK, 1, 1);
     int ok = 0;
     uint8_t out[512], out_bad[512];
     do {
@@ -1895,9 +1859,7 @@ int test_seekable_with_checksum(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = 3, .block_size = 64 * 1024, .seekable = 1, .checksum_enabled = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, 64 * 1024, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress\n");
         free(src);
@@ -1944,8 +1906,7 @@ int test_seekable_with_checksum(void) {
         free(dst);
         return 0;
     }
-    zxc_decompress_opts_t dopts = {.checksum_enabled = 1};
-    int64_t dsize = zxc_decompress(dst, (size_t)csize, full, SRC_SIZE, &dopts);
+    int64_t dsize = test_decompress_verified(dst, (size_t)csize, full, SRC_SIZE);
     if (dsize != (int64_t)SRC_SIZE || memcmp(src, full, SRC_SIZE) != 0) {
         printf("Failed: full decompress with checksum mismatch\n");
         free(full);
@@ -1987,9 +1948,8 @@ int test_seekable_work_buf_tail_pad(void) {
         return 0;
     }
 
-    zxc_compress_opts_t opts = {
-        .level = ZXC_LEVEL_DEFAULT, .block_size = BLK, .checksum_enabled = 1, .seekable = 1};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize =
+        test_compress_cfg(src, SRC_SIZE, dst, dst_cap, ZXC_LEVEL_DEFAULT, BLK, 1, 1);
     if (csize <= 0) {
         printf("Failed: compress returned %lld\n", (long long)csize);
         free(src);
@@ -2103,8 +2063,7 @@ int test_seekable_eof_with_payload(void) {
     int ok = 0;
     if (!src || !arc) goto done;
     fill_seek_data(src, SRC_SIZE, 7);
-    const zxc_compress_opts_t opts = {.level = 1, .seekable = 1, .block_size = 4096};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, arc, cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, arc, cap, 1, 4096, 0, 1);
     zxc_seekable* s = csize > 0 ? zxc_seekable_open(arc, (size_t)csize) : NULL;
     if (!s) {
         printf("Failed: intact archive does not open\n");
@@ -2292,8 +2251,7 @@ int test_seekable_mt_group_boundary(void) {
     do {
         if (!src || !arc || !st_out || !mt_out) break;
         gen_random_data(src, SRC_SIZE);
-        const zxc_compress_opts_t co = {.level = 1, .block_size = BS, .seekable = 1};
-        const int64_t csize = zxc_compress(src, SRC_SIZE, arc, cap, &co);
+        const int64_t csize = test_compress_cfg(src, SRC_SIZE, arc, cap, 1, BS, 0, 1);
         if (csize <= 0) {
             printf("  [FAIL] compress -> %lld\n", (long long)csize);
             break;
@@ -2361,8 +2319,7 @@ int test_seekable_forged_table_entry(void) {
         free(src);
         return 0;
     }
-    zxc_compress_opts_t opts = {.level = 1, .seekable = 1, .block_size = BS};
-    const int64_t csize = zxc_compress(src, SRC_SIZE, dst, dst_cap, &opts);
+    const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 1, BS, 0, 1);
     free(src);
     if (csize <= 0) {
         printf("Failed: compress\n");

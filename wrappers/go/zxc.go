@@ -164,6 +164,7 @@ var (
 	ErrDictMismatch = &Error{Code: int(C.ZXC_ERROR_DICT_MISMATCH), Name: "dictionary ID mismatch"}
 	ErrDictTooLarge = &Error{Code: int(C.ZXC_ERROR_DICT_TOO_LARGE), Name: "dictionary exceeds maximum size"}
 	ErrBadLevel     = &Error{Code: int(C.ZXC_ERROR_BAD_LEVEL), Name: "compression level out of range"}
+	ErrBadParam     = &Error{Code: int(C.ZXC_ERROR_BAD_PARAM), Name: "parameter out of range"}
 	ErrInvalidData  = errors.New("zxc: invalid compressed data")
 
 	// ErrBadHufTable is returned when a shared literal Huffman table does not
@@ -223,6 +224,8 @@ func errorFromCode(code C.int64_t) error {
 		return ErrBadLevel
 	case int(C.ZXC_ERROR_DICT_UNSUPPORTED):
 		return ErrDictUnsupported
+	case int(C.ZXC_ERROR_BAD_PARAM):
+		return ErrBadParam
 	default:
 		return fmt.Errorf("zxc: unknown error (code %d)", int(code))
 	}
@@ -261,7 +264,8 @@ func defaultOptions() options {
 // Option configures compression or decompression.
 type Option func(*options)
 
-// WithLevel sets the compression level.
+// WithLevel sets the compression level. A level outside [MinLevel, MaxLevel]
+// is refused with [ErrBadLevel]; 0 selects [LevelDefault].
 func WithLevel(l Level) Option {
 	return func(o *options) {
 		o.level = l
@@ -278,7 +282,8 @@ func WithChecksum(enabled bool) Option {
 }
 
 // WithThreads sets the number of worker threads for streaming operations.
-// A value of 0 means auto-detect the CPU core count.
+// A value of 0 means auto-detect the CPU core count; a negative one, or more
+// than the library's maximum (512), is refused with [ErrBadParam].
 func WithThreads(n int) Option {
 	return func(o *options) { o.threads = n }
 }
@@ -321,4 +326,94 @@ func applyOptions(opts []Option) options {
 		fn(&o)
 	}
 	return o
+}
+
+// ============================================================================
+// Native context configuration
+// ============================================================================
+//
+// The C library takes every parameter on a context (zxc_cctx_set_param,
+// zxc_cctx_set_dict and the dctx counterparts). The helpers below translate
+// an options value into those calls, so each entry point configures a
+// context, runs, and frees it; the Go API keeps its functional options.
+
+// boolParam maps a flag to the 0/1 a context parameter takes.
+func boolParam(b bool) int64 {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// setCParam sets one compression parameter, mapping a refusal to its error.
+func setCParam(ptr *C.zxc_cctx, param C.zxc_cparam_t, v int64) error {
+	if rc := C.zxc_cctx_set_param(ptr, param, C.int64_t(v)); rc != C.ZXC_OK {
+		return errorFromCode(C.int64_t(rc))
+	}
+	return nil
+}
+
+// setDParam sets one decompression parameter, mapping a refusal to its error.
+func setDParam(ptr *C.zxc_dctx, param C.zxc_dparam_t, v int64) error {
+	if rc := C.zxc_dctx_set_param(ptr, param, C.int64_t(v)); rc != C.ZXC_OK {
+		return errorFromCode(C.int64_t(rc))
+	}
+	return nil
+}
+
+// configureCctx sets the level, checksum, seek table and thread count of o
+// on ptr, then attaches its dictionary.
+func configureCctx(ptr *C.zxc_cctx, o options) error {
+	if err := setCParam(ptr, C.ZXC_C_LEVEL, int64(o.level)); err != nil {
+		return err
+	}
+	if err := setCParam(ptr, C.ZXC_C_CHECKSUM, boolParam(o.checksum)); err != nil {
+		return err
+	}
+	if err := setCParam(ptr, C.ZXC_C_SEEKABLE, boolParam(o.seekable)); err != nil {
+		return err
+	}
+	if err := setCParam(ptr, C.ZXC_C_THREADS, int64(o.threads)); err != nil {
+		return err
+	}
+	return attachCompressDict(ptr, o)
+}
+
+// configureDctx sets the checksum and thread count of o on ptr, then attaches
+// its dictionary.
+func configureDctx(ptr *C.zxc_dctx, o options) error {
+	if err := setDParam(ptr, C.ZXC_D_CHECKSUM, boolParam(o.checksum)); err != nil {
+		return err
+	}
+	if err := setDParam(ptr, C.ZXC_D_THREADS, int64(o.threads)); err != nil {
+		return err
+	}
+	return attachDecompressDict(ptr, o)
+}
+
+// createCctx returns a native compression context configured from o, for the
+// caller to free with C.zxc_free_cctx.
+func createCctx(o options) (*C.zxc_cctx, error) {
+	ptr := C.zxc_create_cctx()
+	if ptr == nil {
+		return nil, ErrMemory
+	}
+	if err := configureCctx(ptr, o); err != nil {
+		C.zxc_free_cctx(ptr)
+		return nil, err
+	}
+	return ptr, nil
+}
+
+// createDctx is [createCctx] for a decompression context.
+func createDctx(o options) (*C.zxc_dctx, error) {
+	ptr := C.zxc_create_dctx()
+	if ptr == nil {
+		return nil, ErrMemory
+	}
+	if err := configureDctx(ptr, o); err != nil {
+		C.zxc_free_dctx(ptr)
+		return nil, err
+	}
+	return ptr, nil
 }

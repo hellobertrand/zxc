@@ -21,7 +21,7 @@
 
 #include <stddef.h>
 
-#include "../../include/zxc_opts.h"
+#include "recipe.h"
 
 #define VC_KB(n) ((size_t)(n) * 1024U)
 #define VC_MB(n) ((size_t)(n) * 1024U * 1024U)
@@ -29,7 +29,7 @@
 typedef struct {
     const char* name; /* <name>.expected -> <name>.zxc */
     const char* dict; /* .zxd basename in the same directory, or NULL */
-    zxc_compress_opts_t opts;
+    recipe_t opts;
 } valid_case_t;
 
 /* Grouped as in README.md "Vector coverage"; keep the two in step. */

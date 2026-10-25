@@ -149,6 +149,10 @@ pub const ZXC_ERROR_BAD_LEVEL: i32 = -18;
 /// Dictionary not supported by this context's workspace (static contexts)
 pub const ZXC_ERROR_DICT_UNSUPPORTED: i32 = -19;
 
+/// Unknown parameter, or value out of its bounds (`zxc_cctx_set_param`,
+/// `zxc_dctx_set_param`)
+pub const ZXC_ERROR_BAD_PARAM: i32 = -20;
+
 // =============================================================================
 // Dictionary Constants
 // =============================================================================
@@ -164,52 +168,51 @@ pub const ZXC_DICT_HEADER_SIZE: usize = 16;
 pub const ZXC_HUF_TABLE_SIZE: usize = 128;
 
 // =============================================================================
-// Options Structs (mirroring C API)
+// Context Parameters (mirroring zxc_opts.h)
 // =============================================================================
 
-/// Compression options (mirrors `zxc_compress_opts_t` from C API).
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct zxc_compress_opts_t {
-    /// Worker thread count (0 = auto-detect CPU cores).
-    pub n_threads: c_int,
-    /// Compression level 1-7 (0 = default).
-    pub level: c_int,
-    /// Block size in bytes (0 = default 512 KB). Must be power of 2, 4 KB – 2 MB.
-    pub block_size: usize,
-    /// 1 to append a per-block checksum and the archive digest, 0 to disable.
-    pub checksum_enabled: c_int,
-    /// 1 to append a seek table for random-access decompression, 0 to disable.
-    pub seekable: c_int,
-    /// Pre-trained dictionary content (NULL = none).
-    pub dict: *const c_void,
-    /// Dictionary size in bytes (0 = none, max [`ZXC_DICT_SIZE_MAX`]).
-    pub dict_size: usize,
-    /// Shared literal Huffman table: 128-byte packed code-lengths header
-    /// (NULL = none; ignored without dict).
-    pub dict_huf: *const c_void,
-    /// Progress callback (NULL to disable).
-    pub progress_cb: *const c_void,
-    /// User context pointer passed to progress_cb.
-    pub user_data: *mut c_void,
-}
+/// Maximum worker thread count accepted by [`ZXC_C_THREADS`] / [`ZXC_D_THREADS`].
+pub const ZXC_MAX_THREADS: i64 = 512;
 
-impl Default for zxc_compress_opts_t {
-    fn default() -> Self {
-        Self {
-            n_threads: 0,
-            level: 0,
-            block_size: 0,
-            checksum_enabled: 0,
-            seekable: 0,
-            dict: std::ptr::null(),
-            dict_size: 0,
-            dict_huf: std::ptr::null(),
-            progress_cb: std::ptr::null(),
-            user_data: std::ptr::null_mut(),
-        }
-    }
-}
+/// Compression parameter identifier (mirrors the C enum `zxc_cparam_t`).
+///
+/// Set on a [`zxc_cctx`] with [`zxc_cctx_set_param`]; the value 0 restores a
+/// parameter's default, any other value must sit within [`zxc_cparam_bounds`].
+pub type zxc_cparam_t = c_int;
+
+/// Compression level, 1 to 7; default [`ZXC_LEVEL_DEFAULT`].
+pub const ZXC_C_LEVEL: zxc_cparam_t = 1;
+/// Block size in bytes, a power of two in 4 KB..2 MB; default 512 KB.
+pub const ZXC_C_BLOCK_SIZE: zxc_cparam_t = 2;
+/// Worker threads for the `FILE*` pipeline, at most [`ZXC_MAX_THREADS`];
+/// default 0, auto-detect. The buffer, block and push APIs ignore it.
+pub const ZXC_C_THREADS: zxc_cparam_t = 3;
+/// 1 appends the block checksums and the archive digest; default 0.
+pub const ZXC_C_CHECKSUM: zxc_cparam_t = 4;
+/// 1 appends a seek table for random-access decompression; default 0.
+pub const ZXC_C_SEEKABLE: zxc_cparam_t = 5;
+
+/// Decompression parameter identifier (mirrors the C enum `zxc_dparam_t`).
+///
+/// Set on a [`zxc_dctx`] with [`zxc_dctx_set_param`]; same rules as
+/// [`zxc_cparam_t`], bounds from [`zxc_dparam_bounds`].
+pub type zxc_dparam_t = c_int;
+
+/// Worker threads for the `FILE*` pipeline, at most [`ZXC_MAX_THREADS`];
+/// default 0, auto-detect.
+pub const ZXC_D_THREADS: zxc_dparam_t = 1;
+/// 1 verifies the block checksums and the archive digest when the archive
+/// carries them; default 0, no verification.
+pub const ZXC_D_CHECKSUM: zxc_dparam_t = 2;
+
+/// Progress callback (mirrors `zxc_progress_callback_t`), called from the
+/// writer thread of the `FILE*` pipeline after each block or batch of blocks.
+///
+/// Arguments: input bytes processed so far, total input bytes (0 if unknown),
+/// and the `user_data` pointer given to [`zxc_cctx_set_progress`] /
+/// [`zxc_dctx_set_progress`]. Keep it fast and non-blocking.
+pub type zxc_progress_callback_t =
+    Option<unsafe extern "C" fn(bytes_processed: u64, bytes_total: u64, user_data: *const c_void)>;
 
 /// What a frame's header and footer declare (mirrors `zxc_frame_info_t`).
 #[repr(C)]
@@ -231,41 +234,6 @@ pub struct zxc_frame_info_t {
     pub has_checksum: u8,
     /// 1 when a seek table precedes the footer.
     pub has_seek_table: u8,
-}
-
-/// Decompression options (mirrors `zxc_decompress_opts_t` from C API).
-#[repr(C)]
-#[derive(Debug, Clone)]
-pub struct zxc_decompress_opts_t {
-    /// Worker thread count (0 = auto-detect CPU cores).
-    pub n_threads: c_int,
-    /// 1 to verify the block checksums and archive digest when present, 0 to skip.
-    pub checksum_enabled: c_int,
-    /// Pre-trained dictionary content (NULL = none).
-    pub dict: *const c_void,
-    /// Dictionary size in bytes (0 = none).
-    pub dict_size: usize,
-    /// Shared literal Huffman table: 128-byte packed code-lengths header
-    /// (NULL = none; ignored without dict).
-    pub dict_huf: *const c_void,
-    /// Progress callback (NULL to disable).
-    pub progress_cb: *const c_void,
-    /// User context pointer passed to progress_cb.
-    pub user_data: *mut c_void,
-}
-
-impl Default for zxc_decompress_opts_t {
-    fn default() -> Self {
-        Self {
-            n_threads: 0,
-            checksum_enabled: 0,
-            dict: std::ptr::null(),
-            dict_size: 0,
-            dict_huf: std::ptr::null(),
-            progress_cb: std::ptr::null(),
-            user_data: std::ptr::null_mut(),
-        }
-    }
 }
 
 // =============================================================================
@@ -320,7 +288,11 @@ unsafe extern "C" {
     /// Useful for allocating output buffers before compression.
     pub fn zxc_compress_bound(input_size: usize) -> usize;
 
-    /// Compresses a data buffer using the ZXC algorithm.
+    /// Compresses a data buffer into a complete ZXC archive, at `level`.
+    ///
+    /// The simple form: one level, every other parameter at its default
+    /// (512 KB blocks, no checksum, no seek table, no dictionary). For
+    /// anything else, configure a [`zxc_cctx`] and call [`zxc_compress_cctx`].
     ///
     /// # Safety
     ///
@@ -330,31 +302,37 @@ unsafe extern "C" {
     ///
     /// # Returns
     ///
-    /// Number of bytes written to `dst` (>0 on success), or a negative error code.
+    /// Number of bytes written to `dst` (>0 on success), or a negative error
+    /// code. `level` 0 selects the default; any other level outside 1..7 is
+    /// `ZXC_ERROR_BAD_LEVEL`.
     pub fn zxc_compress(
         src: *const c_void,
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_compress_opts_t,
+        level: c_int,
     ) -> i64;
 
-    /// Decompresses a ZXC compressed buffer.
+    /// Decompresses a complete ZXC archive.
+    ///
+    /// The simple form: no checksum verification and no dictionary. For
+    /// either, configure a [`zxc_dctx`] and call [`zxc_decompress_dctx`].
     ///
     /// # Safety
     ///
     /// - `src` must be a valid pointer to `src_size` bytes of compressed data.
-    /// - `dst` must be a valid pointer to at least `dst_capacity` bytes.
+    /// - `dst` must be a valid pointer to at least `dst_capacity` bytes, or
+    ///   NULL with `dst_capacity` 0 to probe the archive without decoding.
     ///
     /// # Returns
     ///
-    /// Number of decompressed bytes written to `dst` (>0 on success), or a negative error code.
+    /// Number of decompressed bytes written to `dst`, 0 for an empty archive,
+    /// or a negative error code.
     pub fn zxc_decompress(
         src: *const c_void,
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Returns the decompressed size stored in a ZXC compressed buffer.
@@ -383,7 +361,10 @@ unsafe extern "C" {
     ) -> c_int;
 
     /// Returns `sizeof(zxc_frame_info_t)` as compiled into the C library.
-    /// See [`zxc_compress_opts_size`].
+    ///
+    /// Layout guard: the Rust [`zxc_frame_info_t`] mirrors the C struct by
+    /// hand; comparing sizes turns silent layout drift into a test failure
+    /// (see the `frame_info_layout_matches_library` test).
     pub fn zxc_frame_info_size() -> usize;
 
     /// Returns the minimum single-buffer size for an in-place decompression.
@@ -402,6 +383,8 @@ unsafe extern "C" {
     /// The compressed archive must sit flush-right in `buffer` (its last
     /// `comp_size` bytes); decoding runs left-to-right into `buffer[0..]`.
     /// `buffer_capacity` must be at least `zxc_decompress_inplace_bound`.
+    /// No checksum verification and no dictionary: for either, configure a
+    /// [`zxc_dctx`] and call [`zxc_decompress_inplace_dctx`].
     ///
     /// # Returns
     ///
@@ -411,20 +394,19 @@ unsafe extern "C" {
         buffer: *mut c_void,
         buffer_capacity: usize,
         comp_size: usize,
-        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// In-place decompression with a caller-supplied context.
     ///
     /// Same contract as `zxc_decompress_inplace`, with `dctx` as the decode
-    /// context. With a static context (`zxc_init_static_dctx`) the call
-    /// allocates nothing; it rejects a foreign block size and any dictionary.
+    /// context and its parameters. With a static context
+    /// (`zxc_init_static_dctx`) the call allocates nothing; it rejects a
+    /// foreign block size and any dictionary.
     pub fn zxc_decompress_inplace_dctx(
         dctx: *mut zxc_dctx,
         buffer: *mut c_void,
         buffer_capacity: usize,
         comp_size: usize,
-        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Returns a human-readable name for the given error code.
@@ -438,17 +420,6 @@ unsafe extern "C" {
     /// A constant string such as "ZXC_OK" or "ZXC_ERROR_MEMORY".
     /// Returns "ZXC_UNKNOWN_ERROR" for unrecognized codes.
     pub fn zxc_error_name(code: c_int) -> *const std::os::raw::c_char;
-
-    /// Returns `sizeof(zxc_compress_opts_t)` as compiled into the C library.
-    ///
-    /// Layout guard: the Rust [`zxc_compress_opts_t`] mirrors the C struct by
-    /// hand; comparing sizes turns silent layout drift into a test failure
-    /// (see the `opts_layout_matches_library` test).
-    pub fn zxc_compress_opts_size() -> usize;
-
-    /// Returns `sizeof(zxc_decompress_opts_t)` as compiled into the C library.
-    /// See [`zxc_compress_opts_size`].
-    pub fn zxc_decompress_opts_size() -> usize;
 
     /// Returns the dictionary ID a ZXC compressed buffer requires.
     ///
@@ -606,7 +577,8 @@ unsafe extern "C" {
     /// tail pad used by the fast decoder.
     pub fn zxc_decompress_block_bound(uncompressed_size: usize) -> usize;
 
-    /// Compresses a single block without file framing.
+    /// Compresses a single block without file framing, with the parameters
+    /// in force on `cctx` (level, checksum, dictionary).
     ///
     /// Output format: `block_header(8B) + payload + optional checksum(4B)`.
     ///
@@ -619,10 +591,10 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_compress_opts_t,
     ) -> i64;
 
-    /// Decompresses a single block produced by [`zxc_compress_block`].
+    /// Decompresses a single block produced by [`zxc_compress_block`], with
+    /// the parameters in force on `dctx` (checksum, dictionary).
     ///
     /// `dst_capacity` should be at least
     /// [`zxc_decompress_block_bound(uncompressed_size)`](zxc_decompress_block_bound)
@@ -636,7 +608,6 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Strict-sized variant of [`zxc_decompress_block`]: accepts
@@ -651,7 +622,6 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Estimates the memory reserved by a compression context for a single
@@ -672,12 +642,15 @@ unsafe extern "C" {
 // =============================================================================
 
 unsafe extern "C" {
-    /// Creates a heap-allocated compression context.
+    /// Creates a heap-allocated compression context, every parameter at its
+    /// default (level 3, 512 KB blocks, no checksum, no seek table).
     ///
-    /// When `opts` is non-NULL, internal buffers are pre-allocated.
-    /// When `opts` is NULL, allocation is deferred to first use.
-    /// Returns NULL on allocation failure. Free with [`zxc_free_cctx`].
-    pub fn zxc_create_cctx(opts: *const zxc_compress_opts_t) -> *mut zxc_cctx;
+    /// Only the handle is allocated here; the working buffers come on the
+    /// first call, sized from the parameters then in force. Configure it with
+    /// [`zxc_cctx_set_param`], [`zxc_cctx_set_dict`] and
+    /// [`zxc_cctx_set_progress`]. Returns NULL on allocation failure. Free
+    /// with [`zxc_free_cctx`].
+    pub fn zxc_create_cctx() -> *mut zxc_cctx;
 
     /// Frees a compression context. Safe to call with a null pointer.
     ///
@@ -685,7 +658,82 @@ unsafe extern "C" {
     /// - `cctx` must be a pointer returned by [`zxc_create_cctx`] (or null).
     pub fn zxc_free_cctx(cctx: *mut zxc_cctx);
 
-    /// Compresses a full file-framed buffer using a reusable context.
+    /// Sets one parameter on `cctx`; 0 restores its default.
+    ///
+    /// Takes effect on the next call. A value outside [`zxc_cparam_bounds`]
+    /// is refused and the parameter keeps its value: `ZXC_ERROR_BAD_LEVEL`
+    /// for [`ZXC_C_LEVEL`], `ZXC_ERROR_BAD_BLOCK_SIZE` for
+    /// [`ZXC_C_BLOCK_SIZE`] (a non-power-of-two included),
+    /// `ZXC_ERROR_BAD_PARAM` otherwise, and for an unknown `param`. On a
+    /// static context the block size is pinned, and a level raise into
+    /// level 6 is refused when the workspace was carved below it.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid pointer returned by [`zxc_create_cctx`] or
+    ///   [`zxc_init_static_cctx`].
+    pub fn zxc_cctx_set_param(cctx: *mut zxc_cctx, param: zxc_cparam_t, value: i64) -> c_int;
+
+    /// Reads one parameter of `cctx` into `*value`.
+    ///
+    /// Returns `ZXC_OK`, `ZXC_ERROR_BAD_PARAM` for an unknown `param`, or
+    /// `ZXC_ERROR_NULL_INPUT`.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid context; `value` must be valid for writes.
+    pub fn zxc_cctx_get_param(cctx: *const zxc_cctx, param: zxc_cparam_t, value: *mut i64)
+    -> c_int;
+
+    /// Reports the accepted range of a compression parameter.
+    ///
+    /// Returns `ZXC_OK`, or `ZXC_ERROR_BAD_PARAM` for an unknown `param`.
+    ///
+    /// # Safety
+    /// - `min` and `max` must each be NULL or valid for writes.
+    pub fn zxc_cparam_bounds(param: zxc_cparam_t, min: *mut i64, max: *mut i64) -> c_int;
+
+    /// Attaches a pre-trained dictionary to `cctx`; a NULL `dict` detaches.
+    ///
+    /// The context keeps the pointers only: the bytes stay caller-owned and
+    /// must outlive every call that uses them. `dict_huf`, when non-NULL, is
+    /// the [`ZXC_HUF_TABLE_SIZE`]-byte shared literal table.
+    ///
+    /// Returns `ZXC_OK`; `ZXC_ERROR_DICT_TOO_LARGE` above
+    /// [`ZXC_DICT_SIZE_MAX`]; `ZXC_ERROR_DICT_UNSUPPORTED` on a static context.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid context.
+    /// - `dict` must be NULL or valid for `dict_size` bytes for as long as it
+    ///   stays attached; `dict_huf` NULL or valid for 128 bytes likewise.
+    pub fn zxc_cctx_set_dict(
+        cctx: *mut zxc_cctx,
+        dict: *const c_void,
+        dict_size: usize,
+        dict_huf: *const c_void,
+    ) -> c_int;
+
+    /// Sets the progress callback; `None` disables it. Honoured by
+    /// [`zxc_stream_compress`] only.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid context; `user_data` is handed back to `cb`
+    ///   unchanged and must stay valid while the callback is attached.
+    pub fn zxc_cctx_set_progress(
+        cctx: *mut zxc_cctx,
+        cb: zxc_progress_callback_t,
+        user_data: *mut c_void,
+    ) -> c_int;
+
+    /// Restores every parameter to its default, detaches the dictionary and
+    /// the callback. The working buffers are kept. On a static context the
+    /// pinned block size and level are the defaults.
+    ///
+    /// # Safety
+    /// - `cctx` must be a valid context.
+    pub fn zxc_cctx_reset(cctx: *mut zxc_cctx) -> c_int;
+
+    /// Compresses a full file-framed buffer using a reusable context, with
+    /// the parameters in force on it (level, block size, checksum, seek
+    /// table, dictionary).
     ///
     /// # Safety
     /// - `cctx` must be a valid pointer returned by [`zxc_create_cctx`].
@@ -695,11 +743,14 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_compress_opts_t,
     ) -> i64;
 
-    /// Creates a heap-allocated decompression context.
-    /// Returns NULL on allocation failure. Free with [`zxc_free_dctx`].
+    /// Creates a heap-allocated decompression context, every parameter at
+    /// its default (no checksum verification, no dictionary).
+    ///
+    /// Configure it with [`zxc_dctx_set_param`], [`zxc_dctx_set_dict`] and
+    /// [`zxc_dctx_set_progress`]. Returns NULL on allocation failure. Free
+    /// with [`zxc_free_dctx`].
     pub fn zxc_create_dctx() -> *mut zxc_dctx;
 
     /// Frees a decompression context. Safe to call with a null pointer.
@@ -708,7 +759,66 @@ unsafe extern "C" {
     /// - `dctx` must be a pointer returned by [`zxc_create_dctx`] (or null).
     pub fn zxc_free_dctx(dctx: *mut zxc_dctx);
 
-    /// Decompresses a full file-framed buffer using a reusable context.
+    /// Sets one parameter on `dctx`; 0 restores its default.
+    ///
+    /// A value outside [`zxc_dparam_bounds`] is `ZXC_ERROR_BAD_PARAM`, as is
+    /// an unknown `param`; the parameter keeps its value.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid pointer returned by [`zxc_create_dctx`] or
+    ///   [`zxc_init_static_dctx`].
+    pub fn zxc_dctx_set_param(dctx: *mut zxc_dctx, param: zxc_dparam_t, value: i64) -> c_int;
+
+    /// Reads one parameter of `dctx` into `*value`. See [`zxc_cctx_get_param`].
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid context; `value` must be valid for writes.
+    pub fn zxc_dctx_get_param(dctx: *const zxc_dctx, param: zxc_dparam_t, value: *mut i64)
+    -> c_int;
+
+    /// Reports the accepted range of a decompression parameter. See
+    /// [`zxc_cparam_bounds`].
+    ///
+    /// # Safety
+    /// - `min` and `max` must each be NULL or valid for writes.
+    pub fn zxc_dparam_bounds(param: zxc_dparam_t, min: *mut i64, max: *mut i64) -> c_int;
+
+    /// Attaches the dictionary the archives were compressed with; NULL
+    /// detaches. Same ownership rules as [`zxc_cctx_set_dict`]; the header's
+    /// dict_id is checked against the (dict, table) pair at decode time.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid context.
+    /// - `dict` must be NULL or valid for `dict_size` bytes for as long as it
+    ///   stays attached; `dict_huf` NULL or valid for 128 bytes likewise.
+    pub fn zxc_dctx_set_dict(
+        dctx: *mut zxc_dctx,
+        dict: *const c_void,
+        dict_size: usize,
+        dict_huf: *const c_void,
+    ) -> c_int;
+
+    /// Sets the progress callback; `None` disables it. Honoured by
+    /// [`zxc_stream_decompress`] only.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid context; `user_data` is handed back to `cb`
+    ///   unchanged and must stay valid while the callback is attached.
+    pub fn zxc_dctx_set_progress(
+        dctx: *mut zxc_dctx,
+        cb: zxc_progress_callback_t,
+        user_data: *mut c_void,
+    ) -> c_int;
+
+    /// Restores every parameter to its default, detaches the dictionary and
+    /// the callback. The working buffers are kept.
+    ///
+    /// # Safety
+    /// - `dctx` must be a valid context.
+    pub fn zxc_dctx_reset(dctx: *mut zxc_dctx) -> c_int;
+
+    /// Decompresses a full file-framed buffer using a reusable context, with
+    /// the parameters in force on it (checksum, dictionary).
     ///
     /// # Safety
     /// - `dctx` must be a valid pointer returned by [`zxc_create_dctx`].
@@ -718,7 +828,6 @@ unsafe extern "C" {
         src_size: usize,
         dst: *mut c_void,
         dst_capacity: usize,
-        opts: *const zxc_decompress_opts_t,
     ) -> i64;
 
     /// Returns the exact byte count required by a static compression
@@ -730,17 +839,24 @@ unsafe extern "C" {
     pub fn zxc_static_cctx_workspace_size(block_size: usize, level: c_int) -> usize;
 
     /// Initialises a compression context inside a caller-supplied workspace
-    /// (no heap allocation).
+    /// (no heap allocation), carved for `block_size` and `level` (1..7).
+    ///
+    /// Both are pinned: [`zxc_cctx_set_param`] refuses another block size
+    /// and a level raise into level 6 when `level` was below it; checksum,
+    /// seek table and lower levels are honoured. [`zxc_cctx_set_dict`]
+    /// returns `ZXC_ERROR_DICT_UNSUPPORTED`. Returns NULL if the workspace
+    /// is too small or a parameter is invalid.
     ///
     /// # Safety
     /// - `workspace` must be cache-line (64-byte) aligned, at least
-    ///   `zxc_static_cctx_workspace_size` bytes, and outlive the handle.
-    /// - `opts` must be non-null with `block_size` and `level` set.
+    ///   `zxc_static_cctx_workspace_size(block_size, level)` bytes, and
+    ///   outlive the handle.
     /// - `zxc_free_cctx` is a no-op on the returned handle.
     pub fn zxc_init_static_cctx(
         workspace: *mut c_void,
         workspace_size: usize,
-        opts: *const zxc_compress_opts_t,
+        block_size: usize,
+        level: c_int,
     ) -> *mut zxc_cctx;
 
     /// Returns the exact byte count required by a static decompression
@@ -780,22 +896,24 @@ unsafe extern "C" {
     /// - `f_in` must be a valid FILE* opened in "rb" mode
     /// - `f_out` must be a valid FILE* opened in "wb" mode
     /// - File handles must remain valid for the duration of the call
+    /// - `cfg` must be NULL or a valid [`zxc_cctx`]
     ///
     /// # Arguments
     ///
     /// * `f_in` - Input file stream
-    /// * `f_out` - Output file stream  
-    /// * `n_threads` - Number of worker threads (0 = auto-detect CPU cores)
-    /// * `level` - Compression level (1-7)
-    /// * `checksum_enabled` - If non-zero, enables checksum verification
+    /// * `f_out` - Output file stream
+    /// * `cfg` - Configured compression context, read for its parameters
+    ///   (level, block size, threads, checksum, seek table, dictionary,
+    ///   progress callback), or NULL for defaults. Its buffers are not used:
+    ///   it is configuration only and may be freed after the call.
     ///
     /// # Returns
     ///
-    /// Total compressed bytes written, or -1 on error.
+    /// Total compressed bytes written, or a negative error code.
     pub fn zxc_stream_compress(
         f_in: *mut libc::FILE,
         f_out: *mut libc::FILE,
-        opts: *const zxc_compress_opts_t,
+        cfg: *const zxc_cctx,
     ) -> i64;
 
     /// Decompresses data from an input stream to an output stream.
@@ -806,21 +924,23 @@ unsafe extern "C" {
     ///
     /// - `f_in` must be a valid FILE* opened in "rb" mode
     /// - `f_out` must be a valid FILE* opened in "wb" mode
+    /// - `cfg` must be NULL or a valid [`zxc_dctx`]
     ///
     /// # Arguments
     ///
     /// * `f_in` - Input file stream (compressed data)
     /// * `f_out` - Output file stream (decompressed data)
-    /// * `n_threads` - Number of worker threads (0 = auto-detect)
-    /// * `checksum_enabled` - If non-zero, verifies checksums
+    /// * `cfg` - Configured decompression context, read for its parameters
+    ///   (threads, checksum, dictionary, progress callback), or NULL for
+    ///   defaults. Its buffers are not used.
     ///
     /// # Returns
     ///
-    /// Total decompressed bytes written, or -1 on error.
+    /// Total decompressed bytes written, or a negative error code.
     pub fn zxc_stream_decompress(
         f_in: *mut libc::FILE,
         f_out: *mut libc::FILE,
-        opts: *const zxc_decompress_opts_t,
+        cfg: *const zxc_dctx,
     ) -> i64;
 
     /// Returns the decompressed size stored in a ZXC compressed file.
@@ -1053,9 +1173,18 @@ pub struct zxc_dstream {
 }
 
 unsafe extern "C" {
-    /// Creates a push compression stream. Returns NULL on allocation failure.
-    /// Free with [`zxc_cstream_free`].
-    pub fn zxc_cstream_create(opts: *const zxc_compress_opts_t) -> *mut zxc_cstream;
+    /// Creates a push compression stream.
+    ///
+    /// The parameters are copied from `cfg` at creation; the context may be
+    /// freed or reused afterwards. Only [`ZXC_C_LEVEL`], [`ZXC_C_BLOCK_SIZE`]
+    /// and [`ZXC_C_CHECKSUM`] are honoured; threads, seek table and the
+    /// progress callback are ignored. A dictionary on `cfg` fails creation.
+    /// Returns NULL on allocation failure or a dictionary on `cfg`. Free with
+    /// [`zxc_cstream_free`].
+    ///
+    /// # Safety
+    /// - `cfg` must be NULL (all defaults) or a valid [`zxc_cctx`].
+    pub fn zxc_cstream_create(cfg: *const zxc_cctx) -> *mut zxc_cstream;
 
     /// Releases a push compression stream. Safe to call with null.
     ///
@@ -1093,9 +1222,16 @@ unsafe extern "C" {
     /// Suggested output chunk size for the compressor.
     pub fn zxc_cstream_out_size(cs: *const zxc_cstream) -> usize;
 
-    /// Creates a push decompression stream. Returns NULL on allocation
-    /// failure. Free with [`zxc_dstream_free`].
-    pub fn zxc_dstream_create(opts: *const zxc_decompress_opts_t) -> *mut zxc_dstream;
+    /// Creates a push decompression stream.
+    ///
+    /// The parameters are copied from `cfg` at creation; only
+    /// [`ZXC_D_CHECKSUM`] is honoured. A dictionary on `cfg` fails creation.
+    /// Returns NULL on allocation failure or a dictionary on `cfg`. Free with
+    /// [`zxc_dstream_free`].
+    ///
+    /// # Safety
+    /// - `cfg` must be NULL (all defaults) or a valid [`zxc_dctx`].
+    pub fn zxc_dstream_create(cfg: *const zxc_dctx) -> *mut zxc_dstream;
 
     /// Releases a push decompression stream. Safe to call with null.
     ///
@@ -1133,32 +1269,22 @@ unsafe extern "C" {
 
 #[cfg(test)]
 mod tests {
-    /// The options structs above are hand-mirrored from zxc_opts.h. A C-side
-    /// field change that is not replicated here silently shifts every later
-    /// field (undefined behaviour at the FFI boundary); this test turns that
-    /// drift into a hard failure.
+    use super::*;
+
+    /// `zxc_frame_info_t` is hand-mirrored from zxc_buffer.h. A C-side field
+    /// change that is not replicated here silently shifts every later field
+    /// (undefined behaviour at the FFI boundary); this test turns that drift
+    /// into a hard failure.
     #[test]
-    fn opts_layout_matches_library() {
+    fn frame_info_layout_matches_library() {
         unsafe {
             assert_eq!(
-                std::mem::size_of::<super::zxc_compress_opts_t>(),
-                super::zxc_compress_opts_size(),
-                "zxc_compress_opts_t layout drift: update the Rust mirror in zxc-sys"
-            );
-            assert_eq!(
-                std::mem::size_of::<super::zxc_decompress_opts_t>(),
-                super::zxc_decompress_opts_size(),
-                "zxc_decompress_opts_t layout drift: update the Rust mirror in zxc-sys"
-            );
-            assert_eq!(
-                std::mem::size_of::<super::zxc_frame_info_t>(),
-                super::zxc_frame_info_size(),
+                std::mem::size_of::<zxc_frame_info_t>(),
+                zxc_frame_info_size(),
                 "zxc_frame_info_t layout drift: update the Rust mirror in zxc-sys"
             );
         }
     }
-
-    use super::*;
 
     #[test]
     fn test_compress_bound() {
@@ -1188,19 +1314,22 @@ mod tests {
             let bound = zxc_compress_bound(input.len());
             let mut compressed = vec![0u8; bound];
 
-            // Compress
-            let copts = zxc_compress_opts_t {
-                level: ZXC_LEVEL_DEFAULT,
-                checksum_enabled: 1,
-                ..Default::default()
-            };
-            let compressed_size = zxc_compress(
+            // Compress with checksums: that needs a configured context.
+            let cctx = zxc_create_cctx();
+            assert!(!cctx.is_null());
+            assert_eq!(
+                zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT as i64),
+                ZXC_OK
+            );
+            assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1), ZXC_OK);
+            let compressed_size = zxc_compress_cctx(
+                cctx,
                 input.as_ptr() as *const c_void,
                 input.len(),
                 compressed.as_mut_ptr() as *mut c_void,
                 compressed.len(),
-                &copts,
             );
+            zxc_free_cctx(cctx);
             assert!(compressed_size > 0, "Compression failed");
             // Highly repetitive data should compress significantly
             assert!(
@@ -1215,18 +1344,36 @@ mod tests {
             );
             assert_eq!(decompressed_size as usize, input.len());
 
-            // Decompress
+            // Decompress, verifying the checksums.
             let mut decompressed = vec![0u8; decompressed_size as usize];
-            let dopts = zxc_decompress_opts_t {
-                checksum_enabled: 1,
-                ..Default::default()
-            };
-            let result_size = zxc_decompress(
+            let dctx = zxc_create_dctx();
+            assert!(!dctx.is_null());
+            assert_eq!(zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1), ZXC_OK);
+            let result_size = zxc_decompress_dctx(
+                dctx,
                 compressed.as_ptr() as *const c_void,
                 compressed_size as usize,
                 decompressed.as_mut_ptr() as *mut c_void,
                 decompressed.len(),
-                &dopts,
+            );
+            zxc_free_dctx(dctx);
+            assert_eq!(result_size, input.len() as i64);
+            assert_eq!(&decompressed[..], &input[..]);
+
+            // The simple forms agree with the configured ones.
+            let simple_size = zxc_compress(
+                input.as_ptr() as *const c_void,
+                input.len(),
+                compressed.as_mut_ptr() as *mut c_void,
+                compressed.len(),
+                ZXC_LEVEL_DEFAULT,
+            );
+            assert!(simple_size > 0, "zxc_compress failed");
+            let result_size = zxc_decompress(
+                compressed.as_ptr() as *const c_void,
+                simple_size as usize,
+                decompressed.as_mut_ptr() as *mut c_void,
+                decompressed.len(),
             );
             assert_eq!(result_size, input.len() as i64);
             assert_eq!(&decompressed[..], &input[..]);
@@ -1251,20 +1398,91 @@ mod tests {
                 let bound = zxc_compress_bound(input.len());
                 let mut compressed = vec![0u8; bound];
 
-                let copts = zxc_compress_opts_t {
-                    level,
-                    checksum_enabled: 1,
-                    ..Default::default()
-                };
                 let compressed_size = zxc_compress(
                     input.as_ptr() as *const c_void,
                     input.len(),
                     compressed.as_mut_ptr() as *mut c_void,
                     compressed.len(),
-                    &copts,
+                    level,
                 );
                 assert!(compressed_size > 0, "Compression failed at level {}", level);
             }
+        }
+    }
+
+    /// The parameter contract the safe crate relies on: bounds, set/get, 0
+    /// restores the default, out-of-range refused with the documented code,
+    /// unknown identifier refused, reset.
+    #[test]
+    fn test_context_params() {
+        unsafe {
+            let (mut lo, mut hi) = (0i64, 0i64);
+            assert_eq!(zxc_cparam_bounds(ZXC_C_LEVEL, &mut lo, &mut hi), ZXC_OK);
+            assert_eq!((lo, hi), (ZXC_LEVEL_FASTEST as i64, ZXC_LEVEL_ULTRA as i64));
+            assert_eq!(zxc_cparam_bounds(ZXC_C_THREADS, &mut lo, &mut hi), ZXC_OK);
+            assert_eq!((lo, hi), (0, ZXC_MAX_THREADS));
+            assert_eq!(
+                zxc_cparam_bounds(99, std::ptr::null_mut(), std::ptr::null_mut()),
+                ZXC_ERROR_BAD_PARAM
+            );
+            assert_eq!(zxc_dparam_bounds(ZXC_D_CHECKSUM, &mut lo, &mut hi), ZXC_OK);
+            assert_eq!((lo, hi), (0, 1));
+            assert_eq!(
+                zxc_dparam_bounds(99, std::ptr::null_mut(), std::ptr::null_mut()),
+                ZXC_ERROR_BAD_PARAM
+            );
+
+            let cctx = zxc_create_cctx();
+            assert!(!cctx.is_null());
+            let mut v = -1i64;
+            assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &mut v), ZXC_OK);
+            assert_eq!(v, ZXC_LEVEL_DEFAULT as i64);
+            assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_BLOCK_SIZE, &mut v), ZXC_OK);
+            assert_eq!(v, 512 * 1024);
+
+            assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 5), ZXC_OK);
+            assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &mut v), ZXC_OK);
+            assert_eq!(v, 5);
+            assert_eq!(
+                zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 8),
+                ZXC_ERROR_BAD_LEVEL
+            );
+            assert_eq!(
+                zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 3000),
+                ZXC_ERROR_BAD_BLOCK_SIZE
+            );
+            assert_eq!(
+                zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 2),
+                ZXC_ERROR_BAD_PARAM
+            );
+            assert_eq!(zxc_cctx_set_param(cctx, 99, 1), ZXC_ERROR_BAD_PARAM);
+            assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &mut v), ZXC_OK);
+            assert_eq!(v, 5, "a refused value must not change the parameter");
+
+            assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 0), ZXC_OK);
+            assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_LEVEL, &mut v), ZXC_OK);
+            assert_eq!(v, ZXC_LEVEL_DEFAULT as i64, "0 restores the default");
+
+            assert_eq!(zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1), ZXC_OK);
+            assert_eq!(zxc_cctx_reset(cctx), ZXC_OK);
+            assert_eq!(zxc_cctx_get_param(cctx, ZXC_C_SEEKABLE, &mut v), ZXC_OK);
+            assert_eq!(v, 0, "reset restores the defaults");
+            zxc_free_cctx(cctx);
+
+            let dctx = zxc_create_dctx();
+            assert!(!dctx.is_null());
+            assert_eq!(zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1), ZXC_OK);
+            assert_eq!(zxc_dctx_get_param(dctx, ZXC_D_CHECKSUM, &mut v), ZXC_OK);
+            assert_eq!(v, 1);
+            assert_eq!(
+                zxc_dctx_set_param(dctx, ZXC_D_THREADS, ZXC_MAX_THREADS + 1),
+                ZXC_ERROR_BAD_PARAM
+            );
+            assert_eq!(zxc_dctx_set_param(dctx, 99, 1), ZXC_ERROR_BAD_PARAM);
+            assert_eq!(zxc_dctx_reset(dctx), ZXC_OK);
+            assert_eq!(zxc_dctx_get_param(dctx, ZXC_D_CHECKSUM, &mut v), ZXC_OK);
+            assert_eq!(v, 0);
+            zxc_free_dctx(dctx);
         }
     }
 }

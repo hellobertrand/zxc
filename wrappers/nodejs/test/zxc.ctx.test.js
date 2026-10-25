@@ -119,6 +119,60 @@ describe("Cctx / Dctx", () => {
     expect(() => new zxc.Dctx({ dict, dictHuf: Buffer.alloc(3) })).toThrow();
   });
 
+  test("refuse an out-of-range level at construction", () => {
+    // Contexts set the level on the native context: no clamping, the setter
+    // refuses and the constructor throws with the zxc error code.
+    let err;
+    try {
+      new zxc.Cctx({ level: zxc.LEVEL_ULTRA + 1 });
+    } catch (e) {
+      err = e;
+    }
+    expect(err).toBeDefined();
+    expect(err.code).toBe(zxc.ERROR_BAD_LEVEL);
+    expect(err.message).toBe("ZXC_ERROR_BAD_LEVEL");
+    // The one-shot API refuses too: no entry point clamps the level.
+    const payload = Buffer.concat(samples());
+    let oneShot;
+    try {
+      zxc.compress(payload, { level: zxc.LEVEL_ULTRA + 1 });
+    } catch (e) {
+      oneShot = e;
+    }
+    expect(oneShot).toBeDefined();
+    expect(oneShot.code).toBe(zxc.ERROR_BAD_LEVEL);
+    expect(() => zxc.compress(payload, { level: -1 })).toThrow();
+    // 0 still selects the default level.
+    expect(
+      zxc
+        .compress(payload, { level: 0 })
+        .equals(zxc.compress(payload, { level: zxc.LEVEL_DEFAULT })),
+    ).toBe(true);
+  });
+
+  test("refuse a non-integer level instead of coercing it", () => {
+    const payload = Buffer.from("level coercion");
+    const code = (fn) => {
+      try {
+        fn();
+      } catch (e) {
+        return e.code;
+      }
+      return undefined;
+    };
+    for (const level of [2 ** 32 + 5, 7.9, 0.5, NaN, Infinity, "3"]) {
+      expect(code(() => zxc.compress(payload, { level }))).toBe(
+        zxc.ERROR_BAD_LEVEL,
+      );
+      expect(code(() => new zxc.Cctx({ level }))).toBe(zxc.ERROR_BAD_LEVEL);
+      expect(code(() => new zxc.CStream({ level }))).toBe(zxc.ERROR_BAD_LEVEL);
+    }
+    // null, like undefined, selects the default.
+    expect(
+      new zxc.Cctx({ level: null }).compress(payload).length,
+    ).toBeGreaterThan(0);
+  });
+
   test("refuse calls after close", () => {
     const payload = Buffer.concat(samples());
     const cctx = new zxc.Cctx();

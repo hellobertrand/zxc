@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-#include "../include/zxc_dict.h"
+#include "../../include/zxc_dict.h"
 #include "test_common.h"
 
 /* Pins the encoder's output: round-trip tests accept any valid parse, so a
@@ -120,26 +120,31 @@ static void pin_gen_mixed(uint8_t* buf, const size_t n) {
 static int pin_pass(const uint8_t* src, uint8_t* comp, const size_t cap, uint8_t* back,
                     const size_t* block_sizes, const size_t n_block_sizes, const void* dict,
                     const size_t dict_size, const void* dict_huf, pin_t got[PIN_N_LEVELS]) {
-    const zxc_decompress_opts_t dop = {
-        .checksum_enabled = 1, .dict = dict, .dict_size = dict_size, .dict_huf = dict_huf};
-    for (int level = 1; level <= PIN_N_LEVELS; level++) {
+    zxc_cctx* const cctx = zxc_create_cctx();
+    zxc_dctx* const dctx = zxc_create_dctx();
+    int ok = cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) == ZXC_OK &&
+             zxc_cctx_set_dict(cctx, dict, dict_size, dict_huf) == ZXC_OK &&
+             zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK &&
+             zxc_dctx_set_dict(dctx, dict, dict_size, dict_huf) == ZXC_OK;
+    if (!ok) printf("  [FAIL] context setup\n");
+    for (int level = 1; ok && level <= PIN_N_LEVELS; level++) {
         pin_t p = {0, 0};
-        for (size_t in = 0; in < PIN_N_INPUTS; in++) {
+        for (size_t in = 0; ok && in < PIN_N_INPUTS; in++) {
             const uint8_t* const data = src + in * PIN_INPUT_SIZE;
-            for (size_t b = 0; b < n_block_sizes; b++) {
-                const zxc_compress_opts_t co = {.level = level,
-                                                .block_size = block_sizes[b],
-                                                .checksum_enabled = 1,
-                                                .dict = dict,
-                                                .dict_size = dict_size,
-                                                .dict_huf = dict_huf};
-                const int64_t c = zxc_compress(data, PIN_INPUT_SIZE, comp, cap, &co);
+            for (size_t b = 0; ok && b < n_block_sizes; b++) {
+                const int64_t c = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
+                                          zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE,
+                                                             (int64_t)block_sizes[b]) == ZXC_OK
+                                      ? zxc_compress_cctx(cctx, data, PIN_INPUT_SIZE, comp, cap)
+                                      : ZXC_ERROR_BAD_PARAM;
                 if (c <= 0 ||
-                    zxc_decompress(comp, (size_t)c, back, PIN_INPUT_SIZE, &dop) != PIN_INPUT_SIZE ||
+                    zxc_decompress_dctx(dctx, comp, (size_t)c, back, PIN_INPUT_SIZE) !=
+                        PIN_INPUT_SIZE ||
                     memcmp(back, data, PIN_INPUT_SIZE) != 0) {
                     printf("  [FAIL] level %d, input %zu, block size %zu%s: round trip (%lld)\n",
                            level, in, block_sizes[b], dict ? ", dict" : "", (long long)c);
-                    return 0;
+                    ok = 0;
+                    break;
                 }
                 p.hash = rapidhash_withSeed(comp, (size_t)c, p.hash);
                 p.size += (size_t)c;
@@ -147,7 +152,9 @@ static int pin_pass(const uint8_t* src, uint8_t* comp, const size_t cap, uint8_t
         }
         got[level - 1] = p;
     }
-    return 1;
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    return ok;
 }
 
 /* Compares a pass with its table; on a mismatch, prints the table to paste. */

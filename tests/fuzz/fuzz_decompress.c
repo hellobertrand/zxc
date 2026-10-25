@@ -36,7 +36,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     if (expected_size > 0 && expected_size <= out_capacity) out_capacity = (size_t)expected_size;
 
-    zxc_decompress(data, size, out_buf, out_capacity, 0);
+    zxc_decompress(data, size, out_buf, out_capacity);
 
     return 0;
 }

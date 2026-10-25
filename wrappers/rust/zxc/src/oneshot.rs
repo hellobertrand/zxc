@@ -11,6 +11,7 @@ use std::ffi::c_void;
 
 use zxc_sys::{ZXC_VERSION_MAJOR, ZXC_VERSION_MINOR, ZXC_VERSION_PATCH};
 
+use crate::ctx::{RawCctx, RawDctx};
 use crate::error::error_from_code;
 use crate::{CompressOptions, DecompressOptions, Error, Level, Result};
 
@@ -101,25 +102,32 @@ unsafe fn impl_compress(
     dst_cap: usize,
     options: &CompressOptions,
 ) -> Result<usize> {
-    let written = unsafe {
-        let (dict, dict_huf) =
-            crate::dict_parts(options.dict.as_deref(), options.dict_huf.as_deref())?;
-        let copts = zxc_sys::zxc_compress_opts_t {
-            level: options.level as i32,
-            checksum_enabled: options.checksum as i32,
-            seekable: options.seekable as i32,
-            dict: crate::dict_ptr(dict),
-            dict_size: dict.len(),
-            dict_huf: crate::dict_ptr(dict_huf),
-            ..Default::default()
-        };
-        zxc_sys::zxc_compress(
-            data.as_ptr() as *const c_void,
-            data.len(),
-            dst_ptr as *mut c_void,
-            dst_cap,
-            &copts,
-        )
+    // A wrong table length is refused before anything is allocated.
+    crate::dict_parts(options.dict.as_deref(), options.dict_huf.as_deref())?;
+    let simple = !options.checksum && !options.seekable && options.dict.is_none();
+    let written = if simple {
+        // The simple form: one level, every other parameter at its default.
+        unsafe {
+            zxc_sys::zxc_compress(
+                data.as_ptr() as *const c_void,
+                data.len(),
+                dst_ptr as *mut c_void,
+                dst_cap,
+                options.level as i32,
+            )
+        }
+    } else {
+        let mut cctx = RawCctx::new()?;
+        cctx.configure(options, 0)?;
+        unsafe {
+            zxc_sys::zxc_compress_cctx(
+                cctx.as_ptr(),
+                data.as_ptr() as *const c_void,
+                data.len(),
+                dst_ptr as *mut c_void,
+                dst_cap,
+            )
+        }
     };
 
     if written < 0 {
@@ -303,23 +311,30 @@ unsafe fn impl_decompress(
     dst_cap: usize,
     options: &DecompressOptions,
 ) -> Result<usize> {
-    let written = unsafe {
-        let (dict, dict_huf) =
-            crate::dict_parts(options.dict.as_deref(), options.dict_huf.as_deref())?;
-        let dopts = zxc_sys::zxc_decompress_opts_t {
-            checksum_enabled: if options.verify_checksum { 1 } else { 0 },
-            dict: crate::dict_ptr(dict),
-            dict_size: dict.len(),
-            dict_huf: crate::dict_ptr(dict_huf),
-            ..Default::default()
-        };
-        zxc_sys::zxc_decompress(
-            compressed.as_ptr() as *const c_void,
-            compressed.len(),
-            dst_ptr as *mut c_void,
-            dst_cap,
-            &dopts,
-        )
+    crate::dict_parts(options.dict.as_deref(), options.dict_huf.as_deref())?;
+    let simple = !options.verify_checksum && options.dict.is_none();
+    let written = if simple {
+        // The simple form: no checksum verification, no dictionary.
+        unsafe {
+            zxc_sys::zxc_decompress(
+                compressed.as_ptr() as *const c_void,
+                compressed.len(),
+                dst_ptr as *mut c_void,
+                dst_cap,
+            )
+        }
+    } else {
+        let mut dctx = RawDctx::new()?;
+        dctx.configure(options, 0)?;
+        unsafe {
+            zxc_sys::zxc_decompress_dctx(
+                dctx.as_ptr(),
+                compressed.as_ptr() as *const c_void,
+                compressed.len(),
+                dst_ptr as *mut c_void,
+                dst_cap,
+            )
+        }
     };
 
     if written < 0 {
