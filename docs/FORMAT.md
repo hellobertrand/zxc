@@ -257,15 +257,15 @@ Flags (u8):
   the checksum algorithm identifier; value 0 denotes a 32-bit folding of
   the RapidHash function {{RAPIDHASH}}, and other values are RESERVED.
   Bit 4 is RESERVED; encoders MUST set it to zero and decoders MUST
-  ignore it.
+  reject a header in which it is set.
 
 Reserved / Dictionary ID:
 : 7 bytes. When HAS_DICTIONARY is clear, all seven bytes are
-  RESERVED: encoders MUST set them to zero and decoders MUST ignore
-  their content. When HAS_DICTIONARY is set, the four bytes at
-  offsets 0x07..0x0A carry the Dictionary ID as a u32 in
-  little-endian order ({{dictionary-header-encoding}}) and the three
-  bytes at offsets 0x0B..0x0D MUST be zero.
+  RESERVED and encoders MUST set them to zero. When HAS_DICTIONARY is
+  set, the four bytes at offsets 0x07..0x0A carry the Dictionary ID as
+  a u32 in little-endian order ({{dictionary-header-encoding}}) and
+  the three bytes at offsets 0x0B..0x0D MUST be zero. A decoder MUST
+  reject a header in which a byte required to be zero is not.
 
 Header Checksum (u16):
 : The 16-bit header checksum of {{header-checksums}}, computed over
@@ -301,16 +301,16 @@ All other values are unassigned. A decoder MUST reject any block
 whose type is not defined for the version it implements, rather
 than skipping it ({{compatibility-rules}}).
 
-## Block Header Semantics
+## Block Header Semantics {#block-header-semantics}
 
 Block Flags (u8):
 : RESERVED: no flag is defined. Encoders MUST write 0. Decoders MUST
-  ignore non-zero values, except in the EOF and SEK block headers,
-  which they MUST reject ({{eof-block}}, {{sek-block}}).
+  reject a non-zero value, whatever the block type
+  ({{compatibility-rules}}).
 
 Reserved (u8):
-: MUST be set to 0 by encoders. Decoders MUST ignore it, except in
-  the EOF and SEK block headers, as for Block Flags.
+: MUST be set to 0 by encoders. Decoders MUST reject a non-zero
+  value, whatever the block type, as for Block Flags.
 
 Compressed Payload Size:
 : The size in bytes of the block payload. This size does NOT
@@ -1223,7 +1223,8 @@ Flags (u8):
 : Bits 0..3 encode the checksum algorithm identifier, matching the
   Flags field of the ZXC File Header; value 0 denotes the
   RapidHash-based folding {{RAPIDHASH}}. Bits 4..7 are RESERVED;
-  encoders MUST set them to zero.
+  encoders MUST set them to zero. A loader MUST reject any other
+  identifier or a reserved bit set.
 
 Content Size (u16):
 : The length in bytes of the dictionary content that follows the
@@ -1239,11 +1240,12 @@ Dictionary ID (u32):
   dictionary.
 
 Reserved:
-: 2 bytes. Encoders MUST set these to zero.
+: 2 bytes. Encoders MUST set these to zero; a loader MUST reject a
+  non-zero value.
 
 Header Checksum (u16):
 : The 16-bit header checksum of {{header-checksums}}, computed over
-  the 16-byte header with the four bytes at 0x0C..0x0F treated as
+  the 16-byte header with the two bytes at 0x0E..0x0F treated as
   zero.
 
 Dictionary Content:
@@ -1372,14 +1374,17 @@ Unknown block types:
 
 Reserved fields:
 : All reserved bytes and flag bits MUST be written as zero by
-  encoders. The decoder tolerates (ignores) non-zero reserved
-  values, which are covered by the header checksum; assigning a reserved
-  field any meaning is a version bump, never a same-version
-  extension. The EOF and SEK block headers are the exception: a
-  decoder MUST reject one whose Block Flags or Reserved byte is
-  non-zero ({{eof-block}}, {{sek-block}}). So is the File Footer: a
-  decoder MUST reject an L byte with bit 3 or 7 set
-  ({{file-footer}}).
+  encoders. Assigning a reserved field any meaning is a version
+  bump, never a same-version extension. A decoder MUST reject a File
+  Header that sets Flags bit 4 or a reserved byte ({{file-header}}),
+  a block header whose Block Flags or Reserved byte is non-zero,
+  whatever the block type ({{block-header-semantics}}), and a File
+  Footer whose L byte has bit 3 or 7 set ({{file-footer}}); a
+  dictionary loader MUST reject a dictionary header with non-zero
+  reserved Flags bits or Reserved bytes ({{zxd-format}}).
+  The SPL and PAK sub-header fields written as 0 and ignored on
+  decode (Match Length Encoding, PAK Offset Encoding) are the
+  exception.
 
 ## Minimum Conforming Decoder {#minimum-conforming-decoder}
 
@@ -1415,8 +1420,10 @@ all errors in the table are fatal by default.
 | Bad magic                              | File header offset 0x00     | Reject immediately. Not a ZXC file.             |
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
 | File header checksum mismatch          | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
+| File header reserved bit or byte set   | File header offsets 0x06-0x0D | Reject. Flags bit 4, or a byte of 0x07..0x0D outside the Dictionary ID ({{file-header}}). |
 | Invalid chunk size code                | File header offset 0x05     | Reject. Code outside the valid range \[12..21\].  |
 | Block header checksum mismatch         | Block header offset 0x07    | Reject block. Stream is corrupt.                |
+| Block Flags or Reserved non-zero       | Block header offsets 0x01-0x02 | Reject. No flag is defined and the reserved byte has no meaning in this version ({{block-header-semantics}}, {{compatibility-rules}}). |
 | Unknown block type                     | Block header offset 0x00    | Reject. Type not defined for this version.      |
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
 | Block checksum mismatch                | Trailing checksum, after decoding | Reject block. Wrong decoded bytes: corrupt payload, wrong dictionary, or block out of place. |
@@ -1526,11 +1533,11 @@ accident, not against an adversary ({{checksum-strength}}).
 
 ## Reserved Fields
 
-A decoder that follows {{compatibility-rules}} will tolerate
-non-zero values in RESERVED bytes and flag bits, except in the EOF and
-SEK block headers. Encoder authors
-MUST NOT rely on this tolerance to smuggle data; future revisions
-of this document MAY assign meaning to any RESERVED field.
+A decoder that follows {{compatibility-rules}} rejects non-zero
+values in RESERVED bytes and flag bits, so a forged header with a
+recomputed checksum does not pass on a reserved field. Encoder
+authors MUST NOT write anything but zero there; future revisions of
+this document MAY assign meaning to any RESERVED field.
 
 ## Side Channels
 
@@ -1812,7 +1819,7 @@ C7 D1 B0 9C | 02 | 00 | 05 00 | 34 07 FC 0C | 00 00 | C6 51
   File Header of any archive compressed with this dictionary.
 - 00 00 are the two RESERVED bytes.
 - C6 51 is the Header Checksum (LE value 0x51C6), computed over the
-  16-byte header with bytes 0x0C..0x0F treated as zero.
+  16-byte header with bytes 0x0E..0x0F treated as zero.
 
 Dictionary content (offset 0x10, 5 bytes):
 
