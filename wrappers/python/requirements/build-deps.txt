@@ -14,13 +14,17 @@ pathspec==1.1.1 \
 scikit-build-core==1.1.1 \
     --hash=sha256:6f6d6cf600e2e9639fd258ecd11cfc19bd189354b968916a519c6793e7e26237 \
     --hash=sha256:e347a59193c878ac56a363e57506938652a6dd8c965790cb1cbc6bc7e8d5abad
-    # via -r build-deps.in
-setuptools-scm[toml]==10.3.4 \
+    # via -r requirements/build-deps.in
+setuptools==84.2.1 \
+    --hash=sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc \
+    --hash=sha256:ca140b45d5325a9478f880e351484f62fef15f336462e449ca0c03c873d589c2
+    # via
+    #   -r requirements/build-deps.in
+    #   setuptools-scm
+setuptools-scm==10.3.4 \
     --hash=sha256:82f34c3e3084fc2b57d397200637cc13f2338004052d2fee47baa5f0e902464e \
     --hash=sha256:a69f28bfc245608781205e912faae437c2b2165773afa4e7b979d77447a69dd2
-    # via
-    #   -r build-deps.in
-    #   setuptools-scm
+    # via -r requirements/build-deps.in
 vcs-versioning==2.5.0 \
     --hash=sha256:956a796e31f80fe714d219d6d1df15a6bf247d10f6d851bf4b98279d0a42da55 \
     --hash=sha256:dbf44f6303dc817e5792cb7d0e9cc90e3046ee1e32eaa357b20ad368811313d0
