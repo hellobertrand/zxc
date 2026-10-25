@@ -42,8 +42,8 @@ jobs:
 
     - name: Run CLI Tests
       run: |
-        chmod +x tests/test_cli.sh
-        ./tests/test_cli.sh build/zxc
+        chmod +x tests/cli/test_cli.sh
+        ./tests/cli/test_cli.sh build/zxc
 
     - name: Generate Coverage Report
       run: |

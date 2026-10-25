@@ -28,9 +28,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_constants.h"
-#include "../include/zxc_stream.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_constants.h"
+#include "../../include/zxc_stream.h"
 
 #define FUZZ_STREAM_MAX_INPUT (256 << 10) /* 256 KiB, before tiling */
 

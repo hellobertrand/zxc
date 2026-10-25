@@ -32,7 +32,7 @@ if you do not implement the feature:
   with no dictionary a decoder stops earlier, which is `dict_required`'s case.
 
 ```sh
-cd conformance/v9            # from the repository root, or wherever you
+cd tests/conformance/v9      # from the repository root, or wherever you
                              # unpacked the corpus; pick the version you decode
 [ -d valid ] || { echo "no corpus here"; exit 1; }
 
@@ -101,9 +101,9 @@ CI job fails on any changed byte, and checks the file set matches the manifest.
 Refresh it whenever the corpus changes on purpose:
 
 ```sh
-sha256sum conformance/v9/valid/*.zxc conformance/v9/valid/*.expected \
-          conformance/v9/valid/*.zxd conformance/v9/invalid/*.zxc \
-  | sort -k2 > conformance/v9/vectors.sha256
+sha256sum tests/conformance/v9/valid/*.zxc tests/conformance/v9/valid/*.expected \
+          tests/conformance/v9/valid/*.zxd tests/conformance/v9/invalid/*.zxc \
+  | sort -k2 > tests/conformance/v9/vectors.sha256
 ```
 
 ## Regenerating
@@ -116,10 +116,10 @@ manifest guards them.
 
 ```sh
 cmake --build build --target zxc_valid_gen zxc_invalid_gen
-./build/zxc_valid_gen   conformance/v9/valid
-./build/zxc_invalid_gen conformance/v9/invalid
+./build/zxc_valid_gen   tests/conformance/v9/valid
+./build/zxc_invalid_gen tests/conformance/v9/invalid
 ```
 
 The `.expected` plaintexts and the `.zxd` dictionaries are inputs, never
-rewritten. After a format bump the corpus moves to a new `conformance/v<N>/`:
+rewritten. After a format bump the corpus moves to a new `tests/conformance/v<N>/`:
 create it, generate into it, then write its `FORMAT_VERSION` and manifest.

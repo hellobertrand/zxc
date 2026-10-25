@@ -39,8 +39,8 @@
  * load helpers used to recompute the on-disk integrity fields. Header-only
  * (static inline), so no extra linkage is required. */
 #include "../../src/lib/zxc_internal.h"
-#include "../vector_io.h"
 #include "golden_cases.h"
+#include "vector_io.h"
 
 /* ------------------------------------------------------------------------- */
 /* Reporting helpers                                                         */

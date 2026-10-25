@@ -10,9 +10,9 @@
  * generated in invalid_cases.h, which holds the recipes; test_conformance.c
  * rebuilds the same bytes from that header and checks the committed files.
  *
- *   zxc_invalid_gen [<output-dir>]    # defaults to conformance/v<current>/invalid
+ *   zxc_invalid_gen [<output-dir>]    # defaults to tests/conformance/v<current>/invalid
  *
- * After a format bump the corpus moves to a new conformance/v<N>/: create it,
+ * After a format bump the corpus moves to a new tests/conformance/v<N>/: create it,
  * generate into it, then write its FORMAT_VERSION and vectors.sha256.
  */
 
@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../tests/vector_io.h"
+#include "../format/vector_io.h"
 #include "invalid_cases.h"
 
 static int write_file(const char* dir, const char* name, const uint8_t* data, size_t size) {
@@ -33,7 +33,7 @@ static int write_file(const char* dir, const char* name, const uint8_t* data, si
 
 int main(int argc, char** argv) {
     char fallback[64];
-    snprintf(fallback, sizeof fallback, "conformance/v%u/invalid",
+    snprintf(fallback, sizeof fallback, "tests/conformance/v%u/invalid",
              (unsigned)ZXC_FILE_FORMAT_VERSION);
     const char* dir = (argc > 1) ? argv[1] : fallback;
     if (!vio_dir_is_safe(dir)) {

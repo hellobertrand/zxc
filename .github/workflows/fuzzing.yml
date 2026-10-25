@@ -20,7 +20,7 @@ on:
     paths:
       - 'src/**'
       - 'include/**'
-      - 'tests/fuzz_*.c'
+      - 'tests/fuzz/**'
       - '.clusterfuzzlite/**'
 
 permissions:
@@ -121,28 +121,28 @@ jobs:
           INCLUDES="-I include -I src/lib/vendors"
           SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_pivco_tables.c src/lib/zxc_seekable.c src/lib/zxc_pstream.c"
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_roundtrip.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_roundtrip.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_roundtrip
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_decompress.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_decompress.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_decompress
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_seekable.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_seekable.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_seekable
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_pstream.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_pstream.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_pstream
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_dict.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_dict.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_dict
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_stream.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_stream.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_stream
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_inplace.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_inplace.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_inplace
 
-          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz_block.c \
+          clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_block.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_block
 
       - name: Replay Corpora

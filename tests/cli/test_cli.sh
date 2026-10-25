@@ -5,12 +5,13 @@
 # Copyright (c) Bertrand Lebonnois and contributors.
 #
 # Test script for ZXC CLI
-# Usage: ./tests/test_cli.sh [path_to_zxc_binary]
+# Usage: ./tests/cli/test_cli.sh [path_to_zxc_binary]
 
 set -e
 
 # Default binary path
-ZXC_BIN=${1:-"../build/zxc"}
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+ZXC_BIN=${1:-"$SCRIPT_DIR/../../build/zxc"}
 
 # Test Directory (to isolate test files)
 TEST_DIR="./test_tmp"
@@ -1312,7 +1313,7 @@ fi
 
 # 26.5 zxcless pages .zxc files through less, and other files unchanged (POSIX
 #      only: not installed on Windows). Off a terminal, less copies to stdout.
-ZXCLESS="$(dirname "$0")/../src/cli/zxcless"
+ZXCLESS="$(dirname "$0")/../../src/cli/zxcless"
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] zxcless is not installed on Windows" ;;
     *)
@@ -1404,7 +1405,7 @@ case "$(uname -s 2>/dev/null)" in
 esac
 
 # 26.6 zxcgrep searches .zxc files and other files unchanged (POSIX only)
-ZXCGREP="$(dirname "$0")/../src/cli/zxcgrep"
+ZXCGREP="$(dirname "$0")/../../src/cli/zxcgrep"
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] zxcgrep is not installed on Windows" ;;
     *)

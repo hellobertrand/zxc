@@ -391,7 +391,7 @@ The wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format
 
 Two byte-frozen suites guard the format:
 
-* **Decoder conformance** — [`conformance/`](conformance/README.md) ships public vectors per format version: `valid/*.zxc` streams with their expected output, and `invalid/*.zxc` streams a correct decoder **must** reject, at least one per row of the format's error table. Point your own decoder at them; locally, run the `conformance` CTest.
+* **Decoder conformance** — [`tests/conformance/`](tests/conformance/README.md) ships public vectors per format version: `valid/*.zxc` streams with their expected output, and `invalid/*.zxc` streams a correct decoder **must** reject, at least one per row of the format's error table. Point your own decoder at them; locally, run the `conformance` CTest.
 * **Encoder stability** — [`tests/format/`](tests/format/README.md) pins the exact bytes the encoder emits for every block type and integrity field; [`vector-stability.yml`](.github/workflows/vector-stability.yml) fails CI on any single-byte drift.
 
 ## Safety & Quality

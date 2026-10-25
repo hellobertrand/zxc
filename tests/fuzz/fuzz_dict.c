@@ -34,10 +34,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_constants.h"
-#include "../include/zxc_dict.h"
-#include "../include/zxc_error.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_constants.h"
+#include "../../include/zxc_dict.h"
+#include "../../include/zxc_error.h"
 
 #define FUZZ_DICT_MAX_INPUT (256 << 10) /* 256 KiB */
 #define FUZZ_DICT_CTRL 8                /* control-header bytes consumed below */

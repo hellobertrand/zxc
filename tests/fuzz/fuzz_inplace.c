@@ -31,10 +31,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_constants.h"
-#include "../include/zxc_error.h"
-#include "../src/lib/zxc_internal.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_constants.h"
+#include "../../include/zxc_error.h"
+#include "../../src/lib/zxc_internal.h"
 
 #define FUZZ_INPLACE_MAX_INPUT (64 << 10) /* 64 KiB of fuzzer bytes */
 #define FUZZ_INPLACE_UNIT 4096            /* zero and noise run granularity */

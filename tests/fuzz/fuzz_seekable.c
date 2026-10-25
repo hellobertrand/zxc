@@ -20,8 +20,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_seekable.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_seekable.h"
 
 #define FUZZ_SEEKABLE_MAX_INPUT (4 << 20) /* 4 MiB */
 

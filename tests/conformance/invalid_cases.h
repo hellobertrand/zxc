@@ -17,8 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_error.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_error.h"
 /* Private header: zxc_hash8/zxc_hash16 to re-sign patched headers. */
 #include "zxc_internal.h"
 

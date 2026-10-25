@@ -35,7 +35,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_pstream.h"
+#include "../../include/zxc_pstream.h"
 
 /* Cap aligned with the maximum supported block size (2 MiB). */
 #define FUZZ_PSTREAM_MAX_INPUT (2 << 20) /* 2 MiB */

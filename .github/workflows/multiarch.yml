@@ -99,7 +99,7 @@ jobs:
               ctest --test-dir $BUILD_DIR -C Release --output-on-failure
               # The 32-bit and the /MD (shared UCRT) MSVC CLIs are only tested here.
               if [ "${{ matrix.os }}" = "windows" ]; then
-                  ./tests/test_cli.sh "$BUILD_DIR/Release/zxc.exe"
+                  ./tests/cli/test_cli.sh "$BUILD_DIR/Release/zxc.exe"
               fi
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
@@ -289,7 +289,7 @@ jobs:
 
               echo "Running Tests for $LIB_TYPE via QEMU..."
               "${RUN[@]}" ./$BUILD_DIR/zxc_test
-              "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./conformance
+              "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./tests/conformance
               "${RUN[@]}" ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"
@@ -375,7 +375,7 @@ jobs:
 
               echo "Running Tests for $LIB_TYPE under Intel SDE (${{ matrix.simd }})..."
               $SDE ./"$BUILD_DIR"/zxc_test
-              $SDE ./"$BUILD_DIR"/zxc_conformance_test ./conformance
+              $SDE ./"$BUILD_DIR"/zxc_conformance_test ./tests/conformance
               $SDE ./"$BUILD_DIR"/zxc_format_golden_test ./tests/format/golden
 
               echo ">>> Completed Build: $LIB_TYPE"

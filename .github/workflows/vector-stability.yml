@@ -15,7 +15,7 @@ name: Test Vector Stability
 #                one silently would move the reference they are measured by.
 #
 # Separate jobs so the check that goes red names which contract broke.
-# See tests/format/README.md and conformance/README.md.
+# See tests/format/README.md and tests/conformance/README.md.
 
 on:
   workflow_dispatch:
@@ -76,9 +76,9 @@ jobs:
       - name: Verify every frozen corpus
         run: |
           shopt -s nullglob
-          dirs=(conformance/v*/)
+          dirs=(tests/conformance/v*/)
           if [ ${#dirs[@]} -eq 0 ]; then
-            echo "::error::No conformance/v<N>/ corpus found."
+            echo "::error::No tests/conformance/v<N>/ corpus found."
             exit 1
           fi
           for d in "${dirs[@]}"; do

@@ -30,8 +30,8 @@
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
-#include "../vector_io.h"
 #include "golden_cases.h"
+#include "vector_io.h"
 
 int main(int argc, char** argv) {
     const char* dir = (argc > 1) ? argv[1] : "tests/format/golden";

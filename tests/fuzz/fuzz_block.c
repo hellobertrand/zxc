@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
+#include "../../include/zxc_buffer.h"
 
 #define FUZZ_BLOCK_MAX_INPUT (256 << 10) /* 256 KiB of fuzzer bytes */
 #define FUZZ_BLOCK_CTRL 4                /* control bytes consumed below */

@@ -23,7 +23,7 @@ build() {
         $CC $CFLAGS $ZXC_CFLAGS "$@" -c "$src" -o "$dir/$(basename "${src%.c}").o"
     done
     for fuzzer in $fuzzers; do
-        $CC $CFLAGS $ZXC_CFLAGS "$@" -c tests/fuzz_${fuzzer}.c -o "$dir/fuzz_${fuzzer}.o"
+        $CC $CFLAGS $ZXC_CFLAGS "$@" -c tests/fuzz/fuzz_${fuzzer}.c -o "$dir/fuzz_${fuzzer}.o"
         $CXX $CXXFLAGS "$dir/fuzz_${fuzzer}.o" "$dir"/zxc_*.o -o $OUT/zxc_fuzzer_${fuzzer}${suffix} \
             $LIB_FUZZING_ENGINE -lm -pthread
     done

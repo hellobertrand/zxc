@@ -82,7 +82,7 @@ jobs:
         run: ctest --output-on-failure
 
       - name: Test CLI
-        run: ./tests/test_cli.sh build/zxc
+        run: ./tests/cli/test_cli.sh build/zxc
 
       - name: Package Release (Archive)
         if: github.event_name == 'release'
@@ -177,7 +177,7 @@ jobs:
       - name: Test
         run: |
           ctest --test-dir build --output-on-failure
-          ./tests/test_cli.sh build/zxc.exe
+          ./tests/cli/test_cli.sh build/zxc.exe
           ${{ matrix.cc }} -O2 -Iinclude -DZXC_DLL_IMPORT tests/packaging/consumer.c \
               build-dll/libzxc.dll.a -o build-dll/consumer.exe
           (cd build-dll && ./consumer.exe)

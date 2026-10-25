@@ -26,7 +26,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 
-#include "../include/zxc_buffer.h"
+#include "../../include/zxc_buffer.h"
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     static uint8_t out_buf[4 << 20]; /* 4 MiB */

@@ -2,7 +2,6 @@
 exclude:
   code:
     - tests/**
-    - conformance/**
     - wrappers/go/*_test.go
     - wrappers/nodejs/test/**
     - wrappers/python/tests/**

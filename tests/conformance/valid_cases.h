@@ -6,7 +6,7 @@
  */
 
 /*
- * Recipe for conformance/v<N>/valid: the options each vector was produced with.
+ * Recipe for tests/conformance/v<N>/valid: the options each vector was produced with.
  * Rebuild with zxc_valid_gen; test_conformance.c checks every committed archive
  * still matches its entry.
  *
@@ -21,7 +21,7 @@
 
 #include <stddef.h>
 
-#include "../include/zxc_opts.h"
+#include "../../include/zxc_opts.h"
 
 #define VC_KB(n) ((size_t)(n) * 1024U)
 #define VC_MB(n) ((size_t)(n) * 1024U * 1024U)

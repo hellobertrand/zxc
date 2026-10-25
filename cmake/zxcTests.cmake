@@ -11,21 +11,21 @@ if(ZXC_BUILD_TESTS)
     endif()
 
     add_executable(zxc_test
-        tests/test_main.c
-        tests/test_common.c
-        tests/test_buffer_api.c
-        tests/test_block_api.c
-        tests/test_context_api.c
-        tests/test_static_ctx.c
-        tests/test_pstream_api.c
-        tests/test_stream_api.c
-        tests/test_container.c
-        tests/test_seekable.c
-        tests/test_seekable_mt.c
-        tests/test_format.c
-        tests/test_encoder_pin.c
-        tests/test_misc.c
-        tests/test_dict.c
+        tests/unit/test_main.c
+        tests/unit/test_common.c
+        tests/unit/test_buffer_api.c
+        tests/unit/test_block_api.c
+        tests/unit/test_context_api.c
+        tests/unit/test_static_ctx.c
+        tests/unit/test_pstream_api.c
+        tests/unit/test_stream_api.c
+        tests/unit/test_container.c
+        tests/unit/test_seekable.c
+        tests/unit/test_seekable_mt.c
+        tests/unit/test_format.c
+        tests/unit/test_encoder_pin.c
+        tests/unit/test_misc.c
+        tests/unit/test_dict.c
     )
 
     # When building shared libraries, create a static version for tests and the
@@ -92,7 +92,7 @@ if(ZXC_BUILD_TESTS)
 
     target_include_directories(zxc_test PRIVATE src/lib ${RAPIDHASH_INCLUDE_DIR})
 
-    file(STRINGS tests/test_main.c ZXC_TEST_CASE_LINES REGEX "TEST_CASE\\(")
+    file(STRINGS tests/unit/test_main.c ZXC_TEST_CASE_LINES REGEX "TEST_CASE\\(")
     set(ZXC_TEST_NAMES "")
     foreach(_line IN LISTS ZXC_TEST_CASE_LINES)
         if(_line MATCHES "TEST_CASE\\(([A-Za-z0-9_]+)\\)")
@@ -104,7 +104,7 @@ if(ZXC_BUILD_TESTS)
     endforeach()
 
     # --- Conformance suite ---------------------------------------------------
-    add_executable(zxc_conformance_test conformance/test_conformance.c)
+    add_executable(zxc_conformance_test tests/conformance/test_conformance.c)
     target_link_libraries(zxc_conformance_test PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_conformance_test PRIVATE ${CMAKE_SOURCE_DIR}/include
         ${CMAKE_SOURCE_DIR}/src/lib
@@ -118,7 +118,7 @@ if(ZXC_BUILD_TESTS)
 
     add_test(
         NAME conformance
-        COMMAND zxc_conformance_test "${CMAKE_SOURCE_DIR}/conformance"
+        COMMAND zxc_conformance_test "${CMAKE_SOURCE_DIR}/tests/conformance"
     )
 
     # --- Golden-file format conformance --------------------------------------
@@ -155,7 +155,7 @@ if(ZXC_BUILD_TESTS)
     endif()
 
     # Maintainer-only tool that rebuilds the current version's valid vectors.
-    add_executable(zxc_valid_gen conformance/gen_valid.c)
+    add_executable(zxc_valid_gen tests/conformance/gen_valid.c)
     target_link_libraries(zxc_valid_gen PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_valid_gen PRIVATE
         ${CMAKE_SOURCE_DIR}/include
@@ -169,7 +169,7 @@ if(ZXC_BUILD_TESTS)
     endif()
 
     # Maintainer-only tool that rebuilds the current version's invalid vectors.
-    add_executable(zxc_invalid_gen conformance/gen_invalid.c)
+    add_executable(zxc_invalid_gen tests/conformance/gen_invalid.c)
     target_link_libraries(zxc_invalid_gen PRIVATE ${ZXC_INTERNAL_LIB})
     target_include_directories(zxc_invalid_gen PRIVATE
         ${CMAKE_SOURCE_DIR}/include

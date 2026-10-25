@@ -17,11 +17,11 @@
 #include <sys/stat.h>
 #endif
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_dict.h"
-#include "../include/zxc_error.h"
-#include "../include/zxc_seekable.h"
-#include "../tests/vector_io.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_dict.h"
+#include "../../include/zxc_error.h"
+#include "../../include/zxc_seekable.h"
+#include "../format/vector_io.h"
 #include "invalid_cases.h"
 #include "valid_cases.h"
 
@@ -545,7 +545,7 @@ int main(int argc, char** argv) {
     /* One frozen corpus per format version, <root>/v<N>/. Composing it from the
      * constant means a bump looks for a corpus that does not exist yet, rather
      * than testing vectors this decoder could not decode anyway (Sec 10.3). */
-    const char* root = "conformance";
+    const char* root = "tests/conformance";
     if (argc > 1) root = argv[1];
 
     char valid_dir[512], invalid_dir[512];

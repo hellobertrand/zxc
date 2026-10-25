@@ -27,7 +27,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../include/zxc_buffer.h"
+#include "../../include/zxc_buffer.h"
 
 #define FUZZ_ROUNDTRIP_MAX_INPUT (4 << 20) /* 4 MiB */
 

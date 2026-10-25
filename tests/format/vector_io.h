@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-/* File I/O shared by the vector tools (tests/format/ and conformance/). */
+/* File I/O shared by the vector tools: tests/format/ and tests/conformance/. */
 
 #ifndef ZXC_VECTOR_IO_H
 #define ZXC_VECTOR_IO_H
