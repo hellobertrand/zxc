@@ -287,6 +287,7 @@ int test_seek_flag_contract(void);
 int test_footer_digest(void);
 int test_seek_tail_rule(void);
 int test_chunk_size_code(void);
+int test_file_header_reserved(void);
 int test_header_checksum_single_bit(void);
 
 /* Encoder output */

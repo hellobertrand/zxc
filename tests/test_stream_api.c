@@ -1603,19 +1603,29 @@ int test_stream_size_then_decompress(void) {
 
 int test_stream_footer_looks_like_sek(void) {
     printf("=== TEST: Stream - a footer that parses as a SEK header ===\n");
+    /* Footer bytes with the SEK type and a valid checksum, but Flags/Reserved set. */
     uint64_t n = 0;
     for (uint64_t k = ZXC_BLOCK_SEK; k < (1U << 24) && !n; k += 256) {
         uint8_t b[8];
         zxc_store_le64(b, k);
-        zxc_block_header_t bh;
-        if (zxc_read_block_header(b, sizeof(b), &bh) == ZXC_OK && bh.block_type == ZXC_BLOCK_SEK)
-            n = k;
+        const uint8_t sum = b[7];
+        b[7] = 0;
+        if (sum == zxc_hash8(b)) n = k;
     }
     if (!n) {
         printf("  [FAIL] no such size below 16 MiB\n");
         return 0;
     }
-    printf("  size %llu bytes parses as a SEK header\n", (unsigned long long)n);
+    {
+        uint8_t b[8];
+        zxc_store_le64(b, n);
+        zxc_block_header_t bh;
+        if (zxc_read_block_header(b, sizeof(b), &bh) != ZXC_ERROR_BAD_HEADER) {
+            printf("  [FAIL] size %llu parses as a SEK header\n", (unsigned long long)n);
+            return 0;
+        }
+    }
+    printf("  size %llu bytes hashes like a SEK header\n", (unsigned long long)n);
 
     uint8_t* const src = malloc((size_t)n);
     uint8_t* const out = malloc((size_t)n);

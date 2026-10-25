@@ -511,7 +511,7 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
 /**
  * @brief Parses and validates a ZXC file header from @p src.
  *
- * Checks the magic word, format version, and 16-bit checksum.
+ * Checks the magic word, format version, 16-bit checksum and reserved bits/bytes.
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum,
@@ -530,6 +530,11 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     if (UNLIKELY(zxc_le16(src + 14) != zxc_hash16(temp) ||
                  (src[6] & ZXC_FILE_CHECKSUM_ALGO_MASK) != ZXC_CHECKSUM_RAPIDHASH))
         return ZXC_ERROR_BAD_HEADER;
+    // Reserved: flag bit 4, bytes 7-13 minus the dict_id (7-10).
+    if (UNLIKELY(src[6] & ZXC_FILE_FLAG_RESERVED)) return ZXC_ERROR_BAD_HEADER;
+    uint8_t rsv = 0;
+    for (size_t i = (src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 11 : 7; i < 14; i++) rsv |= src[i];
+    if (UNLIKELY(rsv != 0)) return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
         const uint8_t code = src[5];
@@ -698,7 +703,7 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
 /**
  * @brief Parses and validates a block header from @p src.
  *
- * Validates the 8-bit checksum embedded in the header.
+ * Validates the 8-bit checksum, then requires Block Flags and Reserved to be 0.
  */
 int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* RESTRICT bh) {
@@ -708,9 +713,10 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
     ZXC_MEMCPY(temp, src, ZXC_BLOCK_HEADER_SIZE);
     temp[7] = 0;  // Zero out checksum byte before hashing
     if (UNLIKELY(src[7] != zxc_hash8(temp))) return ZXC_ERROR_BAD_HEADER;
+    if (UNLIKELY((src[1] | src[2]) != 0)) return ZXC_ERROR_BAD_HEADER;
 
     bh->block_type = src[0];
-    bh->block_flags = 0;  // Flags not used currently
+    bh->block_flags = src[1];
     bh->reserved = src[2];
     bh->comp_size = zxc_le32(src + 3);
     bh->header_checksum = src[7];

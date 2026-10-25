@@ -153,6 +153,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_footer_digest),
     TEST_CASE(test_seek_tail_rule),
     TEST_CASE(test_chunk_size_code),
+    TEST_CASE(test_file_header_reserved),
     TEST_CASE(test_header_checksum_single_bit),
 
     /* --- Encoder output --- */

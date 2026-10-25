@@ -231,7 +231,7 @@ it, say. Two edits to the 16-byte header (§ 12.4 of `FORMAT.md`):
 
 1. set the version byte at `0x04` to `02`;
 2. recompute the 2-byte header checksum of § 7.1 over the 16-byte header with
-   bytes `0x0C..0x0F` zeroed, and store it little-endian at `0x0E`.
+   bytes `0x0E..0x0F` zeroed, and store it little-endian at `0x0E`.
 
 Nothing else moves: `dict_id` covers the content and the table only, so it comes
 out unchanged and the pairing survives.

@@ -742,6 +742,19 @@ int test_header_checksum(void) {
         return 0;
     }
 
+    // 5. Block Flags or Reserved set, checksum recomputed: refused.
+    for (int at = 1; at <= 2; at++) {
+        uint8_t odd[ZXC_BLOCK_HEADER_SIZE];
+        if (zxc_write_block_header(odd, sizeof(odd), &bh_in) != ZXC_BLOCK_HEADER_SIZE) return 0;
+        odd[at] = 0x01;
+        odd[7] = 0;
+        odd[7] = zxc_hash8(odd);
+        if (zxc_read_block_header(odd, sizeof(odd), &bh_out) != ZXC_ERROR_BAD_HEADER) {
+            printf("  [FAIL] block header byte %d set was accepted\n", at);
+            return 0;
+        }
+    }
+
     printf("PASS\n\n");
     return 1;
 }
@@ -1530,6 +1543,47 @@ int test_forged_block_comp_size(void) {
  * flip's sign, so the guarantee is re-derived here from the constants and a
  * constant that opens a hole fails the suite. Block header: every bit. File
  * header: every bit and every pair. */
+/* Reserved flag bit or byte set, checksum recomputed: refused, with or without dict. */
+int test_file_header_reserved(void) {
+    printf("=== TEST: Format - file header reserved bits and bytes ===\n");
+    for (int dict = 0; dict <= 1; dict++) {
+        const uint32_t dict_id = dict ? 0x12345678U : 0;
+        uint8_t hdr[ZXC_FILE_HEADER_SIZE];
+        if (zxc_write_file_header(hdr, sizeof(hdr), 1U << 18, 1, dict_id, 0) !=
+            ZXC_FILE_HEADER_SIZE) {
+            printf("  [FAIL] dict %d: header not written\n", dict);
+            return 0;
+        }
+        uint32_t got_id = 0;
+        if (zxc_read_file_header(hdr, sizeof(hdr), NULL, NULL, &got_id, NULL) != ZXC_OK ||
+            got_id != dict_id) {
+            printf("  [FAIL] dict %d: valid header refused\n", dict);
+            return 0;
+        }
+        uint8_t odd[ZXC_FILE_HEADER_SIZE];
+        memcpy(odd, hdr, sizeof(odd));
+        odd[6] |= ZXC_FILE_FLAG_RESERVED;
+        zxc_file_header_sign(odd);
+        if (zxc_read_file_header(odd, sizeof(odd), NULL, NULL, NULL, NULL) !=
+            ZXC_ERROR_BAD_HEADER) {
+            printf("  [FAIL] dict %d: reserved flag bit accepted\n", dict);
+            return 0;
+        }
+        for (int at = dict ? 11 : 7; at < 14; at++) {
+            memcpy(odd, hdr, sizeof(odd));
+            odd[at] = 0x01;
+            zxc_file_header_sign(odd);
+            if (zxc_read_file_header(odd, sizeof(odd), NULL, NULL, NULL, NULL) !=
+                ZXC_ERROR_BAD_HEADER) {
+                printf("  [FAIL] dict %d: reserved byte %d set was accepted\n", dict, at);
+                return 0;
+            }
+        }
+    }
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_header_checksum_single_bit(void) {
     printf("=== TEST: every header bit moves its checksum ===\n");
 

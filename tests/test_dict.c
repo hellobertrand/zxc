@@ -85,6 +85,26 @@ int test_dict_zxd_roundtrip(void) {
         return 0;
     }
 
+    /* Non-zero Flags or Reserved, checksum recomputed: refused. */
+    static const struct {
+        int at;
+        uint8_t v;
+    } odd[] = {{5, 0x01}, {5, 0x10}, {5, 0x80}, {12, 0x01}, {13, 0x01}};
+    for (size_t k = 0; k < sizeof(odd) / sizeof(odd[0]); k++) {
+        uint8_t* const bad = (uint8_t*)malloc((size_t)written);
+        memcpy(bad, zxd, (size_t)written);
+        bad[odd[k].at] = odd[k].v;
+        zxc_store_le16(bad + 14, 0);
+        zxc_store_le16(bad + 14, zxc_hash16(bad));
+        rc = zxc_dict_load(bad, (size_t)written, &loaded_content, &loaded_size, NULL, NULL);
+        free(bad);
+        if (rc != ZXC_ERROR_BAD_HEADER) {
+            printf("  [FAIL] byte 0x%02X = 0x%02X accepted (%d)\n", odd[k].at, odd[k].v, rc);
+            free(zxd);
+            return 0;
+        }
+    }
+
     free(zxd);
     printf("PASS\n\n");
     return 1;

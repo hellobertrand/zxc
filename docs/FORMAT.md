@@ -92,10 +92,11 @@ Offset  Size  Field
   - Bit 5 (`0x20`): `HAS_SEEK_TABLE` — a SEK block (§5.5) sits between the EOF block and the
     footer. Clear, the footer follows the EOF block directly.
   - Bits 0..3: checksum algorithm id (`0` = RapidHash-based folding).
-  - Bit 4: reserved.
+  - Bit 4: reserved, must be 0. A decoder **MUST** reject the header when it is set.
 - **Reserved / Dictionary ID**: 7 bytes.
   - When `HAS_DICTIONARY` is set: bytes `0x07..0x0A` contain a `dict_id` (`u32` LE), a 32-bit hash of the dictionary content. Bytes `0x0B..0x0D` remain zero.
   - When `HAS_DICTIONARY` is clear: all 7 bytes are zero.
+  - A decoder **MUST** reject the header when a byte required to be zero is not.
 - **Header Checksum** (`u16`): the 16-bit header checksum of [7.1](#71-header-checksums), computed over the 16-byte header with bytes `0x0E..0x0F` zeroed.
 
 ---
@@ -121,9 +122,9 @@ Offset  Size  Field
   - `2` = PAK
   - `254` = SEK
   - `255` = EOF
-- **Block Flags**: no flag is defined; must be 0.
-- **Reserved**: must be 0. In the EOF and SEK headers, this byte and Block Flags are checked
-  (§5.4, §5.5).
+- **Block Flags**: no flag is defined; must be 0. A decoder **MUST** reject a non-zero value.
+- **Reserved**: must be 0. A decoder **MUST** reject a non-zero value, in every block type
+  (§10.3).
 - **Compressed Payload Size** (`comp_size`): payload size in bytes (does **not** include the optional trailing 4-byte block
   checksum). For a data block (RAW, SPL, PAK) it never exceeds the `block_size` declared in the
   file header: a block that would grow falls back to RAW, whose payload equals its content, so
@@ -849,7 +850,7 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 - **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
 - **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version. The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
-- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. The current decoder tolerates (ignores) non-zero reserved values — they are covered by the header checksum, so accidental corruption is still caught — but assigning a reserved field any meaning is a **version bump**, never a same-version extension. Exception: a decoder rejects an EOF or SEK header whose Block Flags or Reserved byte is non-zero (§5.4, §5.5), and a footer whose `L` byte sets bit 3 or 7 (§8).
+- **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Assigning a reserved field any meaning is a **version bump**, never a same-version extension. A decoder rejects a file header that sets flag bit 4 or a reserved byte (§3), a block header whose Block Flags or Reserved byte is non-zero, whatever the block type (§4.1), and a footer whose `L` byte sets bit 3 or 7 (§8); a dictionary loader rejects a `.zxd` header with non-zero Flags or Reserved bytes (§12.4). The SPL/PAK sub-header fields written as 0 and ignored on decode (Match Length Encoding, PAK Offset Encoding, §5.2, §5.3) are the exception.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values as a corrupt header.
 
 ### 10.4 Minimum conforming decoder
@@ -884,8 +885,10 @@ The recommended behavior for each class is specified below.
 | **Bad magic** | File header, offset 0x00 | Reject immediately. Not a ZXC file. |
 | **Unsupported version** | File header, offset 0x04 | Reject immediately. Version not supported. |
 | **File header checksum mismatch** | File header, offset 0x0E | Reject. Header is corrupt or truncated. |
+| **File header reserved bit or byte set** | File header, offsets 0x06-0x0D | Reject. Flag bit 4, or a byte of `0x07..0x0D` outside the `dict_id` (§3). |
 | **Invalid chunk size code** | File header, offset 0x05 | Reject. Code outside the valid range `[12..21]`. |
 | **Block header checksum mismatch** | Block header, offset 0x07 | Reject block. Stream is corrupt. |
+| **Block Flags or Reserved non-zero** | Block header, offsets 0x01-0x02 | Reject. No flag is defined and the reserved byte has no meaning in this version (§4.1, §10.3). |
 | **Unknown block type** | Block header, offset 0x00 | Reject. The block-type set is fixed per format version (see §10.3); a decoder must not skip past unrecognised data. |
 | **Block payload truncated** | While reading the Compressed Payload Size bytes | Reject. Unexpected end of stream. |
 | **Block checksum mismatch** | Trailing 4-byte checksum, after decoding the block | Reject block. The decoded bytes are wrong: corrupt payload, wrong dictionary, or a block out of place. |
@@ -980,7 +983,7 @@ Offset  Size  Field
 0x06    2     Content size (u16 LE, max 65535)
 0x08    4     dict_id (u32 LE, binds content AND shared table, see below)
 0x0C    2     Reserved (0)
-0x0E    2     Header Checksum (see 7.1, computed with 0x0C-0x0F zeroed)
+0x0E    2     Header Checksum (see 7.1, computed with 0x0E-0x0F zeroed)
 0x10    N     Dictionary content (raw bytes)
 0x10+N  128   Shared literal Huffman table (256 × 4-bit packed code lengths,
               same layout as the § 5.2.1 code-length header; always present)
@@ -991,14 +994,15 @@ Offset  Size  Field
   an unsupported dictionary version. Version 1 shipped with format v8: its header
   was signed with the pre-v9 checksum, not the one § 7.1 now specifies, so it is
   rejected on the version byte before the checksum is ever compared.
-- **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0).
+- **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0). A loader **MUST** reject any other id or a reserved bit set.
+- **Reserved** (`0x0C..0x0D`): must be 0; a loader **MUST** reject a non-zero value.
 - **Shared literal Huffman table**: code lengths for the Literal Encoding `3` literal
   sections (§ 5.2.2), trained on the corpus' post-LZ literal distribution.
 - **dict_id**: `fold32(rapidhash(table_128_bytes, seed = fold32(rapidhash(content))))`
   (see [12.3](#123-file-header-encoding)) — binds the exact (content, table)
   pair. Must match the `dict_id` stored in any ZXC file header that references
   this dictionary.
-- **Header Checksum**: the 16-bit header checksum of [7.1](#71-header-checksums), computed over the 16-byte header with bytes `0x0C..0x0F` zeroed.
+- **Header Checksum**: the 16-bit header checksum of [7.1](#71-header-checksums), computed over the 16-byte header with bytes `0x0E..0x0F` zeroed.
 - **Content**: raw bytes that prefill the LZ77 window. Not compressed.
 
 ### 12.5 Dictionary training
@@ -1270,7 +1274,7 @@ C7 D1 B0 9C | 02 | 00 | 05 00 | 34 07 FC 0C | 00 00 | C6 51
 - `05 00` -> content size (LE) = `5` bytes.
 - `34 07 FC 0C` -> `dict_id` (LE) = `0x0CFC0734`. Binds the **(content, table)** pair (see §12.4) and must match the `dict_id` stored in the file header of any `.zxc` archive compressed with this dictionary.
 - `00 00` -> reserved.
-- `C6 51` -> header checksum (LE) = `0x51C6`, computed over the 16-byte header with bytes `0x0C..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
+- `C6 51` -> header checksum (LE) = `0x51C6`, computed over the 16-byte header with bytes `0x0E..0x0F` zeroed (same method as the ZXC file header — the checksum is the last 2 bytes of the header).
 
 #### B) Dictionary Content (offset `0x10`, 5 bytes)
 

@@ -378,10 +378,12 @@ static_assert((ZXC_CACHE_LINE_SIZE & ZXC_ALIGNMENT_MASK) == 0,
 /** @brief Bit flag in the Flags byte: a SEK block sits between the EOF block and the footer
  *  (bit 5). */
 #define ZXC_FILE_FLAG_HAS_SEEK_TABLE 0x20U
+/** @brief Reserved bit in the Flags byte (bit 4), must be 0. */
+#define ZXC_FILE_FLAG_RESERVED 0x10U
 /** @brief Mask for the checksum algorithm id (bits 0-3). */
 #define ZXC_FILE_CHECKSUM_ALGO_MASK 0x0FU
 static_assert(((ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_FILE_FLAG_HAS_DICTIONARY |
-                ZXC_FILE_FLAG_HAS_SEEK_TABLE) &
+                ZXC_FILE_FLAG_HAS_SEEK_TABLE | ZXC_FILE_FLAG_RESERVED) &
                ZXC_FILE_CHECKSUM_ALGO_MASK) == 0,
               "a file flag overlaps the checksum algorithm id");
 
@@ -2281,8 +2283,9 @@ int zxc_write_block_header(uint8_t* RESTRICT dst, const size_t dst_capacity,
  * @param[in]  src_size  Size of @p src in bytes.
  * @param[out] bh        Block header structure populated with the parsed data.
  *
- * @return @c ZXC_OK on success, or @c ZXC_ERROR_SRC_TOO_SMALL if @p src is
- *         smaller than @c ZXC_BLOCK_HEADER_SIZE.
+ * @return @c ZXC_OK on success, @c ZXC_ERROR_SRC_TOO_SMALL if @p src is
+ *         smaller than @c ZXC_BLOCK_HEADER_SIZE, or @c ZXC_ERROR_BAD_HEADER on a
+ *         bad checksum or non-zero Block Flags / Reserved.
  */
 int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* bh);

@@ -902,8 +902,12 @@ static size_t zxc_stream_read_blocks(zxc_stream_ctx_t* ctx, FILE* f_in, zxc_stre
 
         zxc_block_header_t bh;
         if (UNLIKELY(zxc_read_block_header(bh_buf, ZXC_BLOCK_HEADER_SIZE, &bh) != ZXC_OK)) {
-            code = ZXC_ERROR_CORRUPT_DATA;  // LCOV_EXCL_LINE
-            goto _failed;                   // LCOV_EXCL_LINE
+            // Bad checksum: corrupt data. Good checksum, Flags/Reserved set: bad header.
+            uint8_t sum[ZXC_BLOCK_HEADER_SIZE];
+            ZXC_MEMCPY(sum, bh_buf, ZXC_BLOCK_HEADER_SIZE);
+            sum[7] = 0;
+            code = bh_buf[7] == zxc_hash8(sum) ? ZXC_ERROR_BAD_HEADER : ZXC_ERROR_CORRUPT_DATA;
+            goto _failed;
         }
 
         if (bh.block_type == ZXC_BLOCK_EOF) {
