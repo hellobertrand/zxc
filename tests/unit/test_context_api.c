@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-#include "../include/zxc_dict.h"
+#include "../../include/zxc_dict.h"
 #include "test_common.h"
 
 int test_opaque_context_api(void) {

@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-#include "../include/zxc_dict.h"
+#include "../../include/zxc_dict.h"
 #include "test_common.h"
 
 /* Pins the encoder's output: round-trip tests accept any valid parse, so a

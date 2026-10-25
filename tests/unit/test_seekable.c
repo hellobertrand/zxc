@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-#include "../include/zxc_stream.h"
+#include "../../include/zxc_stream.h"
 #include "test_common.h"
 
 int test_seekable_table_sizes(void) {

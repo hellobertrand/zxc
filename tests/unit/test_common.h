@@ -18,12 +18,12 @@
 #include <share.h>
 #endif
 
-#include "../include/zxc_buffer.h"
-#include "../include/zxc_error.h"
-#include "../include/zxc_pstream.h"
-#include "../include/zxc_seekable.h"
-#include "../include/zxc_stream.h"
-#include "../src/lib/zxc_internal.h"
+#include "../../include/zxc_buffer.h"
+#include "../../include/zxc_error.h"
+#include "../../include/zxc_pstream.h"
+#include "../../include/zxc_seekable.h"
+#include "../../include/zxc_stream.h"
+#include "../../src/lib/zxc_internal.h"
 
 /* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo } */
 #define TEST_CASE(fn) {#fn, fn}

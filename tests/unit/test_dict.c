@@ -5,7 +5,7 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
-#include "../include/zxc_dict.h"
+#include "../../include/zxc_dict.h"
 #include "test_common.h"
 
 /* Build a valid 128-byte packed lengths table from arbitrary content bytes
