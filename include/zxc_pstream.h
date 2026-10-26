@@ -120,7 +120,8 @@ typedef struct zxc_dstream_s zxc_dstream;
  * The parameters are copied from @p cfg at creation; the context itself may be
  * freed or reused afterwards.
  *
- * Only @ref ZXC_C_LEVEL, @ref ZXC_C_BLOCK_SIZE and @ref ZXC_C_CHECKSUM are
+ * Only @ref ZXC_C_LEVEL, @ref ZXC_C_BLOCK_SIZE, @ref ZXC_C_CHECKSUM and
+ * @ref ZXC_C_FAVOR_DECODE_SPEED are
  * honoured. @ref ZXC_C_THREADS is ignored, this API being single-threaded,
  * see @ref zxc_stream_compress for the multi-threaded @c FILE* pipeline; so
  * are @ref ZXC_C_SEEKABLE and the progress callback. A dictionary on @p cfg

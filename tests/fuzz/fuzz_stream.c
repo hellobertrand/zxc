@@ -103,6 +103,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const zxc_progress_callback_t cb = ((data[1] >> 4) & 1) ? on_progress : NULL;
     const size_t block_size = kBlockSizes[(data[1] >> 5) & 3];
     const size_t tiles = (size_t)(data[2] & 7) + 1;
+    const int favor_decode_speed = (data[2] >> 3) & 1;
+    const int split_budget_pct = 1 + ((data[2] >> 4) * 7) % ZXC_SPLIT_BUDGET_MAX; /* 1..100 */
     const size_t dict_cap = ((size_t)data[3] + 1) * 256;
 
     fuzz_raw(data, size, n_threads, checksum);
@@ -132,6 +134,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         zxc_cctx_set_param(co, ZXC_C_BLOCK_SIZE, (int64_t)block_size) == ZXC_OK &&
         zxc_cctx_set_param(co, ZXC_C_CHECKSUM, checksum) == ZXC_OK &&
         zxc_cctx_set_param(co, ZXC_C_SEEKABLE, seekable) == ZXC_OK &&
+        zxc_cctx_set_param(co, ZXC_C_FAVOR_DECODE_SPEED,
+                           favor_decode_speed ? split_budget_pct : 0) == ZXC_OK &&
         zxc_cctx_set_dict(co, dict, dict_size, NULL) == ZXC_OK &&
         zxc_cctx_set_progress(co, cb, NULL) == ZXC_OK &&
         zxc_dctx_set_param(dopts, ZXC_D_THREADS, n_threads) == ZXC_OK &&

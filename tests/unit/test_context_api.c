@@ -289,6 +289,7 @@ int test_cctx_param_contract(void) {
         {ZXC_C_THREADS, "threads", 0, ZXC_MAX_THREADS, 0},
         {ZXC_C_CHECKSUM, "checksum", 0, 1, 0},
         {ZXC_C_SEEKABLE, "seekable", 0, 1, 0},
+        {ZXC_C_FAVOR_DECODE_SPEED, "favor_decode_speed", 1, ZXC_SPLIT_BUDGET_MAX, 0},
     };
     const size_t n_tab = sizeof(tab) / sizeof(tab[0]);
     zxc_cctx* const c = zxc_create_cctx();
@@ -348,12 +349,14 @@ int test_cctx_param_contract(void) {
         {ZXC_C_CHECKSUM, 2, ZXC_ERROR_BAD_PARAM},
         {ZXC_C_CHECKSUM, -1, ZXC_ERROR_BAD_PARAM},
         {ZXC_C_SEEKABLE, 2, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_FAVOR_DECODE_SPEED, ZXC_SPLIT_BUDGET_MAX + 1, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_FAVOR_DECODE_SPEED, -1, ZXC_ERROR_BAD_PARAM},
         {(zxc_cparam_t)0, 1, ZXC_ERROR_BAD_PARAM},
-        {(zxc_cparam_t)6, 0, ZXC_ERROR_BAD_PARAM},
+        {(zxc_cparam_t)7, 0, ZXC_ERROR_BAD_PARAM},
         {(zxc_cparam_t)99, 1, ZXC_ERROR_BAD_PARAM},
     };
     /* Non-default values first, so a refusal that resets would show. */
-    static const int64_t custom[] = {5, 65536, 2, 1, 1};
+    static const int64_t custom[] = {5, 65536, 2, 1, 1, 25};
     for (size_t i = 0; i < n_tab; i++) {
         if (zxc_cctx_set_param(c, tab[i].p, custom[i]) != ZXC_OK) {
             printf("  [FAIL] %s: custom value %lld refused\n", tab[i].name, (long long)custom[i]);
@@ -1359,5 +1362,98 @@ int test_context_api_empty_input(void) {
     } while (0);
     zxc_free_cctx(cctx);
     if (ok) printf("PASS\n\n");
+    return ok;
+}
+
+/* ZXC_C_FAVOR_DECODE_SPEED: a different archive at level 3 on the frame and the
+ * block API, 0 turns it off again, a static context honours it, and every
+ * output decodes. */
+int test_cctx_favor_decode_speed(void) {
+    printf("=== TEST: Opaque Context API - ZXC_C_FAVOR_DECODE_SPEED ===\n");
+
+    const size_t src_sz = 300000;
+    const uint64_t fb = zxc_compress_bound(src_sz), bb = zxc_compress_block_bound(src_sz);
+    const size_t cap = (size_t)(fb > bb ? fb : bb);
+    uint8_t* const src = malloc(src_sz);
+    uint8_t* const ref[2] = {malloc(cap), malloc(cap)}; /* off, on */
+    uint8_t* const out = malloc(cap);
+    uint8_t* const back = malloc(src_sz);
+    int ok = 0;
+    if (!src || !ref[0] || !ref[1] || !out || !back) goto done;
+    gen_split_data(src, src_sz);
+
+    for (int block_api = 0; block_api <= 1; block_api++) {
+        const char* const api = block_api ? "block" : "frame";
+        zxc_cctx* const c = zxc_create_cctx();
+        zxc_dctx* const dc = zxc_create_dctx();
+        if (!c || !dc || zxc_cctx_set_param(c, ZXC_C_LEVEL, 3) != ZXC_OK) {
+            zxc_free_cctx(c);
+            zxc_free_dctx(dc);
+            goto done;
+        }
+        int64_t n[3] = {0, 0, 0}; /* off, on, off again */
+        for (int k = 0; k < 3; k++) {
+            uint8_t* const dst = k == 2 ? out : ref[k];
+            if (zxc_cctx_set_param(c, ZXC_C_FAVOR_DECODE_SPEED,
+                                   k == 1 ? ZXC_SPLIT_BUDGET_MAX : 0) != ZXC_OK) {
+                printf("  [FAIL] %s: set_param\n", api);
+                zxc_free_cctx(c);
+                zxc_free_dctx(dc);
+                goto done;
+            }
+            n[k] = block_api ? zxc_compress_block(c, src, src_sz, dst, cap)
+                             : zxc_compress_cctx(c, src, src_sz, dst, cap);
+        }
+        zxc_free_cctx(c);
+        const int differs =
+            n[0] > 0 && n[1] > 0 && !(n[0] == n[1] && memcmp(ref[0], ref[1], (size_t)n[0]) == 0);
+        const int back_off = n[2] == n[0] && memcmp(out, ref[0], (size_t)n[0]) == 0;
+        if (!differs || !back_off) {
+            printf("  [FAIL] %s: on %s the output (%lld vs %lld), 0 %s it off\n", api,
+                   differs ? "changes" : "leaves", (long long)n[0], (long long)n[1],
+                   back_off ? "turns" : "does not turn");
+            zxc_free_dctx(dc);
+            goto done;
+        }
+        int decoded = 1;
+        for (int k = 0; k < 2 && decoded; k++) {
+            const int64_t d = block_api
+                                  ? zxc_decompress_block(dc, ref[k], (size_t)n[k], back, src_sz)
+                                  : zxc_decompress_dctx(dc, ref[k], (size_t)n[k], back, src_sz);
+            decoded = d == (int64_t)src_sz && memcmp(back, src, src_sz) == 0;
+            if (!decoded)
+                printf("  [FAIL] %s: output %d does not decode (%lld)\n", api, k, (long long)d);
+        }
+        zxc_free_dctx(dc);
+        if (!decoded) goto done;
+        printf("  [PASS] %s API: on changes the output, 0 turns it off, both decode\n", api);
+    }
+
+    /* A static context honours it like a heap one. */
+    const size_t ws_sz = zxc_static_cctx_workspace_size(ZXC_BLOCK_SIZE_DEFAULT, 3);
+    void* const ws = ws_sz ? test_aligned_alloc(64, ws_sz) : NULL;
+    zxc_cctx* const sc = ws ? zxc_init_static_cctx(ws, ws_sz, ZXC_BLOCK_SIZE_DEFAULT, 3) : NULL;
+    const int64_t n_static =
+        sc && zxc_cctx_set_param(sc, ZXC_C_FAVOR_DECODE_SPEED, ZXC_SPLIT_BUDGET_MAX) == ZXC_OK
+            ? zxc_compress_cctx(sc, src, src_sz, out, cap)
+            : -1;
+    const int64_t n_ref =
+        test_compress_decode_speed(src, src_sz, ref[1], cap, 3, ZXC_SPLIT_BUDGET_MAX);
+    test_aligned_free(ws);
+    if (n_static <= 0 || n_static != n_ref || memcmp(out, ref[1], (size_t)n_ref) != 0) {
+        printf("  [FAIL] static context: %lld bytes, heap %lld\n", (long long)n_static,
+               (long long)n_ref);
+        goto done;
+    }
+    printf("  [PASS] static context honours it\n");
+    ok = 1;
+    printf("PASS\n\n");
+
+done:
+    free(src);
+    free(ref[0]);
+    free(ref[1]);
+    free(out);
+    free(back);
     return ok;
 }

@@ -610,6 +610,7 @@
       <enumerator name='ZXC_C_THREADS' value='3'/>
       <enumerator name='ZXC_C_CHECKSUM' value='4'/>
       <enumerator name='ZXC_C_SEEKABLE' value='5'/>
+      <enumerator name='ZXC_C_FAVOR_DECODE_SPEED' value='6'/>
     </enum-decl>
     <enum-decl name='zxc_dparam_t' naming-typedef-id='type-id-117' filepath='/src/src/lib/../../include/zxc_opts.h' line='77' column='1' id='type-id-118'>
       <underlying-type type-id='type-id-116'/>

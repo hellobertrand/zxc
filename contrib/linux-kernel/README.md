@@ -144,8 +144,8 @@ What it maps, and why:
 - `ZXC_POPCOUNT32` / `ZXC_POPCOUNT64`: `hweight32` / `hweight64`. Without
   FP/SIMD registers the popcount builtins are libgcc calls the kernel does not
   export.
-- `CHAR_BIT`, `UINT16_MAX`, `UINT32_MAX`, `UINT64_MAX`: the kernel spells them
-  `U*_MAX`.
+- `CHAR_BIT`, `UINT8_MAX`, `UINT16_MAX`, `UINT32_MAX`, `UINT64_MAX`: the kernel
+  spells them `U*_MAX`.
 - `static_assert`: from `<linux/build_bug.h>`, which only defines it from 5.1;
   older kernels get `_Static_assert`. A replacement header must provide it, as
   `src/lib/zxc_internal.h` checks its constants with it.
