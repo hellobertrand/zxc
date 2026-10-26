@@ -55,6 +55,30 @@ void gen_lz_data(uint8_t* const buf, const size_t size) {
     for (size_t i = 0; i < size; i++) buf[i] = pattern[i % pat_len];
 }
 
+void gen_split_data(uint8_t* const buf, const size_t size) {
+    uint32_t st = 0x9E3779B9U;
+    uint8_t src[96];  // shared match source; back-references clear the distance floor
+    for (size_t k = 0; k < sizeof(src); k++) {
+        st = st * 1103515245U + 12345U;
+        src[k] = (uint8_t)(st >> 16);
+    }
+    size_t n = 0;
+    for (size_t k = 0; k < sizeof(src) && n < size; k++) buf[n++] = src[k];
+    while (n < size) {
+        st = st * 1103515245U + 12345U;
+        const size_t lit = (st >> 16) % 8U;  // 0-7 literals, LL mostly inline
+        for (size_t k = 0; k < lit && n < size; k++) {
+            st = st * 1103515245U + 12345U;
+            buf[n++] = (uint8_t)(st >> 16);
+        }
+        st = st * 1103515245U + 12345U;
+        // ~1 in 4 matches escapes the ML field (20-160 bytes); the rest stay inline.
+        const size_t m =
+            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 141U) : 6U + ((st >> 18) % 14U);
+        for (size_t k = 0; k < m && n < size; k++) buf[n++] = src[k % sizeof(src)];
+    }
+}
+
 // Generates a regular numeric sequence (integer-pattern round-trip input)
 void gen_num_data(uint8_t* const buf, const size_t size) {
     // Fill with 32-bit integers
@@ -260,6 +284,17 @@ int64_t test_compress_cfg(const void* src, const size_t n, void* dst, const size
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, (int64_t)block_size);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, seekable);
+    const int64_t r = rc == ZXC_OK ? zxc_compress_cctx(c, src, n, dst, cap) : rc;
+    zxc_free_cctx(c);
+    return r;
+}
+
+int64_t test_compress_decode_speed(const void* src, const size_t n, void* dst, const size_t cap,
+                                   const int level, const int budget) {
+    zxc_cctx* const c = zxc_create_cctx();
+    if (!c) return ZXC_ERROR_MEMORY;
+    int rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, level);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_FAVOR_DECODE_SPEED, budget);
     const int64_t r = rc == ZXC_OK ? zxc_compress_cctx(c, src, n, dst, cap) : rc;
     zxc_free_cctx(c);
     return r;

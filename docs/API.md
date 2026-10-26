@@ -280,7 +280,8 @@ typedef enum {
     ZXC_C_BLOCK_SIZE = 2,   // block size in bytes
     ZXC_C_THREADS    = 3,   // worker threads, FILE* pipeline only
     ZXC_C_CHECKSUM   = 4,   // block checksums + archive digest
-    ZXC_C_SEEKABLE   = 5    // append a seek table
+    ZXC_C_SEEKABLE   = 5,   // append a seek table
+    ZXC_C_FAVOR_DECODE_SPEED = 6  // block growth budget for decode speed, %
 } zxc_cparam_t;
 ```
 
@@ -291,6 +292,7 @@ typedef enum {
 | `ZXC_C_THREADS` | Workers of `zxc_stream_compress()`; the reader and writer come on top. 0: online processors, capped at `ZXC_MAX_THREADS`, minus one; at least one, at most 511. The buffer, block and push APIs are single-threaded and ignore it. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
 | `ZXC_C_CHECKSUM` | 1 appends the per-block checksums and the archive digest. | 0 | 0 or 1 |
 | `ZXC_C_SEEKABLE` | 1 appends a seek table for random-access decompression. | 0 | 0 or 1 |
+| `ZXC_C_FAVOR_DECODE_SPEED` | Favors decode speed over size at levels 3 to 7: long matches go out as chains of short inline matches, which the decoder handles without its length escape. The value is how much a block may grow for it, in percent of its size before entropy coding; `ZXC_SPLIT_BUDGET_DEFAULT` (10) is the knee beyond which decoding barely speeds up. A few percent larger, 10 to 25 percent faster to decode, same format; no effect at levels 1 and 2. | 0 (off) | 1 to `ZXC_SPLIT_BUDGET_MAX` (100) |
 
 **Decompression parameters** (`zxc_dparam_t`):
 
@@ -730,9 +732,10 @@ ZXC_EXPORT int64_t zxc_compress_block(
 ```
 
 Compresses a single block using a reusable context, under the context's
-configuration: `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`, `ZXC_C_CHECKSUM` and the
-dictionary set with `zxc_cctx_set_dict()`; the shared literal table is rebuilt
-only when it changes. `ZXC_C_SEEKABLE` and `ZXC_C_THREADS` have no effect here.
+configuration: `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`, `ZXC_C_CHECKSUM`,
+`ZXC_C_FAVOR_DECODE_SPEED` and the dictionary set with `zxc_cctx_set_dict()`;
+the shared literal table is rebuilt only when it changes. `ZXC_C_SEEKABLE` and
+`ZXC_C_THREADS` have no effect here.
 A static context cannot carry a dictionary (`zxc_cctx_set_dict()` refuses it
 with `ZXC_ERROR_DICT_UNSUPPORTED`).
 
@@ -1002,8 +1005,8 @@ ZXC_EXPORT int64_t zxc_compress_cctx(
 
 Compresses a complete archive like `zxc_compress()`, under the context's
 configuration and reusing its buffers: `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`,
-`ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE` and the dictionary; `ZXC_C_THREADS` is
-ignored (single-threaded). The workspace is re-carved when the block size
+`ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`, `ZXC_C_FAVOR_DECODE_SPEED` and the
+dictionary; `ZXC_C_THREADS` is ignored (single-threaded). The workspace is re-carved when the block size
 changes, or when a level raise into `ZXC_LEVEL_DENSITY` needs the
 optimal-parser scratch. `ZXC_C_SEEKABLE` appends the seek table without
 allocating, static contexts included.
@@ -1158,7 +1161,8 @@ the workspace for the maximum block size up front.
   without re-initialising (`0` is the pinned value here). `ZXC_C_LEVEL` may
   still change, within the tier the workspace was carved for: a raise into
   `ZXC_LEVEL_DENSITY` on a workspace sized below it is `ZXC_ERROR_BAD_LEVEL`.
-  `ZXC_C_CHECKSUM` and `ZXC_C_SEEKABLE` are honoured without re-partitioning.
+  `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE` and `ZXC_C_FAVOR_DECODE_SPEED` are
+  honoured without re-partitioning.
 - **No dictionary.** `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` return
   `ZXC_ERROR_DICT_UNSUPPORTED`: the workspace has no room for the prefix.
 - **Workspace alignment.** Must be at least cache-line (64-byte) aligned.
@@ -1497,8 +1501,9 @@ unspecified — never keep live data inside the declared capacity.
 ZXC_EXPORT zxc_cstream* zxc_cstream_create(const zxc_cctx* cfg);   // NULL = defaults
 ```
 
-Creates a push compression stream. `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE` and
-`ZXC_C_CHECKSUM` are copied from `cfg` at creation and frozen for the lifetime
+Creates a push compression stream. `ZXC_C_LEVEL`, `ZXC_C_BLOCK_SIZE`,
+`ZXC_C_CHECKSUM` and `ZXC_C_FAVOR_DECODE_SPEED` are copied from `cfg` at
+creation and frozen for the lifetime
 of the stream; the context itself may be freed or reused afterwards.
 `ZXC_C_THREADS`, `ZXC_C_SEEKABLE` and the progress callback are ignored on
 this path. A dictionary on `cfg` **fails creation**: push streams take no

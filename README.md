@@ -180,6 +180,7 @@ Apple M2 (ARM64)
 zxc assets.tar                        # level 3 (default) -> assets.tar.zxc
 zxc -z -5 assets.tar assets.tar.zxc   # level 5
 zxc -z -S assets.tar assets.tar.zxc   # seekable: O(1) random-access decompression
+zxc -5 --favor-decode-speed assets.tar    # a few % larger, decompresses 10-25 % faster
 
 # Decompress. "unzxc" (POSIX installs) is an alias for "zxc -d"
 zxc -d assets.tar.zxc assets.tar

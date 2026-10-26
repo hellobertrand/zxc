@@ -2235,6 +2235,73 @@ else
     fi
 fi
 
+# 39. --favor-decode-speed: an encoder policy. Every 7th line repeats: 40-50 byte
+# matches, the lengths the split re-emits inline.
+echo "Testing --favor-decode-speed..."
+PDS="$TEST_DIR/pds.txt"
+: > "$PDS"
+for i in $(seq 1 4000); do
+    printf 'the quick brown fox jumps over the lazy dog, line %d of 7\n' $((i % 7)) >> "$PDS"
+done
+"$ZXC_BIN" -3 -c "$PDS" > "$TEST_DIR/pds_off.zxc"
+"$ZXC_BIN" -3 --favor-decode-speed -c "$PDS" > "$TEST_DIR/pds_on.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/pds_on.zxc" > "$TEST_DIR/pds_on.dec"
+if cmp -s "$PDS" "$TEST_DIR/pds_on.dec"; then
+    log_pass "--favor-decode-speed round trip"
+else
+    log_fail "--favor-decode-speed round-trip failed"
+fi
+# 39.1 The level 3 archive differs
+if ! cmp -s "$TEST_DIR/pds_off.zxc" "$TEST_DIR/pds_on.zxc"; then
+    log_pass "--favor-decode-speed changes the level 3 archive"
+else
+    log_fail "--favor-decode-speed left the level 3 archive unchanged"
+fi
+# 39.2 Levels 1-2 (PAK) never split
+"$ZXC_BIN" -1 -c "$PDS" > "$TEST_DIR/pds_off1.zxc"
+"$ZXC_BIN" -1 --favor-decode-speed -c "$PDS" > "$TEST_DIR/pds_on1.zxc" 2>/dev/null
+if cmp -s "$TEST_DIR/pds_off1.zxc" "$TEST_DIR/pds_on1.zxc"; then
+    log_pass "--favor-decode-speed has no effect at level 1"
+else
+    log_fail "--favor-decode-speed changed the level 1 archive"
+fi
+# 39.3 Benchmark mode reports it, with the budget the library applies
+BJ=$("$ZXC_BIN" -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null)
+if echo "$BJ" | grep -q '"favor_decode_speed": true' && echo "$BJ" | grep -q '"split_budget_pct": 10,'; then
+    log_pass "-b -j reports favor_decode_speed and the default budget"
+else
+    log_fail "-b -j does not report favor_decode_speed with budget 10"
+fi
+# 39.3.1 Levels 1-2 warn that the option does nothing there
+if "$ZXC_BIN" -1 --favor-decode-speed -c "$PDS" 2>&1 >/dev/null | grep -q "no effect at levels 1 and 2"; then
+    log_pass "--favor-decode-speed warns at level 1"
+else
+    log_fail "--favor-decode-speed silent at level 1"
+fi
+# 39.4 =PCT widens the budget: a different archive that still decodes
+"$ZXC_BIN" -3 --favor-decode-speed=100 -c "$PDS" > "$TEST_DIR/pds_on100.zxc"
+"$ZXC_BIN" -d -c "$TEST_DIR/pds_on100.zxc" > "$TEST_DIR/pds_on100.dec"
+if cmp -s "$PDS" "$TEST_DIR/pds_on100.dec" && ! cmp -s "$TEST_DIR/pds_on.zxc" "$TEST_DIR/pds_on100.zxc"; then
+    log_pass "--favor-decode-speed=100 round trip, differs from the default budget"
+else
+    log_fail "--favor-decode-speed=100 round trip or budget ignored"
+fi
+# 39.5 The budget is 1 to 100
+if ! "$ZXC_BIN" -3 --favor-decode-speed=0 -c "$PDS" > /dev/null 2>&1 && \
+   ! "$ZXC_BIN" -3 --favor-decode-speed=101 -c "$PDS" > /dev/null 2>&1 && \
+   ! "$ZXC_BIN" -3 --favor-decode-speed=x -c "$PDS" > /dev/null 2>&1; then
+    log_pass "--favor-decode-speed rejects a budget outside 1-100"
+else
+    log_fail "--favor-decode-speed accepted a bad budget"
+fi
+# 39.6 Benchmark mode reports the budget
+if "$ZXC_BIN" -b1 -j --favor-decode-speed=25 "$TEST_FILE_ARG" 2>/dev/null | grep -q '"split_budget_pct": 25'; then
+    log_pass "-b -j reports split_budget_pct"
+else
+    log_fail "-b -j does not report split_budget_pct"
+fi
+rm -f "$TEST_DIR"/pds_*
+
 # 41. An output naming the input in another letter case, on a case-insensitive
 #     filesystem (Windows, default macOS), is the input: refused, input intact
 echo "Testing -f -o onto the input spelled in another case..."

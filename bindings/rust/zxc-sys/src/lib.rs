@@ -173,6 +173,11 @@ pub const ZXC_HUF_TABLE_SIZE: usize = 128;
 
 /// Maximum worker thread count accepted by [`ZXC_C_THREADS`] / [`ZXC_D_THREADS`].
 pub const ZXC_MAX_THREADS: i64 = 512;
+/// The [`ZXC_C_FAVOR_DECODE_SPEED`] budget beyond which decoding barely speeds
+/// up: what the CLI's bare `--favor-decode-speed` sets.
+pub const ZXC_SPLIT_BUDGET_DEFAULT: i64 = 10;
+/// Largest [`ZXC_C_FAVOR_DECODE_SPEED`] budget.
+pub const ZXC_SPLIT_BUDGET_MAX: i64 = 100;
 
 /// Compression parameter identifier (mirrors the C enum `zxc_cparam_t`).
 ///
@@ -191,6 +196,10 @@ pub const ZXC_C_THREADS: zxc_cparam_t = 3;
 pub const ZXC_C_CHECKSUM: zxc_cparam_t = 4;
 /// 1 appends a seek table for random-access decompression; default 0.
 pub const ZXC_C_SEEKABLE: zxc_cparam_t = 5;
+/// Favors decode speed over size at levels 3-7: the block growth budget in
+/// percent, 1 to [`ZXC_SPLIT_BUDGET_MAX`] ([`ZXC_SPLIT_BUDGET_DEFAULT`] is the
+/// knee); default 0, off.
+pub const ZXC_C_FAVOR_DECODE_SPEED: zxc_cparam_t = 6;
 
 /// Decompression parameter identifier (mirrors the C enum `zxc_dparam_t`).
 ///
