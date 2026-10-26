@@ -307,8 +307,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_spl_match_split_piece(const uint32_t code)
  * lanes keep an inline run off one store-forwarding chain.
  *
  * @return 1 when the minority counts, a static predictor's misses, reach
- *         ZXC_SPL_MATCH_SPLIT_MIN_MISPREDICT_PCT of the escapes and some escape sits
- *         in a bad context, so that a split can happen; else 0.
+ *         ZXC_SPL_MATCH_SPLIT_MIN_MISPREDICT_PCT of the escapes; else 0. Whether
+ *         an escape actually sits in a bad context is the caller's pass 1: it
+ *         marks nothing and returns when none does.
  */
 static int zxc_spl_match_split_analyze(const uint8_t* RESTRICT tokens, const uint32_t n_seq,
                                        zxc_spl_match_split_hist_t* RESTRICT hist_buf,
@@ -329,7 +330,9 @@ static int zxc_spl_match_split_analyze(const uint8_t* RESTRICT tokens, const uin
         hist = ((hist << 1) | esc) & hmask;
         n_esc += esc;
     }
-    uint32_t errors = 0, bad_esc = 0;
+    // A plain min-reduction: no conditional sum here, which GCC 14.2 vectorized
+    // wrong for AVX-512 (the masked adds merged the addend, not the accumulator).
+    uint32_t errors = 0;
     for (uint32_t c = 0; c <= hmask; c++) {
         uint32_t n0 = 0, n1 = 0;
         for (uint32_t l = 0; l < 4; l++) {
@@ -337,10 +340,9 @@ static int zxc_spl_match_split_analyze(const uint8_t* RESTRICT tokens, const uin
             n1 += ctx_hist[l][1][c];
         }
         ctx_bad[c] = (n1 < n0);  // escape a strict minority in its context
-        bad_esc += ctx_bad[c] ? n1 : 0;
         errors += (n0 < n1) ? n0 : n1;
     }
-    return bad_esc != 0 &&
+    return n_esc != 0 &&
            (uint64_t)errors * 100 >= (uint64_t)ZXC_SPL_MATCH_SPLIT_MIN_MISPREDICT_PCT * n_esc;
 }
 
