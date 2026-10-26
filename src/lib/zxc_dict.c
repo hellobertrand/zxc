@@ -330,7 +330,7 @@ int64_t zxc_train_dict(const void* const* RESTRICT samples, const size_t* RESTRI
         // accumulate coverage (summed k-gram frequency) as the score.
         uint32_t coverage = f;
         size_t end = i + ZXC_DICT_KGRAM_LEN;
-        while (end + ZXC_DICT_KGRAM_LEN <= corpus_size && end - i < 4096) {
+        while (end + ZXC_DICT_KGRAM_LEN <= corpus_size && end - i < ZXC_DICT_SEGMENT_MAX) {
             const uint16_t nf = freq[zxc_dict_hash(corpus + end)];
             if (nf < 2) break;
             coverage += nf;

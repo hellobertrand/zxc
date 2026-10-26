@@ -396,6 +396,8 @@ static_assert(((ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_FILE_FLAG_HAS_DICTIONARY |
 /** @brief K-gram length scanned by the dictionary trainer. Aligned on the LZ
  *         minimum match length so trained patterns are matchable at encode time. */
 #define ZXC_DICT_KGRAM_LEN ZXC_LZ_MIN_MATCH_LEN
+/** @brief Longest trainer segment: one repetitive region cannot take the whole budget. */
+#define ZXC_DICT_SEGMENT_MAX 4096
 /** @brief Address bits for the dictionary trainer's k-gram frequency table. */
 #define ZXC_DICT_HASH_BITS 16
 /** @brief Maximum number of candidate segments the dictionary trainer keeps. */
@@ -570,7 +572,13 @@ static_assert(ZXC_SEQ_LL_BITS + ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS == 32,
  * the encoder refuses to emit values above this bound. Together they bound the
  * varint surface to exactly the format-defined block size limit. */
 #define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
-static_assert(ZXC_MAX_VARINT_VALUE < (1U << 21), "varint values must fit the 3-byte form");
+/** @name Varint reach: the first value each encoded length cannot hold (7, 14, 21 bits).
+ *  @{ */
+#define ZXC_VARINT_1B_LIMIT (1U << 7)
+#define ZXC_VARINT_2B_LIMIT (1U << 14)
+#define ZXC_VARINT_3B_LIMIT (1U << 21)
+/** @} */
+static_assert(ZXC_MAX_VARINT_VALUE < ZXC_VARINT_3B_LIMIT, "varint values must fit the 3-byte form");
 static_assert(ZXC_BLOCK_SIZE_MIN <= ZXC_BLOCK_SIZE_DEFAULT &&
                   ZXC_BLOCK_SIZE_DEFAULT <= ZXC_BLOCK_SIZE_MAX &&
                   (ZXC_BLOCK_SIZE_DEFAULT & (ZXC_BLOCK_SIZE_DEFAULT - 1)) == 0,
@@ -702,13 +710,16 @@ static_assert(ZXC_DICT_SIZE_MAX <= ZXC_LZ_MAX_DIST, "a dictionary must stay with
 /** @brief Threshold above which `find_best_match` is skipped at intra-match
  *         positions, keeping the parser O(N) on highly repetitive data. */
 #define ZXC_OPT_LONG_MATCH_SKIP ((size_t)256)
-static_assert(ZXC_OPT_LONG_MATCH_SKIP <= ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + 128 * 128,
+static_assert(ZXC_OPT_LONG_MATCH_SKIP <=
+                  ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK + ZXC_VARINT_2B_LIMIT,
               "covered positions relax only the first two match cost classes");
 /** @brief Minimum literal count for the sample-based Huffman cost estimator
  *         used by the optimal parser. Below this, the strided sample is too
  *         small for the resulting code-lengths to be statistically reliable,
  *         so the estimator falls back to RAW cost (8 bits/byte). */
 #define ZXC_OPT_LIT_SAMPLE_MIN 1024
+/** @brief Bytes that estimator samples per block: enough for a 256-symbol histogram. */
+#define ZXC_OPT_LIT_SAMPLE_TARGET 4096
 
 /** @} */
 

@@ -972,11 +972,9 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* const d_end = dst + dst_capacity;
     // Lowest address a match may reach: the dictionary prefix if any, else dst.
     const uint8_t* const d_floor = dst - dict_size;
-    // Destination safe margin for 4x loop: max output without varint extension.
-    // ll_max = 14, ml_max = 14 + 5 = 19, per-seq = 33, 4x = 132.
-    // Plus the overshoot the wild copies are allowed (ZXC_PAD_SIZE) + 4 safety = 168.
-    const uint8_t* const d_end_safe =
-        (dst_capacity > 132 + ZXC_PAD_SIZE + 4) ? d_end - (132 + ZXC_PAD_SIZE + 4) : dst;
+    // 4x loop margin: four sequences without a varint, the wild-copy overshoot, 4 of safety.
+    const size_t d_margin_4x = 4 * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE + 4;
+    const uint8_t* const d_end_safe = (dst_capacity > d_margin_4x) ? d_end - d_margin_4x : dst;
 
     // Literal margin for the 4x loops: without a varint, ll <= 14 per sequence,
     // so 4 * 14 = 56. Past that margin only the cold varint path checks l_ptr.

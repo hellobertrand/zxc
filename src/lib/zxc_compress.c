@@ -202,14 +202,14 @@ static ZXC_ALWAYS_INLINE size_t zxc_write_varint(uint8_t* RESTRICT dst, const ui
         return 0;
     }
 
-    // 1 byte: 0xxxxxxx (7 bits) = 2^7 = 128
-    if (LIKELY(val < (1U << 7))) {
+    // 1 byte: 0xxxxxxx (7 bits)
+    if (LIKELY(val < ZXC_VARINT_1B_LIMIT)) {
         dst[0] = (uint8_t)val;
         return 1;
     }
 
-    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits) = 2^14 = 16384
-    if (LIKELY(val < (1U << 14))) {
+    // 2 bytes: 10xxxxxx xxxxxxxx (14 bits)
+    if (LIKELY(val < ZXC_VARINT_2B_LIMIT)) {
         dst[0] = (uint8_t)(0x80 | (val & 0x3F));
         dst[1] = (uint8_t)(val >> 6);
         return 2;
@@ -1032,7 +1032,8 @@ static uint32_t zxc_opt_estimate_lit_bits(const uint8_t* RESTRICT src, const siz
     if (UNLIKELY(src_sz < ZXC_OPT_LIT_SAMPLE_MIN)) return CHAR_BIT;
 
     uint32_t hist[ZXC_HUF_NUM_SYMBOLS] = {0};
-    const size_t step = (src_sz > 4096) ? (src_sz >> 12) : 1U;
+    const size_t step =
+        (src_sz > ZXC_OPT_LIT_SAMPLE_TARGET) ? src_sz / ZXC_OPT_LIT_SAMPLE_TARGET : 1U;
     size_t sampled = 0;
     for (size_t i = 0; i < src_sz; i += step) {
         hist[src[i]]++;
@@ -1210,14 +1211,14 @@ static int zxc_lz77_optimal_parse_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                 // Cost is piecewise constant in varint segments, so split
                 // [MIN_MATCH, L_max] into:
                 //   1. cheap   : v < ML_MASK                   -> base
-                //   2. varint1 : v in [ML_MASK, ML_MASK + 128) -> base + 8
-                //   3. varint2+: v >= ML_MASK + 128            -> base + 16, ...
+                //   2. varint1 : v in [ML_MASK, ML_MASK + VARINT_1B_LIMIT) -> base + 8
+                //   3. varint2+: v >= ML_MASK + VARINT_1B_LIMIT            -> base + 16, ...
                 // The first two have a constant nxt and vectorize; the third is
                 // rare enough to stay scalar.
                 const uint16_t off_biased = (uint16_t)(off - ZXC_LZ_OFFSET_BIAS);
                 const size_t L_max_plus = L_max + 1;
                 const size_t L_cheap_end = ZXC_LZ_MIN_MATCH_LEN + ZXC_TOKEN_ML_MASK;
-                const size_t L_v1_end = L_cheap_end + 128;
+                const size_t L_v1_end = L_cheap_end + ZXC_VARINT_1B_LIMIT;
                 const uint32_t nxt_cheap = dp[p] + ZXC_OPT_MATCH_COST_BASE;
                 const uint32_t nxt_v1 = nxt_cheap + CHAR_BIT;
 
