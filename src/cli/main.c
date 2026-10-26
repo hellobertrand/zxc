@@ -403,8 +403,8 @@ static void* g_dict_huf = NULL;
 /* Builds a compression context from the command line. ZXC_OK and *out set, or
  * the refusing setter's error with *out NULL. */
 static int cli_cctx(zxc_cctx** out, int threads, int level, size_t block_size, int checksum,
-                    int seekable, const void* dict, size_t dict_size, const void* dict_huf,
-                    zxc_progress_callback_t cb, void* user_data) {
+                    int seekable, int decode_speed_budget, const void* dict, size_t dict_size,
+                    const void* dict_huf, zxc_progress_callback_t cb, void* user_data) {
     *out = NULL;
     zxc_cctx* const c = zxc_create_cctx();
     if (!c) return ZXC_ERROR_MEMORY;
@@ -413,6 +413,7 @@ static int cli_cctx(zxc_cctx** out, int threads, int level, size_t block_size, i
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_BLOCK_SIZE, (int64_t)block_size);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_CHECKSUM, checksum != 0);
     if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_SEEKABLE, seekable != 0);
+    if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_FAVOR_DECODE_SPEED, decode_speed_budget);
     if (rc == ZXC_OK) rc = zxc_cctx_set_dict(c, dict, dict_size, dict_huf);
     if (rc == ZXC_OK) rc = zxc_cctx_set_progress(c, cb, user_data);
     if (rc != ZXC_OK) {
@@ -442,6 +443,10 @@ static int cli_dctx(zxc_dctx** out, int threads, int checksum, const void* dict,
 }
 // --no-preserve clears it
 static int g_preserve = 1;
+// --favor-decode-speed[=PCT]: ZXC_C_FAVOR_DECODE_SPEED, the budget being PCT or
+// ZXC_SPLIT_BUDGET_DEFAULT
+static int g_favor_decode_speed = 0;
+static int g_split_budget_pct = 0;
 
 /* Enables printf-style format/argument checking by the compiler on GCC/Clang
  * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
@@ -501,7 +506,14 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE };
+enum {
+    OPT_VERSION = 1000,
+    OPT_HELP,
+    OPT_TRAIN_DICT,
+    OPT_PROGRESS,
+    OPT_NO_PRESERVE,
+    OPT_FAVOR_DECODE_SPEED
+};
 
 // Whether path ends with the archive extension.
 static int zxc_has_archive_ext(const char* path) {
@@ -711,6 +723,9 @@ static void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
+        "  --favor-decode-speed[=PCT]\n"
+        "                    Favor decode speed over size (levels 3-7); PCT = how much\n"
+        "                    a block may grow for it, 1-100 {10}\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file\n"
@@ -1572,6 +1587,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (g_verbose && mode != MODE_INTEGRITY)
         zxc_log("Checksum: %s\n", checksum_enabled ? "enabled" : "disabled");
     if (g_verbose && seekable) zxc_log("Seekable: enabled\n");
+    if (g_verbose && g_favor_decode_speed && mode == MODE_COMPRESS && level > ZXC_LEVEL_FAST)
+        zxc_log("Priority: decode speed, budget %d%%\n", g_split_budget_pct);
 
     // Prepare progress context
     progress_ctx_t pctx = {.start_time = zxc_now(),
@@ -1588,8 +1605,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     const zxc_progress_callback_t progress_cb = show_progress ? &cli_progress_callback : NULL;
     if (mode == MODE_COMPRESS) {
         zxc_cctx* cctx = NULL;
-        bytes = cli_cctx(&cctx, num_threads, level, block_size, checksum_enabled, seekable, dict,
-                         dict_size, g_dict_huf, progress_cb, &pctx);
+        bytes = cli_cctx(&cctx, num_threads, level, block_size, checksum_enabled, seekable,
+                         g_favor_decode_speed ? g_split_budget_pct : 0, dict, dict_size, g_dict_huf,
+                         progress_cb, &pctx);
         if (bytes == ZXC_OK) bytes = zxc_stream_compress(f_in, f_out, cctx);
         zxc_free_cctx(cctx);
     } else if (pass_through) {
@@ -1757,32 +1775,34 @@ int main(int argc, char** argv) {
     const char* dict_path = NULL;
     const char* output_path = NULL;
 
-    static const struct option long_options[] = {{"train", no_argument, 0, OPT_TRAIN_DICT},
-                                                 {"progress", required_argument, 0, OPT_PROGRESS},
-                                                 {"no-preserve", no_argument, 0, OPT_NO_PRESERVE},
-                                                 {"output", required_argument, 0, 'o'},
-                                                 {"dict", required_argument, 0, 'D'},
-                                                 {"compress", no_argument, 0, 'z'},
-                                                 {"decompress", no_argument, 0, 'd'},
-                                                 {"list", no_argument, 0, 'l'},
-                                                 {"test", no_argument, 0, 't'},
-                                                 {"bench", optional_argument, 0, 'b'},
-                                                 {"threads", required_argument, 0, 'T'},
-                                                 {"keep", no_argument, 0, 'k'},
-                                                 {"force", no_argument, 0, 'f'},
-                                                 {"stdout", no_argument, 0, 'c'},
-                                                 {"verbose", no_argument, 0, 'v'},
-                                                 {"quiet", no_argument, 0, 'q'},
-                                                 {"checksum", no_argument, 0, 'C'},
-                                                 {"no-checksum", no_argument, 0, 'N'},
-                                                 {"json", no_argument, 0, 'j'},
-                                                 {"version", no_argument, 0, 'V'},
-                                                 {"help", no_argument, 0, 'h'},
-                                                 {"multiple", no_argument, 0, 'm'},
-                                                 {"recursive", no_argument, 0, 'r'},
-                                                 {"block-size", required_argument, 0, 'B'},
-                                                 {"seekable", no_argument, 0, 'S'},
-                                                 {0, 0, 0, 0}};
+    static const struct option long_options[] = {
+        {"train", no_argument, 0, OPT_TRAIN_DICT},
+        {"progress", required_argument, 0, OPT_PROGRESS},
+        {"no-preserve", no_argument, 0, OPT_NO_PRESERVE},
+        {"favor-decode-speed", optional_argument, 0, OPT_FAVOR_DECODE_SPEED},
+        {"output", required_argument, 0, 'o'},
+        {"dict", required_argument, 0, 'D'},
+        {"compress", no_argument, 0, 'z'},
+        {"decompress", no_argument, 0, 'd'},
+        {"list", no_argument, 0, 'l'},
+        {"test", no_argument, 0, 't'},
+        {"bench", optional_argument, 0, 'b'},
+        {"threads", required_argument, 0, 'T'},
+        {"keep", no_argument, 0, 'k'},
+        {"force", no_argument, 0, 'f'},
+        {"stdout", no_argument, 0, 'c'},
+        {"verbose", no_argument, 0, 'v'},
+        {"quiet", no_argument, 0, 'q'},
+        {"checksum", no_argument, 0, 'C'},
+        {"no-checksum", no_argument, 0, 'N'},
+        {"json", no_argument, 0, 'j'},
+        {"version", no_argument, 0, 'V'},
+        {"help", no_argument, 0, 'h'},
+        {"multiple", no_argument, 0, 'm'},
+        {"recursive", no_argument, 0, 'r'},
+        {"block-size", required_argument, 0, 'B'},
+        {"seekable", no_argument, 0, 'S'},
+        {0, 0, 0, 0}};
 
     int opt;
     int multiple_mode = 0;
@@ -1895,6 +1915,20 @@ int main(int argc, char** argv) {
             case OPT_NO_PRESERVE:
                 g_preserve = 0;
                 break;
+            case OPT_FAVOR_DECODE_SPEED: {
+                g_favor_decode_speed = 1;
+                g_split_budget_pct = ZXC_SPLIT_BUDGET_DEFAULT;
+                if (optarg == NULL) break;
+                char* end = NULL;
+                const long pct = strtol(optarg, &end, 10);
+                if (end == optarg || *end != '\0' || pct < 1 || pct > ZXC_SPLIT_BUDGET_MAX) {
+                    fprintf(stderr, "Error: --favor-decode-speed budget must be 1 to %d\n",
+                            ZXC_SPLIT_BUDGET_MAX);
+                    return 1;
+                }
+                g_split_budget_pct = (int)pct;
+                break;
+            }
             case OPT_PROGRESS:
                 if (optarg != NULL && strcmp(optarg, "auto") == 0)
                     g_progress_mode = ZXC_PROGRESS_AUTO;
@@ -1959,6 +1993,10 @@ int main(int argc, char** argv) {
     if (checksum == -1) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
+
+    if (g_favor_decode_speed && level <= ZXC_LEVEL_FAST &&
+        (mode == MODE_COMPRESS || mode == MODE_BENCHMARK))
+        zxc_log("Warning: --favor-decode-speed has no effect at levels 1 and 2\n");
 
     // -f only if no mode flag took over
     if (cat_mode && mode == MODE_DECOMPRESS) force = 1;
@@ -2246,8 +2284,9 @@ int main(int argc, char** argv) {
         zxc_cctx* bench_cctx = NULL;
         zxc_dctx* bench_dctx = NULL;
         FILE* f_in = NULL;
-        int bench_rc = cli_cctx(&bench_cctx, num_threads, level, block_size, checksum, 0, dict,
-                                dict_size, g_dict_huf, NULL, NULL);
+        int bench_rc = cli_cctx(&bench_cctx, num_threads, level, block_size, checksum, 0,
+                                g_favor_decode_speed ? g_split_budget_pct : 0, dict, dict_size,
+                                g_dict_huf, NULL, NULL);
         if (bench_rc == ZXC_OK)
             bench_rc = cli_dctx(&bench_dctx, num_threads, checksum, dict, dict_size, g_dict_huf,
                                 NULL, NULL);
@@ -2437,6 +2476,8 @@ int main(int argc, char** argv) {
                 "  \"threads\": %d,\n"
                 "  \"level\": %d,\n"
                 "  \"checksum_enabled\": %s,\n"
+                "  \"favor_decode_speed\": %s,\n"
+                "  \"split_budget_pct\": %d,\n"
                 "  \"compress_speed_mbps\": %.3f,\n"
                 "  \"decompress_speed_mbps\": %.3f,\n"
                 "  \"compress_time_seconds\": %.6f,\n"
@@ -2444,7 +2485,8 @@ int main(int argc, char** argv) {
                 "}\n",
                 in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
                 decompress_iters, num_threads, level, checksum ? "true" : "false",
-                compress_speed_mbps, decompress_speed_mbps, best_compress, best_decompress);
+                g_favor_decode_speed ? "true" : "false", g_split_budget_pct, compress_speed_mbps,
+                decompress_speed_mbps, best_compress, best_decompress);
         else
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"

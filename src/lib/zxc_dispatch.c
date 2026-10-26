@@ -912,6 +912,7 @@ typedef struct {
     int level;
     int checksum;
     int seekable;
+    uint8_t split_budget_pct; /* ZXC_C_FAVOR_DECODE_SPEED, 0 = off */
     size_t block_size;
 } zxc_cctx_opts_t;
 
@@ -996,6 +997,7 @@ static zxc_cctx_opts_t zxc_cparams_resolve(const zxc_cparams_t* p) {
     return (zxc_cctx_opts_t){.level = p->level,
                              .checksum = p->checksum_enabled,
                              .seekable = p->seekable,
+                             .split_budget_pct = (uint8_t)p->favor_decode_speed,
                              .block_size = p->block_size};
 }
 
@@ -1033,6 +1035,10 @@ int zxc_cparam_bounds(const zxc_cparam_t param, int64_t* min, int64_t* max) {
         case ZXC_C_SEEKABLE:
             lo = 0;
             hi = 1;
+            break;
+        case ZXC_C_FAVOR_DECODE_SPEED:
+            lo = 1;
+            hi = ZXC_SPLIT_BUDGET_MAX;
             break;
         default:
             return ZXC_ERROR_BAD_PARAM;
@@ -1092,6 +1098,9 @@ int zxc_cctx_set_param(zxc_cctx* cctx, const zxc_cparam_t param, const int64_t v
         case ZXC_C_SEEKABLE:
             p->seekable = (int)value;
             break;
+        case ZXC_C_FAVOR_DECODE_SPEED:
+            p->favor_decode_speed = (int)value;
+            break;
         default:
             return ZXC_ERROR_BAD_PARAM;  // LCOV_EXCL_LINE: bounds already refused it
     }
@@ -1116,6 +1125,9 @@ int zxc_cctx_get_param(const zxc_cctx* cctx, const zxc_cparam_t param, int64_t* 
             break;
         case ZXC_C_SEEKABLE:
             *value = p->seekable;
+            break;
+        case ZXC_C_FAVOR_DECODE_SPEED:
+            *value = p->favor_decode_speed;
             break;
         default:
             return ZXC_ERROR_BAD_PARAM;
@@ -1224,6 +1236,7 @@ static int64_t zxc_compress_cctx_resolved(zxc_cctx* cctx, const void* RESTRICT s
     }
 
     zxc_cctx_t* const ctx = &cctx->inner;
+    ctx->split_budget_pct = o.split_budget_pct;
     ctx->dict_size = dict_size;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(ctx, cctx->huf_cache, &cctx->huf_cached, dict_huf) !=
                  ZXC_OK))
@@ -1767,6 +1780,7 @@ static int64_t zxc_compress_block_resolved(zxc_cctx* cctx, const void* RESTRICT 
         cctx->inner.checksum_enabled = o.checksum;
     }
 
+    cctx->inner.split_budget_pct = o.split_budget_pct;
     cctx->inner.dict_size = b_dict_size;
     if (UNLIKELY(zxc_ctx_sync_dict_huf(&cctx->inner, cctx->huf_cache, &cctx->huf_cached,
                                        ZXC_OPTS_DICT_HUF(opts)) != ZXC_OK))

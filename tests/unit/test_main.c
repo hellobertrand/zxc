@@ -51,6 +51,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_api_scratch_buf),
     TEST_CASE(test_min_dist_policy),
     TEST_CASE(test_spl_match_split),
+    TEST_CASE(test_split_budget_pct),
     TEST_CASE(test_buffer_error_codes),
     TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),
@@ -76,6 +77,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_context_api_seekable_compress),
     TEST_CASE(test_cctx_level_raise_reinit),
     TEST_CASE(test_cctx_param_contract),
+    TEST_CASE(test_cctx_favor_decode_speed),
     TEST_CASE(test_dctx_param_contract),
     TEST_CASE(test_ctx_dict_copied),
     TEST_CASE(test_cctx_configured_archives),
@@ -95,6 +97,7 @@ static const test_entry_t g_tests[] = {
     /* --- Stream API --- */
     TEST_CASE(test_null_output_decompression),
     TEST_CASE(test_stream_level_clamp),
+    TEST_CASE(test_stream_favor_decode_speed),
     TEST_CASE(test_stream_corrupt_block_header),
     TEST_CASE(test_stream_dry_run_size),
     TEST_CASE(test_stream_oversized_dict),

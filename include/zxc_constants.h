@@ -73,6 +73,12 @@
 #define ZXC_BLOCK_SIZE_MAX (1U << ZXC_BLOCK_SIZE_MAX_LOG2)
 /** @} */ /* end of block_size */
 
+/** @brief The @ref ZXC_C_FAVOR_DECODE_SPEED budget beyond which decoding barely
+ *         speeds up: what the CLI's bare --favor-decode-speed sets. */
+#define ZXC_SPLIT_BUDGET_DEFAULT 10
+/** @brief Largest @ref ZXC_C_FAVOR_DECODE_SPEED budget. */
+#define ZXC_SPLIT_BUDGET_MAX 100
+
 /**
  * @defgroup dictionary Dictionary
  * @brief Constants for pre-trained dictionary support.

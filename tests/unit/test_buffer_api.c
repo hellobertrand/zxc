@@ -1309,9 +1309,30 @@ done:
     return ok;
 }
 
-// Round trips through zxc_spl_match_split_block, where a rewrite regression shows:
-// escaped matches (20-38 bytes) mixed irregularly with inline ones (6-19 bytes),
-// which levels 3-5 split within their caps.
+// Round trip with ZXC_C_FAVOR_DECODE_SPEED at its default budget: within the
+// bound, read by any decoder.
+static int split_round_trip(const char* what, const uint8_t* buf, const size_t n, const int level) {
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const comp = malloc(cap);
+    uint8_t* const back = malloc(n);
+    int ok = 0;
+    if (!comp || !back) goto done;
+    const int64_t c =
+        test_compress_decode_speed(buf, n, comp, cap, level, ZXC_SPLIT_BUDGET_DEFAULT);
+    const int64_t d = c > 0 ? zxc_decompress(comp, (size_t)c, back, n) : -1;
+    if (c <= 0 || d != (int64_t)n || memcmp(back, buf, n) != 0) {
+        printf("  [FAIL] %s, level %d: compress %lld, decompress %lld\n", what, level, (long long)c,
+               (long long)d);
+        goto done;
+    }
+    ok = 1;
+done:
+    free(comp);
+    free(back);
+    return ok;
+}
+
+// zxc_spl_match_split_block round trips, by default and with ZXC_C_FAVOR_DECODE_SPEED.
 int test_spl_match_split(void) {
     printf("=== TEST: Unit - SPL match splitting round trip ===\n");
     const size_t cap = 512 * 1024;
@@ -1319,40 +1340,111 @@ int test_spl_match_split(void) {
     int ok = 0;
     if (!buf) goto done;
 
-    uint32_t st = 0x9E3779B9U;
-    uint8_t src[96];  // shared match source; back-references clear the distance floor
-    for (size_t k = 0; k < sizeof(src); k++) {
-        st = st * 1103515245U + 12345U;
-        src[k] = (uint8_t)(st >> 16);
-    }
-    size_t n = 0;
-    for (size_t k = 0; k < sizeof(src) && n < cap; k++) buf[n++] = src[k];
-    while (n + sizeof(src) + 64 < cap) {
-        st = st * 1103515245U + 12345U;
-        const size_t lit = (st >> 16) % 8U;  // 0-7 literals, LL mostly inline
-        for (size_t k = 0; k < lit && n < cap; k++) {
-            st = st * 1103515245U + 12345U;
-            buf[n++] = (uint8_t)(st >> 16);
-        }
-        st = st * 1103515245U + 12345U;
-        // ~1 in 4 matches escapes the ML field (20-38 bytes); the rest stay inline.
-        const size_t m =
-            ((st >> 16) % 4U == 0U) ? 20U + ((st >> 18) % 19U) : 6U + ((st >> 18) % 14U);
-        for (size_t k = 0; k < m && n < cap; k++) buf[n++] = src[k % sizeof(src)];
-    }
+    gen_split_data(buf, cap);
+    const size_t n = cap;
 
-    // Levels 3-5 run the split; 1-2 (PAK) and 6-7 must round-trip cleanly too.
+    // The default splits at levels 3-5, the option at 3-7; 1-2 (PAK) never.
     for (int lvl = ZXC_LEVEL_FASTEST; lvl <= ZXC_LEVEL_ULTRA; lvl++)
-        if (!test_round_trip("spl split", buf, n, lvl, 0)) goto done;
+        if (!test_round_trip("spl split", buf, n, lvl, 0) ||
+            !split_round_trip("spl split, decode speed", buf, n, lvl))
+            goto done;
     // Text-like data reaches the split by a different route (irregular escapes).
     fill_text_like(buf, cap);
-    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_DENSITY; lvl++)
-        if (!test_round_trip("spl split text", buf, cap, lvl, 0)) goto done;
+    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_ULTRA; lvl++)
+        if (!test_round_trip("spl split text", buf, cap, lvl, 0) ||
+            !split_round_trip("spl split text, decode speed", buf, cap, lvl))
+            goto done;
 
     printf("PASS\n\n");
     ok = 1;
 done:
     free(buf);
+    return ok;
+}
+
+// Escaped matches of 20-33 bytes, under every level's gated cap, in about 45
+// percent of the sequences: the gate splits them.
+static void gen_short_escapes(uint8_t* buf, const size_t n) {
+    uint32_t st = 12345U;
+    uint8_t src[4096];
+    for (size_t k = 0; k < sizeof(src); k++) {
+        st = st * 1103515245U + 12345U;
+        src[k] = (uint8_t)(st >> 16);
+    }
+    size_t i = 0;
+    for (size_t k = 0; k < sizeof(src) && i < n; k++) buf[i++] = src[k];
+    while (i < n) {
+        st = st * 1103515245U + 12345U;
+        if ((st >> 16) % 3U == 0U) {
+            st = st * 1103515245U + 12345U;
+            buf[i++] = (uint8_t)(st >> 16);
+        }
+        st = st * 1103515245U + 12345U;
+        const size_t m =
+            ((st >> 16) % 100U < 45U) ? 20U + ((st >> 18) % 14U) : 6U + ((st >> 18) % 14U);
+        st = st * 1103515245U + 12345U;
+        const size_t off = (st >> 12) % (sizeof(src) - 64);
+        for (size_t k = 0; k < m && i < n; k++) buf[i++] = src[off + k];
+    }
+}
+
+// ZXC_C_FAVOR_DECODE_SPEED's budget: 0 is off (the plain level), a wider budget
+// never shrinks the output, and even a budget of 1 splits at least as much as
+// the default policy.
+int test_split_budget_pct(void) {
+    printf("=== TEST: Unit - ZXC_C_FAVOR_DECODE_SPEED budget ===\n");
+    static const int pcts[] = {0, 1, ZXC_SPLIT_BUDGET_DEFAULT, ZXC_SPLIT_BUDGET_MAX};
+    enum { N = sizeof(pcts) / sizeof(pcts[0]) };
+    const size_t n = 300000;
+    const size_t cap = (size_t)zxc_compress_bound(n);
+    uint8_t* const src = malloc(n);
+    uint8_t* const back = malloc(n);
+    uint8_t* out[N] = {NULL};
+    int64_t sz[N] = {0};
+    int ok = 0;
+    if (!src || !back) goto done;
+    gen_split_data(src, n);
+
+    for (int i = 0; i < N; i++) {
+        out[i] = malloc(cap);
+        if (!out[i]) goto done;
+        sz[i] = test_compress_decode_speed(src, n, out[i], cap, 3, pcts[i]);
+        const int64_t d = sz[i] > 0 ? zxc_decompress(out[i], (size_t)sz[i], back, n) : -1;
+        if (sz[i] <= 0 || d != (int64_t)n || memcmp(back, src, n) != 0) {
+            printf("  [FAIL] budget %d: compress %lld, decompress %lld\n", pcts[i],
+                   (long long)sz[i], (long long)d);
+            goto done;
+        }
+    }
+    const int64_t plain = zxc_compress(src, n, back, n, 3);
+    const int off_is_plain = plain == sz[0] && memcmp(back, out[0], (size_t)plain) == 0;
+    const int widens = sz[0] < sz[1] && sz[1] < sz[2] && sz[2] < sz[3];
+    if (!off_is_plain || !widens) {
+        printf("  [FAIL] 0 %s the plain level; sizes off/1/10/100: %lld/%lld/%lld/%lld\n",
+               off_is_plain ? "==" : "!=", (long long)sz[0], (long long)sz[1], (long long)sz[2],
+               (long long)sz[3]);
+        goto done;
+    }
+    printf("  [PASS] budget off/1/10/100: %lld/%lld/%lld/%lld bytes\n", (long long)sz[0],
+           (long long)sz[1], (long long)sz[2], (long long)sz[3]);
+
+    gen_short_escapes(src, n);
+    for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_COMPACT; lvl++) {
+        const int64_t s_def = zxc_compress(src, n, out[0], cap, lvl);
+        const int64_t s_on = test_compress_decode_speed(src, n, out[1], cap, lvl, 1);
+        if (s_def <= 0 || s_on < s_def) {
+            printf("  [FAIL] level %d: budget 1 gives %lld bytes, the default %lld\n", lvl,
+                   (long long)s_on, (long long)s_def);
+            goto done;
+        }
+    }
+    printf("  [PASS] budget 1 splits at least as much as the default at levels 3-5\n");
+    printf("PASS\n\n");
+    ok = 1;
+done:
+    for (int i = 0; i < N; i++) free(out[i]);
+    free(src);
+    free(back);
     return ok;
 }
 

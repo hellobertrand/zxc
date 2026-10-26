@@ -63,6 +63,9 @@ uint32_t zxc_test_rand(void);
 
 void gen_random_data(uint8_t* buf, size_t size);
 void gen_lz_data(uint8_t* buf, size_t size);
+/* Inline matches (6-19 bytes) mixed irregularly with escaped ones (20-160, on both
+ * sides of the 128-byte split cap), a few literals between. */
+void gen_split_data(uint8_t* buf, size_t size);
 
 /* --- File footer (FORMAT.md Sec 8) ------------------------------------- */
 
@@ -116,6 +119,10 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
  * block checksums, seek table. Negative zxc_error_t on failure. */
 int64_t test_compress_cfg(const void* src, size_t n, void* dst, size_t cap, int level,
                           size_t block_size, int checksum, int seekable);
+/* One-shot through a context with ZXC_C_LEVEL and ZXC_C_FAVOR_DECODE_SPEED set
+ * (0 = off); the compressed size or a negative zxc_error_t. */
+int64_t test_compress_decode_speed(const void* src, size_t n, void* dst, size_t cap, int level,
+                                   int budget);
 
 /* zxc_decompress_dctx() on a throwaway context that verifies the checksums,
  * which the one-shot zxc_decompress() no longer does. */
@@ -128,6 +135,7 @@ int test_buffer_api(void);
 int test_buffer_api_scratch_buf(void);
 int test_min_dist_policy(void);
 int test_spl_match_split(void);
+int test_split_budget_pct(void);
 int test_buffer_error_codes(void);
 int test_get_decompressed_size(void);
 int test_frame_info(void);
@@ -153,6 +161,7 @@ int test_context_api_seekable_frame(void);
 int test_context_api_seekable_compress(void);
 int test_cctx_level_raise_reinit(void);
 int test_cctx_param_contract(void);
+int test_cctx_favor_decode_speed(void);
 int test_dctx_param_contract(void);
 int test_ctx_dict_copied(void);
 int test_cctx_configured_archives(void);
@@ -172,6 +181,7 @@ int test_static_dctx_inplace(void);
 /* Stream API */
 int test_null_output_decompression(void);
 int test_stream_level_clamp(void);
+int test_stream_favor_decode_speed(void);
 int test_stream_corrupt_block_header(void);
 int test_stream_dry_run_size(void);
 int test_stream_oversized_dict(void);

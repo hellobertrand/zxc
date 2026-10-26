@@ -28,6 +28,7 @@
 #include <string.h>
 
 #include "../../include/zxc_buffer.h"
+#include "../../include/zxc_error.h"
 
 #define FUZZ_ROUNDTRIP_MAX_INPUT (4 << 20) /* 4 MiB */
 
@@ -49,7 +50,20 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     }
 
     const int level = size > 0 ? (data[0] % (unsigned)zxc_max_level()) + 1 : 1;
-    const int64_t csize = zxc_compress(data, size, comp_buf, bound, level);
+    // Bit 6 of data[0] turns the decode-speed split on, data[1] sizes its budget.
+    const int budget = size > 1 && ((data[0] >> 6) & 1) ? 1 + data[1] % ZXC_SPLIT_BUDGET_MAX : 0;
+    int64_t csize;
+    if (budget) {
+        zxc_cctx* const cctx = zxc_create_cctx();
+        if (!cctx) return 0;
+        csize = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
+                        zxc_cctx_set_param(cctx, ZXC_C_FAVOR_DECODE_SPEED, budget) == ZXC_OK
+                    ? zxc_compress_cctx(cctx, data, size, comp_buf, bound)
+                    : ZXC_ERROR_BAD_PARAM;
+        zxc_free_cctx(cctx);
+    } else {
+        csize = zxc_compress(data, size, comp_buf, bound, level);
+    }
     if (csize < 0) return 0;
 
     if (size == 0) return 0;
