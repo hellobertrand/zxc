@@ -28,6 +28,9 @@
 #ifndef CHAR_BIT
 #define CHAR_BIT 8
 #endif
+#ifndef UINT8_MAX
+#define UINT8_MAX U8_MAX
+#endif
 #ifndef UINT16_MAX
 #define UINT16_MAX U16_MAX
 #endif
