@@ -643,8 +643,8 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  */
 #define DECODE_PAK_SEQ(S, RESERVE, N_REM, DECODE, ON_FAIL)                                   \
     do {                                                                                     \
-        uint64_t ll = (S) >> 24;                                                             \
-        const uint32_t mb = ((S) >> 16) & 0xFF;                                              \
+        uint64_t ll = (S) >> ZXC_SEQ_LL_SHIFT;                                               \
+        const uint32_t mb = ((S) >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK;                     \
         uint64_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;                                             \
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {                                               \
             ll += zxc_read_varint(&extras_ptr, extras_end);                                  \
@@ -661,7 +661,7 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
                          (size_t)(d_end - d_ptr)))                                           \
                 ON_FAIL;                                                                     \
         }                                                                                    \
-        const uint32_t off = ((S) & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;                            \
+        const uint32_t off = ((S) & ZXC_SEQ_OFF_MASK) + ZXC_LZ_OFFSET_BIAS;                  \
         /* PAK keeps the ladder: its inline ll reaches 254. */                               \
         zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                          \
         l_ptr += ll;                                                                         \
@@ -674,19 +674,22 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  *        statement of the post-threshold FAST loops ((void)0 elsewhere),
  *        placed exactly where the hand-unrolled bodies had it.
  */
-#define DECODE_PAK_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                 \
-    do {                                                                               \
-        uint32_t s1 = zxc_le32(seq_ptr);                                               \
-        uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));                            \
-        uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));                        \
-        uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));                        \
-        seq_ptr += 4 * sizeof(uint32_t);                                               \
-        PREFETCH;                                                                      \
-        DECODE_PAK_SEQ(s1, (s2 >> 24) + (s3 >> 24) + (s4 >> 24), 3U, DECODE, ON_FAIL); \
-        DECODE_PAK_SEQ(s2, (s3 >> 24) + (s4 >> 24), 2U, DECODE, ON_FAIL);              \
-        DECODE_PAK_SEQ(s3, (s4 >> 24), 1U, DECODE, ON_FAIL);                           \
-        DECODE_PAK_SEQ(s4, 0, 0U, DECODE, ON_FAIL);                                    \
-        n_seq -= 4;                                                                    \
+#define DECODE_PAK_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                          \
+    do {                                                                                        \
+        uint32_t s1 = zxc_le32(seq_ptr);                                                        \
+        uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));                                     \
+        uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));                                 \
+        uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));                                 \
+        seq_ptr += 4 * sizeof(uint32_t);                                                        \
+        PREFETCH;                                                                               \
+        DECODE_PAK_SEQ(                                                                         \
+            s1, (s2 >> ZXC_SEQ_LL_SHIFT) + (s3 >> ZXC_SEQ_LL_SHIFT) + (s4 >> ZXC_SEQ_LL_SHIFT), \
+            3U, DECODE, ON_FAIL);                                                               \
+        DECODE_PAK_SEQ(s2, (s3 >> ZXC_SEQ_LL_SHIFT) + (s4 >> ZXC_SEQ_LL_SHIFT), 2U, DECODE,     \
+                       ON_FAIL);                                                                \
+        DECODE_PAK_SEQ(s3, (s4 >> ZXC_SEQ_LL_SHIFT), 1U, DECODE, ON_FAIL);                      \
+        DECODE_PAK_SEQ(s4, 0, 0U, DECODE, ON_FAIL);                                             \
+        n_seq -= 4;                                                                             \
     } while (0)
 
 /**
@@ -1269,14 +1272,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += sizeof(uint32_t);
 
-        uint64_t ll = seq >> 24;
+        uint64_t ll = seq >> ZXC_SEQ_LL_SHIFT;
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t m_bits = (seq >> 16) & 0xFF;
+        uint32_t m_bits = (seq >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK;
         uint64_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        uint32_t offset = (seq & ZXC_SEQ_OFF_MASK) + ZXC_LZ_OFFSET_BIAS;
 
         // Strict bounds check: sequence must fit, AND wild copies must not overshoot
         // Check both destination (d_ptr) and source literal stream (l_ptr)
@@ -1337,7 +1340,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
         const uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += sizeof(uint32_t);
 
-        uint64_t ll = seq >> 24;
+        uint64_t ll = seq >> ZXC_SEQ_LL_SHIFT;
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {
             ll += zxc_read_varint(&extras_ptr, extras_end);
             if (UNLIKELY(l_ptr + ll > l_end)) {
@@ -1347,7 +1350,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
             }
         }
 
-        uint32_t m_bits = (seq >> 16) & 0xFF;
+        uint32_t m_bits = (seq >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK;
         uint64_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
 
@@ -1358,7 +1361,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
             extras_ptr = ext_save;
             break;
         }
-        uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        uint32_t offset = (seq & ZXC_SEQ_OFF_MASK) + ZXC_LZ_OFFSET_BIAS;
 
         zxc_decode_copy_literals(d_ptr, l_ptr, ll);
         l_ptr += ll;
@@ -1379,13 +1382,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
         uint32_t seq = zxc_le32(seq_ptr);
         seq_ptr += sizeof(uint32_t);
 
-        uint64_t ll = seq >> 24;
+        uint64_t ll = seq >> ZXC_SEQ_LL_SHIFT;
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) ll += zxc_read_varint(&extras_ptr, extras_end);
 
-        uint32_t m_bits = (seq >> 16) & 0xFF;
+        uint32_t m_bits = (seq >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK;
         uint64_t ml = m_bits + ZXC_LZ_MIN_MATCH_LEN;
         if (UNLIKELY(m_bits == ZXC_SEQ_ML_MASK)) ml += zxc_read_varint(&extras_ptr, extras_end);
-        uint32_t offset = (seq & 0xFFFF) + ZXC_LZ_OFFSET_BIAS;
+        uint32_t offset = (seq & ZXC_SEQ_OFF_MASK) + ZXC_LZ_OFFSET_BIAS;
 
         if (UNLIKELY(ll + ml > (size_t)(d_end - d_ptr) || l_ptr + ll > l_end))
             return ZXC_ERROR_OVERFLOW;

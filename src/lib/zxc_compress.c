@@ -2087,8 +2087,8 @@ static int zxc_encode_block_pak(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
             const uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? ZXC_SEQ_LL_MASK : ll;
             const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? ZXC_SEQ_ML_MASK : ml;
-            const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
-                                     (ml_write << ZXC_SEQ_OFF_BITS) |
+            const uint32_t seq_val = (ll_write << ZXC_SEQ_LL_SHIFT) |
+                                     (ml_write << ZXC_SEQ_ML_SHIFT) |
                                      ((off - ZXC_LZ_OFFSET_BIAS) & ZXC_SEQ_OFF_MASK);
             buf_sequences[seq_c] = seq_val;
             seq_c++;

@@ -518,6 +518,10 @@ static_assert(ZXC_TOKEN_LIT_BITS == 4 && ZXC_TOKEN_ML_BITS == 4,
 #define ZXC_SEQ_ML_MASK ((1U << ZXC_SEQ_ML_BITS) - 1)
 /** @brief Mask to extract Offset from a PAK sequence. */
 #define ZXC_SEQ_OFF_MASK ((1U << ZXC_SEQ_OFF_BITS) - 1)
+/** @brief Shift of the Literal Length field: the top byte of the word. */
+#define ZXC_SEQ_LL_SHIFT (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)
+/** @brief Shift of the Match Length field: just above the offset. */
+#define ZXC_SEQ_ML_SHIFT ZXC_SEQ_OFF_BITS
 static_assert(ZXC_SEQ_LL_BITS + ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS == 32,
               "a PAK sequence is one 32-bit word");
 /** @} */
