@@ -67,6 +67,8 @@
 
 // Jobs per worker when they carry several blocks each.
 #define ZXC_STREAM_RING_BATCHED 2U
+// Jobs per worker when they carry one block each: slack for a slow block.
+#define ZXC_STREAM_RING_UNBATCHED 4U
 
 // ============================================================================
 // STREAMING ENGINE (Producer / Worker / Consumer)
@@ -778,7 +780,8 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
     // One thread for the reader and writer, none with positioned reads.
     const int num_workers = ctx->in_fd >= 0 ? num_threads : (num_threads > 1) ? num_threads - 1 : 1;
     // Batched jobs hold several blocks: fewer keep the workers fed.
-    ctx->ring_size = (size_t)num_workers * (ctx->batch > 1 ? ZXC_STREAM_RING_BATCHED : 4U);
+    ctx->ring_size = (size_t)num_workers *
+                     (ctx->batch > 1 ? ZXC_STREAM_RING_BATCHED : ZXC_STREAM_RING_UNBATCHED);
 
     const uint64_t max_out = zxc_compress_bound(chunk);
     const size_t raw_alloc_in =
@@ -1094,7 +1097,7 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
             ctx->in_pos += remaining;
             remaining = 0;
         }
-        uint8_t discard[512];
+        uint8_t discard[512];  // scratch, any size
         while (remaining > 0 && !ctx->io_error) {
             const size_t chunk = remaining < sizeof(discard) ? (size_t)remaining : sizeof(discard);
             if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx->io_error = 1;
@@ -1269,7 +1272,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_compress_opts_t* 
 
     // Seekable: initial block-size tracking array
     if (seekable) {
-        e.w.seek_cap = 64;
+        e.w.seek_cap = 64;  // doubled as blocks come
         e.w.seek_comp = (uint32_t*)ZXC_MALLOC(e.w.seek_cap * sizeof(uint32_t));
         if (UNLIKELY(!e.w.seek_comp)) return ZXC_ERROR_MEMORY;  // LCOV_EXCL_LINE
     }
