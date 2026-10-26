@@ -30,6 +30,10 @@
 
 #define ZXC_STDIO_BUFFER_SIZE (1024 * 1024)
 
+// The archive extension, appended on compression and stripped on decompression.
+#define ZXC_ARCHIVE_EXT ".zxc"
+#define ZXC_ARCHIVE_EXT_LEN (sizeof(ZXC_ARCHIVE_EXT) - 1)
+
 #ifdef _WIN32
 #define ZXC_PATH_SEP '\\'
 #else
@@ -458,6 +462,13 @@ typedef enum {
 
 enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE };
 
+// Whether path ends with the archive extension.
+static int zxc_has_archive_ext(const char* path) {
+    const size_t len = strlen(path);
+    return len >= ZXC_ARCHIVE_EXT_LEN &&
+           strcmp(path + len - ZXC_ARCHIVE_EXT_LEN, ZXC_ARCHIVE_EXT) == 0;
+}
+
 // dir + separator + name in a malloc'd string, so no fixed limit; NULL if out of memory.
 static char* zxc_path_join(const char* dir, const char* name) {
     const size_t dir_len = strlen(dir);
@@ -559,9 +570,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
         } else {
-            // Skip .zxc files when compressing, to avoid double compression
-            const size_t len = strlen(full_path);
-            if (mode != MODE_COMPRESS || len < 4 || strcmp(full_path + len - 4, ".zxc") != 0) {
+            // Skip archives when compressing, to avoid double compression
+            if (mode != MODE_COMPRESS || !zxc_has_archive_ext(full_path)) {
                 overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
                                                    force, to_stdout, checksum, level, block_size,
                                                    json_output, seekable, dict, dict_size);
@@ -614,13 +624,10 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                                                  to_stdout, checksum, level, block_size,
                                                  json_output, seekable, dict, dict_size);
             } else if (S_ISREG(st.st_mode)) {
-                // Check if it ends with .zxc to skip if compressing to avoid double compression
-                if (mode == MODE_COMPRESS) {
-                    const size_t len = strlen(full_path);
-                    if (len >= 4 && strcmp(full_path + len - 4, ".zxc") == 0) {
-                        free(full_path);
-                        continue;  // Skip already compressed files in recursive compression
-                    }
+                // Skip archives when compressing, to avoid double compression
+                if (mode == MODE_COMPRESS && zxc_has_archive_ext(full_path)) {
+                    free(full_path);
+                    continue;
                 }
                 overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
                                                    force, to_stdout, checksum, level, block_size,
@@ -1318,7 +1325,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     } else if (!use_stdin) {
         // Auto-generate output filename from the input filename
         if (mode == MODE_COMPRESS) {
-            const int n = snprintf(out_path, sizeof(out_path), "%s.zxc", in_path);
+            const int n = snprintf(out_path, sizeof(out_path), "%s" ZXC_ARCHIVE_EXT, in_path);
             if (n < 0 || (size_t)n >= sizeof(out_path)) {
                 zxc_log("Error: Output path too long\n");
                 fclose(f_in);
@@ -1326,8 +1333,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             }
         } else {
             const size_t len = strlen(in_path);
-            if (len > 4 && !strcmp(in_path + len - 4, ".zxc")) {
-                const size_t base_len = len - 4;
+            // A bare extension has no base name to write to.
+            if (len > ZXC_ARCHIVE_EXT_LEN && zxc_has_archive_ext(in_path)) {
+                const size_t base_len = len - ZXC_ARCHIVE_EXT_LEN;
                 if (base_len >= sizeof(out_path)) {
                     zxc_log("Error: Output path too long\n");
                     fclose(f_in);
@@ -1336,8 +1344,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                 memcpy(out_path, in_path, base_len);
                 out_path[base_len] = '\0';
             } else {
-                zxc_log("Error: Cannot determine output filename: '%s' does not end with .zxc\n",
-                        in_path);
+                zxc_log(
+                    "Error: Cannot determine output filename: '%s' does not end "
+                    "with " ZXC_ARCHIVE_EXT "\n",
+                    in_path);
                 fclose(f_in);
                 return 1;
             }
