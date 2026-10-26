@@ -904,7 +904,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
                     r_ptr += len;
                 } else {
                     // RLE run: fill with single byte
-                    const uint32_t len = (token & ZXC_LIT_LEN_MASK) + 4;
+                    const uint32_t len = (token & ZXC_LIT_LEN_MASK) + ZXC_LIT_RLE_RUN_MIN;
                     if (UNLIKELY(w_ptr + len > w_end || r_ptr >= r_end))
                         return ZXC_ERROR_CORRUPT_DATA;
                     ZXC_MEMSET(w_ptr, *r_ptr++, len);

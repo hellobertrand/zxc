@@ -528,6 +528,12 @@ static_assert(ZXC_SEQ_LL_BITS + ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS == 32,
 #define ZXC_LIT_RLE_FLAG 0x80U
 /** @brief Mask to extract the run/literal length (lower 7 bits). */
 #define ZXC_LIT_LEN_MASK (ZXC_LIT_RLE_FLAG - 1)
+/** @brief Longest literal run one token carries: a length field of 0 means 1 byte. */
+#define ZXC_LIT_RUN_MAX (ZXC_LIT_LEN_MASK + 1U) /* 128 */
+/** @brief Shortest run worth an RLE token: a length field of 0 means this many bytes. */
+#define ZXC_LIT_RLE_RUN_MIN 4U
+/** @brief Longest run one RLE token carries. */
+#define ZXC_LIT_RLE_RUN_MAX (ZXC_LIT_LEN_MASK + ZXC_LIT_RLE_RUN_MIN) /* 131 */
 /** @} */
 
 /** @name LZ77 Constants

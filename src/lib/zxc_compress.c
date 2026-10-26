@@ -1639,14 +1639,14 @@ parse_done:;
 #endif
             const size_t run = (size_t)(p - run_start);
 
-            if (run >= 4) {
-                // RLE run: 2 bytes per 131 values, then remainder
+            if (run >= ZXC_LIT_RLE_RUN_MIN) {
+                // RLE run: 2 bytes per ZXC_LIT_RLE_RUN_MAX values, then remainder
                 // Branchless: full_chunks * 2 + remainder handling
-                const size_t full_chunks = run / 131;
-                const size_t rem = run - full_chunks * 131;  // Avoid modulo
+                const size_t full_chunks = run / ZXC_LIT_RLE_RUN_MAX;
+                const size_t rem = run - full_chunks * ZXC_LIT_RLE_RUN_MAX;  // Avoid modulo
                 rle_size += full_chunks * 2;
                 // Remainder: if >= 4 -> 2 bytes (RLE), else 1 + rem (literal)
-                if (rem >= 4)
+                if (rem >= ZXC_LIT_RLE_RUN_MIN)
                     rle_size += 2;
                 else if (rem > 0)
                     rle_size += 1 + rem;
@@ -1670,7 +1670,7 @@ parse_done:;
                         goto _lit_done; /* run may extend past the window */
                     }
                     const size_t seg = (size_t)(p + rpos - lit_start);
-                    rle_size += seg + ((seg + 127) >> 7);
+                    rle_size += seg + (seg + ZXC_LIT_LEN_MASK) / ZXC_LIT_RUN_MAX;
                     rle_size += 2; /* run fits one chunk: full_chunks=0, rem>=4 */
                     p += rpos + rpairs + 1;
                     lit_start = p;
@@ -1716,9 +1716,8 @@ parse_done:;
             _lit_done:;
 #endif
                 const size_t lit_run = (size_t)(p - lit_start);
-                // 1 header per 128 bytes + all data bytes
-                // lit_run + ceil(lit_run / 128)
-                rle_size += lit_run + ((lit_run + 127) >> 7);
+                // 1 header per ZXC_LIT_RUN_MAX bytes + all data bytes
+                rle_size += lit_run + (lit_run + ZXC_LIT_LEN_MASK) / ZXC_LIT_RUN_MAX;
             }
         }
 
@@ -1878,11 +1877,11 @@ parse_done:;
             while (lit_ptr < lit_end && *lit_ptr == b) lit_ptr++;
             size_t run = (size_t)(lit_ptr - run_start);
 
-            if (run >= 4) {
+            if (run >= ZXC_LIT_RLE_RUN_MIN) {
                 // RLE runs: emit 2-byte tokens (header + value)
-                while (run >= 4) {
-                    size_t chunk = (run > 131) ? 131 : run;
-                    *p_curr++ = (uint8_t)(ZXC_LIT_RLE_FLAG | (chunk - 4));
+                while (run >= ZXC_LIT_RLE_RUN_MIN) {
+                    size_t chunk = (run > ZXC_LIT_RLE_RUN_MAX) ? ZXC_LIT_RLE_RUN_MAX : run;
+                    *p_curr++ = (uint8_t)(ZXC_LIT_RLE_FLAG | (chunk - ZXC_LIT_RLE_RUN_MIN));
                     *p_curr++ = b;
                     run -= chunk;
                 }
@@ -1907,9 +1906,9 @@ parse_done:;
                 size_t lit_run = (size_t)(lit_ptr - lit_run_start);
                 const uint8_t* src_ptr = lit_run_start;
 
-                // Emit literal chunks (max 128 bytes each)
+                // Emit literal chunks (ZXC_LIT_RUN_MAX bytes each at most)
                 while (lit_run > 0) {
-                    size_t chunk = (lit_run > 128) ? 128 : lit_run;
+                    size_t chunk = (lit_run > ZXC_LIT_RUN_MAX) ? ZXC_LIT_RUN_MAX : lit_run;
                     *p_curr++ = (uint8_t)(chunk - 1);
                     ZXC_MEMCPY(p_curr, src_ptr, chunk);
                     p_curr += chunk;
