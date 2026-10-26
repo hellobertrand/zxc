@@ -76,6 +76,9 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 **-S**, **--seekable**
 : Append a seek table to the archive during compression. The archive then supports random access: the decoder locates and decompresses any block in `O(1)` without reading the whole file. Suited to compressed filesystems, game assets and log analysis.
 
+**--favor-decode-speed**[=*PCT*]
+: Favor decompression speed over size. At levels 3 to 7 long matches are re-emitted as chains of short inline matches, within a per-block size budget: a few percent larger, 10 to 25 percent faster to decompress. *PCT* sets that budget, how much a block may grow for it, from 1 to 100 percent (default 10, the point beyond which decompression barely speeds up). The format is unchanged, any decoder reads the result. No effect at levels 1 and 2.
+
 **-k**, **--keep**
 : Keep the input file. This is the default behavior; the flag overrides **--rm**.
 
