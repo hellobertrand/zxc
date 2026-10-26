@@ -2086,8 +2086,8 @@ static int zxc_encode_block_pak(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
 
             if (ll > 0) zxc_flush_literals(literals, &lit_c, anchor, ll, iend);
 
-            const uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? 255U : ll;
-            const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? 255U : ml;
+            const uint32_t ll_write = (ll >= ZXC_SEQ_LL_MASK) ? ZXC_SEQ_LL_MASK : ll;
+            const uint32_t ml_write = (ml >= ZXC_SEQ_ML_MASK) ? ZXC_SEQ_ML_MASK : ml;
             const uint32_t seq_val = (ll_write << (ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS)) |
                                      (ml_write << ZXC_SEQ_OFF_BITS) |
                                      ((off - ZXC_LZ_OFFSET_BIAS) & ZXC_SEQ_OFF_MASK);
