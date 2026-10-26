@@ -570,7 +570,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     const uint8_t* anchor, uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
     uint16_t* RESTRICT chain_table, const uint32_t epoch_mark, const uint32_t offset_mask,
     const int level, const zxc_lz77_params_t p, const uint32_t last_off) {
-    const int use_hash5 = (level >= 3);
+    const int use_hash5 = (level >= ZXC_LEVEL_DEFAULT);
     // Sentinel length just below the minimum, so any valid match replaces it.
     zxc_match_t best = (zxc_match_t){NULL, ZXC_LZ_MIN_MATCH_LEN - 1, 0};
 
@@ -1365,7 +1365,7 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
                              const uint32_t offset_mask, const int level) {
     if (UNLIKELY(dict_size < ZXC_LZ_MIN_MATCH_LEN)) return;
 
-    const int use_hash5 = (level >= 3);
+    const int use_hash5 = (level >= ZXC_LEVEL_DEFAULT);
     const size_t limit = dict_size - (ZXC_LZ_MIN_MATCH_LEN - 1);
 
     // Sparse seeding for the first half, dense for the second half.

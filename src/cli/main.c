@@ -1657,7 +1657,7 @@ int main(int argc, char** argv) {
     int force = 0;
     int bench_seconds = 5;
     int checksum = -1;
-    int level = 3;
+    int level = ZXC_LEVEL_DEFAULT;
     int json_output = 0;
     size_t block_size = 0;
     int seekable = 0;
