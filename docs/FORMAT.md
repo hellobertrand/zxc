@@ -42,7 +42,7 @@ normative:
 
 informative:
   RFC5116:
-  RFC8478:
+  RFC8878:
   LZ4:
     title: "LZ4 - Extremely fast compression"
     target: https://lz4.github.io/lz4/
@@ -91,7 +91,7 @@ three goals:
 
 1. Decompression throughput in the multi-gigabyte-per-second range
    on commodity CPUs, in the same family as LZ4 {{LZ4}} rather than
-   the higher-ratio family of Zstandard {{RFC8478}}.
+   the higher-ratio family of Zstandard {{RFC8878}}.
 2. Random access via an optional seek table appended to the archive,
    allowing constant-time navigation to any block.
 3. Kernel-space friendliness: no dynamic allocation in the hot path,
@@ -238,7 +238,7 @@ Format Version (u8):
   does not support, as an unsupported version ({{error-handling}}).
 
 Chunk Size Code (u8):
-: Values in the range \[12, 21\] are interpreted as exponents, where
+: Values from 12 to 21 inclusive are interpreted as exponents, where
   block size = 2^code. This yields valid block sizes from 4 KiB
   (code 12) to 2 MiB (code 21). The default block size in the
   reference implementation is 512 KiB (code 19). All other values
@@ -545,7 +545,7 @@ by tree level rather than by symbol.
  Offset  Size  Field
  0x00    128   Code-length header (256 x 4-bit lengths, packed
                two-per-byte, low nibble first). code_len[i] in
-               [0, 11]; 0 means the symbol is absent.
+               0 to 11; 0 means the symbol is absent.
  0x80    var   One run per emitting node of the canonical code tree,
                in breadth-first order (parents before children, left
                before right). Runs are LSB-first within bytes and
@@ -558,7 +558,7 @@ Codes are length-limited at L = 11 bits. Levels <= 6 never emit a
 code longer than 8 bits; level 7 (ULTRA) MAY emit codes up to 11
 bits. Symbols are ordered by (code_len, symbol) and assigned
 consecutive code values in that order, starting at zero and
-left-shifting by one whenever the length increases — the standard
+left-shifting by one whenever the length increases, the standard
 canonical construction. The code tree is the binary trie of these
 codewords read MSB-first: at depth d, bit code_len - 1 - d of a
 codeword selects the left (0) or right (1) child. The Kraft equality
@@ -642,8 +642,8 @@ dictionary (HAS_DICTIONARY set). The payload is the same Huffman section
 as {{huffman-literal-section}} with the 128-byte code-length header
 OMITTED: the code lengths are taken instead from the shared literal
 table carried by the .zxd dictionary ({{zxd-format}}), which is
-validated once — under the same rules as {{huffman-decoder-validation}}
-— when the dictionary is attached. The section payload therefore begins
+validated once, under the same rules as {{huffman-decoder-validation}},
+when the dictionary is attached. The section payload therefore begins
 directly with the first emitting-node run.
 
 The shared table is trained on the corpus' post-LZ literal distribution
@@ -888,7 +888,7 @@ The 4- and 5-byte forms are listed to define the scheme; Format
 Version 9 caps encodings at three bytes and a decoder MUST reject
 the other two ({{varint-cap}}).
 
-The first byte's payload bits — those below its unary prefix — are
+The first byte's payload bits, those below its unary prefix, are
 the least significant bits of the value, and each following byte
 contributes the next eight bits up. Writing b0, b1, b2 for the
 bytes in stream order, the accepted forms decode as:
@@ -1228,7 +1228,7 @@ Flags (u8):
 
 Content Size (u16):
 : The length in bytes of the dictionary content that follows the
-  header. MUST be in the range \[1, 65535\].
+  header. MUST be from 1 to 65535 inclusive.
 
 Dictionary ID (u32):
 : A deterministic 32-bit identifier that binds the (content, table)
