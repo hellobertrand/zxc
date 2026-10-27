@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   # ===========================================================================
-  # Clang 12–22 on Ubuntu
+  # Clang 12–23 on Ubuntu
   # ===========================================================================
   clang:
     name: "Clang ${{ matrix.version }}"
@@ -37,9 +37,10 @@ jobs:
           - { os: ubuntu-24.04, version: 18, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-24.04, version: 19, needs_llvm_apt: true,  llvm_distro: noble }
           - { os: ubuntu-24.04, version: 20, needs_llvm_apt: true,  llvm_distro: noble }
-          # Ubuntu 26.04 ships Clang 20, 21, 22
+          # Ubuntu 26.04 ships Clang 20, 21, 22 - 23 needs LLVM APT
           - { os: ubuntu-26.04, version: 21, needs_llvm_apt: false, llvm_distro: "" }
           - { os: ubuntu-26.04, version: 22, needs_llvm_apt: false, llvm_distro: "" }
+          - { os: ubuntu-26.04, version: 23, needs_llvm_apt: true,  llvm_distro: resolute }
 
     steps:
       - name: Checkout Repository

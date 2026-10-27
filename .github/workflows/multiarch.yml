@@ -309,21 +309,39 @@ jobs:
   #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2 plus BMI1/BMI2/LZCNT;
   #                            VBMI2 is required by ZXC's AVX-512 gate, which
   #                            Skylake-Server lacks)
+  # Tier 3 (x86_64 APX): the whole build (baseline, variants, tests) compiled
+  # with -mapxf, so GCC uses the 16 extended GPRs, NDD and the other APX forms
+  # everywhere; the binary runs nowhere but on an APX CPU or under SDE:
+  #   -dmr  Diamond Rapids  -> APX; its AVX-512 also makes the dispatcher pick
+  #                            the AVX-512 tier, now in APX encodings. Needs
+  #                            GCC >= 14 (ubuntu-26.04 ships 15) and SDE >= 9.48.
   # ===========================================================================
-  build-tier2-amd64-sde:
-    name: "Tier 2: x86_64 (sde ${{ matrix.simd }})"
-    runs-on: ubuntu-latest
+  build-amd64-sde:
+    name: "Tier ${{ matrix.tier }}: x86_64 (sde ${{ matrix.simd }})"
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         include:
           - simd: sse2
+            tier: 2
+            runner: ubuntu-latest
             sde_chip: mrm
           - simd: avx2
+            tier: 2
+            runner: ubuntu-latest
             sde_chip: hsw
           - simd: avx-512
+            tier: 2
+            runner: ubuntu-latest
             sde_chip: icx
+          # Tier 3
+          - simd: apx
+            tier: 3
+            runner: ubuntu-26.04
+            sde_chip: dmr
+            cmake_c_flags: "-mapxf"
     env:
       # Pinned + checksum-verified (Intel requires a license acceptance to
       # download; the tarball itself is served from downloadmirror.intel.com).
@@ -350,10 +368,17 @@ jobs:
         shell: bash
         run: |
           # ZXC_NATIVE_ARCH=OFF keeps the core library at the x86-64 baseline so
-          # nothing outside the explicit per-ISA variants emits an instruction the
-          # emulated model lacks.
+          # nothing outside the explicit per-ISA variants (or matrix.cmake_c_flags,
+          # applied to every translation unit) emits an instruction the emulated
+          # model lacks.
           SDE="sde64 -${{ matrix.sde_chip }} --"
           echo "Emulated CPU: Intel SDE -${{ matrix.sde_chip }} (${{ matrix.simd }} tier)"
+
+          # An `[ -n .. ] && ..` one-liner would abort the step under -e.
+          EXTRA_ARGS=()
+          if [ -n "${{ matrix.cmake_c_flags }}" ]; then
+              EXTRA_ARGS+=(-DCMAKE_C_FLAGS="${{ matrix.cmake_c_flags }}")
+          fi
 
           for LIB_TYPE in "STATIC" "SHARED"; do
               echo ">>> Starting Build: $LIB_TYPE"
@@ -365,6 +390,7 @@ jobs:
               cmake -S . -B "$BUILD_DIR" \
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
+                  "${EXTRA_ARGS[@]}" \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
