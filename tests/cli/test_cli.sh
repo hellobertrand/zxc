@@ -613,6 +613,24 @@ else
     log_fail "Keep source file failed (source was deleted)"
 fi
 
+# 18.1 Without -k, a symlink given as input is what gets removed: the link
+#      goes, its target stays untouched (POSIX only: symlinks need privileges
+#      on Windows).
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] symlink input removal: POSIX only" ;;
+    *)
+        cp "$TEST_FILE" "$TEST_DIR/rm_target.txt"
+        ln -s "rm_target.txt" "$TEST_DIR/rm_link.txt"
+        "$ZXC_BIN" -3 "$TEST_DIR/rm_link.txt"
+        if [[ ! -L "$TEST_DIR/rm_link.txt" ]] && [[ ! -e "$TEST_DIR/rm_link.txt" ]] && \
+           [[ -f "$TEST_DIR/rm_link.txt.zxc" ]] && cmp -s "$TEST_FILE" "$TEST_DIR/rm_target.txt"; then
+            log_pass "Symlink input removal unlinks the link, keeps its target"
+        else
+            log_fail "Symlink input removal: link kept or target removed/altered"
+        fi
+        ;;
+esac
+
 # 19. Multi-Threading Tests (-T)
 echo "Testing Multi-Threading..."
 

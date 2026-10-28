@@ -1652,7 +1652,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", resolved_out_path,
                     resolved_in_path, remove_input ? "; input kept" : "");
         else if (remove_input)
-            unlink(resolved_in_path);
+            // The name given: through a symlink the target stays
+            unlink(in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
             const int err_code = (int)bytes;
