@@ -11,14 +11,14 @@
 \f[B]unzxc\f[R] is equivalent to \f[B]zxc \-d\f[R].
 .PP
 \f[B]zxccat\f[R] is equivalent to \f[B]zxc \-dcf\f[R] applied to every
-\f[I]INPUT\-FILE\f[R] in turn, writing them all to standard output;
-input that does not start like a ZXC archive (see \f[B]\-f\f[R]) comes
-out unchanged.
+\f[I]INPUT\-FILE\f[R] in turn, writing them all to stdout; input that
+does not start like a ZXC archive (see \f[B]\-f\f[R]) comes out
+unchanged.
 .PP
 \f[B]zxcless\f[R] [\f[B]\-\-dict=\f[R]\f[I]FILE\f[R]]
 [\f[I]LESS\-OPTIONS\f[R]] [\f[I]FILE\f[R]...]
-shows files, or standard input, in \f[B]less\f[R](1), decompressing ZXC
-archives on the fly; other input displays unchanged.
+shows files, or stdin, in \f[B]less\f[R](1), decompressing ZXC archives
+on the fly; other input displays unchanged.
 \f[B]\-\-dict\f[R] supplies the dictionary of archives that need one
 (see \f[B]\-D\f[R]).
 The \f[B]ZXC\f[R] environment variable names the \f[B]zxc\f[R] binary to
@@ -27,8 +27,8 @@ use.
 \f[B]zxcgrep\f[R] [\f[B]\-\-dict=\f[R]\f[I]FILE\f[R]]
 [\f[I]GREP\-OPTIONS\f[R]] [\f[B]\-e\f[R]] \f[I]PATTERN\f[R]
 [\f[I]FILE\f[R]...]
-runs \f[B]grep\f[R](1) on files, or standard input, decompressing ZXC
-archives on the fly; other input is searched unchanged.
+runs \f[B]grep\f[R](1) on files, or stdin, decompressing ZXC archives on
+the fly; other input is searched unchanged.
 \f[B]\-\-dict\f[R] supplies the dictionary of archives that need one
 (see \f[B]\-D\f[R]).
 Options go before the pattern; those that select files (\f[B]\-r\f[R],
@@ -43,39 +43,34 @@ support \f[B]\-\-label\f[R] (GNU and BSD grep do).
 \f[B]zxcless\f[R] and \f[B]zxcgrep\f[R] are shell scripts; all four are
 installed on POSIX systems only.
 .SH DESCRIPTION
-\f[B]zxc\f[R] is a command\-line interface for the ZXC compression
-library, a high\-performance lossless compression algorithm optimized
-for maximum decompression throughput.
+\f[B]zxc\f[R] is the command\-line interface to the ZXC compression
+library, a lossless compressor designed for maximum decompression
+throughput.
 .PP
-\f[B]zxc\f[R] is designed for the \f[I]\(dqWrite Once, Read
-Many\(dq\f[R] paradigm.
-It trades compression speed to generate a bitstream specifically
-structured to maximize decompression speed, effectively offloading
-complexity from the decoder to the encoder.
-It aims to provide very high decompression speeds across modern
-architectures while maintaining competitive compression ratios.
-ZXC is particularly suited for scenarios such as Game Assets, Firmware
-or App Bundles where data is compressed once on a build server and
-decompressed millions of times on user devices.
+ZXC follows the \f[I]write once, read many\f[R] model: it spends more
+effort on compression to produce a bitstream that decodes as fast as
+possible, moving the complexity from the decoder to the encoder.
+It targets very high decompression speed on modern architectures while
+keeping competitive compression ratios, and suits data such as game
+assets, firmware or application bundles that is compressed once on a
+build server and decompressed many times on user devices.
 .PP
-By default, \f[B]zxc\f[R] compresses a single \f[I]INPUT\-FILE\f[R].
-If no \f[I]OUTPUT\-FILE\f[R] is provided, \f[B]zxc\f[R] will
-automatically append the \f[CR].zxc\f[R] extension to the input
-filename.
-If no \f[I]INPUT\-FILE\f[R] is provided, \f[B]zxc\f[R] will read from
-standard input (\f[CR]stdin\f[R]) and write to standard output
-(\f[CR]stdout\f[R]).
+By default \f[B]zxc\f[R] compresses a single \f[I]INPUT\-FILE\f[R].
+Without \f[I]OUTPUT\-FILE\f[R], the output name is the input name with
+\f[CR].zxc\f[R] appended on compression, or with \f[CR].zxc\f[R] removed
+on decompression.
+Without \f[I]INPUT\-FILE\f[R], \f[B]zxc\f[R] reads stdin and writes
+stdout.
 .SH STANDARD MODES
 .TP
 \f[B]\-z\f[R], \f[B]\-\-compress\f[R]
-Compress FILE.
-This is the default mode if no mode is specified.
+Compress \f[I]INPUT\-FILE\f[R].
+This is the default mode.
 .TP
 \f[B]\-d\f[R], \f[B]\-\-decompress\f[R]
-Decompress FILE.
-This is the default mode when \f[B]zxc\f[R] is invoked under the name
-\f[B]unzxc\f[R] (typically an installed symlink).
-An explicit mode flag still takes precedence.
+Decompress \f[I]INPUT\-FILE\f[R].
+This is the default mode when \f[B]zxc\f[R] is invoked as
+\f[B]unzxc\f[R]; an explicit mode option still takes precedence.
 .TP
 \f[B]\-l\f[R], \f[B]\-\-list\f[R]
 List archive information: compressed size, uncompressed size,
@@ -96,42 +91,34 @@ An existing file there is replaced only with \f[B]\-f\f[R].
 See \f[B]DICTIONARIES\f[R].
 .TP
 \f[B]\-t\f[R], \f[B]\-\-test\f[R]
-Test the integrity of a compressed FILE.
-It decodes the file and verifies its checksum (if present) without
-writing any output.
-Checksum status reflects the archive header.
-With \f[B]\-t\f[R], three outcomes are reported: verified, none present,
-or skipped via \f[B]\-N\f[R].
-Input streamed from a pipe reports unknown, since its header cannot be
-re\-read.
-All four cases exit 0 on a valid archive.
+Check the integrity of \f[I]INPUT\-FILE\f[R]: decode it and verify its
+checksums, if any, without writing output.
+The report states whether the checksum was verified, absent, skipped by
+\f[B]\-N\f[R], or unknown for input read from a pipe, whose header
+cannot be re\-read; all four exit 0 on a valid archive.
 Under \f[B]\-j\f[R], \f[CR]checksum_verified\f[R] is true only when a
-checksum was actually checked.
-\f[CR]checksum\f[R] reports \f[CR]enabled\f[R], \f[CR]disabled\f[R],
-\f[CR]mixed\f[R] (concatenated frames that differ), or
-\f[CR]unknown\f[R] (pipe input), the same values as \f[B]\-l\f[R].
+checksum was actually checked, and \f[CR]checksum\f[R] takes the same
+values as \f[B]\-l\f[R]: \f[CR]enabled\f[R], \f[CR]disabled\f[R],
+\f[CR]mixed\f[R] or \f[CR]unknown\f[R].
 .TP
 \f[B]\-b\f[R], \f[B]\-\-bench\f[R] [\f[I]N\f[R]]
-Benchmark in\-memory performance.
-Loads the input file entirely into RAM and measures raw algorithm
-throughput (default duration is 5 seconds).
+Benchmark in\-memory performance: load \f[I]INPUT\-FILE\f[R] entirely
+into RAM and measure raw compression and decompression throughput for
+\f[I]N\f[R] seconds (default 5).
 .SH OPTIONS
 .TP
 \f[B]\-m\f[R], \f[B]\-\-multiple\f[R]
-Process multiple files at once.
-When specified, all subsequent non\-option arguments are treated as
-input files.
-For each input file, a corresponding \f[CR].zxc\f[R] file is created (or
-decompressed into its original name).
-Output cannot be written to standard output (\f[CR]stdout\f[R]) when
-this mode is enabled.
+Process several files at once: every non\-option argument is an input
+file, each compressed to its own \f[CR].zxc\f[R] file or decompressed to
+its original name.
+Cannot be combined with \f[B]\-c\f[R] or \f[B]\-o\f[R].
 .TP
 \f[B]\-r\f[R], \f[B]\-\-recursive\f[R]
-Recursively process directories.
-When specified, any directory listed as an argument will be traversed,
-and all regular files within it will be processed (compressed or
-decompressed).
-This option implicitly enables \f[CR]\-\-multiple\f[R] mode.
+Process directories recursively: every regular file under a directory
+given as argument is compressed or decompressed in place.
+On compression, files already ending in \f[CR].zxc\f[R] are skipped;
+symbolic links are reported and skipped.
+Implies \f[B]\-m\f[R].
 .TP
 \f[B]\-1\f[R]..\f[B]\-7\f[R]
 Set the compression level, from 1 (fastest compression) to 7 (smallest
@@ -143,9 +130,9 @@ Levels 6 (density) and 7 (ultra) compress far more slowly and suit data
 written once and read many times.
 .TP
 \f[B]\-T\f[R], \f[B]\-\-threads\f[R] \f[I]N\f[R]
-Set the number of threads to use for compression and decompression.
-A value of \f[CR]0\f[R] means auto\-detection based on the number of
-available CPU cores.
+Set the number of threads for compression and decompression.
+\f[CR]0\f[R] (the default) auto\-detects it from the available CPU
+cores.
 .TP
 \f[B]\-B\f[R], \f[B]\-\-block\-size\f[R] \f[I]SIZE\f[R]
 Set the compression block size.
@@ -153,22 +140,20 @@ Set the compression block size.
 \f[B]2M\f[R] (e.g.
 \f[CR]4K\f[R], \f[CR]64K\f[R], \f[CR]256K\f[R], \f[CR]512K\f[R],
 \f[CR]1M\f[R]).
-Smaller blocks reduce memory usage and improve random\-access
-decompression; larger blocks generally yield better compression ratios.
-The default is \f[B]512K\f[R], tuned for bulk/archival workloads where
-ratio and decompression throughput matter most.
-This option is only meaningful during compression; the block size is
-stored in the archive header and automatically used during
-decompression.
+Smaller blocks use less memory and improve random access; larger blocks
+generally compress better.
+The default is \f[B]512K\f[R], tuned for bulk and archival workloads.
+Only meaningful on compression: the block size is stored in the archive
+header and reused on decompression.
 .TP
 \f[B]\-C\f[R], \f[B]\-\-checksum\f[R]
-Enable block hashing during compression using the rapidhash algorithm.
-Recommended for data integrity validation.
-Checksum verification is automatically performed during extraction when
-enabled.
+Checksum every block with rapidhash during compression, and verify the
+checksums during decompression.
+This is the default.
 .TP
 \f[B]\-N\f[R], \f[B]\-\-no\-checksum\f[R]
-Explicitly disable checksum generation.
+Disable checksums: none is written on compression, and none is verified
+on decompression or under \f[B]\-t\f[R].
 .TP
 \f[B]\-D\f[R], \f[B]\-\-dict\f[R] \f[I]FILE\f[R]
 Use a pre\-trained dictionary (\f[CR].zxd\f[R]) for compression or
@@ -176,13 +161,13 @@ decompression.
 On compression, the archive records the dictionary\(aqs
 \f[CR]dict_id\f[R] in its header.
 On decompression, \f[B]\-D\f[R] is \f[B]required\f[R] for any archive
-that was compressed with a dictionary \(em there is no auto\-lookup;
-without it, decompression fails with a dictionary\-required error (see
+that was compressed with a dictionary: there is no auto\-lookup, and
+without it decompression fails with a dictionary\-required error (see
 \f[B]DICTIONARIES\f[R]).
 .TP
 \f[B]\-o\f[R], \f[B]\-\-output\f[R] \f[I]FILE\f[R]
 Write output to \f[I]FILE\f[R].
-For compression/decompression this overrides the positional
+For compression and decompression this overrides the positional
 \f[I]OUTPUT\-FILE\f[R] (single\-file mode only); when omitted the output
 name is derived from the input.
 For \f[B]\-\-train\f[R] it sets the dictionary path: if \f[I]FILE\f[R]
@@ -193,10 +178,10 @@ to \f[CR]dictionary_<dict_id>.zxd\f[R] in the current directory.
 .TP
 \f[B]\-S\f[R], \f[B]\-\-seekable\f[R]
 Append a seek table to the archive during compression.
-This transforms the file into a random\-access format (Seekable
-Archive), allowing the decoder to instantly locate and decompress
-specific blocks in \f[CR]O(1)\f[R] time without reading the entire file.
-Ideal for compressed filesystems, game assets, and log analysis.
+The archive then supports random access: the decoder locates and
+decompresses any block in \f[CR]O(1)\f[R] without reading the whole
+file.
+Suited to compressed filesystems, game assets and log analysis.
 .TP
 \f[B]\-k\f[R], \f[B]\-\-keep\f[R]
 Keep the input file.
@@ -216,56 +201,51 @@ times, group and, as root, owner; decompression thus restores the
 original\(aqs.
 The output is created \f[CR]0600\f[R] and gets its final mode once
 complete; a group that cannot be kept loses its permission bits.
-If the mode or times cannot be set, zxc warns and keeps the input.
+If the mode or times cannot be set, \f[B]zxc\f[R] warns and keeps the
+input.
 On Windows only the times are copied.
 The format stores none of these.
 .TP
 \f[B]\-f\f[R], \f[B]\-\-force\f[R]
-Force overwrite of the \f[I]OUTPUT\-FILE\f[R] if it already exists.
+Overwrite \f[I]OUTPUT\-FILE\f[R] if it exists.
 An existing file or symbolic link is removed and a new file created, so
 a link at the output path is replaced, never followed; a device such as
 \f[CR]/dev/null\f[R] is written as is.
-When decompressing to standard output (with \f[B]\-c\f[R], or from
-standard input without an \f[I]OUTPUT\-FILE\f[R]), also copy input that
-is not a ZXC archive unchanged.
+When decompressing to stdout (with \f[B]\-c\f[R], or from stdin without
+an \f[I]OUTPUT\-FILE\f[R]), also copy input that is not a ZXC archive
+unchanged.
 A named file is decoded only if it starts with the 4\-byte magic word.
-Standard input can\(aqt be rewound, so there only its first byte counts:
-input that starts with \f[CR]0xF5\f[R], which never starts UTF\-8 text,
-is decoded as an archive.
+stdin cannot be rewound, so there only its first byte counts: input that
+starts with \f[CR]0xF5\f[R], which never starts UTF\-8 text, is decoded
+as an archive.
 .TP
 \f[B]\-c\f[R], \f[B]\-\-stdout\f[R]
-Force writing to standard output (\f[CR]stdout\f[R]), even if it is the
-console.
+Write to stdout, even when it is a terminal.
 .TP
 \f[B]\-v\f[R], \f[B]\-\-verbose\f[R]
-Enable verbose logging mode.
-Outputs more detailed information during operations.
+Print more information during operations.
 .TP
 \f[B]\-q\f[R], \f[B]\-\-quiet\f[R]
-Enable quiet mode, suppressing all non\-error output (such as progress
-bars or real\-time statistics).
+Suppress all non\-error output, such as progress bars and statistics.
 .TP
 \f[B]\-j\f[R], \f[B]\-\-json\f[R]
-Output results in JSON format.
-This is particularly useful for scripting, benchmarking, and the
-\f[CR]\-\-list\f[R] mode.
+Print results as JSON, for scripting, benchmarking and \f[B]\-l\f[R].
 .TP
 \f[B]\-\-progress\f[R] \f[I]MODE\f[R]
 Control the progress display: \f[B]auto\f[R] (default) shows a progress
-bar on the standard error stream when it is a terminal and the file is
-larger than 1 MB; \f[B]always\f[R] forces progress reporting even when
-standard error is not a terminal (updates are then printed one per line,
-at most once per second) or when the size is unknown (stdin input);
-\f[B]never\f[R] disables it.
+bar on stderr when it is a terminal and the file is larger than 1 MB;
+\f[B]always\f[R] reports progress even when stderr is not a terminal
+(one line per update, at most once per second) or when the size is
+unknown (stdin); \f[B]never\f[R] disables it.
 \f[B]\-q\f[R] suppresses progress regardless of this option.
 .SH SPECIAL OPTIONS
 .TP
 \f[B]\-V\f[R], \f[B]\-\-version\f[R]
-Display the version of the zxc library and the compiled architecture
-information, then exit.
+Print the version of the zxc library and the compiled architecture, then
+exit.
 .TP
 \f[B]\-h\f[R], \f[B]\-\-help\f[R]
-Display a help message and exit.
+Print a help message and exit.
 .SH DICTIONARIES
 For workloads compressed in small blocks (4K\(en128K), a pre\-trained
 dictionary can dramatically improve the compression ratio.
@@ -286,11 +266,7 @@ lowercase 8\-digit hex reported by \f[CR]zxc \-l\f[R]).
 On decompression the dictionary is \f[B]not\f[R] auto\-located: an
 archive compressed with a dictionary must be decompressed by supplying
 that dictionary with \f[B]\-D\f[R], otherwise decompression fails with a
-dictionary\-required error.
-.PP
-If no matching dictionary can be found (or supplied), decompression
-fails with a dictionary\-required error rather than producing corrupt
-output.
+dictionary\-required error rather than producing corrupt output.
 .SH CONCATENATED ARCHIVES
 Archives can be concatenated (\f[CR]cat a.zxc b.zxc > ab.zxc\f[R]):
 \f[B]\-d\f[R] decodes them one after the other into one output, and
@@ -303,6 +279,8 @@ and dictionary ID instead.
 fail with a dictionary\-mismatch error.
 .SH EXAMPLES
 \f[B]Compress a file:\f[R] zxc data.txt
+.PP
+\f[B]Compress a file and remove the original:\f[R] zxc \-\-rm data.txt
 .PP
 \f[B]Compress a file with high density (Level 6, archival):\f[R] zxc \-6
 data.bin
@@ -331,8 +309,7 @@ file2.txt file3.txt
 \f[B]Decompress all files in a directory recursively:\f[R] zxc \-d \-r
 \&./my_folder
 .PP
-\f[B]Decompress a file to standard output:\f[R] zxc \-dc data.txt.zxc >
-data.txt
+\f[B]Decompress a file to stdout:\f[R] zxc \-dc data.txt.zxc > data.txt
 .PP
 \f[B]List archive information:\f[R] zxc \-l data.txt.zxc
 .PP
