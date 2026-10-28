@@ -63,7 +63,7 @@ if(ZXC_INSTALL)
         install(TARGETS zxc
             RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
         )
-        # "unzxc" (zxc -d) and "zxccat" (zxc -dc): symlinks to zxc and to its
+        # "unzxc" (zxc -d) and "zxccat" (zxc -dcf): symlinks to zxc and to its
         # man page. Symbolic links and man pages are POSIX-only; skipped on Windows.
         if(NOT WIN32)
             install(FILES ${CMAKE_CURRENT_SOURCE_DIR}/src/cli/zxc.1
