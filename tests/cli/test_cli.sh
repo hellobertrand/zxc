@@ -100,7 +100,7 @@ wait_for_file() {
 # 2. Basic Round-Trip
 echo "Testing Basic Round-Trip..."
 
-if ! "$ZXC_BIN" -z -k "$TEST_FILE_ARG"; then
+if ! "$ZXC_BIN" -z "$TEST_FILE_ARG"; then
     log_fail "Compression command failed (exit code $?)"
 fi
 
@@ -123,10 +123,10 @@ fi
 # Decompress to file
 rm -f "$TEST_FILE"
 sleep 1
-if ! "$ZXC_BIN" -d -k "$TEST_FILE_XC_ARG"; then
+if ! "$ZXC_BIN" -d "$TEST_FILE_XC_ARG"; then
      echo "Decompress to file failed. Retrying once..."
      sleep 1
-     if ! "$ZXC_BIN" -d -k "$TEST_FILE_XC_ARG"; then
+     if ! "$ZXC_BIN" -d "$TEST_FILE_XC_ARG"; then
         log_fail "Decompression to file failed."
      fi
 fi
@@ -168,7 +168,7 @@ fi
 # 4. Flags
 echo "Testing Flags..."
 # Level
-"$ZXC_BIN" -1 -k -f "$TEST_FILE_ARG"
+"$ZXC_BIN" -1 -f "$TEST_FILE_ARG"
 if [[ ! -f "$TEST_FILE_XC_BASH" ]]; then log_fail "Level 1 flag failed"; fi
 log_pass "Flag -1"
 
@@ -176,7 +176,7 @@ log_pass "Flag -1"
 touch "$TEST_DIR/out.zxc"
 touch "${TEST_FILE_XC_BASH}"
 set +e
-"$ZXC_BIN" -z -k "$TEST_FILE_ARG" > /dev/null 2>&1
+"$ZXC_BIN" -z "$TEST_FILE_ARG" > /dev/null 2>&1
 RET=$?
 set -e
 if [[ $RET -eq 0 ]]; then
@@ -185,7 +185,7 @@ else
      log_pass "Overwrite protection verified"
 fi
 
-"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f "$TEST_FILE_ARG"
 if [[ $? -eq 0 ]]; then
    log_pass "Force overwrite (-f)"
 else
@@ -242,14 +242,14 @@ fi
 
 # 8. Checksum
 echo "Testing Checksum..."
-"$ZXC_BIN" -C -k -f "$TEST_FILE_ARG"
+"$ZXC_BIN" -C -f "$TEST_FILE_ARG"
 if [[ ! -f "$TEST_FILE_XC_BASH" ]]; then log_fail "Checksum compression failed"; fi
 rm -f "$TEST_FILE"
 "$ZXC_BIN" -d "$TEST_FILE_XC_ARG"
 if [[ ! -f "$TEST_FILE" ]]; then log_fail "Checksum decompression failed"; fi
 log_pass "Checksum enabled (-C)"
 
-"$ZXC_BIN" -N -k -f "$TEST_FILE_ARG"
+"$ZXC_BIN" -N -f "$TEST_FILE_ARG"
 if [[ ! -f "$TEST_FILE_XC_BASH" ]]; then log_fail "No-Checksum compression failed"; fi
 rm -f "$TEST_FILE"
 "$ZXC_BIN" -d "$TEST_FILE_XC_ARG"
@@ -258,7 +258,7 @@ log_pass "Checksum disabled (-N)"
 
 # 9. Integrity Test (-t)
 echo "Testing Integrity Check (-t)..."
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 
 # Valid file should pass and show "OK"
 OUT=$("$ZXC_BIN" -t "$TEST_FILE_XC_ARG")
@@ -294,7 +294,7 @@ fi
 echo "Testing archive checksum detection (-l)..."
 EMPTY="$TEST_DIR/empty"
 : > "$EMPTY"
-"$ZXC_BIN" -z -k -f -C "$EMPTY"
+"$ZXC_BIN" -z -f -C "$EMPTY"
 if ! wait_for_file "$EMPTY.zxc"; then
     log_fail "Could not create empty archive $EMPTY.zxc"
 fi
@@ -319,7 +319,7 @@ fi
 # A -N archive carries no checksum
 NOCK="$TEST_DIR/nochecksum"
 head -c 200000 "${TEST_FILE}.orig" > "$NOCK"
-"$ZXC_BIN" -z -k -f -N "$NOCK"
+"$ZXC_BIN" -z -f -N "$NOCK"
 if ! wait_for_file "$NOCK.zxc"; then
     log_fail "Could not create no-checksum archive $NOCK.zxc"
 fi
@@ -365,7 +365,7 @@ else
 fi
 
 # Section 9 corrupted the shared archive; recreate it
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 
 # Piped input: checksum unknown, and the pipe still decodes
 set +e
@@ -418,7 +418,7 @@ fi
 
 # 10. Block Checksum Integrity
 echo "Testing Block Checksum Integrity..."
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 
 # Flip the last byte of the last block's checksum, before the 8-byte EOF block
 # and the footer (digest, then the sizes whose lengths the last byte gives).
@@ -446,7 +446,7 @@ fi
 
 # 11. List Command (-l)
 echo "Testing List Command (-l)..."
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 
 # Normal list mode
 OUT=$("$ZXC_BIN" -l "$TEST_FILE_XC_ARG")
@@ -478,7 +478,7 @@ fi
 # 12. Compression Levels (All)
 echo "Testing All Compression Levels..."
 for LEVEL in 1 2 3 4 5 6 7; do
-    "$ZXC_BIN" -$LEVEL -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.zxc"
+    "$ZXC_BIN" -$LEVEL -c "$TEST_FILE_ARG" > "$TEST_DIR/test_lvl${LEVEL}.zxc"
     if [[ ! -f "$TEST_DIR/test_lvl${LEVEL}.zxc" ]]; then
         log_fail "Compression level $LEVEL failed"
     fi
@@ -499,7 +499,7 @@ echo "Testing Different Data Types..."
 # 13.1 Highly Repetitive Text (Best Compression)
 echo "  Testing repetitive data..."
 yes "Lorem ipsum dolor sit amet" | head -n 1000 > "$TEST_DIR/test_repetitive.txt"
-"$ZXC_BIN" -3 -k "$TEST_DIR/test_repetitive.txt"
+"$ZXC_BIN" -3 "$TEST_DIR/test_repetitive.txt"
 if [[ ! -f "$TEST_DIR/test_repetitive.txt.zxc" ]]; then
     log_fail "Repetitive data compression failed"
 fi
@@ -516,7 +516,7 @@ fi
 # 13.2 Binary Zeros (Highly Compressible)
 echo "  Testing binary zeros..."
 dd if=/dev/zero bs=1024 count=100 of="$TEST_DIR/test_zeros.bin" 2>/dev/null
-"$ZXC_BIN" -3 -k "$TEST_DIR/test_zeros.bin"
+"$ZXC_BIN" -3 "$TEST_DIR/test_zeros.bin"
 if [[ ! -f "$TEST_DIR/test_zeros.bin.zxc" ]]; then
     log_fail "Binary zeros compression failed"
 fi
@@ -533,7 +533,7 @@ fi
 # 13.3 Random Data (Incompressible - Should use RAW blocks)
 echo "  Testing random data (incompressible)..."
 dd if=/dev/urandom bs=1024 count=100 of="$TEST_DIR/test_random.bin" 2>/dev/null
-"$ZXC_BIN" -3 -k "$TEST_DIR/test_random.bin"
+"$ZXC_BIN" -3 "$TEST_DIR/test_random.bin"
 if [[ ! -f "$TEST_DIR/test_random.bin.zxc" ]]; then
     log_fail "Random data compression failed"
 fi
@@ -554,7 +554,7 @@ fi
 # 14. Large File Test (Performance Validation)
 echo "Testing Large Files..."
 dd if=/dev/zero bs=1M count=10 of="$TEST_DIR/test_large.bin" 2>/dev/null
-if ! "$ZXC_BIN" -3 -k "$TEST_DIR/test_large.bin"; then
+if ! "$ZXC_BIN" -3 "$TEST_DIR/test_large.bin"; then
     log_fail "Large file compression failed"
 fi
 if ! "$ZXC_BIN" -d -c "$TEST_DIR/test_large.bin.zxc" > "$TEST_DIR/test_large.dec"; then
@@ -578,7 +578,7 @@ fi
 # 16. Empty File Edge Case
 echo "Testing Empty File..."
 touch "$TEST_DIR/test_empty.txt"
-"$ZXC_BIN" -3 -k "$TEST_DIR/test_empty.txt"
+"$ZXC_BIN" -3 "$TEST_DIR/test_empty.txt"
 if [[ ! -f "$TEST_DIR/test_empty.txt.zxc" ]]; then
     log_fail "Empty file compression failed"
 fi
@@ -603,10 +603,16 @@ else
     log_fail "Stdin auto-detection failed (empty output)"
 fi
 
-# 18. Keep Source File (-k)
-echo "Testing Keep Source (-k)..."
+# 18. The input is kept by default; -k only says so
+echo "Testing Keep Source (default and -k)..."
 cp "$TEST_FILE" "$TEST_DIR/test_keep.txt"
-"$ZXC_BIN" -k "$TEST_DIR/test_keep.txt"
+"$ZXC_BIN" "$TEST_DIR/test_keep.txt"
+if [[ -f "$TEST_DIR/test_keep.txt" ]] && [[ -f "$TEST_DIR/test_keep.txt.zxc" ]]; then
+    log_pass "Source file kept by default"
+else
+    log_fail "Source file kept by default failed (source was deleted)"
+fi
+"$ZXC_BIN" -k -f "$TEST_DIR/test_keep.txt"
 if [[ -f "$TEST_DIR/test_keep.txt" ]] && [[ -f "$TEST_DIR/test_keep.txt.zxc" ]]; then
     log_pass "Keep source file (-k)"
 else
@@ -636,7 +642,7 @@ echo "Testing Multi-Threading..."
 
 # 19.1 Single Thread (baseline)
 echo "  Testing single thread (-T1)..."
-"$ZXC_BIN" -3 -T1 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T1.zxc"
+"$ZXC_BIN" -3 -T1 -c "$TEST_FILE_ARG" > "$TEST_DIR/test_T1.zxc"
 if [[ ! -f "$TEST_DIR/test_T1.zxc" ]]; then
     log_fail "Single thread compression failed"
 fi
@@ -650,7 +656,7 @@ fi
 
 # 19.2 Multi-Thread (2 threads)
 echo "  Testing 2 threads (-T2)..."
-"$ZXC_BIN" -3 -T2 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T2.zxc"
+"$ZXC_BIN" -3 -T2 -c "$TEST_FILE_ARG" > "$TEST_DIR/test_T2.zxc"
 if [[ ! -f "$TEST_DIR/test_T2.zxc" ]]; then
     log_fail "2-thread compression failed"
 fi
@@ -664,7 +670,7 @@ fi
 
 # 19.3 Multi-Thread (all threads)
 echo "  Testing all threads (-T0)..."
-"$ZXC_BIN" -3 -T0 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_T0.zxc"
+"$ZXC_BIN" -3 -T0 -c "$TEST_FILE_ARG" > "$TEST_DIR/test_T0.zxc"
 if [[ ! -f "$TEST_DIR/test_T0.zxc" ]]; then
     log_fail "all-thread compression failed"
 fi
@@ -696,7 +702,7 @@ fi
 # 19.6 Large file with threads (performance validation)
 echo "  Testing large file with threads..."
 dd if=/dev/zero bs=1M count=5 of="$TEST_DIR/test_large_mt.bin" 2>/dev/null
-"$ZXC_BIN" -3 -T4 -c -k "$TEST_DIR/test_large_mt.bin" > "$TEST_DIR/test_large_mt.zxc"
+"$ZXC_BIN" -3 -T4 -c "$TEST_DIR/test_large_mt.bin" > "$TEST_DIR/test_large_mt.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/test_large_mt.zxc" > "$TEST_DIR/test_large_mt.dec"
 if cmp -s "$TEST_DIR/test_large_mt.bin" "$TEST_DIR/test_large_mt.dec"; then
     log_pass "Large file multi-threading"
@@ -709,7 +715,7 @@ echo "Testing JSON Output (-j, --json)..."
 
 # 20.1 List mode with JSON (single file)
 echo "  Testing list mode with JSON (single file)..."
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG")
 if [[ "$JSON_OUT" == *'"filename"'* ]] && \
    [[ "$JSON_OUT" == *'"compressed_size_bytes"'* ]] && \
@@ -757,7 +763,7 @@ fi
 
 # 20.4 Integrity check with JSON (valid file)
 echo "  Testing integrity check with JSON (valid file)..."
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 JSON_OUT=$("$ZXC_BIN" -t -j "$TEST_FILE_XC_ARG")
 if [[ "$JSON_OUT" == *'"filename"'* ]] && \
    [[ "$JSON_OUT" == *'"status": "ok"'* ]] && \
@@ -769,7 +775,7 @@ fi
 
 # 20.5 Integrity check with JSON (corrupt file)
 echo "  Testing integrity check with JSON (corrupt file)..."
-"$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+"$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
 # Corrupt a byte
 printf '\xff' | dd of="$TEST_FILE_XC_ARG" bs=1 seek=100 count=1 conv=notrunc 2>/dev/null
 set +e
@@ -788,7 +794,7 @@ fi
 # 20.6 Verify JSON is parseable (if jq is available)
 echo "  Checking JSON validity (if jq available)..."
 if command -v jq &> /dev/null; then
-    "$ZXC_BIN" -z -k -f -C "$TEST_FILE_ARG"
+    "$ZXC_BIN" -z -f -C "$TEST_FILE_ARG"
     JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_FILE_XC_ARG")
     if echo "$JSON_OUT" | jq . > /dev/null 2>&1; then
         log_pass "JSON output is valid (verified with jq)"
@@ -884,7 +890,7 @@ case "$(uname -s 2>/dev/null)" in
         ln -s "$TEST_DIR/rec_links/d/real.txt" "$TEST_DIR/rec_links/to_file.txt"
         ln -s . "$TEST_DIR/rec_links/loop"
         ln -s /nonexistent "$TEST_DIR/rec_links/dangling"
-        REC_OUT=$("$ZXC_BIN" -r -k -3 "$TEST_DIR/rec_links" 2>&1); REC_RC=$?
+        REC_OUT=$("$ZXC_BIN" -r -3 "$TEST_DIR/rec_links" 2>&1); REC_RC=$?
         if [[ $REC_RC -eq 0 ]] && [[ -f "$TEST_DIR/rec_links/d/real.txt.zxc" ]] && \
            [[ ! -e "$TEST_DIR/rec_links/to_file.txt.zxc" ]] && \
            [[ ! -e "$TEST_DIR/rec_outside/outside.txt.zxc" ]] && \
@@ -902,7 +908,7 @@ echo "Testing Block Size (-B)..."
 # 23.1 Round-trip with different block sizes
 for BS in 4K 64K 512K 1M; do
     echo "  Testing block size -B $BS..."
-    "$ZXC_BIN" -3 -B "$BS" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_${BS}.zxc"
+    "$ZXC_BIN" -3 -B "$BS" -c "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_${BS}.zxc"
     if [[ ! -s "$TEST_DIR/test_bs_${BS}.zxc" ]]; then
         log_fail "Block size $BS compression produced empty output"
     fi
@@ -917,7 +923,7 @@ done
 
 # 23.2 Test suffix formats (KB, M, MB)
 echo "  Testing block size suffix formats..."
-"$ZXC_BIN" -3 -B 128KB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_128KB.zxc"
+"$ZXC_BIN" -3 -B 128KB -c "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_128KB.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/test_bs_128KB.zxc" > "$TEST_DIR/test_bs_128KB.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_128KB.dec"; then
     log_pass "Block size suffix KB"
@@ -925,7 +931,7 @@ else
     log_fail "Block size suffix KB round-trip failed"
 fi
 
-"$ZXC_BIN" -3 -B 2MB -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_2MB.zxc"
+"$ZXC_BIN" -3 -B 2MB -c "$TEST_FILE_ARG" > "$TEST_DIR/test_bs_2MB.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/test_bs_2MB.zxc" > "$TEST_DIR/test_bs_2MB.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_bs_2MB.dec"; then
     log_pass "Block size suffix MB"
@@ -986,8 +992,8 @@ fi
 
 # 24.2 Seekable file must be larger than normal (SEK block overhead)
 echo "  Testing seekable overhead..."
-"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/normal.zxc"
-"$ZXC_BIN" -3 -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable.zxc"
+"$ZXC_BIN" -3 -c "$TEST_FILE_ARG" > "$TEST_DIR/normal.zxc"
+"$ZXC_BIN" -3 -S -c "$TEST_FILE_ARG" > "$TEST_DIR/seekable.zxc"
 SIZE_NORMAL=$(wc -c < "$TEST_DIR/normal.zxc" | tr -d ' ')
 SIZE_SEEKABLE=$(wc -c < "$TEST_DIR/seekable.zxc" | tr -d ' ')
 if [[ "$SIZE_SEEKABLE" -gt "$SIZE_NORMAL" ]]; then
@@ -999,7 +1005,7 @@ fi
 
 # 24.3 Seekable with small block size (many blocks = larger seek table)
 echo "  Testing seekable with small blocks (-B 4K)..."
-"$ZXC_BIN" -3 -S -B 4K -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_4k.zxc"
+"$ZXC_BIN" -3 -S -B 4K -c "$TEST_FILE_ARG" > "$TEST_DIR/seekable_4k.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/seekable_4k.zxc" > "$TEST_DIR/seekable_4k.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_4k.dec"; then
     SIZE_4K=$(wc -c < "$TEST_DIR/seekable_4k.zxc" | tr -d ' ')
@@ -1015,7 +1021,7 @@ fi
 
 # 24.4 Seekable with checksum
 echo "  Testing seekable + checksum (-S -C)..."
-"$ZXC_BIN" -3 -S -C -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_chk.zxc"
+"$ZXC_BIN" -3 -S -C -c "$TEST_FILE_ARG" > "$TEST_DIR/seekable_chk.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/seekable_chk.zxc" > "$TEST_DIR/seekable_chk.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_chk.dec"; then
     log_pass "Seekable + checksum (-S -C)"
@@ -1025,7 +1031,7 @@ fi
 
 # 24.5 Seekable with multi-threading
 echo "  Testing seekable + threads (-S -T2)..."
-"$ZXC_BIN" -3 -S -T2 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_mt.zxc"
+"$ZXC_BIN" -3 -S -T2 -c "$TEST_FILE_ARG" > "$TEST_DIR/seekable_mt.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/seekable_mt.zxc" > "$TEST_DIR/seekable_mt.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_mt.dec"; then
     log_pass "Seekable + multi-threading (-S -T2)"
@@ -1037,7 +1043,7 @@ fi
 echo "  Testing seekable across all levels..."
 SEEK_ALL_OK=1
 for LEVEL in 1 2 3 4 5 6 7; do
-    "$ZXC_BIN" -$LEVEL -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_lvl${LEVEL}.zxc"
+    "$ZXC_BIN" -$LEVEL -S -c "$TEST_FILE_ARG" > "$TEST_DIR/seekable_lvl${LEVEL}.zxc"
     "$ZXC_BIN" -d -c "$TEST_DIR/seekable_lvl${LEVEL}.zxc" > "$TEST_DIR/seekable_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/seekable_lvl${LEVEL}.dec"; then
         SEEK_ALL_OK=0
@@ -1058,7 +1064,7 @@ fi
 
 # 24.8 Seekable + no-checksum
 echo "  Testing seekable + no-checksum (-S -N)..."
-"$ZXC_BIN" -3 -S -N -c -k "$TEST_FILE_ARG" > "$TEST_DIR/seekable_nochk.zxc"
+"$ZXC_BIN" -3 -S -N -c "$TEST_FILE_ARG" > "$TEST_DIR/seekable_nochk.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/seekable_nochk.zxc" > "$TEST_DIR/seekable_nochk.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/seekable_nochk.dec"; then
     log_pass "Seekable + no-checksum (-S -N)"
@@ -1068,7 +1074,7 @@ fi
 
 # 24.9 List command on seekable archive
 echo "  Testing list command on seekable archive..."
-"$ZXC_BIN" -3 -S -C -k -f "$TEST_FILE_ARG"
+"$ZXC_BIN" -3 -S -C -f "$TEST_FILE_ARG"
 OUT=$("$ZXC_BIN" -l "$TEST_FILE_XC_ARG")
 if [[ "$OUT" == *"Compressed"* ]] && [[ "$OUT" == *"Uncompressed"* ]]; then
     log_pass "List command on seekable archive"
@@ -1094,7 +1100,7 @@ log_pass "Dictionary trained via --train"
 
 # 25.2 Round-trip with dictionary
 echo "  Testing dict round-trip..."
-"$ZXC_BIN" -3 -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict.zxc"
+"$ZXC_BIN" -3 -D "$DICT_FILE" -c "$TEST_FILE_ARG" > "$TEST_DIR/test_dict.zxc"
 if [[ ! -s "$TEST_DIR/test_dict.zxc" ]]; then
     log_fail "Dict compression failed"
 fi
@@ -1116,7 +1122,7 @@ fi
 
 # 25.4 List without dict shows dash
 echo "  Testing list without dict shows dash..."
-"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_nodict2.zxc"
+"$ZXC_BIN" -3 -c "$TEST_FILE_ARG" > "$TEST_DIR/test_nodict2.zxc"
 OUT=$("$ZXC_BIN" -l "$TEST_DIR/test_nodict2.zxc")
 if [[ "$OUT" == *"Dict ID"* ]] && [[ "$OUT" == *" -  "* ]]; then
     log_pass "List without dict shows dash"
@@ -1147,7 +1153,7 @@ fi
 
 # 25.7 Dict with seekable
 echo "  Testing dict + seekable (-D -S)..."
-"$ZXC_BIN" -3 -D "$DICT_FILE" -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_seek.zxc"
+"$ZXC_BIN" -3 -D "$DICT_FILE" -S -c "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_seek.zxc"
 "$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_seek.zxc" > "$TEST_DIR/test_dict_seek.dec"
 if cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_seek.dec"; then
     log_pass "Dict + seekable (-D -S)"
@@ -1159,7 +1165,7 @@ fi
 echo "  Testing dict across all levels..."
 DICT_ALL_OK=1
 for LEVEL in 1 2 3 4 5 6 7; do
-    "$ZXC_BIN" -$LEVEL -D "$DICT_FILE" -c -k "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_lvl${LEVEL}.zxc"
+    "$ZXC_BIN" -$LEVEL -D "$DICT_FILE" -c "$TEST_FILE_ARG" > "$TEST_DIR/test_dict_lvl${LEVEL}.zxc"
     "$ZXC_BIN" -d -D "$DICT_FILE" -c "$TEST_DIR/test_dict_lvl${LEVEL}.zxc" > "$TEST_DIR/test_dict_lvl${LEVEL}.dec"
     if ! cmp -s "$TEST_FILE" "$TEST_DIR/test_dict_lvl${LEVEL}.dec"; then
         DICT_ALL_OK=0
@@ -1229,7 +1235,7 @@ esac
 # 25.11 -D is mandatory on decompression: no auto-lookup, even if the .zxd sits
 # right next to the archive.
 echo "  Testing -D is mandatory (no auto-lookup)..."
-"$ZXC_BIN" -3 -D "$AUTO_DIR/$ZXD_NAME" -B 4K -c -k "$TEST_FILE_ARG" > "$AUTO_DIR/payload.zxc"
+"$ZXC_BIN" -3 -D "$AUTO_DIR/$ZXD_NAME" -B 4K -c "$TEST_FILE_ARG" > "$AUTO_DIR/payload.zxc"
 set +e
 "$ZXC_BIN" -d -c "$AUTO_DIR/payload.zxc" > /dev/null 2>&1   # .zxd present, but no -D
 RET=$?
@@ -1257,7 +1263,7 @@ UNZXC_BIN="$TEST_DIR/unzxc"
 
 if ln -sf "$ZXC_ABS" "$UNZXC_BIN" 2>/dev/null && [[ -L "$UNZXC_BIN" ]]; then
     # A known archive to decode through the alias.
-    "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/alias.zxc"
+    "$ZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/alias.zxc"
 
     # 26.1 unzxc with no mode flag must decompress (equivalent to zxc -d).
     if "$UNZXC_BIN" -c "$TEST_DIR/alias.zxc" > "$TEST_DIR/alias.dec" 2>/dev/null \
@@ -1319,7 +1325,7 @@ else
 fi
 
 # 26.4 -c appends to a >> redirect
-"$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/append.zxc"
+"$ZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/append.zxc"
 printf 'kept line\n' > "$TEST_DIR/append_out"
 "$ZXC_BIN" -d -c "$TEST_DIR/append.zxc" >> "$TEST_DIR/append_out"
 { printf 'kept line\n'; cat "$TEST_FILE"; } > "$TEST_DIR/append_expected"
@@ -1336,7 +1342,7 @@ case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] zxcless is not installed on Windows" ;;
     *)
         if command -v less >/dev/null 2>&1; then
-            "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/less.zxc"
+            "$ZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/less.zxc"
             printf 'plain text\n' > "$TEST_DIR/less_plain.txt"
             { cat "$TEST_FILE"; cat "$TEST_DIR/less_plain.txt"; } > "$TEST_DIR/less_expected"
             set +e
@@ -1393,7 +1399,7 @@ case "$(uname -s 2>/dev/null)" in
                 printf 'sample %s: connection to database lost, retrying\n' "$n" > "$TEST_DIR/less_dict/s$n"
             done
             "$ZXC_BIN" --train -q -o "$TEST_DIR/less_dict/d.zxd" "$TEST_DIR/less_dict"/s* > /dev/null 2>&1
-            "$ZXC_BIN" -z -c -k -D "$TEST_DIR/less_dict/d.zxd" "$TEST_FILE_ARG" > "$TEST_DIR/less_dict/a.zxc"
+            "$ZXC_BIN" -z -c -D "$TEST_DIR/less_dict/d.zxd" "$TEST_FILE_ARG" > "$TEST_DIR/less_dict/a.zxc"
             set +e
             ZXC="$ZXC_ABS" sh "$ZXCLESS" --dict="$TEST_DIR/less_dict/d.zxd" "$TEST_DIR/less_dict/a.zxc" \
                 > "$TEST_DIR/less_dict_out" 2>/dev/null < /dev/null
@@ -1429,7 +1435,7 @@ case "$(uname -s 2>/dev/null)" in
     *)
         zxcgrep() { ZXC="$ZXC_ABS" sh "$ZXCGREP" "$@"; }
         printf 'alpha\nERROR one\nbeta\n' > "$TEST_DIR/grep.log"
-        "$ZXC_BIN" -z -c -k "$TEST_DIR/grep.log" > "$TEST_DIR/grep.log.zxc"
+        "$ZXC_BIN" -z -c "$TEST_DIR/grep.log" > "$TEST_DIR/grep.log.zxc"
         printf "ERROR it's\n" > "$TEST_DIR/grep it's.txt"
         printf '%s:ERROR one\n%s:ERROR it'"'"'s\n' "$TEST_DIR/grep.log.zxc" \
             "$TEST_DIR/grep it's.txt" > "$TEST_DIR/grep_expected"
@@ -1487,7 +1493,7 @@ case "$(uname -s 2>/dev/null)" in
         # --dict supplies the dictionary; without it the archive is an error
         "$ZXC_BIN" --train -q -o "$TEST_DIR/grep_d.zxd" "$TEST_DIR/grep.log" "$TEST_DIR/grep it's.txt" \
             "$TEST_DIR/grep.log" "$TEST_DIR/grep it's.txt" "$TEST_DIR/grep.log" > /dev/null 2>&1
-        "$ZXC_BIN" -z -c -k -D "$TEST_DIR/grep_d.zxd" "$TEST_DIR/grep.log" > "$TEST_DIR/grep_dict.zxc"
+        "$ZXC_BIN" -z -c -D "$TEST_DIR/grep_d.zxd" "$TEST_DIR/grep.log" > "$TEST_DIR/grep_dict.zxc"
         set +e
         zxcgrep --dict "$TEST_DIR/grep_d.zxd" ERROR "$TEST_DIR/grep_dict.zxc" > "$TEST_DIR/grep_dict_out" 2>/dev/null
         GREP_DICT_RC=$?
@@ -1502,7 +1508,7 @@ case "$(uname -s 2>/dev/null)" in
         fi
 
         # grep stopping early is no error, even with SIGPIPE ignored (CI); -q stops at a match
-        "$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/grep_big.zxc"
+        "$ZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/grep_big.zxc"
         set +e
         zxcgrep -l Lorem "$TEST_DIR/grep_big.zxc" > /dev/null 2> "$TEST_DIR/grep_l_err"
         GREP_EARLY_RC=$?
@@ -1542,8 +1548,8 @@ for n in 1 2 3; do
 done
 
 # 27.1 Cross-platform: the shell expands the glob; -m must compress every file to
-#      <name>.zxc (keeping inputs with -k). Then verify one round-trip is valid.
-"$ZXC_BIN" -k -m "$MGLOB_DIR"/part_*.txt >/dev/null 2>&1 || true
+#      <name>.zxc (inputs are kept). Then verify one round-trip is valid.
+"$ZXC_BIN" -m "$MGLOB_DIR"/part_*.txt >/dev/null 2>&1 || true
 if [[ -f "$MGLOB_DIR/part_1.txt.zxc" ]] && [[ -f "$MGLOB_DIR/part_2.txt.zxc" ]] \
    && [[ -f "$MGLOB_DIR/part_3.txt.zxc" ]]; then
     if "$ZXC_BIN" -d -c "$MGLOB_DIR/part_2.txt.zxc" 2>/dev/null | cmp -s - "$MGLOB_DIR/part_2.txt"; then
@@ -1650,21 +1656,48 @@ else
     log_fail "-o with -m should be rejected"
 fi
 
-# 29. Default Input Deletion (gzip-like behavior)
-echo "Testing Default Input Deletion..."
+# 29. Input removal (--rm)
+echo "Testing Input Removal (--rm)..."
 cp "$TEST_FILE" "$TEST_DIR/del_me.txt"
-"$ZXC_BIN" -f "$TEST_DIR/del_me.txt"
+"$ZXC_BIN" -f --rm "$TEST_DIR/del_me.txt"
 if [[ ! -f "$TEST_DIR/del_me.txt" ]] && [[ -f "$TEST_DIR/del_me.txt.zxc" ]]; then
-    log_pass "Compression deletes input by default"
+    log_pass "Compression with --rm deletes the input"
 else
-    log_fail "Compression without -k should delete the input"
+    log_fail "Compression with --rm should delete the input"
 fi
-"$ZXC_BIN" -d -f "$TEST_DIR/del_me.txt.zxc"
+"$ZXC_BIN" -d -f --rm "$TEST_DIR/del_me.txt.zxc"
 if [[ -f "$TEST_DIR/del_me.txt" ]] && [[ ! -f "$TEST_DIR/del_me.txt.zxc" ]] \
    && cmp -s "$TEST_FILE" "$TEST_DIR/del_me.txt"; then
-    log_pass "Decompression deletes archive by default"
+    log_pass "Decompression with --rm deletes the archive"
 else
-    log_fail "Decompression without -k should delete the archive and restore the file"
+    log_fail "Decompression with --rm should delete the archive and restore the file"
+fi
+
+# 29.1 --rm is ignored when the output is not the derived name: -c, -o, a
+#      positional OUTPUT-FILE; -k wins over --rm
+"$ZXC_BIN" -c --rm "$TEST_DIR/del_me.txt" > "$TEST_DIR/del_me_c.zxc"
+RM_C=$?; [[ -f "$TEST_DIR/del_me.txt" ]]; RM_C_KEPT=$?
+"$ZXC_BIN" -f -o "$TEST_DIR/del_me_o.zxc" --rm "$TEST_DIR/del_me.txt"
+RM_O=$?; [[ -f "$TEST_DIR/del_me.txt" ]]; RM_O_KEPT=$?
+"$ZXC_BIN" -f --rm "$TEST_DIR/del_me.txt" "$TEST_DIR/del_me_pos.zxc"
+RM_P=$?; [[ -f "$TEST_DIR/del_me.txt" ]]; RM_P_KEPT=$?
+"$ZXC_BIN" -f -k --rm "$TEST_DIR/del_me.txt"
+RM_K=$?; [[ -f "$TEST_DIR/del_me.txt" ]]; RM_K_KEPT=$?
+if [[ $RM_C -eq 0 && $RM_C_KEPT -eq 0 && $RM_O -eq 0 && $RM_O_KEPT -eq 0 && \
+      $RM_P -eq 0 && $RM_P_KEPT -eq 0 && $RM_K -eq 0 && $RM_K_KEPT -eq 0 ]] && \
+   cmp -s "$TEST_DIR/del_me_c.zxc" "$TEST_DIR/del_me.txt.zxc"; then
+    log_pass "--rm ignored with -c, -o, OUTPUT-FILE and -k"
+else
+    log_fail "--rm removed the input with -c ($RM_C_KEPT), -o ($RM_O_KEPT), OUTPUT-FILE ($RM_P_KEPT) or -k ($RM_K_KEPT)"
+fi
+
+# 29.2 --rm on -t and -l leaves the archive alone
+"$ZXC_BIN" -t --rm "$TEST_DIR/del_me.txt.zxc" > /dev/null
+"$ZXC_BIN" -l --rm "$TEST_DIR/del_me.txt.zxc" > /dev/null
+if [[ -f "$TEST_DIR/del_me.txt.zxc" ]]; then
+    log_pass "--rm ignored with -t and -l"
+else
+    log_fail "--rm removed the archive under -t or -l"
 fi
 
 # 30. Long Options and Option Parsing
@@ -1794,7 +1827,7 @@ fi
 #     inherit its ENOSPC semantics (writes succeed), so require real Linux.
 if [[ "$(uname -s 2>/dev/null)" == "Linux" ]] && [[ -w /dev/full ]]; then
     set +e
-    "$ZXC_BIN" -c -k -f "$TEST_FILE_ARG" > /dev/full 2>/dev/null
+    "$ZXC_BIN" -c -f "$TEST_FILE_ARG" > /dev/full 2>/dev/null
     RET=$?
     set -e
     if [[ $RET -ne 0 ]]; then
@@ -1810,7 +1843,7 @@ fi
 echo "Testing Progress Display (--progress)..."
 
 # 34.1 --progress=always emits updates on a non-tty stderr (file input, known size)
-"$ZXC_BIN" --progress=always -f -k -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog1.err"
+"$ZXC_BIN" --progress=always -f -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog1.err"
 if grep -q "Compressing \[" "$TEST_DIR/prog1.err" && grep -q "MB/s" "$TEST_DIR/prog1.err"; then
     log_pass "--progress=always emits updates off-tty"
 else
@@ -1826,8 +1859,8 @@ else
 fi
 
 # 34.3 --progress=never and auto off-tty stay silent
-"$ZXC_BIN" --progress=never -f -k -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog3.err"
-"$ZXC_BIN" -f -k -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog4.err"
+"$ZXC_BIN" --progress=never -f -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog3.err"
+"$ZXC_BIN" -f -c "$TEST_FILE_ARG" > /dev/null 2> "$TEST_DIR/prog4.err"
 if [[ ! -s "$TEST_DIR/prog3.err" ]] && [[ ! -s "$TEST_DIR/prog4.err" ]]; then
     log_pass "--progress=never and auto off-tty are silent"
 else
@@ -1847,7 +1880,7 @@ fi
 
 # 34.5 -t with --progress=always labels the operation "Testing"
 set +e
-"$ZXC_BIN" -z -k -f "$TEST_FILE_ARG" 2> "$TEST_DIR/prog5z.err"
+"$ZXC_BIN" -z -f "$TEST_FILE_ARG" 2> "$TEST_DIR/prog5z.err"
 ZRET=$?
 set -e
 if [[ $ZRET -ne 0 ]]; then
@@ -1873,8 +1906,8 @@ fi
 echo "Testing containers..."
 
 # 35.1 Two archives back to back decode as one stream, from a file and from stdin
-"$ZXC_BIN" -3 -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_a.zxc"
-"$ZXC_BIN" -1 -N -S -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_b.zxc"
+"$ZXC_BIN" -3 -c "$TEST_FILE_ARG" > "$TEST_DIR/cat_a.zxc"
+"$ZXC_BIN" -1 -N -S -c "$TEST_FILE_ARG" > "$TEST_DIR/cat_b.zxc"
 cat "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_b.zxc" > "$TEST_DIR/cat.zxc"
 cat "$TEST_FILE" "$TEST_FILE" > "$TEST_DIR/cat.expected"
 "$ZXC_BIN" -d -c "$TEST_DIR/cat.zxc" > "$TEST_DIR/cat.dec"
@@ -1917,7 +1950,7 @@ else
 fi
 
 # 35.2c Block sizes that differ between frames: listed by -v, an array in JSON
-"$ZXC_BIN" -B 256K -c -k "$TEST_FILE_ARG" > "$TEST_DIR/cat_c.zxc"
+"$ZXC_BIN" -B 256K -c "$TEST_FILE_ARG" > "$TEST_DIR/cat_c.zxc"
 cat "$TEST_DIR/cat_a.zxc" "$TEST_DIR/cat_c.zxc" > "$TEST_DIR/cat_bs.zxc"
 VOUT=$("$ZXC_BIN" -l -v "$TEST_DIR/cat_bs.zxc")
 JSON_OUT=$("$ZXC_BIN" -l -j "$TEST_DIR/cat_bs.zxc")
@@ -1949,7 +1982,7 @@ for w in z d l list t test b; do
     printf 'file named %s\n' "$w" > "$WORD_DIR/$w"
     cp "$WORD_DIR/$w" "$WORD_DIR/$w.orig"
     set +e
-    (cd "$WORD_DIR" && "$ZXC_ABS" "$w" && "$ZXC_ABS" -d -- "$w.zxc") > /dev/null 2>&1
+    (cd "$WORD_DIR" && "$ZXC_ABS" --rm "$w" && "$ZXC_ABS" -d -- "$w.zxc") > /dev/null 2>&1
     RET=$?
     set -e
     if [[ $RET -ne 0 ]] || ! cmp -s "$WORD_DIR/$w.orig" "$WORD_DIR/$w"; then
@@ -1961,7 +1994,7 @@ log_pass "Files named like modes compress and decompress"
 # 37. -dcf passes through input that is not an archive
 echo "Testing -dcf pass-through..."
 printf 'plain text, not an archive\n' > "$TEST_DIR/pass_plain.txt"
-"$ZXC_BIN" -z -c -k "$TEST_FILE_ARG" > "$TEST_DIR/pass.zxc"
+"$ZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/pass.zxc"
 
 # 37.1 Plain input, from a file or stdin, comes out as is; without -f it is refused
 set +e
@@ -2030,9 +2063,9 @@ touch -t 202001011200 "$META"
 WANT=$(file_attrs "$META")
 
 # 38.1 Round trip: the archive, then the restored file, carry the original's
-"$ZXC_BIN" -q "$META"
+"$ZXC_BIN" -q --rm "$META"
 GOT_XC=$(file_attrs "$META.zxc")
-"$ZXC_BIN" -d -q "$META.zxc"
+"$ZXC_BIN" -d -q --rm "$META.zxc"
 GOT_DEC=$(file_attrs "$META")
 if [[ "$GOT_XC" == "$WANT" && "$GOT_DEC" == "$WANT" ]]; then
     log_pass "Mode and mtime survive compression and decompression"
@@ -2043,7 +2076,7 @@ fi
 # 38.2 -f onto an existing, wider file still yields the input's mode
 printf 'old\n' > "$META.zxc"
 chmod 644 "$META.zxc"
-"$ZXC_BIN" -q -k -f "$META"
+"$ZXC_BIN" -q -f "$META"
 GOT=$(file_attrs "$META.zxc")
 if [[ "$GOT" == "$WANT" ]]; then
     log_pass "-f overwrite takes the input's mode and mtime"
@@ -2053,7 +2086,7 @@ fi
 rm -f "$META.zxc"
 
 # 38.3 --no-preserve leaves the output's mtime current
-"$ZXC_BIN" -q -k --no-preserve "$META"
+"$ZXC_BIN" -q --no-preserve "$META"
 GOT=$(file_attrs "$META.zxc")
 if [[ "${GOT##* }" != "${WANT##* }" ]]; then
     log_pass "--no-preserve keeps a fresh mtime"
@@ -2073,17 +2106,17 @@ touch -t 202001011200 "$META_DIR/a"
 touch -t 201806150930 "$META_DIR/sub/b"
 WANT_A=$(file_attrs "$META_DIR/a")
 WANT_B=$(file_attrs "$META_DIR/sub/b")
-"$ZXC_BIN" -q -m "$META_DIR/a" "$META_DIR/sub/b"
+"$ZXC_BIN" -q --rm -m "$META_DIR/a" "$META_DIR/sub/b"
 GOT_A=$(file_attrs "$META_DIR/a.zxc")
 GOT_B=$(file_attrs "$META_DIR/sub/b.zxc")
-"$ZXC_BIN" -d -q -r "$META_DIR"
+"$ZXC_BIN" -d -q --rm -r "$META_DIR"
 GOT_DEC="$(file_attrs "$META_DIR/a") $(file_attrs "$META_DIR/sub/b")"
 if [[ "$GOT_A $GOT_B" == "$WANT_A $WANT_B" && "$GOT_DEC" == "$WANT_A $WANT_B" ]]; then
     log_pass "-m and -r keep each file's mode and mtime"
 else
     log_fail "-m/-r metadata: want '$WANT_A $WANT_B', archives '$GOT_A $GOT_B', restored '$GOT_DEC'"
 fi
-"$ZXC_BIN" -q -r -k --no-preserve "$META_DIR"
+"$ZXC_BIN" -q -r --no-preserve "$META_DIR"
 GOT_A=$(file_attrs "$META_DIR/a.zxc")
 GOT_B=$(file_attrs "$META_DIR/sub/b.zxc")
 if [[ "${GOT_A##* }" != "${WANT_A##* }" && "${GOT_B##* }" != "${WANT_B##* }" ]]; then
@@ -2100,8 +2133,8 @@ else
     head -c 50000 "$TEST_FILE" > "$META_RO"
     chmod 444 "$META_RO"
     set +e
-    "$ZXC_BIN" -q -k "$META_RO" && "$ZXC_BIN" -q -k -f "$META_RO" &&
-        "$ZXC_BIN" -q -d -k -f "$META_RO.zxc"
+    "$ZXC_BIN" -q "$META_RO" && "$ZXC_BIN" -q -f "$META_RO" &&
+        "$ZXC_BIN" -q -d -f "$META_RO.zxc"
     RC=$?
     set -e
     GOT="$(file_attrs "$META_RO") $(file_attrs "$META_RO.zxc")"
@@ -2117,9 +2150,9 @@ else
     cp "$META_LN" "$META_LN.orig"
     ln -s "$TEST_DIR/meta_victim" "$META_LN.zxc"
     set +e
-    "$ZXC_BIN" -q -k "$META_LN" 2>/dev/null
+    "$ZXC_BIN" -q "$META_LN" 2>/dev/null
     RC_NOF=$?
-    "$ZXC_BIN" -q -k -f "$META_LN"
+    "$ZXC_BIN" -q -f "$META_LN"
     RC_F=$?
     set -e
     if [[ $RC_NOF -ne 0 && $RC_F -eq 0 && ! -e "$TEST_DIR/meta_victim" && ! -L "$META_LN.zxc" ]]; then
@@ -2147,7 +2180,7 @@ else
     cp "$META_LN.orig" "$META_LN"
     rm -f "$META_LN.zxc"
     ln "$META_LN" "$META_LN.zxc"  # output hard-linked to the input
-    "$ZXC_BIN" -q -k -f "$META_LN"
+    "$ZXC_BIN" -q -f "$META_LN"
     if cmp -s "$META_LN" "$META_LN.orig" && "$ZXC_BIN" -dc "$META_LN.zxc" | cmp -s - "$META_LN.orig"; then
         log_pass "An output hard-linked to the input does not overwrite it"
     else
@@ -2164,7 +2197,7 @@ cp "${TEST_FILE}.orig" "$CASE_IN"
 if [[ ! -e "$CASE_OUT" ]]; then
     echo "  [SKIP] case-sensitive filesystem"
 else
-    if "$ZXC_BIN" -q -k -f -o "$CASE_OUT" "$CASE_IN" 2>/dev/null; then
+    if "$ZXC_BIN" -q -f -o "$CASE_OUT" "$CASE_IN" 2>/dev/null; then
         log_fail "-f -o onto the input in another case was not refused"
     elif cmp -s "$CASE_IN" "${TEST_FILE}.orig"; then
         log_pass "-f -o onto the input in another case is refused, input kept"
@@ -2184,7 +2217,7 @@ rm -f "$LINK_OUT"
 if ! ln "$LINK_IN" "$LINK_OUT" 2>/dev/null || [[ "$(stat -c '%h' "$LINK_IN" 2>/dev/null || stat -f '%l' "$LINK_IN")" != 2 ]]; then
     echo "  [SKIP] hard links not supported here"
 elif [[ $IS_WINDOWS -eq 1 ]]; then
-    if "$ZXC_BIN" -q -k -f -o "$LINK_OUT" "$LINK_IN" 2>/dev/null; then
+    if "$ZXC_BIN" -q -f -o "$LINK_OUT" "$LINK_IN" 2>/dev/null; then
         log_fail "-f -o onto a hard link to the input was not refused"
     elif cmp -s "$LINK_IN" "${TEST_FILE}.orig"; then
         log_pass "-f -o onto a hard link to the input is refused, input kept"
@@ -2192,7 +2225,7 @@ elif [[ $IS_WINDOWS -eq 1 ]]; then
         log_fail "-f -o onto a hard link to the input destroyed it"
     fi
 else
-    if ! "$ZXC_BIN" -q -k -f -o "$LINK_OUT" "$LINK_IN" 2>/dev/null; then
+    if ! "$ZXC_BIN" -q -f -o "$LINK_OUT" "$LINK_IN" 2>/dev/null; then
         log_fail "-f -o onto a hard link to the input was refused"
     elif cmp -s "$LINK_IN" "${TEST_FILE}.orig" && "$ZXC_BIN" -d -c "$LINK_OUT" | cmp -s - "${TEST_FILE}.orig"; then
         log_pass "-f -o onto a hard link to the input replaces the link, input kept"

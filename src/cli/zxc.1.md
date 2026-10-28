@@ -80,7 +80,10 @@ By default, **zxc** compresses a single *INPUT-FILE*. If no *OUTPUT-FILE* is pro
 : Append a seek table to the archive during compression. This transforms the file into a random-access format (Seekable Archive), allowing the decoder to instantly locate and decompress specific blocks in `O(1)` time without reading the entire file. Ideal for compressed filesystems, game assets, and log analysis.
 
 **-k**, **--keep**
-: Keep the input file after an in-place compression or decompression. By default the input is removed **only** when its output name is auto-derived (e.g. `file` → `file.zxc`). When the output is named explicitly — with **-o** or a positional *OUTPUT-FILE* — the input is always kept, so this flag is only needed for the in-place case.
+: Keep the input file. This is the default behavior; the flag overrides **--rm**.
+
+**--rm**
+: Remove the input file(s) once compression or decompression has succeeded. Ignored when writing to stdout or to a file named with **-o** or *OUTPUT-FILE*, and with **-t** or **-l**.
 
 **--no-preserve**
 : Do not copy the input's attributes to the output. By default, when the input is a regular file, the output takes its permission bits (no setuid, setgid or sticky), access and modification times, group and, as root, owner; decompression thus restores the original's. The output is created `0600` and gets its final mode once complete; a group that cannot be kept loses its permission bits. If the mode or times cannot be set, zxc warns and keeps the input. On Windows only the times are copied. The format stores none of these.

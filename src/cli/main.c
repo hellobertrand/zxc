@@ -501,7 +501,7 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE, OPT_RM };
 
 // Whether path ends with the archive extension.
 static int zxc_has_archive_ext(const char* path) {
@@ -713,7 +713,9 @@ static void print_help(const char* app) {
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
-        "  -k, --keep        Keep input file\n"
+        "  -k, --keep        Keep input file {default}\n"
+        "  --rm              Remove input file once its output is written; ignored\n"
+        "                    with -c, -o, an OUTPUT-FILE, -t or -l\n"
         "  --no-preserve     Do not copy the input's mode, times and group (owner as\n"
         "                    root) to the output\n"
         "  -f, --force       Force overwrite; when decompressing to stdout, copy\n"
@@ -1747,6 +1749,7 @@ int main(int argc, char** argv) {
 
     int num_threads = 0;
     int keep_input = 0;
+    int rm_input = 0;
     int force = 0;
     int bench_seconds = 5;
     int checksum = -1;
@@ -1769,6 +1772,7 @@ int main(int argc, char** argv) {
                                                  {"bench", optional_argument, 0, 'b'},
                                                  {"threads", required_argument, 0, 'T'},
                                                  {"keep", no_argument, 0, 'k'},
+                                                 {"rm", no_argument, 0, OPT_RM},
                                                  {"force", no_argument, 0, 'f'},
                                                  {"stdout", no_argument, 0, 'c'},
                                                  {"verbose", no_argument, 0, 'v'},
@@ -1895,6 +1899,9 @@ int main(int argc, char** argv) {
             case OPT_NO_PRESERVE:
                 g_preserve = 0;
                 break;
+            case OPT_RM:
+                rm_input = 1;
+                break;
             case OPT_PROGRESS:
                 if (optarg != NULL && strcmp(optarg, "auto") == 0)
                     g_progress_mode = ZXC_PROGRESS_AUTO;
@@ -1959,6 +1966,9 @@ int main(int argc, char** argv) {
     if (checksum == -1) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
+
+    // The input stays unless --rm asks otherwise; -k wins over --rm
+    if (!rm_input) keep_input = 1;
 
     // -f only if no mode flag took over
     if (cat_mode && mode == MODE_DECOMPRESS) force = 1;

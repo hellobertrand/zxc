@@ -199,13 +199,14 @@ specific blocks in \f[CR]O(1)\f[R] time without reading the entire file.
 Ideal for compressed filesystems, game assets, and log analysis.
 .TP
 \f[B]\-k\f[R], \f[B]\-\-keep\f[R]
-Keep the input file after an in\-place compression or decompression.
-By default the input is removed \f[B]only\f[R] when its output name is
-auto\-derived (e.g.
-\f[CR]file\f[R] → \f[CR]file.zxc\f[R]).
-When the output is named explicitly \(em with \f[B]\-o\f[R] or a
-positional \f[I]OUTPUT\-FILE\f[R] \(em the input is always kept, so this
-flag is only needed for the in\-place case.
+Keep the input file.
+This is the default behavior; the flag overrides \f[B]\-\-rm\f[R].
+.TP
+\f[B]\-\-rm\f[R]
+Remove the input file(s) once compression or decompression has
+succeeded.
+Ignored when writing to stdout or to a file named with \f[B]\-o\f[R] or
+\f[I]OUTPUT\-FILE\f[R], and with \f[B]\-t\f[R] or \f[B]\-l\f[R].
 .TP
 \f[B]\-\-no\-preserve\f[R]
 Do not copy the input\(aqs attributes to the output.
