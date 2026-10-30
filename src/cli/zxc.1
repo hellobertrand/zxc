@@ -93,9 +93,10 @@ See \f[B]DICTIONARIES\f[R].
 \f[B]\-t\f[R], \f[B]\-\-test\f[R]
 Check the integrity of \f[I]INPUT\-FILE\f[R]: decode it and verify its
 checksums, if any, without writing output.
-The report states whether the checksum was verified, absent, skipped by
-\f[B]\-N\f[R], or unknown for input read from a pipe, whose header
-cannot be re\-read; all four exit 0 on a valid archive.
+A valid archive prints \f[CR]OK\f[R] and exits 0.
+With \f[B]\-v\f[R], the report also states whether the checksum was
+verified, absent, skipped by \f[B]\-N\f[R], or unknown for input read
+from a pipe, whose header cannot be re\-read.
 Under \f[B]\-j\f[R], \f[CR]checksum_verified\f[R] is true only when a
 checksum was actually checked, and \f[CR]checksum\f[R] takes the same
 values as \f[B]\-l\f[R]: \f[CR]enabled\f[R], \f[CR]disabled\f[R],
@@ -192,6 +193,8 @@ Remove the input file(s) once compression or decompression has
 succeeded.
 Ignored when writing to stdout or to a file named with \f[B]\-o\f[R] or
 \f[I]OUTPUT\-FILE\f[R], and with \f[B]\-t\f[R] or \f[B]\-l\f[R].
+A symbolic link given as input is itself removed; its target is left
+intact.
 .TP
 \f[B]\-\-no\-preserve\f[R]
 Do not copy the input\(aqs attributes to the output.

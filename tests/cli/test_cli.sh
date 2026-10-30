@@ -619,7 +619,7 @@ else
     log_fail "Keep source file failed (source was deleted)"
 fi
 
-# 18.1 Without -k, a symlink given as input is what gets removed: the link
+# 18.1 With --rm, a symlink given as input is what gets removed: the link
 #      goes, its target stays untouched (POSIX only: symlinks need privileges
 #      on Windows).
 case "$(uname -s 2>/dev/null)" in
@@ -627,7 +627,7 @@ case "$(uname -s 2>/dev/null)" in
     *)
         cp "$TEST_FILE" "$TEST_DIR/rm_target.txt"
         ln -s "rm_target.txt" "$TEST_DIR/rm_link.txt"
-        "$ZXC_BIN" -3 "$TEST_DIR/rm_link.txt"
+        "$ZXC_BIN" -3 --rm "$TEST_DIR/rm_link.txt"
         if [[ ! -L "$TEST_DIR/rm_link.txt" ]] && [[ ! -e "$TEST_DIR/rm_link.txt" ]] && \
            [[ -f "$TEST_DIR/rm_link.txt.zxc" ]] && cmp -s "$TEST_FILE" "$TEST_DIR/rm_target.txt"; then
             log_pass "Symlink input removal unlinks the link, keeps its target"
