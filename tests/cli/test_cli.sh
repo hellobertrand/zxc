@@ -216,10 +216,10 @@ fi
 # 7. Version
 echo "Testing Version..."
 OUT_VER=$("$ZXC_BIN" -V)
-if [[ "$OUT_VER" == *"ZXC CLI"* && "$OUT_VER" =~ v[0-9]+\.[0-9]+\.[0-9]+ ]]; then
-    log_pass "Version flag"
+if [[ "$OUT_VER" == *"ZXC CLI"* && "$OUT_VER" =~ v[0-9]+\.[0-9]+\.[0-9]+\ \"[A-Za-z][A-Za-z0-9]*\" ]]; then
+    log_pass "Version flag (with code name)"
 else
-    log_fail "Version flag failed"
+    log_fail "Version flag failed (expected v<M.m.p> \"<CodeName>\"): $OUT_VER"
 fi
 
 # The banner names the target: "(<arch> <32|64>-bit <LE|BE>)", never "unknown".

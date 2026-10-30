@@ -106,7 +106,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 ## SPECIAL OPTIONS
 
 **-V**, **--version**
-: Print the version of the zxc library and the compiled architecture, then exit.
+: Print the version and code name of the zxc library and the compiled architecture, then exit.
 
 **-h**, **--help**
 : Print a help message and exit.

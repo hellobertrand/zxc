@@ -70,6 +70,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_default_level"
         "_zxc_version_string"
         "_zxc_version_number"
+        "_zxc_version_codename"
         "_zxc_error_name"
         # Frame-info struct layout guard
         "_zxc_get_frame_info"
