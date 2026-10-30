@@ -222,8 +222,8 @@ else
     log_fail "Version flag failed (expected v<M.m.p> \"<CodeName>\"): $OUT_VER"
 fi
 
-# The banner names the target: "(<arch> <32|64>-bit <LE|BE>)", never "unknown".
-VER_TARGET_RE='^ZXC CLI \(([a-z0-9_]+) (32|64)-bit (LE|BE)\) v'
+# The banner names the target: "(build <arch> <32|64>-bit <LE|BE>)", never "unknown".
+VER_TARGET_RE='^ZXC CLI v[0-9.]+ "[A-Za-z0-9]+" \(build ([a-z0-9_]+) (32|64)-bit (LE|BE)\),'
 if [[ "$OUT_VER" =~ $VER_TARGET_RE ]]; then
     VER_ARCH=${BASH_REMATCH[1]}
     VER_ENDIAN=${BASH_REMATCH[3]}

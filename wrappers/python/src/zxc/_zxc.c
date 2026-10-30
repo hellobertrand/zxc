@@ -114,6 +114,7 @@ static PyObject* pyzxc_min_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_max_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_default_level(PyObject* self, PyObject* args);
 static PyObject* pyzxc_version_string(PyObject* self, PyObject* args);
+static PyObject* pyzxc_version_codename(PyObject* self, PyObject* args);
 
 static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg);
@@ -204,6 +205,7 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_max_level", (PyCFunction)pyzxc_max_level, METH_NOARGS, NULL},
     {"pyzxc_default_level", (PyCFunction)pyzxc_default_level, METH_NOARGS, NULL},
     {"pyzxc_version_string", (PyCFunction)pyzxc_version_string, METH_NOARGS, NULL},
+    {"pyzxc_version_codename", (PyCFunction)pyzxc_version_codename, METH_NOARGS, NULL},
 
     /* Dictionary API. */
     {"pyzxc_train_dict", (PyCFunction)pyzxc_train_dict, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -772,6 +774,13 @@ static PyObject* pyzxc_version_string(PyObject* self, PyObject* args) {
     (void)self;
     (void)args;
     const char* const v = zxc_version_string();
+    return PyUnicode_FromString(v ? v : "");
+}
+
+static PyObject* pyzxc_version_codename(PyObject* self, PyObject* args) {
+    (void)self;
+    (void)args;
+    const char* const v = zxc_version_codename();
     return PyUnicode_FromString(v ? v : "");
 }
 

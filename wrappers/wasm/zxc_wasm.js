@@ -281,6 +281,7 @@ export default async function createZXC(moduleOverrides, factory) {
   const ZXC_HUF_TABLE_SIZE = 128;
 
   const _version_string = Module.cwrap("zxc_version_string", "string", []);
+  const _version_codename = Module.cwrap("zxc_version_codename", "string", []);
   const _error_name = Module.cwrap("zxc_error_name", "string", ["number"]);
   const _min_level = Module.cwrap("zxc_min_level", "number", []);
   const _max_level = Module.cwrap("zxc_max_level", "number", []);
@@ -1761,6 +1762,8 @@ export default async function createZXC(moduleOverrides, factory) {
 
     /** Library version string. */
     version: _version_string(),
+    /** Release code name (informational). */
+    codename: _version_codename(),
     /** Minimum compression level. */
     minLevel: _min_level(),
     /** Maximum compression level. */

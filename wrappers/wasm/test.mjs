@@ -76,6 +76,7 @@ async function main() {
     ["number", "number"],
   );
   const _version_string = Module.cwrap("zxc_version_string", "string", []);
+  const _version_codename = Module.cwrap("zxc_version_codename", "string", []);
   const _min_level = Module.cwrap("zxc_min_level", "number", []);
   const _max_level = Module.cwrap("zxc_max_level", "number", []);
   const _default_level = Module.cwrap("zxc_default_level", "number", []);
@@ -87,6 +88,11 @@ async function main() {
   assert(
     typeof version === "string" && version.length > 0,
     `Version: ${version}`,
+  );
+  const codename = _version_codename();
+  assert(
+    typeof codename === "string" && codename.length > 0,
+    `Codename: ${codename}`,
   );
   assert(_min_level() === 1, `Min level: ${_min_level()}`);
   assert(_max_level() === 7, `Max level: ${_max_level()}`);

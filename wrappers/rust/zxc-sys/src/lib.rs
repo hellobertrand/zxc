@@ -276,6 +276,12 @@ unsafe extern "C" {
     /// Compare with the crate's `ZXC_VERSION_*` constants to detect a runtime
     /// library older than the one compiled against.
     pub fn zxc_version_number() -> c_uint;
+
+    /// Returns the release code name of the library as a null-terminated
+    /// string (e.g. `"Hydrogen"`). Informational only.
+    ///
+    /// The returned pointer is a compile-time constant and must not be freed.
+    pub fn zxc_version_codename() -> *const c_char;
 }
 
 // =============================================================================
@@ -1300,6 +1306,12 @@ mod tests {
     fn test_version_number() {
         let header = ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH;
         assert_eq!(unsafe { zxc_version_number() }, header);
+    }
+
+    #[test]
+    fn test_version_codename() {
+        let codename = unsafe { std::ffi::CStr::from_ptr(zxc_version_codename()) };
+        assert!(!codename.to_bytes().is_empty());
     }
 
     #[test]
