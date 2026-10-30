@@ -81,14 +81,14 @@ jobs:
             os: freebsd
             arch: x86-64
             version: "14.4"
-            install: sudo env IGNORE_OSVERSION=yes pkg install -y cmake ninja
+            install: sudo env IGNORE_OSVERSION=yes pkg install -y cmake-core ninja
           - name: FreeBSD 15.1 x86_64
             kind: bsd
             runner: ubuntu-latest
             os: freebsd
             arch: x86-64
             version: "15.1"
-            install: sudo env IGNORE_OSVERSION=yes pkg install -y cmake ninja
+            install: sudo env IGNORE_OSVERSION=yes pkg install -y cmake-core ninja
 
     steps:
       - name: Checkout Repository
