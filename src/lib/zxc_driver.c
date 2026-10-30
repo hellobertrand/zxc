@@ -752,15 +752,16 @@ static void zxc_stream_engine_stop(zxc_stream_engine_t* e, const int writer_star
  *
  * **Regular-file Input (decompression):**
  * Small blocks travel several to a job (@c ZXC_STREAM_BATCH_BYTES); with two
- * threads or more, larger ones are read by the workers and all `n_threads`
- * decode. Pipes and memory streams keep one block per job through `fread`.
+ * workers or more, larger ones are read by the workers. Pipes and memory
+ * streams keep one block per job through `fread`.
  *
  * The caller fills the run's fields of @c e->ctx (mode, level, block size,
  * checksums, dictionary, progress) and of @c e->w (output, seek table, counters).
  *
  * @param[in,out] e         The engine, its run fields filled.
  * @param[in]     f_in      The input stream.
- * @param[in]     n_threads Thread count; 0 or less auto-detects the online processors.
+ * @param[in]     n_threads Workers; 0 or less: online processors, minus one when
+ *                          the reader does the reads.
  * @return @ref ZXC_OK, or @ref ZXC_ERROR_MEMORY with nothing left to free.
  */
 static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int n_threads) {
@@ -768,7 +769,8 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
     const int mode = ctx->compression_mode;
     const size_t chunk = ctx->chunk_size;
 
-    int num_threads = (n_threads > 0) ? n_threads : zxc_num_procs();
+    const int explicit_threads = n_threads > 0;
+    int num_threads = explicit_threads ? n_threads : zxc_num_procs();
     if (num_threads > ZXC_MAX_THREADS) num_threads = ZXC_MAX_THREADS;
     // Positioned reads need two threads: a lone worker is faster fed by the reader.
     ctx->in_fd = -1;
@@ -777,8 +779,11 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
         (in_fd >= 0 && chunk < ZXC_STREAM_BATCH_BYTES) ? (int)(ZXC_STREAM_BATCH_BYTES / chunk) : 1;
     if (in_fd >= 0 && num_threads > 1 && chunk >= ZXC_STREAM_PREAD_MIN_BLOCK)
         zxc_stream_open_positioned(ctx, f_in, in_fd);
-    // One thread for the reader and writer, none with positioned reads.
-    const int num_workers = ctx->in_fd >= 0 ? num_threads : (num_threads > 1) ? num_threads - 1 : 1;
+    // -T N is N workers; auto-detection leaves one processor to the reader and
+    // writer unless the workers read themselves.
+    const int num_workers = (explicit_threads || ctx->in_fd >= 0) ? num_threads
+                            : (num_threads > 1)                   ? num_threads - 1
+                                                                  : 1;
     // Batched jobs hold several blocks: fewer keep the workers fed.
     ctx->ring_size = (size_t)num_workers *
                      (ctx->batch > 1 ? ZXC_STREAM_RING_BATCHED : ZXC_STREAM_RING_UNBATCHED);

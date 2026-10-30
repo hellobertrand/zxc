@@ -288,7 +288,7 @@ typedef enum {
 |---|---|---|---|
 | `ZXC_C_LEVEL` | Compression level (`zxc_compression_level_t`). | `ZXC_LEVEL_DEFAULT` (3) | 1 to 7; out of range is `ZXC_ERROR_BAD_LEVEL` |
 | `ZXC_C_BLOCK_SIZE` | Block size in bytes. | `ZXC_BLOCK_SIZE_DEFAULT` (512 KB) | Power of two in `[ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX]` (4 KB to 2 MB); anything else is `ZXC_ERROR_BAD_BLOCK_SIZE` |
-| `ZXC_C_THREADS` | Worker threads for `zxc_stream_compress()`. The buffer, block and push APIs are single-threaded and ignore it. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
+| `ZXC_C_THREADS` | Workers of `zxc_stream_compress()`; the reader and writer come on top. 0: online processors, capped at `ZXC_MAX_THREADS`, minus one; at least one, at most 511. The buffer, block and push APIs are single-threaded and ignore it. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
 | `ZXC_C_CHECKSUM` | 1 appends the per-block checksums and the archive digest. | 0 | 0 or 1 |
 | `ZXC_C_SEEKABLE` | 1 appends a seek table for random-access decompression. | 0 | 0 or 1 |
 
@@ -303,7 +303,7 @@ typedef enum {
 
 | Identifier | Meaning | Default | Bounds |
 |---|---|---|---|
-| `ZXC_D_THREADS` | Worker threads for `zxc_stream_decompress()`. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
+| `ZXC_D_THREADS` | Workers of `zxc_stream_decompress()`; the reader and writer come on top. 0: online processors, capped at `ZXC_MAX_THREADS`, minus one unless the workers read a regular file themselves; at least one, at most 511 or 512. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
 | `ZXC_D_CHECKSUM` | 1 verifies the block checksums and the archive digest when the archive carries them; 0 skips the verification. | 0 | 0 or 1 |
 
 For every parameter the value `0` restores the default, and `zxc_cctx_reset()` /

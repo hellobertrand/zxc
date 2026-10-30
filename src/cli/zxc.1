@@ -134,9 +134,11 @@ Levels 6 (density) and 7 (ultra) compress far more slowly and suit data
 written once and read many times.
 .TP
 \f[B]\-T\f[R], \f[B]\-\-threads\f[R] \f[I]N\f[R]
-Set the number of threads for compression and decompression.
-\f[CR]0\f[R] (the default) auto\-detects it from the available CPU
-cores.
+Number of worker threads; the reader and writer come on top.
+\f[CR]0\f[R] (the default) uses the available CPU cores minus one for
+the reader and writer, all of them when the workers read the input
+themselves (decompressing a regular file with blocks of 64 KB or more),
+and at least one.
 .TP
 \f[B]\-B\f[R], \f[B]\-\-block\-size\f[R] \f[I]SIZE\f[R]
 Set the compression block size.
