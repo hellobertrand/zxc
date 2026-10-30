@@ -116,9 +116,11 @@ Cannot be combined with \f[B]\-c\f[R] or \f[B]\-o\f[R].
 .TP
 \f[B]\-r\f[R], \f[B]\-\-recursive\f[R]
 Process directories recursively: every regular file under a directory
-given as argument is compressed or decompressed in place.
-On compression, files already ending in \f[CR].zxc\f[R] are skipped;
-symbolic links are reported and skipped.
+given as argument is handled in place.
+Compression skips \f[CR].zxc\f[R] files; decompression and \f[B]\-t\f[R]
+take only those.
+Existing outputs are overwritten only with \f[B]\-f\f[R].
+Symbolic links are reported and skipped.
 Implies \f[B]\-m\f[R].
 .TP
 \f[B]\-1\f[R]..\f[B]\-7\f[R]
@@ -223,7 +225,8 @@ starts with \f[CR]0xF5\f[R], which never starts UTF\-8 text, is decoded
 as an archive.
 .TP
 \f[B]\-c\f[R], \f[B]\-\-stdout\f[R]
-Write to stdout, even when it is a terminal.
+Write to stdout, even when it is a terminal; compressed data to a
+terminal needs \f[B]\-f\f[R].
 .TP
 \f[B]\-v\f[R], \f[B]\-\-verbose\f[R]
 Print more information during operations.

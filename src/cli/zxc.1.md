@@ -50,7 +50,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Process several files at once: every non-option argument is an input file, each compressed to its own `.zxc` file or decompressed to its original name. Cannot be combined with **-c** or **-o**.
 
 **-r**, **--recursive**
-: Process directories recursively: every regular file under a directory given as argument is compressed or decompressed in place. On compression, files already ending in `.zxc` are skipped; symbolic links are reported and skipped. Implies **-m**.
+: Process directories recursively: every regular file under a directory given as argument is handled in place. Compression skips `.zxc` files; decompression and **-t** take only those. Existing outputs are overwritten only with **-f**. Symbolic links are reported and skipped. Implies **-m**.
 
 **-1**..**-7**
 : Set the compression level, from 1 (fastest compression) to 7 (smallest output). Default: 3. Higher levels trade compression speed for ratio; decompression stays fast at every level. Levels 6 (density) and 7 (ultra) compress far more slowly and suit data written once and read many times.
@@ -89,7 +89,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Overwrite *OUTPUT-FILE* if it exists. An existing file or symbolic link is removed and a new file created, so a link at the output path is replaced, never followed; a device such as `/dev/null` is written as is. When decompressing to stdout (with **-c**, or from stdin without an *OUTPUT-FILE*), also copy input that is not a ZXC archive unchanged. A named file is decoded only if it starts with the 4-byte magic word. stdin cannot be rewound, so there only its first byte counts: input that starts with `0xF5`, which never starts UTF-8 text, is decoded as an archive.
 
 **-c**, **--stdout**
-: Write to stdout, even when it is a terminal.
+: Write to stdout, even when it is a terminal; compressed data to a terminal needs **-f**.
 
 **-v**, **--verbose**
 : Print more information during operations.

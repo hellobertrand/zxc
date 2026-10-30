@@ -902,6 +902,35 @@ case "$(uname -s 2>/dev/null)" in
         ;;
 esac
 
+# 22.4 A tree keeps its sources: "-d -r" takes the archives only, "-f" overwrites
+mkdir -p "$TEST_DIR/rec_keep/sub"
+cp "$TEST_FILE" "$TEST_DIR/rec_keep/a.txt"
+cp "$TEST_FILE" "$TEST_DIR/rec_keep/sub/b.txt"
+"$ZXC_BIN" -r -3 "$TEST_DIR/rec_keep"
+set +e
+REC_OUT=$("$ZXC_BIN" -d -r "$TEST_DIR/rec_keep" 2>&1); REC_RC=$?
+set -e
+if [[ $REC_RC -ne 0 ]] && [[ -f "$TEST_DIR/rec_keep/a.txt" ]] && \
+   [[ $(printf '%s\n' "$REC_OUT" | grep -c "Cannot determine output filename") -eq 0 ]]; then
+    log_pass "-d -r on a kept tree skips sources, refuses to overwrite without -f"
+else
+    log_fail "-d -r on a kept tree (rc=$REC_RC): $REC_OUT"
+fi
+printf 'stale' > "$TEST_DIR/rec_keep/a.txt"
+if "$ZXC_BIN" -d -r -f "$TEST_DIR/rec_keep" && \
+   cmp -s "$TEST_FILE" "$TEST_DIR/rec_keep/a.txt" && cmp -s "$TEST_FILE" "$TEST_DIR/rec_keep/sub/b.txt" && \
+   [[ -f "$TEST_DIR/rec_keep/a.txt.zxc" ]]; then
+    log_pass "-d -r -f on a kept tree restores every source"
+else
+    log_fail "-d -r -f on a kept tree failed"
+fi
+"$ZXC_BIN" -t -r "$TEST_DIR/rec_keep" > /dev/null
+if [[ $? -eq 0 ]]; then
+    log_pass "-t -r on a kept tree tests the archives only"
+else
+    log_fail "-t -r on a kept tree choked on a source file"
+fi
+
 # 23. Block Size Tests (-B)
 echo "Testing Block Size (-B)..."
 

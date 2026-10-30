@@ -192,6 +192,10 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
                         return '?';
                 } else if (p->has_arg == optional_argument && name_end) {
                     optarg = name_end + 1;
+                } else if (name_end) {  // "--rm=false" is an error, not --rm
+                    fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", argv[0],
+                            p->name);
+                    return '?';
                 }
                 if (p->flag) {
                     *p->flag = p->val;
@@ -562,6 +566,15 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                int checksum, int level, size_t block_size, int json_output,
                                int seekable, const void* dict, size_t dict_size);
 
+// Compression skips archives; decompression and -t take archives only, since a
+// tree keeps its sources.
+static int zxc_walk_takes(zxc_mode_t mode, const char* path) {
+    const int archive = zxc_has_archive_ext(path);
+    if (mode == MODE_COMPRESS) return !archive;
+    if (mode == MODE_DECOMPRESS || mode == MODE_INTEGRITY) return archive;
+    return 1;
+}
+
 // Forward declaration for processing directory
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
@@ -610,13 +623,10 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
-        } else {
-            // Skip archives when compressing, to avoid double compression
-            if (mode != MODE_COMPRESS || !zxc_has_archive_ext(full_path)) {
-                overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
-                                                   force, to_stdout, checksum, level, block_size,
-                                                   json_output, seekable, dict, dict_size);
-            }
+        } else if (zxc_walk_takes(mode, full_path)) {
+            overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
+                                               force, to_stdout, checksum, level, block_size,
+                                               json_output, seekable, dict, dict_size);
         }
         free(full_path);
     } while (FindNextFileA(hFind, &find_data) != 0);
@@ -664,12 +674,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                 overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                                  to_stdout, checksum, level, block_size,
                                                  json_output, seekable, dict, dict_size);
-            } else if (S_ISREG(st.st_mode)) {
-                // Skip archives when compressing, to avoid double compression
-                if (mode == MODE_COMPRESS && zxc_has_archive_ext(full_path)) {
-                    free(full_path);
-                    continue;
-                }
+            } else if (S_ISREG(st.st_mode) && zxc_walk_takes(mode, full_path)) {
                 overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
                                                    force, to_stdout, checksum, level, block_size,
                                                    json_output, seekable, dict, dict_size);
