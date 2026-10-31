@@ -50,7 +50,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Process several files at once: every non-option argument is an input file, each compressed to its own `.zxc` file or decompressed to its original name. Cannot be combined with **-c** or **-o**.
 
 **-r**, **--recursive**
-: Process directories recursively: every regular file under a directory given as argument is handled in place. Compression skips `.zxc` files; decompression and **-t** take only those. Existing outputs are overwritten only with **-f**. Symbolic links are reported and skipped. Implies **-m**.
+: Process directories recursively: every regular file under a directory given as argument is handled in place. Compression skips `.zxc` files; decompression and **-t** take only those. Existing outputs are overwritten only with **-f**. Symbolic links are reported and skipped, the root included; a trailing `/` names its target instead. Implies **-m**.
 
 **-1**..**-7**
 : Set the compression level, from 1 (fastest compression) to 7 (smallest output). Default: 3. Higher levels trade compression speed for ratio; decompression stays fast at every level. Levels 6 (density) and 7 (ultra) compress far more slowly and suit data written once and read many times.

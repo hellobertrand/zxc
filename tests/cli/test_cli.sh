@@ -931,6 +931,24 @@ else
     log_fail "-t -r on a kept tree choked on a source file"
 fi
 
+# 22.5 A link given as the root is skipped like any other; "link/" names its target
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        mkdir -p "$TEST_DIR/rec_root/real"
+        cp "$TEST_FILE" "$TEST_DIR/rec_root/real/f.txt"
+        ln -s real "$TEST_DIR/rec_root/link"
+        REC_OUT=$("$ZXC_BIN" -r -3 "$TEST_DIR/rec_root/link" 2>&1); REC_RC=$?
+        if [[ $REC_RC -eq 0 ]] && [[ ! -e "$TEST_DIR/rec_root/real/f.txt.zxc" ]] && \
+           [[ "$REC_OUT" == *"is a link, ignored"* ]] && \
+           "$ZXC_BIN" -r -3 "$TEST_DIR/rec_root/link/" && [[ -f "$TEST_DIR/rec_root/real/f.txt.zxc" ]]; then
+            log_pass "Recursive root link skipped; trailing slash names the target"
+        else
+            log_fail "Recursive root link (rc=$REC_RC): $REC_OUT"
+        fi
+        ;;
+esac
+
 # 23. Block Size Tests (-B)
 echo "Testing Block Size (-B)..."
 

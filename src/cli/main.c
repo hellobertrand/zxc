@@ -486,6 +486,17 @@ static int zxc_is_directory(const char* path) {
     DWORD attr = GetFileAttributesA(path);
     return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
 }
+
+// A link itself, as the walk sees its children; a trailing separator names the target.
+static int zxc_is_link(const char* path) {
+    const DWORD attr = GetFileAttributesA(path);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
+    WIN32_FIND_DATAA fd;
+    const HANDLE h = FindFirstFileA(path, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    FindClose(h);
+    return fd.dwReserved0 == IO_REPARSE_TAG_SYMLINK || fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT;
+}
 #else
 static int zxc_is_directory(const char* path) {
     struct stat st;
@@ -493,6 +504,12 @@ static int zxc_is_directory(const char* path) {
         return S_ISDIR(st.st_mode);
     }
     return 0;
+}
+
+// A link itself, as the walk sees its children; a trailing slash names the target.
+static int zxc_is_link(const char* path) {
+    struct stat st;
+    return lstat(path, &st) == 0 && S_ISLNK(st.st_mode);
 }
 #endif
 
@@ -2555,7 +2572,10 @@ int main(int argc, char** argv) {
         const char* current_arg = (optind < argc) ? argv[start_optind + file_idx] : NULL;
 
         if (recursive_mode && current_arg && strcmp(current_arg, "-") != 0 &&
-            zxc_is_directory(current_arg)) {
+            zxc_is_link(current_arg)) {
+            zxc_log("Warning: '%s' is a link, ignored\n", current_arg);
+        } else if (recursive_mode && current_arg && strcmp(current_arg, "-") != 0 &&
+                   zxc_is_directory(current_arg)) {
             overall_ret |= process_directory(current_arg, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
