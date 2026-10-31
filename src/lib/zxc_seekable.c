@@ -624,7 +624,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
 
         for (uint32_t k = 0; k < n; k++, bi++) {
             const uint64_t lb = local + k;  // position in the frame: the checksum seed
-            const uint8_t* blk;
+            const uint8_t* blk = NULL;
             const int read_res = zxc_seek_read_block(s, starts[k], sizes[k], f->has_checksums,
                                                      s->read_buf, s->read_buf_cap, &blk);
             if (UNLIKELY(read_res < 0)) return read_res;
@@ -734,7 +734,7 @@ static int zxc_seek_mt_job(const zxc_seek_mt_shared_t* sh, zxc_seek_mt_job_t* jo
                            const zxc_seek_dict_t** held, uint8_t* read_buf, const size_t read_cap) {
     const zxc_seekable* const s = sh->s;
 
-    const uint8_t* blk;
+    const uint8_t* blk = NULL;
     const int read_res =
         zxc_seek_read_block(s, job->off, job->csz, job->has_cs, read_buf, read_cap, &blk);
     if (UNLIKELY(read_res < 0)) return job->result = read_res;
@@ -851,11 +851,12 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     // About ZXC_MT_BATCH_BYTES of output per batch, less if that would idle
     // threads; no more threads than batches (two or more: batch <= ceil(jobs/2)).
     if (n_threads > ZXC_MAX_THREADS) n_threads = ZXC_MAX_THREADS;
-    const uint32_t share = num_jobs / (uint32_t)n_threads + (num_jobs % (uint32_t)n_threads != 0);
+    const uint32_t share = (num_jobs - 1) / (uint32_t)n_threads + 1;
     uint32_t batch = s->max_block_size < ZXC_MT_BATCH_BYTES
                          ? (uint32_t)(ZXC_MT_BATCH_BYTES / s->max_block_size)
                          : 1;
     if (batch > share) batch = share;
+    if (UNLIKELY(batch == 0)) batch = 1;
     const uint32_t num_batches = num_jobs / batch + (num_jobs % batch != 0);
     if ((uint32_t)n_threads > num_batches) n_threads = (int)num_batches;
 
