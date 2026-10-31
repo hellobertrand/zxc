@@ -1045,7 +1045,7 @@ size_t zxc_compress_block_bound(const size_t input_size) {
  * @brief Returns the minimum dst_capacity required by zxc_decompress_block().
  *
  * The decoder uses speculative wild-copy writes on its fast path.
- * Sizing the destination to uncompressed_size + ZXC_PAD_SIZE*66 guarantees
+ * Sizing the destination to uncompressed_size + ZXC_DECOMPRESS_TAIL_PAD guarantees
  * the fast path is always reachable and that tail bounds checks never
  * spuriously reject the last literals of a valid block.
  *

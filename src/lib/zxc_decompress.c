@@ -1219,10 +1219,11 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
     const uint8_t* const d_floor = dst - dict_size;
     const uint8_t* const d_end_safe =
         (dst_capacity > ZXC_PAD_SIZE * 4) ? d_end - (ZXC_PAD_SIZE * 4) : dst;  // 128
-    // Safety margin for 4x unrolled loop: 4 * (ZXC_SEQ_LL_MASK LL +
-    // ZXC_SEQ_ML_MASK+ZXC_LZ_MIN_MATCH_LEN ML) + ZXC_PAD_SIZE Pad = 4 x (255 + 255 + 5) + 32 = 2092
+    // 4x loop margin: four sequences of inline output (ll <= 254, ml <= 254 + 5,
+    // longer ones escape and check themselves) plus the wild-copy overshoot:
+    // 4 x 513 + 32 = 2084, all of ZXC_DECOMPRESS_TAIL_PAD.
     const uint8_t* const d_end_fast =
-        (dst_capacity > ZXC_DECOMPRESS_TAIL_PAD) ? d_end - ZXC_DECOMPRESS_TAIL_PAD : dst;  // 2112
+        (dst_capacity > ZXC_DECOMPRESS_TAIL_PAD) ? d_end - ZXC_DECOMPRESS_TAIL_PAD : dst;
 
     // Literal margin for the PAK loops: without a varint, ll <= 254 per sequence,
     // so 4 * 254 = 1016. Past that only the cold varint path checks l_ptr.

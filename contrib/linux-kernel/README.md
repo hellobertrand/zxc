@@ -124,7 +124,7 @@ Workspace sizes; levels 6-7 add the optimal-parser scratch:
 
 ## Exactly-sized destinations
 
-`zxc_decompress_block()` wants `ZXC_DECOMPRESS_TAIL_PAD` (2112 bytes) of slack
+`zxc_decompress_block()` wants `ZXC_DECOMPRESS_TAIL_PAD` (2084 bytes) of slack
 past the output for its wild copies, which a page-sized buffer does not have.
 `zxc_decompress_block_safe()` takes a destination sized to the exact output.
 
