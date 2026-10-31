@@ -120,6 +120,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_container_frame_walk),
     TEST_CASE(test_container_engine_reuse),
     TEST_CASE(test_container_seekable),
+    TEST_CASE(test_container_seekable_inplace),
 
     /* --- Push Streaming API --- */
     TEST_CASE(test_pstream_roundtrip_basic),

@@ -642,3 +642,126 @@ int test_container_seekable(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Range reads against the output's bounds: in place single-threaded when the
+ * 2112 B margin fits the range, through the worker's buffer threaded. 4 KB,
+ * 64 KB and 4 KB frames with short last blocks, ranges on either side of the
+ * margin, more threads than blocks, buffer and FILE* sources. Bytes past len
+ * stay untouched; a corrupted block is reported. */
+int test_container_seekable_inplace(void) {
+    printf("=== TEST: Container - Seekable in-place range decoding ===\n");
+
+    const size_t n1 = 4096 * 37 + 1000, n2 = 65536 * 9 + 3000, n3 = 4096 * 20;
+    const size_t total = n1 + n2 + n3;
+    const size_t guard = 4096;
+    static const char* const words[] = {"alpha ", "beta ",  "gamma ", "delta ", "eps ",
+                                        "zeta ",  "theta ", "iota ",  "kappa ", "\n"};
+    uint8_t* const src = malloc(total);
+    uint8_t* const out = malloc(total + guard);
+    int ok = src && out;
+    for (size_t i = 0, x = 777; ok && i < total;) {
+        x = x * 1103515245U + 12345U;
+        const char* w = words[(x >> 16) % 10];
+        while (*w && i < total) src[i++] = (uint8_t)*w++;
+    }
+
+    const frame_cfg_t f1 = {.level = 3, .block_size = 4096, .seekable = 1};
+    const frame_cfg_t f2 = {.level = 5, .block_size = 65536, .checksum_enabled = 1, .seekable = 1};
+    const frame_cfg_t f3 = {.level = 1, .block_size = 4096, .seekable = 1};
+    cbuf_t m = {0};
+    ok = ok && cb_frame(&m, src, n1, &f1);
+    const size_t f2_at = m.n;
+    ok = ok && cb_frame(&m, src + n1, n2, &f2);
+    ok = ok && cb_frame(&m, src + n1 + n2, n3, &f3);
+
+    FILE* const fp = ok ? tmpfile() : NULL;
+    ok = ok && fp && fwrite(m.p, 1, m.n, fp) == m.n && fflush(fp) == 0;
+    zxc_seekable* const sb = ok ? zxc_seekable_open(m.p, m.n) : NULL;
+    zxc_seekable* const sf = ok ? zxc_seekable_open_file(fp) : NULL;
+    if (ok && (!sb || !sf)) {
+        printf("  [FAIL] open\n");
+        ok = 0;
+    }
+    if (ok) {
+        zxc_seekable_set_checksum(sb, 1);
+        zxc_seekable_set_checksum(sf, 1);
+    }
+
+    const size_t edge = 4096 * 30 + 2112; /* block 29 of frame 1 ends exactly a margin early */
+    const struct {
+        size_t off, len;
+    } ranges[] = {{0, total},
+                  {1, total - 1},
+                  {0, n1},
+                  {0, edge},
+                  {0, edge - 1},
+                  {4096, edge - 4096},
+                  {n1 - 5000, 70000},
+                  {n1 + 65536 * 3 - 7, 65536 * 4 + 2112},
+                  {n1 + n2 - 2111, n3 + 2111},
+                  {total - n3 - 3000, 3000 + 2112}};
+    static const int threads[] = {1, 2, 3, 8, 64};
+    for (size_t r = 0; ok && r < sizeof(ranges) / sizeof(ranges[0]); r++) {
+        const size_t off = ranges[r].off, len = ranges[r].len;
+        for (size_t t = 0; ok && t < sizeof(threads) / sizeof(threads[0]); t++) {
+            for (int f = 0; ok && f < 2; f++) {
+                zxc_seekable* const s = f ? sf : sb;
+                memset(out, 0xA5, len + guard);
+                const int64_t got =
+                    zxc_seekable_decompress_range_mt(s, out, len + guard, off, len, threads[t]);
+                int intact = 1;
+                for (size_t g = 0; g < guard; g++) intact &= out[len + g] == 0xA5;
+                if (got != (int64_t)len || memcmp(out, src + off, len) != 0 || !intact) {
+                    printf("  [FAIL] range [%zu, +%zu), %d threads, %s: %lld%s\n", off, len,
+                           threads[t], f ? "FILE*" : "buffer", (long long)got,
+                           intact ? "" : ", wrote past len");
+                    ok = 0;
+                }
+            }
+        }
+    }
+    zxc_seekable_free(sb);
+    zxc_seekable_free(sf);
+    if (fp) fclose(fp);
+
+    /* The stored checksum of frame 2's first block flipped: every path, buffer
+     * and FILE*, reports it. */
+    if (ok) {
+        const uint64_t b0 = (n1 + 4095) / 4096; /* archive-wide index of that block */
+        zxc_seekable* const probe = zxc_seekable_open(m.p, m.n);
+        const uint32_t csz = probe ? zxc_seekable_get_block_comp_size(probe, b0) : 0;
+        zxc_seekable_free(probe);
+        if (csz) m.p[f2_at + ZXC_FILE_HEADER_SIZE + csz - 1] ^= 0x40;
+        FILE* const fc = tmpfile();
+        ok = csz && fc && fwrite(m.p, 1, m.n, fc) == m.n && fflush(fc) == 0;
+        zxc_seekable* const cs[2] = {ok ? zxc_seekable_open(m.p, m.n) : NULL,
+                                     ok ? zxc_seekable_open_file(fc) : NULL};
+        for (int f = 0; ok && f < 2; f++) {
+            if (!cs[f]) {
+                printf("  [FAIL] open after corruption, %s\n", f ? "FILE*" : "buffer");
+                ok = 0;
+                break;
+            }
+            zxc_seekable_set_checksum(cs[f], 1);
+            for (size_t t = 0; ok && t < sizeof(threads) / sizeof(threads[0]); t++) {
+                const int64_t got =
+                    zxc_seekable_decompress_range_mt(cs[f], out, total, 0, total, threads[t]);
+                if (got != ZXC_ERROR_BAD_CHECKSUM) {
+                    printf("  [FAIL] corrupted checksum, %d threads, %s: %lld\n", threads[t],
+                           f ? "FILE*" : "buffer", (long long)got);
+                    ok = 0;
+                }
+            }
+        }
+        zxc_seekable_free(cs[0]);
+        zxc_seekable_free(cs[1]);
+        if (fc) fclose(fc);
+    }
+
+    free(m.p);
+    free(out);
+    free(src);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

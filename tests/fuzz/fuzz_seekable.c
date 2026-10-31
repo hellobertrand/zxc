@@ -37,6 +37,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const int level = (data[0] % 5) + 1;
     const int use_checksum = data[1] & 1;
     const int use_mt = data[1] & 2;
+    const int small_blocks = data[1] & 0x40; /* many blocks: in place, several batches */
     data += 2;
     size -= 2;
 
@@ -65,7 +66,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     int64_t csize = -1;
     if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
         zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, use_checksum) == ZXC_OK &&
-        zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1) == ZXC_OK) {
+        zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1) == ZXC_OK &&
+        (!small_blocks || zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 4096) == ZXC_OK)) {
         csize = zxc_compress_cctx(cctx, data, size, comp_buf, bound);
     }
     zxc_free_cctx(cctx);
@@ -145,6 +147,37 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* NULL handle */
     assert(zxc_seekable_get_num_blocks(NULL) == 0);
     assert(zxc_seekable_get_decompressed_size(NULL) == 0);
+
+    /* ------------------------------------------------------------------ */
+    /* Phase 8: Corrupted blocks, decoded into an exact buffer            */
+    /* ------------------------------------------------------------------ */
+    /* Bytes flipped inside the blocks, the seek table and footer intact so that it
+     * opens: no decode may write past len. */
+    size_t blocks_end = ZXC_FILE_HEADER_SIZE;
+    for (uint64_t i = 0; i < num_blocks; i++) blocks_end += zxc_seekable_get_block_comp_size(s, i);
+    if (blocks_end > ZXC_FILE_HEADER_SIZE && blocks_end <= (size_t)csize) {
+        uint8_t* const bad = (uint8_t*)malloc((size_t)csize);
+        uint8_t* const out = (uint8_t*)malloc(size);
+        if (bad && out) {
+            memcpy(bad, comp_buf, (size_t)csize);
+            const size_t span = blocks_end - ZXC_FILE_HEADER_SIZE;
+            const int flips = 1 + ((raw_data[1] >> 2) & 3);
+            for (int k = 0; k < flips; k++) {
+                const uint8_t a = data[(size_t)k % size], b = data[(size_t)(k * 7 + 3) % size];
+                bad[ZXC_FILE_HEADER_SIZE + ((size_t)a * 257 + b) * 2654435761U % span] ^=
+                    (uint8_t)(1U << (b & 7));
+            }
+            zxc_seekable* const sc = zxc_seekable_open(bad, (size_t)csize);
+            if (sc) {
+                zxc_seekable_decompress_range_mt(sc, out, size, 0, size,
+                                                 2 + ((raw_data[1] >> 4) & 3));
+                zxc_seekable_decompress_range(sc, out, size, 0, size);
+                zxc_seekable_free(sc);
+            }
+        }
+        free(bad);
+        free(out);
+    }
 
     /* ------------------------------------------------------------------ */
     /* Cleanup                                                            */

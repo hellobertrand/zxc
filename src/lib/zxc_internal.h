@@ -355,6 +355,12 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
  * @see zxc_decompress_block_bound()
  */
 #define ZXC_DECOMPRESS_TAIL_PAD (ZXC_PAD_SIZE * 66)
+/**
+ * @brief Output per multi-threaded decode job: smaller blocks travel several to
+ *        a job, paying the thread handoff once. Used by the FILE* engine
+ *        (regular files only) and the seekable range reader.
+ */
+#define ZXC_MT_BATCH_BYTES ((size_t)256 * 1024)
 /** @brief Assumed CPU cache line size for alignment. */
 #define ZXC_CACHE_LINE_SIZE 64
 /** @brief Bitmask for cache-line alignment checks. */
