@@ -352,9 +352,13 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
  * guarantees the fast path is reachable and that tail bounds checks
  * never spuriously reject the last literals of a valid block.
  *
+ * Sized by the PAK 4x loop, whose entry check runs once per batch: four
+ * sequences of inline (pre-varint) output, plus the wild-copy overshoot.
+ * Memory safety rests on this bound (static_assert below); SPL needs less.
+ *
  * @see zxc_decompress_block_bound()
  */
-#define ZXC_DECOMPRESS_TAIL_PAD (ZXC_PAD_SIZE * 66)
+#define ZXC_DECOMPRESS_TAIL_PAD (4 * ZXC_PAK_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE) /* 2084 */
 /**
  * @brief Output per multi-threaded decode job: smaller blocks travel several to
  *        a job, paying the thread handoff once. Used by the FILE* engine
@@ -672,8 +676,10 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 static_assert(ZXC_SPL_MAX_INLINE_ML <= ZXC_PAD_SIZE, "an inline SPL match is one 32-byte store");
 static_assert(ZXC_LZ_WINDOW_SIZE - ZXC_LZ_OFFSET_BIAS <= ZXC_SEQ_OFF_MASK,
               "a biased offset must fit the 16-bit wire field");
-static_assert(4 * ZXC_PAK_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE <= ZXC_DECOMPRESS_TAIL_PAD,
-              "ZXC_DECOMPRESS_TAIL_PAD must hold a 4x PAK batch and its wild-copy overshoot");
+static_assert(ZXC_DECOMPRESS_TAIL_PAD == 2084,
+              "ZXC_DECOMPRESS_TAIL_PAD feeds the public bounds: change it on purpose only");
+static_assert(4 * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE + 4 <= ZXC_DECOMPRESS_TAIL_PAD,
+              "ZXC_DECOMPRESS_TAIL_PAD must also hold the SPL 4x loop margin");
 static_assert(ZXC_DICT_SIZE_MAX <= ZXC_LZ_MAX_DIST, "a dictionary must stay within offset reach");
 
 /** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to
