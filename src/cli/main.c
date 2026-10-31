@@ -192,6 +192,10 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
                         return '?';
                 } else if (p->has_arg == optional_argument && name_end) {
                     optarg = name_end + 1;
+                } else if (name_end) {  // "--rm=false" is an error, not --rm
+                    fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", argv[0],
+                            p->name);
+                    return '?';
                 }
                 if (p->flag) {
                     *p->flag = p->val;
@@ -482,6 +486,17 @@ static int zxc_is_directory(const char* path) {
     DWORD attr = GetFileAttributesA(path);
     return (attr != INVALID_FILE_ATTRIBUTES && (attr & FILE_ATTRIBUTE_DIRECTORY));
 }
+
+// A link itself, as the walk sees its children; a trailing separator names the target.
+static int zxc_is_link(const char* path) {
+    const DWORD attr = GetFileAttributesA(path);
+    if (attr == INVALID_FILE_ATTRIBUTES || !(attr & FILE_ATTRIBUTE_REPARSE_POINT)) return 0;
+    WIN32_FIND_DATAA fd;
+    const HANDLE h = FindFirstFileA(path, &fd);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    FindClose(h);
+    return fd.dwReserved0 == IO_REPARSE_TAG_SYMLINK || fd.dwReserved0 == IO_REPARSE_TAG_MOUNT_POINT;
+}
 #else
 static int zxc_is_directory(const char* path) {
     struct stat st;
@@ -489,6 +504,12 @@ static int zxc_is_directory(const char* path) {
         return S_ISDIR(st.st_mode);
     }
     return 0;
+}
+
+// A link itself, as the walk sees its children; a trailing slash names the target.
+static int zxc_is_link(const char* path) {
+    struct stat st;
+    return lstat(path, &st) == 0 && S_ISLNK(st.st_mode);
 }
 #endif
 
@@ -501,7 +522,7 @@ typedef enum {
     MODE_TRAIN_DICT
 } zxc_mode_t;
 
-enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE };
+enum { OPT_VERSION = 1000, OPT_HELP, OPT_TRAIN_DICT, OPT_PROGRESS, OPT_NO_PRESERVE, OPT_RM };
 
 // Whether path ends with the archive extension.
 static int zxc_has_archive_ext(const char* path) {
@@ -562,6 +583,15 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                int checksum, int level, size_t block_size, int json_output,
                                int seekable, const void* dict, size_t dict_size);
 
+// Compression skips archives; decompression and -t take archives only, since a
+// tree keeps its sources.
+static int zxc_walk_takes(zxc_mode_t mode, const char* path) {
+    const int archive = zxc_has_archive_ext(path);
+    if (mode == MODE_COMPRESS) return !archive;
+    if (mode == MODE_DECOMPRESS || mode == MODE_INTEGRITY) return archive;
+    return 1;
+}
+
 // Forward declaration for processing directory
 static int process_directory(const char* dir_path, zxc_mode_t mode, int num_threads, int keep_input,
                              int force, int to_stdout, int checksum, int level, size_t block_size,
@@ -610,13 +640,10 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
             overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
-        } else {
-            // Skip archives when compressing, to avoid double compression
-            if (mode != MODE_COMPRESS || !zxc_has_archive_ext(full_path)) {
-                overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
-                                                   force, to_stdout, checksum, level, block_size,
-                                                   json_output, seekable, dict, dict_size);
-            }
+        } else if (zxc_walk_takes(mode, full_path)) {
+            overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
+                                               force, to_stdout, checksum, level, block_size,
+                                               json_output, seekable, dict, dict_size);
         }
         free(full_path);
     } while (FindNextFileA(hFind, &find_data) != 0);
@@ -664,12 +691,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                 overall_ret |= process_directory(full_path, mode, num_threads, keep_input, force,
                                                  to_stdout, checksum, level, block_size,
                                                  json_output, seekable, dict, dict_size);
-            } else if (S_ISREG(st.st_mode)) {
-                // Skip archives when compressing, to avoid double compression
-                if (mode == MODE_COMPRESS && zxc_has_archive_ext(full_path)) {
-                    free(full_path);
-                    continue;
-                }
+            } else if (S_ISREG(st.st_mode) && zxc_walk_takes(mode, full_path)) {
                 overall_ret |= process_single_file(full_path, NULL, mode, num_threads, keep_input,
                                                    force, to_stdout, checksum, level, block_size,
                                                    json_output, seekable, dict, dict_size);
@@ -713,7 +735,9 @@ static void print_help(const char* app) {
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
-        "  -k, --keep        Keep input file\n"
+        "  -k, --keep        Keep input file {default}\n"
+        "  --rm              Remove input file once its output is written; ignored\n"
+        "                    with -c, -o, an OUTPUT-FILE, -t or -l\n"
         "  --no-preserve     Do not copy the input's mode, times and group (owner as\n"
         "                    root) to the output\n"
         "  -f, --force       Force overwrite; when decompressing to stdout, copy\n"
@@ -1747,6 +1771,7 @@ int main(int argc, char** argv) {
 
     int num_threads = 0;
     int keep_input = 0;
+    int rm_input = 0;
     int force = 0;
     int bench_seconds = 5;
     int checksum = -1;
@@ -1769,6 +1794,7 @@ int main(int argc, char** argv) {
                                                  {"bench", optional_argument, 0, 'b'},
                                                  {"threads", required_argument, 0, 'T'},
                                                  {"keep", no_argument, 0, 'k'},
+                                                 {"rm", no_argument, 0, OPT_RM},
                                                  {"force", no_argument, 0, 'f'},
                                                  {"stdout", no_argument, 0, 'c'},
                                                  {"verbose", no_argument, 0, 'v'},
@@ -1895,6 +1921,9 @@ int main(int argc, char** argv) {
             case OPT_NO_PRESERVE:
                 g_preserve = 0;
                 break;
+            case OPT_RM:
+                rm_input = 1;
+                break;
             case OPT_PROGRESS:
                 if (optarg != NULL && strcmp(optarg, "auto") == 0)
                     g_progress_mode = ZXC_PROGRESS_AUTO;
@@ -1959,6 +1988,9 @@ int main(int argc, char** argv) {
     if (checksum == -1) {
         checksum = (mode == MODE_BENCHMARK) ? 0 : 1;
     }
+
+    // The input stays unless --rm asks otherwise; -k wins over --rm
+    if (!rm_input) keep_input = 1;
 
     // -f only if no mode flag took over
     if (cat_mode && mode == MODE_DECOMPRESS) force = 1;
@@ -2540,7 +2572,10 @@ int main(int argc, char** argv) {
         const char* current_arg = (optind < argc) ? argv[start_optind + file_idx] : NULL;
 
         if (recursive_mode && current_arg && strcmp(current_arg, "-") != 0 &&
-            zxc_is_directory(current_arg)) {
+            zxc_is_link(current_arg)) {
+            zxc_log("Warning: '%s' is a link, ignored\n", current_arg);
+        } else if (recursive_mode && current_arg && strcmp(current_arg, "-") != 0 &&
+                   zxc_is_directory(current_arg)) {
             overall_ret |= process_directory(current_arg, mode, num_threads, keep_input, force,
                                              to_stdout, checksum, level, block_size, json_output,
                                              seekable, dict, dict_size);
