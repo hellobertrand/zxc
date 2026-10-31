@@ -197,6 +197,7 @@ int test_container_concat(void);
 int test_container_frame_walk(void);
 int test_container_engine_reuse(void);
 int test_container_seekable(void);
+int test_container_seekable_inplace(void);
 
 /* Push Streaming API (zxc_pstream.h) */
 int test_pstream_roundtrip_basic(void);

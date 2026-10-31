@@ -61,10 +61,6 @@
 // Below this block size the per-block system calls cost more than they save.
 #define ZXC_STREAM_PREAD_MIN_BLOCK ((size_t)64 * 1024)
 
-// Output per regular-file job: the thread handoff is paid once per batch. Not for
-// a pipe, whose output would wait for a full batch.
-#define ZXC_STREAM_BATCH_BYTES ((size_t)256 * 1024)
-
 // Jobs per worker when they carry several blocks each.
 #define ZXC_STREAM_RING_BATCHED 2U
 // Jobs per worker when they carry one block each: slack for a slow block.
@@ -219,7 +215,7 @@ typedef struct {
  * @var zxc_stream_ctx_t::in_alloc
  *     Positioned reads: size of each worker's input buffer.
  * @var zxc_stream_ctx_t::batch
- *     Most blocks a decompression job carries (@c ZXC_STREAM_BATCH_BYTES).
+ *     Most blocks a decompression job carries (@c ZXC_MT_BATCH_BYTES).
  * @var zxc_stream_ctx_t::ahead
  *     Positioned reads: the next block header, read with the previous checksum.
  * @var zxc_stream_ctx_t::ahead_len
@@ -751,7 +747,7 @@ static void zxc_stream_engine_stop(zxc_stream_engine_t* e, const int writer_star
  * minimizing memory copies.
  *
  * **Regular-file Input (decompression):**
- * Small blocks travel several to a job (@c ZXC_STREAM_BATCH_BYTES); with two
+ * Small blocks travel several to a job (@c ZXC_MT_BATCH_BYTES); with two
  * workers or more, larger ones are read by the workers. Pipes and memory
  * streams keep one block per job through `fread`.
  *
@@ -775,8 +771,7 @@ static int zxc_stream_engine_start(zxc_stream_engine_t* e, FILE* f_in, const int
     // Positioned reads need two threads: a lone worker is faster fed by the reader.
     ctx->in_fd = -1;
     const int in_fd = (mode == 0) ? zxc_stream_regular_fd(f_in) : -1;
-    ctx->batch =
-        (in_fd >= 0 && chunk < ZXC_STREAM_BATCH_BYTES) ? (int)(ZXC_STREAM_BATCH_BYTES / chunk) : 1;
+    ctx->batch = (in_fd >= 0 && chunk < ZXC_MT_BATCH_BYTES) ? (int)(ZXC_MT_BATCH_BYTES / chunk) : 1;
     if (in_fd >= 0 && num_threads > 1 && chunk >= ZXC_STREAM_PREAD_MIN_BLOCK)
         zxc_stream_open_positioned(ctx, f_in, in_fd);
     // -T N is N workers; auto-detection leaves one processor to the reader and

@@ -147,6 +147,35 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     assert(zxc_seekable_get_decompressed_size(NULL) == 0);
 
     /* ------------------------------------------------------------------ */
+    /* Phase 8: Corrupted blocks, decoded into an exact buffer            */
+    /* ------------------------------------------------------------------ */
+    /* Bytes flipped ahead of the seek table, so it still opens: no decode may
+     * write past len. */
+    if (csize > 64) {
+        uint8_t* const bad = (uint8_t*)malloc((size_t)csize);
+        uint8_t* const out = (uint8_t*)malloc(size);
+        if (bad && out) {
+            memcpy(bad, comp_buf, (size_t)csize);
+            const size_t span = (size_t)csize * 7 / 8;
+            const int flips = 1 + ((raw_data[1] >> 2) & 3);
+            for (int k = 0; k < flips; k++) {
+                const uint8_t a = data[(size_t)k % size], b = data[(size_t)(k * 7 + 3) % size];
+                bad[16 + ((size_t)a * 257 + b) * 2654435761U % (span - 16)] ^=
+                    (uint8_t)(1U << (b & 7));
+            }
+            zxc_seekable* const sc = zxc_seekable_open(bad, (size_t)csize);
+            if (sc) {
+                zxc_seekable_decompress_range_mt(sc, out, size, 0, size,
+                                                 2 + ((raw_data[1] >> 4) & 3));
+                zxc_seekable_decompress_range(sc, out, size, 0, size);
+                zxc_seekable_free(sc);
+            }
+        }
+        free(bad);
+        free(out);
+    }
+
+    /* ------------------------------------------------------------------ */
     /* Cleanup                                                            */
     /* ------------------------------------------------------------------ */
     zxc_seekable_free(s);
