@@ -727,6 +727,6 @@ For non-C languages, see the official bindings:
 | **Go** | `go get` | `go get github.com/hellobertrand/zxc/wrappers/go` | [README](https://github.com/hellobertrand/zxc/blob/main/wrappers/go/README.md) |
 
 Community-maintained:
-- **Go**: https://github.com/meysam81/go-zxc
+- **Go** (native decoder, no cgo): https://github.com/chmike/zxc-go
 - **Nim**: https://github.com/openpeeps/zxc-nim
 - **Free Pascal**: https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor
