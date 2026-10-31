@@ -672,7 +672,6 @@ int test_container_seekable_inplace(void) {
     ok = ok && cb_frame(&m, src, n1, &f1);
     const size_t f2_at = m.n;
     ok = ok && cb_frame(&m, src + n1, n2, &f2);
-    const size_t f2_len = m.n - f2_at;
     ok = ok && cb_frame(&m, src + n1 + n2, n3, &f3);
 
     FILE* const fp = ok ? tmpfile() : NULL;
@@ -725,25 +724,38 @@ int test_container_seekable_inplace(void) {
     zxc_seekable_free(sf);
     if (fp) fclose(fp);
 
-    /* One byte flipped in the middle of the checksummed frame: every path fails. */
+    /* The stored checksum of frame 2's first block flipped: every path, buffer
+     * and FILE*, reports it. */
     if (ok) {
-        m.p[f2_at + f2_len / 2] ^= 0x40;
-        zxc_seekable* const s = zxc_seekable_open(m.p, m.n);
-        if (!s) {
-            printf("  [FAIL] open after corruption\n");
-            ok = 0;
-        }
-        zxc_seekable_set_checksum(s, 1);
-        for (size_t t = 0; ok && t < sizeof(threads) / sizeof(threads[0]); t++) {
-            const int64_t got =
-                zxc_seekable_decompress_range_mt(s, out, total, 0, total, threads[t]);
-            if (got >= 0) {
-                printf("  [FAIL] corrupted block accepted, %d threads: %lld\n", threads[t],
-                       (long long)got);
+        const uint64_t b0 = (n1 + 4095) / 4096; /* archive-wide index of that block */
+        zxc_seekable* const probe = zxc_seekable_open(m.p, m.n);
+        const uint32_t csz = probe ? zxc_seekable_get_block_comp_size(probe, b0) : 0;
+        zxc_seekable_free(probe);
+        if (csz) m.p[f2_at + ZXC_FILE_HEADER_SIZE + csz - 1] ^= 0x40;
+        FILE* const fc = tmpfile();
+        ok = csz && fc && fwrite(m.p, 1, m.n, fc) == m.n && fflush(fc) == 0;
+        zxc_seekable* const cs[2] = {ok ? zxc_seekable_open(m.p, m.n) : NULL,
+                                     ok ? zxc_seekable_open_file(fc) : NULL};
+        for (int f = 0; ok && f < 2; f++) {
+            if (!cs[f]) {
+                printf("  [FAIL] open after corruption, %s\n", f ? "FILE*" : "buffer");
                 ok = 0;
+                break;
+            }
+            zxc_seekable_set_checksum(cs[f], 1);
+            for (size_t t = 0; ok && t < sizeof(threads) / sizeof(threads[0]); t++) {
+                const int64_t got =
+                    zxc_seekable_decompress_range_mt(cs[f], out, total, 0, total, threads[t]);
+                if (got != ZXC_ERROR_BAD_CHECKSUM) {
+                    printf("  [FAIL] corrupted checksum, %d threads, %s: %lld\n", threads[t],
+                           f ? "FILE*" : "buffer", (long long)got);
+                    ok = 0;
+                }
             }
         }
-        zxc_seekable_free(s);
+        zxc_seekable_free(cs[0]);
+        zxc_seekable_free(cs[1]);
+        if (fc) fclose(fc);
     }
 
     free(m.p);

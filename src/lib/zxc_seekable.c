@@ -648,7 +648,12 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
             const size_t dec_cap = direct ? (size_t)dec_sz + ZXC_DECOMPRESS_TAIL_PAD : work_sz;
             const int dec_res =
                 zxc_decompress_chunk_wrapper(&s->dctx, blk, (size_t)read_res, dec_dst, dec_cap, lb);
-            if (UNLIKELY(dec_res < 0)) return dec_res;
+            // In place, the capacity is the block's own: running out of it is corruption.
+            if (UNLIKELY(dec_res < 0))
+                return direct &&
+                               (dec_res == ZXC_ERROR_DST_TOO_SMALL || dec_res == ZXC_ERROR_OVERFLOW)
+                           ? ZXC_ERROR_CORRUPT_DATA
+                           : dec_res;
             if (UNLIKELY((uint32_t)dec_res != dec_sz)) return ZXC_ERROR_CORRUPT_DATA;
 
             if (!direct) ZXC_MEMCPY(out, aside + skip, copy);
@@ -713,8 +718,9 @@ typedef struct {
 /**
  * @brief Reads one job's block, decodes it and copies the requested part out.
  *
- * Decodes into the worker's buffer, not in place: the fast decoder's margin
- * would reach the next block, which another worker may be writing.
+ * Decodes into the worker's buffer, not in place: a batch's last block would
+ * reach another worker's output, and in place measured slower once memory
+ * bandwidth binds (-20 % at 8 threads, M3).
  *
  * @param[in]     sh       Shared state.
  * @param[in,out] job      The claimed job; its @c result is set.
@@ -842,13 +848,16 @@ int64_t zxc_seekable_decompress_range_mt(zxc_seekable* s, void* dst, const size_
     }
     const uint32_t num_jobs = (uint32_t)jobs_64;
 
-    // About ZXC_MT_BATCH_BYTES of output per batch; no more threads than batches.
-    const uint32_t batch = s->max_block_size < ZXC_MT_BATCH_BYTES
-                               ? (uint32_t)(ZXC_MT_BATCH_BYTES / s->max_block_size)
-                               : 1;
+    // About ZXC_MT_BATCH_BYTES of output per batch, less if that would idle
+    // threads; no more threads than batches (two or more: batch <= ceil(jobs/2)).
+    if (n_threads > ZXC_MAX_THREADS) n_threads = ZXC_MAX_THREADS;
+    const uint32_t share = num_jobs / (uint32_t)n_threads + (num_jobs % (uint32_t)n_threads != 0);
+    uint32_t batch = s->max_block_size < ZXC_MT_BATCH_BYTES
+                         ? (uint32_t)(ZXC_MT_BATCH_BYTES / s->max_block_size)
+                         : 1;
+    if (batch > share) batch = share;
     const uint32_t num_batches = num_jobs / batch + (num_jobs % batch != 0);
     if ((uint32_t)n_threads > num_batches) n_threads = (int)num_batches;
-    if (n_threads > ZXC_MAX_THREADS) n_threads = ZXC_MAX_THREADS;
 
     zxc_seek_mt_job_t* const jobs =
         (zxc_seek_mt_job_t*)ZXC_CALLOC(num_jobs, sizeof(zxc_seek_mt_job_t));
