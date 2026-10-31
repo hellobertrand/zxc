@@ -750,8 +750,9 @@ static void print_help(const char* app) {
 }
 
 static void print_version(void) {
-    printf("ZXC CLI (" ZXC_CLI_ARCH " %zu-bit " ZXC_CLI_ENDIAN ") v%s, by Bertrand Lebonnois\n",
-           sizeof(void*) * CHAR_BIT, ZXC_LIB_VERSION_STR);
+    printf("ZXC CLI v%s \"%s\" (build " ZXC_CLI_ARCH " %zu-bit " ZXC_CLI_ENDIAN
+           "), by Bertrand Lebonnois\n",
+           zxc_version_string(), zxc_version_codename(), sizeof(void*) * CHAR_BIT);
 }
 
 /**

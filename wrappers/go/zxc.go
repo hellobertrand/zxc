@@ -115,6 +115,13 @@ func LibraryVersion() string {
 	return C.GoString(C.zxc_version_string())
 }
 
+// LibraryCodename returns the release code name reported by the linked native
+// libzxc (e.g. "Hydrogen"). Informational only; compare versions with
+// [LibraryVersion].
+func LibraryCodename() string {
+	return C.GoString(C.zxc_version_codename())
+}
+
 // MinLevel returns the minimum supported compression level (currently 1).
 func MinLevel() int {
 	return int(C.zxc_min_level())

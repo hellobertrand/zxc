@@ -267,7 +267,11 @@ func TestVersion(t *testing.T) {
 		t.Fatalf("VersionString() = %q, want %q", s, expected)
 	}
 
-	t.Logf("ZXC version: %s", s)
+	if LibraryCodename() == "" {
+		t.Fatal("LibraryCodename returned empty")
+	}
+
+	t.Logf("ZXC version: %s %q", s, LibraryCodename())
 }
 
 func TestErrorMessages(t *testing.T) {

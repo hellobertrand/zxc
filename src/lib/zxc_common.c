@@ -1169,3 +1169,5 @@ int zxc_default_level(void) { return ZXC_LEVEL_DEFAULT; }
 const char* zxc_version_string(void) { return ZXC_LIB_VERSION_STR; }
 
 unsigned zxc_version_number(void) { return ZXC_VERSION_NUMBER; }
+
+const char* zxc_version_codename(void) { return ZXC_VERSION_CODENAME; }

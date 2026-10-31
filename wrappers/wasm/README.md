@@ -116,6 +116,7 @@ ctx.free();
 | Property | Type | Description |
 |----------|------|-------------|
 | `version` | `string` | Library version |
+| `codename` | `string` | Release code name (informational) |
 | `minLevel` | `number` | Minimum compression level (`1`) |
 | `maxLevel` | `number` | Maximum compression level (`5`) |
 | `defaultLevel` | `number` | Default compression level (`3`) |

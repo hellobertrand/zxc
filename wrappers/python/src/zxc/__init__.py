@@ -21,6 +21,7 @@ from ._zxc import (
     pyzxc_max_level,
     pyzxc_default_level,
     pyzxc_version_string,
+    pyzxc_version_codename,
     pyzxc_train_dict,
     pyzxc_dict_id,
     pyzxc_get_dict_id,
@@ -132,6 +133,7 @@ __all__ = [
     "max_level",
     "default_level",
     "library_version",
+    "library_codename",
     # Constants
     "LEVEL_FASTEST",
     "LEVEL_FAST",
@@ -183,6 +185,12 @@ def library_version() -> str:
     """Return the version string reported by the linked native libzxc.
     Distinct from the Python package ``__version__``."""
     return pyzxc_version_string()
+
+
+def library_codename() -> str:
+    """Return the release code name reported by the linked native libzxc
+    (e.g. ``"Hydrogen"``). Informational only."""
+    return pyzxc_version_codename()
 
 
 def train_dict(samples, max_size: int = 65535) -> bytes:

@@ -119,6 +119,19 @@ int test_library_info_api(void) {
     }
     printf("  [PASS] zxc_version_number() == %u\n", num);
 
+    // 6. Code name must be a non-empty string matching the header
+    const char* codename = zxc_version_codename();
+    if (!codename || !*codename) {
+        printf("Failed: zxc_version_codename() returned %s\n", codename ? "\"\"" : "NULL");
+        return 0;
+    }
+    if (strcmp(codename, ZXC_VERSION_CODENAME) != 0) {
+        printf("Failed: zxc_version_codename() returned \"%s\", expected \"%s\"\n", codename,
+               ZXC_VERSION_CODENAME);
+        return 0;
+    }
+    printf("  [PASS] zxc_version_codename() == \"%s\"\n", codename);
+
     printf("PASS\n\n");
     return 1;
 }

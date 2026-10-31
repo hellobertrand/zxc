@@ -18,3 +18,6 @@ keywords = [
   "data-compression",
 ]
 categories = ["compression", "encoding"]
+
+[workspace.dependencies]
+zxc_sys = { path = "zxc-sys", version = "0.15.0", package = "zxc-compress-sys" }

@@ -92,6 +92,12 @@ ZXC_EXPORT const char* zxc_version_string(void);
  */
 ZXC_EXPORT unsigned zxc_version_number(void);
 
+/**
+ * @brief Release code name of the loaded library, @ref ZXC_VERSION_CODENAME.
+ * @return Null-terminated compile-time constant; do not free.
+ */
+ZXC_EXPORT const char* zxc_version_codename(void);
+
 /** @} */ /* end of library_info */
 
 /**

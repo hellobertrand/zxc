@@ -388,6 +388,16 @@ pub fn runtime_version() -> &'static str {
     }
 }
 
+/// Returns the release code name reported by the linked native library
+/// (e.g. `"Hydrogen"`). Informational only; compare versions with
+/// [`runtime_version`].
+pub fn runtime_codename() -> &'static str {
+    unsafe {
+        let ptr = zxc_sys::zxc_version_codename();
+        std::ffi::CStr::from_ptr(ptr).to_str().unwrap_or("")
+    }
+}
+
 /// Returns the minimum supported compression level (currently `1`).
 ///
 /// Equivalent to [`Level::Fastest`] as an integer.
@@ -508,6 +518,11 @@ mod tests {
 
         let cargo_version = env!("CARGO_PKG_VERSION");
         assert_eq!(expected, cargo_version);
+    }
+
+    #[test]
+    fn test_runtime_codename() {
+        assert!(!runtime_codename().is_empty());
     }
 
     #[test]

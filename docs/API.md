@@ -179,12 +179,15 @@ Defined in `zxc_constants.h`:
 #define ZXC_VERSION_MAJOR     0
 #define ZXC_VERSION_MINOR     15
 #define ZXC_VERSION_PATCH     0
+#define ZXC_VERSION_CODENAME  "Hydrogen"
 #define ZXC_LIB_VERSION_STR   "0.15.0"
 #define ZXC_VERSION_NUMBER    (ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH)
 ```
 
 `ZXC_VERSION_NUMBER` gates code at compile time (`#if ZXC_VERSION_NUMBER >= 10000`);
 `zxc_version_number()` returns the loaded library's value for the runtime check.
+`ZXC_VERSION_CODENAME` names the release; it is informational only, and
+`zxc_version_codename()` returns the loaded library's.
 
 ### 5.2 Block Size Constraints
 
@@ -402,6 +405,17 @@ Returns the version of the loaded library as one integer,
 `MAJOR * 10000 + MINOR * 100 + PATCH` (e.g. `1500` for 0.15.0). The header
 defines the same packing as `ZXC_VERSION_NUMBER`; comparing the two detects a
 runtime library older than the one the program was compiled against.
+
+#### `zxc_version_codename`
+
+```c
+ZXC_EXPORT const char* zxc_version_codename(void);
+```
+
+Returns the release code name of the loaded library (e.g. `"Hydrogen"`), the
+header's `ZXC_VERSION_CODENAME`. Informational only: version comparisons use
+`zxc_version_number()`. The returned pointer is a compile-time constant and
+must not be freed.
 
 ### `zxc_compress_bound`
 
@@ -2104,7 +2118,7 @@ for an identifier the loaded library predates.
 
 ## 14. Exported Symbols Summary
 
-The shared library exports **85 symbols** (verified with `nm -gU`):
+The shared library exports **86 symbols** (verified with `nm -gU`):
 
 | # | Symbol | API Layer | Header |
 |---|--------|-----------|--------|
@@ -2113,86 +2127,87 @@ The shared library exports **85 symbols** (verified with `nm -gU`):
 | 3 | `zxc_default_level` | Info | `zxc_buffer.h` |
 | 4 | `zxc_version_string` | Info | `zxc_buffer.h` |
 | 5 | `zxc_version_number` | Info | `zxc_buffer.h` |
-| 6 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
-| 7 | `zxc_compress_bound` | Buffer | `zxc_buffer.h` |
-| 8 | `zxc_compress` | Buffer | `zxc_buffer.h` |
-| 9 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
-| 10 | `zxc_decompress_inplace_bound` | Buffer | `zxc_buffer.h` |
-| 11 | `zxc_decompress_inplace` | Buffer | `zxc_buffer.h` |
-| 12 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
-| 13 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
-| 14 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
-| 15 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
-| 16 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
-| 17 | `zxc_decompress_block_bound` | Block | `zxc_buffer.h` |
-| 18 | `zxc_compress_block` | Block | `zxc_buffer.h` |
-| 19 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
-| 20 | `zxc_decompress_block_safe` | Block | `zxc_buffer.h` |
-| 21 | `zxc_estimate_cctx_size` | Block | `zxc_buffer.h` |
-| 22 | `zxc_cparam_bounds` | Parameters | `zxc_opts.h` |
-| 23 | `zxc_dparam_bounds` | Parameters | `zxc_opts.h` |
-| 24 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
-| 25 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
-| 26 | `zxc_cctx_set_param` | Context | `zxc_buffer.h` |
-| 27 | `zxc_cctx_get_param` | Context | `zxc_buffer.h` |
-| 28 | `zxc_cctx_set_dict` | Context | `zxc_buffer.h` |
-| 29 | `zxc_cctx_set_progress` | Context | `zxc_buffer.h` |
-| 30 | `zxc_cctx_reset` | Context | `zxc_buffer.h` |
-| 31 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
-| 32 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
-| 33 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
-| 34 | `zxc_dctx_set_param` | Context | `zxc_buffer.h` |
-| 35 | `zxc_dctx_get_param` | Context | `zxc_buffer.h` |
-| 36 | `zxc_dctx_set_dict` | Context | `zxc_buffer.h` |
-| 37 | `zxc_dctx_set_progress` | Context | `zxc_buffer.h` |
-| 38 | `zxc_dctx_reset` | Context | `zxc_buffer.h` |
-| 39 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
-| 40 | `zxc_decompress_inplace_dctx` | Context | `zxc_buffer.h` |
-| 41 | `zxc_static_cctx_workspace_size` | Static Context | `zxc_buffer.h` |
-| 42 | `zxc_init_static_cctx` | Static Context | `zxc_buffer.h` |
-| 43 | `zxc_static_dctx_workspace_size` | Static Context | `zxc_buffer.h` |
-| 44 | `zxc_init_static_dctx` | Static Context | `zxc_buffer.h` |
-| 45 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
-| 46 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
-| 47 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
-| 48 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
-| 49 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
-| 50 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
-| 51 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
-| 52 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
-| 53 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
-| 54 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
-| 55 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
-| 56 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
-| 57 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
-| 58 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
-| 59 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
-| 60 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
-| 61 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
-| 62 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
-| 63 | `zxc_seekable_open_reader` | Seekable | `zxc_seekable.h` |
-| 64 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
-| 65 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
-| 66 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
-| 67 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
-| 68 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
-| 69 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
-| 70 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
-| 71 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
-| 72 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
-| 73 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
-| 74 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
-| 75 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
-| 76 | `zxc_dict_train` | Dictionary | `zxc_dict.h` |
-| 77 | `zxc_dict_train_content` | Dictionary | `zxc_dict.h` |
-| 78 | `zxc_dict_train_huf` | Dictionary | `zxc_dict.h` |
-| 79 | `zxc_dict_compute_id` | Dictionary | `zxc_dict.h` |
-| 80 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
-| 81 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
-| 82 | `zxc_dict_huf` | Dictionary | `zxc_dict.h` |
-| 83 | `zxc_dict_read_id` | Dictionary | `zxc_dict.h` |
-| 84 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
-| 85 | `zxc_error_name` | Error | `zxc_error.h` |
+| 6 | `zxc_version_codename` | Info | `zxc_buffer.h` |
+| 7 | `zxc_frame_info_size` | Info | `zxc_buffer.h` |
+| 8 | `zxc_compress_bound` | Buffer | `zxc_buffer.h` |
+| 9 | `zxc_compress` | Buffer | `zxc_buffer.h` |
+| 10 | `zxc_decompress` | Buffer | `zxc_buffer.h` |
+| 11 | `zxc_decompress_inplace_bound` | Buffer | `zxc_buffer.h` |
+| 12 | `zxc_decompress_inplace` | Buffer | `zxc_buffer.h` |
+| 13 | `zxc_get_decompressed_size` | Buffer | `zxc_buffer.h` |
+| 14 | `zxc_get_dict_id` | Dictionary | `zxc_buffer.h` |
+| 15 | `zxc_get_frame_info` | Buffer | `zxc_buffer.h` |
+| 16 | `zxc_get_last_frame_info` | Buffer | `zxc_buffer.h` |
+| 17 | `zxc_compress_block_bound` | Block | `zxc_buffer.h` |
+| 18 | `zxc_decompress_block_bound` | Block | `zxc_buffer.h` |
+| 19 | `zxc_compress_block` | Block | `zxc_buffer.h` |
+| 20 | `zxc_decompress_block` | Block | `zxc_buffer.h` |
+| 21 | `zxc_decompress_block_safe` | Block | `zxc_buffer.h` |
+| 22 | `zxc_estimate_cctx_size` | Block | `zxc_buffer.h` |
+| 23 | `zxc_cparam_bounds` | Parameters | `zxc_opts.h` |
+| 24 | `zxc_dparam_bounds` | Parameters | `zxc_opts.h` |
+| 25 | `zxc_create_cctx` | Context | `zxc_buffer.h` |
+| 26 | `zxc_free_cctx` | Context | `zxc_buffer.h` |
+| 27 | `zxc_cctx_set_param` | Context | `zxc_buffer.h` |
+| 28 | `zxc_cctx_get_param` | Context | `zxc_buffer.h` |
+| 29 | `zxc_cctx_set_dict` | Context | `zxc_buffer.h` |
+| 30 | `zxc_cctx_set_progress` | Context | `zxc_buffer.h` |
+| 31 | `zxc_cctx_reset` | Context | `zxc_buffer.h` |
+| 32 | `zxc_compress_cctx` | Context | `zxc_buffer.h` |
+| 33 | `zxc_create_dctx` | Context | `zxc_buffer.h` |
+| 34 | `zxc_free_dctx` | Context | `zxc_buffer.h` |
+| 35 | `zxc_dctx_set_param` | Context | `zxc_buffer.h` |
+| 36 | `zxc_dctx_get_param` | Context | `zxc_buffer.h` |
+| 37 | `zxc_dctx_set_dict` | Context | `zxc_buffer.h` |
+| 38 | `zxc_dctx_set_progress` | Context | `zxc_buffer.h` |
+| 39 | `zxc_dctx_reset` | Context | `zxc_buffer.h` |
+| 40 | `zxc_decompress_dctx` | Context | `zxc_buffer.h` |
+| 41 | `zxc_decompress_inplace_dctx` | Context | `zxc_buffer.h` |
+| 42 | `zxc_static_cctx_workspace_size` | Static Context | `zxc_buffer.h` |
+| 43 | `zxc_init_static_cctx` | Static Context | `zxc_buffer.h` |
+| 44 | `zxc_static_dctx_workspace_size` | Static Context | `zxc_buffer.h` |
+| 45 | `zxc_init_static_dctx` | Static Context | `zxc_buffer.h` |
+| 46 | `zxc_stream_compress` | Streaming | `zxc_stream.h` |
+| 47 | `zxc_stream_decompress` | Streaming | `zxc_stream.h` |
+| 48 | `zxc_stream_get_decompressed_size` | Streaming | `zxc_stream.h` |
+| 49 | `zxc_stream_get_frame_info` | Streaming | `zxc_stream.h` |
+| 50 | `zxc_stream_get_last_frame_info` | Streaming | `zxc_stream.h` |
+| 51 | `zxc_cstream_create` | Push Streaming | `zxc_pstream.h` |
+| 52 | `zxc_cstream_free` | Push Streaming | `zxc_pstream.h` |
+| 53 | `zxc_cstream_compress` | Push Streaming | `zxc_pstream.h` |
+| 54 | `zxc_cstream_end` | Push Streaming | `zxc_pstream.h` |
+| 55 | `zxc_cstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 56 | `zxc_cstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 57 | `zxc_dstream_create` | Push Streaming | `zxc_pstream.h` |
+| 58 | `zxc_dstream_free` | Push Streaming | `zxc_pstream.h` |
+| 59 | `zxc_dstream_decompress` | Push Streaming | `zxc_pstream.h` |
+| 60 | `zxc_dstream_finished` | Push Streaming | `zxc_pstream.h` |
+| 61 | `zxc_dstream_in_size` | Push Streaming | `zxc_pstream.h` |
+| 62 | `zxc_dstream_out_size` | Push Streaming | `zxc_pstream.h` |
+| 63 | `zxc_seekable_open` | Seekable | `zxc_seekable.h` |
+| 64 | `zxc_seekable_open_reader` | Seekable | `zxc_seekable.h` |
+| 65 | `zxc_seekable_open_file` | Seekable | `zxc_stream.h` |
+| 66 | `zxc_seekable_get_num_blocks` | Seekable | `zxc_seekable.h` |
+| 67 | `zxc_seekable_get_decompressed_size` | Seekable | `zxc_seekable.h` |
+| 68 | `zxc_seekable_get_block_comp_size` | Seekable | `zxc_seekable.h` |
+| 69 | `zxc_seekable_get_block_decomp_size` | Seekable | `zxc_seekable.h` |
+| 70 | `zxc_seekable_decompress_range` | Seekable | `zxc_seekable.h` |
+| 71 | `zxc_seekable_decompress_range_mt` | Seekable | `zxc_seekable.h` |
+| 72 | `zxc_seekable_set_dict` | Seekable | `zxc_seekable.h` |
+| 73 | `zxc_seekable_set_checksum` | Seekable | `zxc_seekable.h` |
+| 74 | `zxc_seekable_free` | Seekable | `zxc_seekable.h` |
+| 75 | `zxc_write_seek_table` | Seekable | `zxc_seekable.h` |
+| 76 | `zxc_seek_table_size` | Seekable | `zxc_seekable.h` |
+| 77 | `zxc_dict_train` | Dictionary | `zxc_dict.h` |
+| 78 | `zxc_dict_train_content` | Dictionary | `zxc_dict.h` |
+| 79 | `zxc_dict_train_huf` | Dictionary | `zxc_dict.h` |
+| 80 | `zxc_dict_compute_id` | Dictionary | `zxc_dict.h` |
+| 81 | `zxc_dict_save` | Dictionary | `zxc_dict.h` |
+| 82 | `zxc_dict_load` | Dictionary | `zxc_dict.h` |
+| 83 | `zxc_dict_huf` | Dictionary | `zxc_dict.h` |
+| 84 | `zxc_dict_read_id` | Dictionary | `zxc_dict.h` |
+| 85 | `zxc_dict_save_bound` | Dictionary | `zxc_dict.h` |
+| 86 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
 (`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with
