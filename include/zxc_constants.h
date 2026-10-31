@@ -101,8 +101,9 @@
  * @brief Bounds on thread-count parameters accepted by the streaming APIs.
  * @{
  */
-/** @brief Maximum thread count: the @c THREADS setters refuse more, and
- *  zxc_seekable_decompress_range_mt() caps its argument to it. */
+/** @brief Thread cap, a guard against memory exhaustion: each worker of the
+ *  @c FILE* pipeline holds up to four jobs of two blocks. The @c THREADS
+ *  setters refuse more; zxc_seekable_decompress_range_mt() clamps to it. */
 #define ZXC_MAX_THREADS 512
 /** @} */ /* end of threading */
 

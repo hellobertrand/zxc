@@ -56,7 +56,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Set the compression level, from 1 (fastest compression) to 7 (smallest output). Default: 3. Higher levels trade compression speed for ratio; decompression stays fast at every level. Levels 6 (density) and 7 (ultra) compress far more slowly and suit data written once and read many times.
 
 **-T**, **--threads** *N*
-: Set the number of threads for compression and decompression. `0` (the default) auto-detects it from the available CPU cores.
+: Number of worker threads; the reader and writer come on top. `0` (the default) uses the available CPU cores minus one for the reader and writer, all of them when the workers read the input themselves (decompressing a regular file with blocks of 64 KB or more), and at least one.
 
 **-B**, **--block-size** *SIZE*
 : Set the compression block size. *SIZE* must be a power of two between **4K** and **2M** (e.g. `4K`, `64K`, `256K`, `512K`, `1M`). Smaller blocks use less memory and improve random access; larger blocks generally compress better. The default is **512K**, tuned for bulk and archival workloads. Only meaningful on compression: the block size is stored in the archive header and reused on decompression.
