@@ -152,25 +152,26 @@ int test_invalid_arguments(void) {
         return 0;
     }
 
-    // 4. zxc_compress NULL checks
-    if (zxc_compress(NULL, 100, (void*)1, 100, 3) >= 0) {
+    // 4. zxc_compress NULL checks; scratch is never read nor written
+    uint8_t scratch[100] = {0};
+    if (zxc_compress(NULL, 100, scratch, 100, 3) >= 0) {
         printf("Failed: zxc_compress should return < 0 when src is NULL\n");
         fclose(f);
         return 0;
     }
-    if (zxc_compress((void*)1, 100, NULL, 100, 3) >= 0) {
+    if (zxc_compress(scratch, 100, NULL, 100, 3) >= 0) {
         printf("Failed: zxc_compress should return < 0 when dst is NULL\n");
         fclose(f);
         return 0;
     }
 
     // 5. zxc_decompress NULL checks
-    if (zxc_decompress(NULL, 100, (void*)1, 100) >= 0) {
+    if (zxc_decompress(NULL, 100, scratch, 100) >= 0) {
         printf("Failed: zxc_decompress should return < 0 when src is NULL\n");
         fclose(f);
         return 0;
     }
-    if (zxc_decompress((void*)1, 100, NULL, 100) >= 0) {
+    if (zxc_decompress(scratch, 100, NULL, 100) >= 0) {
         printf("Failed: zxc_decompress should return < 0 when dst is NULL\n");
         fclose(f);
         return 0;

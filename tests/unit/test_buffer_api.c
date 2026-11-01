@@ -196,8 +196,11 @@ int test_buffer_error_codes(void) {
     /* zxc_compress error paths                                           */
     /* ------------------------------------------------------------------ */
 
+    // The non-NULL side of each NULL check below: never read nor written
+    uint8_t scratch[100] = {0};
+
     // 1. NULL src
-    int64_t r = zxc_compress(NULL, 100, (void*)1, 100, 3);
+    int64_t r = zxc_compress(NULL, 100, scratch, 100, 3);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
         return 0;
@@ -205,7 +208,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_compress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 2. NULL dst
-    r = zxc_compress((void*)1, 100, NULL, 100, 3);
+    r = zxc_compress(scratch, 100, NULL, 100, 3);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
         return 0;
@@ -213,7 +216,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_compress NULL dst -> ZXC_ERROR_NULL_INPUT\n");
 
     // 3. src_size == 0 produces a valid empty frame (header + EOF + footer)
-    uint8_t dummy[16];
+    uint8_t dummy[16] = {0};
     uint8_t empty_dst[64];
     r = zxc_compress(NULL, 0, empty_dst, sizeof(empty_dst), 3);
     if (r <= 0) {
@@ -307,7 +310,7 @@ int test_buffer_error_codes(void) {
     /* ------------------------------------------------------------------ */
 
     // 8. NULL src
-    r = zxc_decompress(NULL, 100, (void*)1, 100);
+    r = zxc_decompress(NULL, 100, scratch, 100);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
                (long long)r);
@@ -316,7 +319,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_decompress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 9. NULL dst
-    r = zxc_decompress((void*)1, 100, NULL, 100);
+    r = zxc_decompress(scratch, 100, NULL, 100);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
                (long long)r);
