@@ -2333,7 +2333,7 @@ int main(int argc, char** argv) {
         fm = tmpfile();
         if (fm) {
             fwrite(ram, 1, in_size, fm);
-            rewind(fm);
+            fseek(fm, 0, SEEK_SET);
         }
 #else
         fm = fmemopen(ram, in_size, "rb");
@@ -2348,7 +2348,7 @@ int main(int argc, char** argv) {
         const double compress_deadline = zxc_now() + (double)bench_seconds;
         const double compress_start = zxc_now();
         while (zxc_now() < compress_deadline) {
-            rewind(fm);
+            fseek(fm, 0, SEEK_SET);
             const double t0 = zxc_now();
             zxc_stream_compress(fm, NULL, bench_cctx);
             const double dt = zxc_now() - t0;
@@ -2379,7 +2379,7 @@ int main(int argc, char** argv) {
             goto bench_cleanup;
         }
         fwrite(ram, 1, in_size, fm_in);
-        rewind(fm_in);
+        fseek(fm_in, 0, SEEK_SET);
 #else
         FILE* fm_in = fmemopen(ram, in_size, "rb");
         FILE* fm_out = fmemopen(c_dat, max_c, "wb");
@@ -2402,8 +2402,8 @@ int main(int argc, char** argv) {
         }
 
 #ifdef _WIN32
-        rewind(fm_out);
-        if (fread(c_dat, 1, (size_t)c_sz, fm_out) != (size_t)c_sz) {
+        if (fseek(fm_out, 0, SEEK_SET) != 0 ||
+            fread(c_dat, 1, (size_t)c_sz, fm_out) != (size_t)c_sz) {
             zxc_log("Error: Short read on the compressed stream\n");
             fclose(fm_in);
             fclose(fm_out);
@@ -2425,7 +2425,7 @@ int main(int argc, char** argv) {
             goto bench_cleanup;
         }
         fwrite(c_dat, 1, (size_t)c_sz, fc);
-        rewind(fc);
+        fseek(fc, 0, SEEK_SET);
 #else
         FILE* fc = fmemopen(c_dat, (size_t)c_sz, "rb");
         if (!fc) {
@@ -2440,7 +2440,7 @@ int main(int argc, char** argv) {
         const double decompress_start = zxc_now();
         last_line = -1.0;
         while (zxc_now() < decompress_deadline) {
-            rewind(fc);
+            fseek(fc, 0, SEEK_SET);
             const double t0 = zxc_now();
             zxc_stream_decompress(fc, NULL, bench_dctx);
             const double dt = zxc_now() - t0;
