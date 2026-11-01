@@ -1,0 +1,7 @@
+# Tests exit on allocation failure (test_malloc, test_tmpfile): out-of-memory
+# and out-of-resources paths are not theirs to handle.
+nullPointerOutOfMemory:tests/*
+nullPointerArithmeticOutOfMemory:tests/*
+nullPointerOutOfResources:tests/*
+# Unused while every test allocation is checked
+unmatchedSuppression:tests/*

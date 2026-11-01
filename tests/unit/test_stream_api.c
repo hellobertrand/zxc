@@ -862,6 +862,11 @@ int test_stream_engine_errors(void) {
 
         fseek(f_comp_out, 0, SEEK_END);
         const long comp_file_sz = ftell(f_comp_out);
+        if (comp_file_sz <= 0) {
+            printf("  [FAIL] ftell failed\n");
+            fclose(f_comp_out);
+            return 0;
+        }
         uint8_t* comp_data = test_malloc((size_t)comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         if (fread(comp_data, 1, (size_t)comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
