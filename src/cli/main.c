@@ -1285,7 +1285,11 @@ static FILE* zxc_create_output(const char* path, int force, int owner_only, int*
     }
     if (fd == -1) return NULL;
     FILE* const f = fdopen(fd, "wb");
-    if (!f) close(fd);
+    if (!f) {
+        const int err = errno;  // a successful close leaves errno unspecified
+        close(fd);
+        errno = err;
+    }
     return f;
 #endif
 }
