@@ -12,6 +12,6 @@
     "dev": "node build.mjs --serve"
   },
   "dependencies": {
-    "marked": "18.1.0"
+    "marked": "18.1.2"
   }
 }
