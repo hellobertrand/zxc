@@ -61,7 +61,7 @@ static uint32_t gc_lcg_next(uint32_t* s) {
     return *s;
 }
 
-/* malloc() that exits on failure, as test_malloc() does. */
+/* Exits on failure, like test_malloc(). */
 static uint8_t* gc_alloc(const size_t n) {
     uint8_t* const b = (uint8_t*)malloc(n ? n : 1);
     if (!b) {

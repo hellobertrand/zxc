@@ -60,10 +60,10 @@ static inline void test_aligned_free(void* p) { free(p); }
 void zxc_test_srand(uint64_t seed);
 uint32_t zxc_test_rand(void);
 
-// Non-NULL pointer that must never be dereferenced
+// Non-NULL, never dereferenced
 #define TEST_POISON_PTR ((void*)(uintptr_t)1)
 
-// malloc() that exits the run on failure; never NULL, even for n == 0
+// malloc() exiting on failure; never NULL, even for 0
 static inline void* test_malloc(const size_t n) {
     void* const p = malloc(n ? n : 1);
     if (!p) {
@@ -73,7 +73,7 @@ static inline void* test_malloc(const size_t n) {
     return p;
 }
 
-// tmpfile() that exits the run on failure
+// tmpfile() exiting on failure
 static inline FILE* test_tmpfile(void) {
     FILE* const f = tmpfile();
     if (!f) {

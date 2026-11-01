@@ -304,8 +304,7 @@ jobs:
   # runtime dispatcher select that job's tier:
   #   -mrm  Merom (Core 2)  -> SSE2 tier    (sub-AVX2 detection -> _default,
   #                            which carries the SSE2 paths: x86-64 baseline);
-  #                            in the ubuntu:26.04 image, as the runner's
-  #                            glibc is amd64v3
+  #                            in ubuntu:26.04, the runner's glibc is amd64v3
   #   -hsw  Haswell         -> AVX2 tier     (gate = AVX2+BMI1+BMI2+LZCNT,
   #                            all present on Haswell; Merom has none)
   #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2 plus BMI1/BMI2/LZCNT;
@@ -357,7 +356,7 @@ jobs:
 
       - name: Install build tools
         run: |
-          SUDO=$(command -v sudo || true)  # absent, and not needed, in the container
+          SUDO=$(command -v sudo || true)  # none in the container
           $SUDO apt-get update
           $SUDO env DEBIAN_FRONTEND=noninteractive \
             apt-get install -y cmake build-essential curl xz-utils ca-certificates
