@@ -791,7 +791,7 @@ int test_swapped_blocks_stream(void) {
     // 3. Read compressed data to memory
     long comp_sz = ftell(f_comp);
     fseek(f_comp, 0, SEEK_SET);
-    uint8_t* comp_buf = malloc((size_t)comp_sz);
+    uint8_t* comp_buf = test_malloc((size_t)comp_sz);
     if (fread(comp_buf, 1, comp_sz, f_comp) != (size_t)comp_sz) {
         printf("[FAIL] Failed to read compressed data\n");
         free(val_buf);
@@ -827,7 +827,7 @@ int test_swapped_blocks_stream(void) {
 
     // 5. Swap Block 1 and Block 2
     // To safely swap, we need a new buffer
-    uint8_t* swapped_buf = malloc((size_t)comp_sz);
+    uint8_t* swapped_buf = test_malloc((size_t)comp_sz);
 
     // Copy File Header
     // Copy File Header

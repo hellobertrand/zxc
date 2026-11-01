@@ -59,6 +59,16 @@ static inline void test_aligned_free(void* p) { free(p); }
 void zxc_test_srand(uint64_t seed);
 uint32_t zxc_test_rand(void);
 
+// malloc() that aborts the run instead of returning NULL
+static inline void* test_malloc(const size_t n) {
+    void* const p = malloc(n);
+    if (!p) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
 // tmpfile() that aborts the run instead of returning NULL
 static inline FILE* test_tmpfile(void) {
     FILE* const f = tmpfile();

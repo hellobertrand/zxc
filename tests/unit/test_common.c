@@ -222,7 +222,7 @@ int test_round_trip(const char* test_name, const uint8_t* input, size_t size, in
     }
 
     fseek(f_decomp, 0, SEEK_SET);
-    uint8_t* out_buf = malloc(size > 0 ? size : 1);
+    uint8_t* out_buf = test_malloc(size > 0 ? size : 1);
 
     if (fread(out_buf, 1, size, f_decomp) != size) {
         printf("Read validation failed (incomplete read)!\n");

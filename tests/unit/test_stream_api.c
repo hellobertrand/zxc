@@ -636,7 +636,7 @@ int test_stream_get_decompressed_size_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
         const size_t cap = zxc_compress_bound(src_sz);
-        uint8_t* comp = malloc(cap);
+        uint8_t* comp = test_malloc(cap);
         int64_t comp_sz = zxc_compress(src, src_sz, comp, cap, 3);
         if (comp_sz <= 0) {
             printf("  [SKIP] compress failed\n");
@@ -736,7 +736,7 @@ int test_stream_engine_errors(void) {
     {
         // First, create a valid compressed stream
         const size_t src_sz = 4096;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
 
         FILE* f_comp_in = test_tmpfile();
@@ -758,7 +758,7 @@ int test_stream_engine_errors(void) {
         // Read the compressed data, corrupt the footer source size, rewrite
         fseek(f_comp_out, 0, SEEK_END);
         const long comp_file_sz = ftell(f_comp_out);
-        uint8_t* comp_data = malloc(comp_file_sz);
+        uint8_t* comp_data = test_malloc(comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         if (fread(comp_data, 1, comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
             printf("  [FAIL] fread failed\n");
@@ -794,7 +794,7 @@ int test_stream_engine_errors(void) {
     // 5. Stream decompress with corrupted global checksum
     {
         const size_t src_sz = 4096;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
 
         FILE* f_comp_in = test_tmpfile();
@@ -815,7 +815,7 @@ int test_stream_engine_errors(void) {
 
         fseek(f_comp_out, 0, SEEK_END);
         const long comp_file_sz = ftell(f_comp_out);
-        uint8_t* comp_data = malloc(comp_file_sz);
+        uint8_t* comp_data = test_malloc(comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         if (fread(comp_data, 1, comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
             printf("  [FAIL] fread failed\n");
@@ -851,7 +851,7 @@ int test_stream_engine_errors(void) {
     // 6. Stream decompress truncated file (missing EOF + footer)
     {
         const size_t src_sz = 4096;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
 
         FILE* f_comp_in = test_tmpfile();
@@ -872,7 +872,7 @@ int test_stream_engine_errors(void) {
 
         fseek(f_comp_out, 0, SEEK_END);
         const long comp_file_sz = ftell(f_comp_out);
-        uint8_t* comp_data = malloc((size_t)comp_file_sz);
+        uint8_t* comp_data = test_malloc((size_t)comp_file_sz);
         fseek(f_comp_out, 0, SEEK_SET);
         if (fread(comp_data, 1, (size_t)comp_file_sz, f_comp_out) != (size_t)comp_file_sz) {
             printf("  [FAIL] fread failed\n");
@@ -908,7 +908,7 @@ int test_stream_engine_errors(void) {
     // 7. Stream decompress with mid-block body truncation
     {
         const size_t src_sz = 64 * 1024;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
 
         FILE* f_comp_in = test_tmpfile();
@@ -932,7 +932,7 @@ int test_stream_engine_errors(void) {
         // Truncate mid-block: keep header + first block header + partial body
         const long trunc_sz = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + 16;
         if (trunc_sz < comp_file_sz) {
-            uint8_t* comp_data = malloc(trunc_sz);
+            uint8_t* comp_data = test_malloc(trunc_sz);
             fseek(f_comp_out, 0, SEEK_SET);
             if (fread(comp_data, 1, trunc_sz, f_comp_out) == (size_t)trunc_sz) {
                 FILE* f_trunc = test_tmpfile();
@@ -961,7 +961,7 @@ int test_stream_engine_errors(void) {
     // 8. Streaming fwrite error: compress real data, then decompress to a read-only file
     {
         const size_t src_sz = 64 * 1024;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
 
         FILE* f_comp_in = test_tmpfile();
@@ -1006,7 +1006,7 @@ int test_stream_engine_errors(void) {
     // 9. Multi-threaded streaming I/O failure (writer fwrite error with multiple workers)
     {
         const size_t src_sz = 256 * 1024;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
 
         FILE* f_comp_in = test_tmpfile();
