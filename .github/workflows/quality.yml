@@ -199,12 +199,30 @@ jobs:
 
       - name: Valgrind Memory Check
         working-directory: build_valgrind
+        shell: bash
         run: |
-          valgrind --leak-check=full \
-                   --show-leak-kinds=all \
-                   --track-origins=yes \
-                   --error-exitcode=1 \
-                   ./zxc_test
+          # One memcheck process per test, $(nproc) at a time; each test's time is logged.
+          mkdir -p vg
+          rc=0
+          # shellcheck disable=SC2016 # $1 and $EPOCHREALTIME expand in the child shell
+          ./zxc_test --list | xargs -P "$(nproc)" -I{} bash -c '
+            s=$EPOCHREALTIME
+            valgrind --leak-check=full --show-leak-kinds=all --track-origins=yes \
+                     --error-exitcode=1 --log-file=vg/$1.vg ./zxc_test -e "$1" > vg/$1.out 2>&1
+            rc=$?
+            awk -v a="$s" -v b="$EPOCHREALTIME" -v t="$1" -v rc="$rc" \
+                "BEGIN { printf \"%7.1fs  %s%s\n\", b - a, t, rc ? \"  FAILED\" : \"\" }"
+            exit $(( rc != 0 ))
+          ' _ {} | tee vg/times.txt || rc=$?
+
+          echo "::group::Slowest tests"
+          sort -rn vg/times.txt | head -20
+          echo "::endgroup::"
+          awk '/FAILED$/ { print $2 }' vg/times.txt | while read -r t; do
+            echo "::error::$t failed under valgrind"
+            cat "vg/$t.out" "vg/$t.vg"
+          done
+          exit "$rc"
 
       - name: Rapidhash resolution is enforced at configure time
         shell: bash
