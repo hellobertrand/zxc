@@ -304,7 +304,8 @@ jobs:
   # runtime dispatcher select that job's tier:
   #   -mrm  Merom (Core 2)  -> SSE2 tier    (sub-AVX2 detection -> _default,
   #                            which carries the SSE2 paths: x86-64 baseline);
-  #                            on 24.04, as the 26.04 glibc is amd64v3
+  #                            in the ubuntu:26.04 image, as the runner's
+  #                            glibc is amd64v3
   #   -hsw  Haswell         -> AVX2 tier     (gate = AVX2+BMI1+BMI2+LZCNT,
   #                            all present on Haswell; Merom has none)
   #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2 plus BMI1/BMI2/LZCNT;
@@ -321,13 +322,15 @@ jobs:
     name: "Tier ${{ matrix.tier }}: x86_64 (sde ${{ matrix.simd }})"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
+    container: ${{ matrix.container }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - simd: sse2
             tier: 2
-            runner: ubuntu-24.04
+            runner: ubuntu-latest
+            container: ubuntu:26.04
             sde_chip: mrm
           - simd: avx2
             tier: 2
@@ -354,8 +357,10 @@ jobs:
 
       - name: Install build tools
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake build-essential
+          SUDO=$(command -v sudo || true)  # absent, and not needed, in the container
+          $SUDO apt-get update
+          $SUDO env DEBIAN_FRONTEND=noninteractive \
+            apt-get install -y cmake build-essential curl xz-utils ca-certificates
 
       - name: Install Intel SDE (pinned + checksum-verified)
         run: |
