@@ -196,7 +196,7 @@ int test_buffer_error_codes(void) {
     /* zxc_compress error paths                                           */
     /* ------------------------------------------------------------------ */
 
-    // The non-NULL side of each NULL check below: never read nor written
+    // Non-NULL side of the NULL checks below, never touched
     uint8_t scratch[100] = {0};
 
     // 1. NULL src

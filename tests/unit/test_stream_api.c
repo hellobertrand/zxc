@@ -152,7 +152,7 @@ int test_invalid_arguments(void) {
         return 0;
     }
 
-    // 4. zxc_compress NULL checks; scratch is never read nor written
+    // 4. zxc_compress NULL checks (scratch is never touched)
     uint8_t scratch[100] = {0};
     if (zxc_compress(NULL, 100, scratch, 100, 3) >= 0) {
         printf("Failed: zxc_compress should return < 0 when src is NULL\n");

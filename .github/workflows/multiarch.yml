@@ -303,10 +303,8 @@ jobs:
   # build per job carries all per-ISA variants; the emulated CPU model makes the
   # runtime dispatcher select that job's tier:
   #   -mrm  Merom (Core 2)  -> SSE2 tier    (sub-AVX2 detection -> _default,
-  #                            which carries the SSE2 paths: x86-64 baseline).
-  #                            Pinned to ubuntu-24.04: the 26.04 image ships
-  #                            an amd64v3 glibc whose ld.so already executes
-  #                            VEX instructions, so nothing runs on Merom.
+  #                            which carries the SSE2 paths: x86-64 baseline);
+  #                            on 24.04, as the 26.04 glibc is amd64v3
   #   -hsw  Haswell         -> AVX2 tier     (gate = AVX2+BMI1+BMI2+LZCNT,
   #                            all present on Haswell; Merom has none)
   #   -icx  Ice Lake Server -> AVX-512 tier  (F+BW+VBMI2 plus BMI1/BMI2/LZCNT;

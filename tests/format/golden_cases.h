@@ -60,7 +60,7 @@ static uint32_t gc_lcg_next(uint32_t* s) {
     return *s;
 }
 
-/* malloc() that aborts the generator instead of returning NULL. */
+/* malloc() that aborts on failure. */
 static uint8_t* gc_alloc(const size_t n) {
     uint8_t* const b = (uint8_t*)malloc(n);
     if (!b) abort();
