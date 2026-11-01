@@ -98,14 +98,10 @@ int test_null_output_decompression(void) {
 int test_invalid_arguments(void) {
     printf("=== TEST: Unit - Invalid Arguments ===\n");
 
-    FILE* f = tmpfile();
-    if (!f) return 0;
+    FILE* const f = test_tmpfile();
+    FILE* const f_valid = test_tmpfile();
+    int ok = 0;
 
-    FILE* f_valid = tmpfile();
-    if (!f_valid) {
-        fclose(f);
-        return 0;
-    }
     // Prepare a valid compressed stream for decompression tests
     zxc_cctx* const _sco5 = cctx_for(1, 1, 0);
     zxc_stream_compress(f, f_valid, _sco5);
@@ -118,8 +114,7 @@ int test_invalid_arguments(void) {
     zxc_free_cctx(_sco6);
     if (_sco6_r >= 0) {
         printf("Failed: Should return < 0 when Input is NULL\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
 
     // 2. Output NULL -> Must SUCCEED (Benchmark / Dry-Run Mode)
@@ -128,8 +123,7 @@ int test_invalid_arguments(void) {
     zxc_free_cctx(_sco7);
     if (_sco7_r < 0) {
         printf("Failed: Should allow NULL Output (Benchmark mode support)\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
 
     // 3. Decompression Input NULL -> Must fail
@@ -138,8 +132,7 @@ int test_invalid_arguments(void) {
     zxc_free_dctx(_sdo8);
     if (_sdo8_r >= 0) {
         printf("Failed: Decompress should return < 0 when Input is NULL\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
 
     // 3b. Decompression Output NULL -> Must SUCCEED (Benchmark mode)
@@ -148,45 +141,41 @@ int test_invalid_arguments(void) {
     zxc_free_dctx(_sdo9);
     if (_sdo9_r < 0) {
         printf("Failed: Decompress should allow NULL Output (Benchmark mode support)\n");
-        fclose(f_valid);
-        return 0;
+        goto cleanup;
     }
 
-    // 4. zxc_compress NULL checks (scratch is never touched)
-    uint8_t scratch[100] = {0};
-    if (zxc_compress(NULL, 100, scratch, 100, 3) >= 0) {
+    // 4. zxc_compress NULL checks
+    if (zxc_compress(NULL, 100, TEST_POISON_PTR, 100, 3) >= 0) {
         printf("Failed: zxc_compress should return < 0 when src is NULL\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
-    if (zxc_compress(scratch, 100, NULL, 100, 3) >= 0) {
+    if (zxc_compress(TEST_POISON_PTR, 100, NULL, 100, 3) >= 0) {
         printf("Failed: zxc_compress should return < 0 when dst is NULL\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
 
     // 5. zxc_decompress NULL checks
-    if (zxc_decompress(NULL, 100, scratch, 100) >= 0) {
+    if (zxc_decompress(NULL, 100, TEST_POISON_PTR, 100) >= 0) {
         printf("Failed: zxc_decompress should return < 0 when src is NULL\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
-    if (zxc_decompress(scratch, 100, NULL, 100) >= 0) {
+    if (zxc_decompress(TEST_POISON_PTR, 100, NULL, 100) >= 0) {
         printf("Failed: zxc_decompress should return < 0 when dst is NULL\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
 
     // 6. zxc_compress_bound overflow check
     if (zxc_compress_bound(SIZE_MAX) != 0) {
         printf("Failed: zxc_compress_bound should return 0 on overflow\n");
-        fclose(f);
-        return 0;
+        goto cleanup;
     }
 
     printf("PASS\n\n");
+    ok = 1;
+cleanup:
     fclose(f);
-    return 1;
+    fclose(f_valid);
+    return ok;
 }
 
 // Checks behavior with truncated compressed input
@@ -634,7 +623,7 @@ int test_stream_get_decompressed_size_errors(void) {
     {
         // Create a valid compressed file in memory
         const size_t src_sz = 512;
-        uint8_t* src = malloc(src_sz);
+        uint8_t* src = test_malloc(src_sz);
         gen_lz_data(src, src_sz);
         const size_t cap = zxc_compress_bound(src_sz);
         uint8_t* comp = test_malloc(cap);
@@ -886,6 +875,11 @@ int test_stream_engine_errors(void) {
         const long trunc_sz =
             comp_file_sz -
             (long)(ZXC_BLOCK_HEADER_SIZE + test_footer_len(comp_data, (size_t)comp_file_sz));
+        if (trunc_sz <= 0) {
+            printf("  [FAIL] archive too short to truncate\n");
+            free(comp_data);
+            return 0;
+        }
 
         FILE* f_corrupt = test_tmpfile();
         FILE* f_dec_out = test_tmpfile();

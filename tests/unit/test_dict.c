@@ -394,13 +394,13 @@ int test_dict_block_safe_roundtrip(void) {
     }
 
     const size_t comp_bound = zxc_compress_block_bound(src_size);
-    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
-    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    uint8_t* compressed = (uint8_t*)test_malloc(comp_bound);
+    uint8_t* decompressed = (uint8_t*)test_malloc(src_size);
     zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
 
     int result = 0;
-    if (!compressed || !decompressed || !cctx || !dctx) {
+    if (!cctx || !dctx) {
         printf("  [FAIL] allocation failed\n");
         goto cleanup;
     }
@@ -553,20 +553,12 @@ int test_dict_stream_roundtrip(void) {
     const size_t dict_size = sizeof(dict_content) - 1;
 
     const size_t src_size = 8192;
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict_content, dict_size);
 
-    FILE* f_src = tmpfile();
-    FILE* f_comp = tmpfile();
-    FILE* f_dec = tmpfile();
-    if (!f_src || !f_comp || !f_dec) {
-        printf("  [FAIL] tmpfile() failed\n");
-        if (f_src) fclose(f_src);
-        if (f_comp) fclose(f_comp);
-        if (f_dec) fclose(f_dec);
-        free(src);
-        return 0;
-    }
+    FILE* f_src = test_tmpfile();
+    FILE* f_comp = test_tmpfile();
+    FILE* f_dec = test_tmpfile();
 
     fwrite(src, 1, src_size, f_src);
     fseek(f_src, 0, SEEK_SET);
@@ -1012,32 +1004,23 @@ static const uint8_t k_dict_b[] =
 static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, size_t dec_dict_size,
                                   int64_t want_err) {
     const size_t src_size = 8192;
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
 
-    FILE* f_src = tmpfile();
-    FILE* f_comp = tmpfile();
-    FILE* f_dec = tmpfile();
-    int ok = 1;
-    if (!f_src || !f_comp || !f_dec) {
-        printf("  [FAIL] %s: tmpfile() failed\n", label);
-        ok = 0;
-    }
+    FILE* f_src = test_tmpfile();
+    FILE* f_comp = test_tmpfile();
+    FILE* f_dec = test_tmpfile();
 
-    if (ok) {
-        fwrite(src, 1, src_size, f_src);
-        fseek(f_src, 0, SEEK_SET);
-        zxc_cctx* cctx = zxc_create_cctx();
-        int64_t cs = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
-        if (cs == ZXC_OK) cs = zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);
-        if (cs == ZXC_OK) cs = zxc_cctx_set_dict(cctx, k_dict_a, sizeof(k_dict_a) - 1, NULL);
-        if (cs == ZXC_OK) cs = zxc_stream_compress(f_src, f_comp, cctx);
-        zxc_free_cctx(cctx);
-        if (cs <= 0) {
-            printf("  [FAIL] %s: stream_compress failed\n", label);
-            ok = 0;
-        }
-    }
+    fwrite(src, 1, src_size, f_src);
+    fseek(f_src, 0, SEEK_SET);
+    zxc_cctx* cctx = zxc_create_cctx();
+    int64_t cs = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
+    if (cs == ZXC_OK) cs = zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);
+    if (cs == ZXC_OK) cs = zxc_cctx_set_dict(cctx, k_dict_a, sizeof(k_dict_a) - 1, NULL);
+    if (cs == ZXC_OK) cs = zxc_stream_compress(f_src, f_comp, cctx);
+    zxc_free_cctx(cctx);
+    int ok = cs > 0;
+    if (!ok) printf("  [FAIL] %s: stream_compress failed\n", label);
 
     if (ok) {
         fseek(f_comp, 0, SEEK_SET);
@@ -1053,9 +1036,9 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
         }
     }
 
-    if (f_src) fclose(f_src);
-    if (f_comp) fclose(f_comp);
-    if (f_dec) fclose(f_dec);
+    fclose(f_src);
+    fclose(f_comp);
+    fclose(f_dec);
     free(src);
     return ok;
 }

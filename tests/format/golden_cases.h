@@ -32,6 +32,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,10 +61,13 @@ static uint32_t gc_lcg_next(uint32_t* s) {
     return *s;
 }
 
-/* malloc() that aborts on failure. */
+/* malloc() that exits on failure, as test_malloc() does. */
 static uint8_t* gc_alloc(const size_t n) {
-    uint8_t* const b = (uint8_t*)malloc(n);
-    if (!b) abort();
+    uint8_t* const b = (uint8_t*)malloc(n ? n : 1);
+    if (!b) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
     return b;
 }
 
@@ -211,7 +215,7 @@ static size_t gc_make_dict_payload(uint8_t** out) {
  * both the per-block table (no 128-byte header) and RAW/RLE. */
 static size_t gc_make_huffman_dict_payload(uint8_t** out) {
     const size_t cap = 4096;
-    uint8_t* b = (uint8_t*)malloc(cap);
+    uint8_t* b = gc_alloc(cap);
     uint32_t st = 0x5EEDCAFEU;
     size_t n = 0;
     while (n + 160 < cap) {

@@ -298,13 +298,15 @@ int test_decompress_block_safe(void) {
      *    dst_capacity == uncompressed_size; must succeed with the safe API. */
     {
         const size_t n = 32 * 1024;
-        uint8_t* src = (uint8_t*)malloc(n);
+        uint8_t* src = (uint8_t*)test_malloc(n);
         gen_random_data(src, n); /* random data -> heavy literal runs, varint-prone */
         uint8_t* comp = NULL;
         size_t comp_cap = 0;
         int64_t csz = sbs_compress(src, n, 3, 0, &comp, &comp_cap);
         if (csz <= 0) {
             printf("Failed: compress literal-heavy\n");
+            free(comp);
+            free(src);
             return 0;
         }
         uint8_t* dst = (uint8_t*)test_malloc(n);

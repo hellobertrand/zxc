@@ -56,12 +56,12 @@ int test_buffer_api(void) {
     printf("=== TEST: Unit - Buffer API (zxc_compress/zxc_decompress) ===\n");
 
     size_t src_size = 128 * 1024;
-    uint8_t* src = malloc(src_size);
+    uint8_t* src = test_malloc(src_size);
     gen_lz_data(src, src_size);
 
     // 1. Calculate max compressed size
     size_t max_dst_size = zxc_compress_bound(src_size);
-    uint8_t* compressed = malloc(max_dst_size);
+    uint8_t* compressed = test_malloc(max_dst_size);
     int checksum_enabled = 1;
 
     // 2. Compress
@@ -196,11 +196,8 @@ int test_buffer_error_codes(void) {
     /* zxc_compress error paths                                           */
     /* ------------------------------------------------------------------ */
 
-    // Non-NULL side of the NULL checks below, never touched
-    uint8_t scratch[100] = {0};
-
     // 1. NULL src
-    int64_t r = zxc_compress(NULL, 100, scratch, 100, 3);
+    int64_t r = zxc_compress(NULL, 100, TEST_POISON_PTR, 100, 3);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
         return 0;
@@ -208,7 +205,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_compress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 2. NULL dst
-    r = zxc_compress(scratch, 100, NULL, 100, 3);
+    r = zxc_compress(TEST_POISON_PTR, 100, NULL, 100, 3);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
         return 0;
@@ -310,7 +307,7 @@ int test_buffer_error_codes(void) {
     /* ------------------------------------------------------------------ */
 
     // 8. NULL src
-    r = zxc_decompress(NULL, 100, scratch, 100);
+    r = zxc_decompress(NULL, 100, TEST_POISON_PTR, 100);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
                (long long)r);
@@ -319,7 +316,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_decompress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 9. NULL dst
-    r = zxc_decompress(scratch, 100, NULL, 100);
+    r = zxc_decompress(TEST_POISON_PTR, 100, NULL, 100);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
                (long long)r);
@@ -380,7 +377,7 @@ int test_buffer_error_codes(void) {
 
     // Prepare a valid compressed buffer for subsequent decompress error tests
     const size_t test_src_sz = 1024;
-    uint8_t* test_src = malloc(test_src_sz);
+    uint8_t* test_src = test_malloc(test_src_sz);
     gen_lz_data(test_src, test_src_sz);
     const size_t comp_cap = zxc_compress_bound(test_src_sz);
     uint8_t* comp_buf = test_malloc(comp_cap);
@@ -1387,11 +1384,11 @@ static int frame_info_same(const zxc_frame_info_t* a, const zxc_frame_info_t* b)
 int test_frame_info(void) {
     printf("=== TEST: Frame info (buffer and FILE*) ===\n");
     enum { N = 100000 };
-    uint8_t* const src = malloc(N);
+    uint8_t* const src = test_malloc(N);
     const size_t cap = zxc_compress_bound(N) + 1;
     uint8_t* const arc = test_malloc(cap);
-    int ok = src && arc && zxc_frame_info_size() == sizeof(zxc_frame_info_t);
-    if (ok) gen_lz_data(src, N);
+    int ok = zxc_frame_info_size() == sizeof(zxc_frame_info_t);
+    gen_lz_data(src, N);
 
     static uint8_t dict[4096];
     memset(dict, 'z', sizeof(dict));
