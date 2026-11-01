@@ -1158,7 +1158,7 @@ int test_seekable_empty_file(void) {
             return 0;
         }
         /* Decompress the stream output */
-        rewind(fout);
+        fseek(fout, 0, SEEK_SET);
         FILE* fdec = tmpfile();
         if (fdec) {
             int64_t dsz = zxc_stream_decompress(fout, fdec, NULL);
@@ -1173,9 +1173,9 @@ int test_seekable_empty_file(void) {
             }
             fclose(fdec);
         }
-        fclose(fin);
-        fclose(fout);
     }
+    if (fin) fclose(fin);
+    if (fout) fclose(fout);
 
     free(dst);
     printf("PASS\n\n");

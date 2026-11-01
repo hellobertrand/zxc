@@ -59,6 +59,16 @@ static inline void test_aligned_free(void* p) { free(p); }
 void zxc_test_srand(uint64_t seed);
 uint32_t zxc_test_rand(void);
 
+// tmpfile() that aborts the run instead of returning NULL
+static inline FILE* test_tmpfile(void) {
+    FILE* const f = tmpfile();
+    if (!f) {
+        perror("tmpfile");
+        exit(EXIT_FAILURE);
+    }
+    return f;
+}
+
 /* --- Data generators ---------------------------------------------------- */
 
 void gen_random_data(uint8_t* buf, size_t size);

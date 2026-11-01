@@ -110,7 +110,7 @@ int test_invalid_arguments(void) {
     zxc_cctx* const _sco5 = cctx_for(1, 1, 0);
     zxc_stream_compress(f, f_valid, _sco5);
     zxc_free_cctx(_sco5);
-    rewind(f_valid);
+    fseek(f_valid, 0, SEEK_SET);
 
     // 1. Input NULL -> Must fail
     zxc_cctx* const _sco6 = cctx_for(1, 5, 0);
@@ -335,12 +335,12 @@ int test_io_deferred_write_failure(void) {
     zxc_cctx* const copts = cctx_for(1, 0, 0);
     zxc_dctx* const dopts = dctx_for(1, 0);
 
-    rewind(f_in);
+    fseek(f_in, 0, SEEK_SET);
     const int64_t c_pipe = zxc_stream_compress(f_in, f_pipe_c, copts);
-    rewind(f_in);
+    fseek(f_in, 0, SEEK_SET);
     const int64_t c_ok = zxc_stream_compress(f_in, f_arc, copts);
     zxc_free_cctx(copts);
-    rewind(f_arc);
+    fseek(f_arc, 0, SEEK_SET);
     const int64_t d_pipe = zxc_stream_decompress(f_arc, f_pipe_d, dopts);
     zxc_free_dctx(dopts);
 
@@ -645,7 +645,7 @@ int test_stream_get_decompressed_size_errors(void) {
             return 0;
         }
 
-        FILE* f = tmpfile();
+        FILE* f = test_tmpfile();
         fwrite(comp, 1, (size_t)comp_sz, f);
         fseek(f, 0, SEEK_SET);
         r = zxc_stream_get_decompressed_size(f);
@@ -739,8 +739,8 @@ int test_stream_engine_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
 
-        FILE* f_comp_in = tmpfile();
-        FILE* f_comp_out = tmpfile();
+        FILE* f_comp_in = test_tmpfile();
+        FILE* f_comp_out = test_tmpfile();
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
@@ -772,8 +772,8 @@ int test_stream_engine_errors(void) {
         // Corrupt the stored source size in the footer
         comp_data[test_footer_size_at(comp_data, (size_t)comp_file_sz)] ^= 0x01;
 
-        FILE* f_corrupt = tmpfile();
-        FILE* f_dec_out = tmpfile();
+        FILE* f_corrupt = test_tmpfile();
+        FILE* f_dec_out = test_tmpfile();
         fwrite(comp_data, 1, comp_file_sz, f_corrupt);
         fseek(f_corrupt, 0, SEEK_SET);
         free(comp_data);
@@ -797,8 +797,8 @@ int test_stream_engine_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
 
-        FILE* f_comp_in = tmpfile();
-        FILE* f_comp_out = tmpfile();
+        FILE* f_comp_in = test_tmpfile();
+        FILE* f_comp_out = test_tmpfile();
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
@@ -829,8 +829,8 @@ int test_stream_engine_errors(void) {
         // Corrupt the global checksum (last 4 bytes)
         comp_data[comp_file_sz - 1] ^= 0xFF;
 
-        FILE* f_corrupt = tmpfile();
-        FILE* f_dec_out = tmpfile();
+        FILE* f_corrupt = test_tmpfile();
+        FILE* f_dec_out = test_tmpfile();
         fwrite(comp_data, 1, comp_file_sz, f_corrupt);
         fseek(f_corrupt, 0, SEEK_SET);
         free(comp_data);
@@ -854,8 +854,8 @@ int test_stream_engine_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
 
-        FILE* f_comp_in = tmpfile();
-        FILE* f_comp_out = tmpfile();
+        FILE* f_comp_in = test_tmpfile();
+        FILE* f_comp_out = test_tmpfile();
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
@@ -886,8 +886,8 @@ int test_stream_engine_errors(void) {
             comp_file_sz -
             (long)(ZXC_BLOCK_HEADER_SIZE + test_footer_len(comp_data, (size_t)comp_file_sz));
 
-        FILE* f_corrupt = tmpfile();
-        FILE* f_dec_out = tmpfile();
+        FILE* f_corrupt = test_tmpfile();
+        FILE* f_dec_out = test_tmpfile();
         fwrite(comp_data, 1, trunc_sz, f_corrupt);
         fseek(f_corrupt, 0, SEEK_SET);
         free(comp_data);
@@ -911,8 +911,8 @@ int test_stream_engine_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
 
-        FILE* f_comp_in = tmpfile();
-        FILE* f_comp_out = tmpfile();
+        FILE* f_comp_in = test_tmpfile();
+        FILE* f_comp_out = test_tmpfile();
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
 
@@ -935,8 +935,8 @@ int test_stream_engine_errors(void) {
             uint8_t* comp_data = malloc(trunc_sz);
             fseek(f_comp_out, 0, SEEK_SET);
             if (fread(comp_data, 1, trunc_sz, f_comp_out) == (size_t)trunc_sz) {
-                FILE* f_trunc = tmpfile();
-                FILE* f_dec_out = tmpfile();
+                FILE* f_trunc = test_tmpfile();
+                FILE* f_dec_out = test_tmpfile();
                 fwrite(comp_data, 1, trunc_sz, f_trunc);
                 fseek(f_trunc, 0, SEEK_SET);
 
@@ -964,8 +964,8 @@ int test_stream_engine_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
 
-        FILE* f_comp_in = tmpfile();
-        FILE* f_comp_out = tmpfile();
+        FILE* f_comp_in = test_tmpfile();
+        FILE* f_comp_out = test_tmpfile();
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
         free(src);
@@ -1009,8 +1009,8 @@ int test_stream_engine_errors(void) {
         uint8_t* src = malloc(src_sz);
         gen_lz_data(src, src_sz);
 
-        FILE* f_comp_in = tmpfile();
-        FILE* f_comp_out = tmpfile();
+        FILE* f_comp_in = test_tmpfile();
+        FILE* f_comp_out = test_tmpfile();
         fwrite(src, 1, src_sz, f_comp_in);
         fseek(f_comp_in, 0, SEEK_SET);
         free(src);
@@ -1509,13 +1509,13 @@ int test_stream_checksum_cross_paths(void) {
             printf("  [FAIL] parameters\n");
             break;
         }
-        rewind(f_src);
+        fseek(f_src, 0, SEEK_SET);
         /* Multi-threaded stream writer, then the one-shot and seekable readers. */
         if (zxc_stream_compress(f_src, f_arc, co) <= 0) {
             printf("  [FAIL] stream compress\n");
             break;
         }
-        rewind(f_arc);
+        fseek(f_arc, 0, SEEK_SET);
         const size_t n = fread(arc, 1, sizeof(arc), f_arc);
         const int64_t one = test_decompress_verified(arc, n, out, N);
         const int one_ok = one == N && memcmp(out, src, N) == 0;
@@ -1531,10 +1531,10 @@ int test_stream_checksum_cross_paths(void) {
         const int64_t m = zxc_compress_cctx(co, src, N, arc, sizeof(arc));
         FILE* const f_one = tmpfile();
         const int wrote = f_one && m > 0 && fwrite(arc, 1, (size_t)m, f_one) == (size_t)m;
-        if (f_one) rewind(f_one);
+        if (f_one) fseek(f_one, 0, SEEK_SET);
         const int64_t stream = wrote ? zxc_stream_decompress(f_one, f_out, verify) : -1;
         if (f_one) fclose(f_one);
-        rewind(f_out);
+        fseek(f_out, 0, SEEK_SET);
         const int stream_ok =
             stream == N && fread(out, 1, N, f_out) == N && memcmp(out, src, N) == 0;
 
@@ -1639,7 +1639,7 @@ int test_stream_size_then_decompress(void) {
                    (long long)reported, (long long)got, n);
             ok = 0;
         } else {
-            rewind(f_out);
+            fseek(f_out, 0, SEEK_SET);
             if (fread(out, 1, n, f_out) != n || memcmp(out, src, n) != 0) {
                 printf("  [FAIL] buffered=%d: decoded bytes differ\n", buffered);
                 ok = 0;
@@ -1721,11 +1721,11 @@ int test_stream_footer_looks_like_sek(void) {
             int push = 0;
             if (f_src && f_arc && f_out && fwrite(src, 1, (size_t)n, f_src) == n &&
                 zxc_cctx_set_param(co, ZXC_C_SEEKABLE, seekable) == ZXC_OK) {
-                rewind(f_src);
+                fseek(f_src, 0, SEEK_SET);
                 if (zxc_stream_compress(f_src, f_arc, co) > 0) {
-                    rewind(f_arc);
+                    fseek(f_arc, 0, SEEK_SET);
                     const int64_t alen = (int64_t)fread(arc, 1, acap, f_arc);
-                    rewind(f_arc);
+                    fseek(f_arc, 0, SEEK_SET);
                     st = zxc_stream_decompress(f_arc, f_out, verify);
                     push = alen > 0 && dstream_finishes(arc, (size_t)alen, out, (size_t)n);
                 }
@@ -1897,17 +1897,17 @@ static void gen_periodic_blocks(uint8_t* src, const size_t n, const size_t bs) {
 static int64_t decode_stream_into(FILE* f_in, FILE* f_out, uint8_t* out, const size_t cap,
                                   const int n_threads) {
     zxc_dctx* const o = dctx_for(n_threads, 1);
-    rewind(f_out);
+    fseek(f_out, 0, SEEK_SET);
     const int64_t r = zxc_stream_decompress(f_in, f_out, o);
     zxc_free_dctx(o);
     if (r <= 0) return r;
-    rewind(f_out);
+    fseek(f_out, 0, SEEK_SET);
     return ((size_t)r <= cap && fread(out, 1, (size_t)r, f_out) == (size_t)r) ? r : -1;
 }
 
 /* Rewrites @p f as a @p pad-byte hole then the archive, positioned on it. */
 static int refill_file(FILE* f, const size_t pad, const uint8_t* arc, const size_t n) {
-    rewind(f);
+    fseek(f, 0, SEEK_SET);
     return ftruncate(fileno(f), 0) == 0 && fseek(f, (long)pad, SEEK_SET) == 0 &&
            fwrite(arc, 1, n, f) == n && fflush(f) == 0 && fseek(f, (long)pad, SEEK_SET) == 0;
 }
@@ -2074,7 +2074,7 @@ int test_stream_input_shrinks(void) {
         if (ok) {
             zxc_dctx* const dopts = dctx_for(n_threads, 1);
             zxc_dctx_set_progress(dopts, shrink_input, f_arc);
-            rewind(f_arc);
+            fseek(f_arc, 0, SEEK_SET);
             // A read sees the cut (I/O error), or the reader meets the end (truncation).
             const int64_t r = zxc_stream_decompress(f_arc, NULL, dopts);
             zxc_free_dctx(dopts);
@@ -2152,7 +2152,7 @@ int test_stream_input_rewritten(void) {
                 rewrite_t w = {f_arc, evil, (size_t)len, 0};
                 zxc_dctx* const dopts = dctx_for(n_threads, 0);
                 zxc_dctx_set_progress(dopts, rewrite_input, &w);
-                rewind(f_arc);
+                fseek(f_arc, 0, SEEK_SET);
                 const int64_t r = zxc_stream_decompress(f_arc, NULL, dopts);
                 zxc_free_dctx(dopts);
                 ok = r < 0;
@@ -2204,11 +2204,11 @@ int test_stream_block_batches(void) {
         zxc_dctx* const dopts = dctx_for(t, 1);
         zxc_dctx_set_progress(dopts, count_jobs, NULL);
         jobs_written = 0;
-        rewind(f_reg);
-        rewind(f_out);
+        fseek(f_reg, 0, SEEK_SET);
+        fseek(f_out, 0, SEEK_SET);
         const int64_t r = zxc_stream_decompress(f_reg, f_out, dopts);
         zxc_free_dctx(dopts);
-        rewind(f_out);
+        fseek(f_out, 0, SEEK_SET);
         ok = r == (int64_t)n && fread(out[0], 1, n, f_out) == n && memcmp(out[0], src, n) == 0 &&
              jobs_written >= 1 && jobs_written < 201;
         if (!ok) printf("Failed: %d threads -> %lld in %d jobs\n", t, (long long)r, jobs_written);

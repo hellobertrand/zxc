@@ -561,12 +561,15 @@ int test_dict_stream_roundtrip(void) {
     FILE* f_dec = tmpfile();
     if (!f_src || !f_comp || !f_dec) {
         printf("  [FAIL] tmpfile() failed\n");
+        if (f_src) fclose(f_src);
+        if (f_comp) fclose(f_comp);
+        if (f_dec) fclose(f_dec);
         free(src);
         return 0;
     }
 
     fwrite(src, 1, src_size, f_src);
-    rewind(f_src);
+    fseek(f_src, 0, SEEK_SET);
 
     zxc_cctx* cctx = zxc_create_cctx();
     int64_t comp_sz = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
@@ -583,7 +586,7 @@ int test_dict_stream_roundtrip(void) {
         return 0;
     }
 
-    rewind(f_comp);
+    fseek(f_comp, 0, SEEK_SET);
     zxc_dctx* dctx = zxc_create_dctx();
     int64_t dec_sz = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) : -1;
     if (dec_sz == ZXC_OK) dec_sz = zxc_dctx_set_dict(dctx, dict_content, dict_size, NULL);
@@ -599,7 +602,7 @@ int test_dict_stream_roundtrip(void) {
         return 0;
     }
 
-    rewind(f_dec);
+    fseek(f_dec, 0, SEEK_SET);
     uint8_t* result = (uint8_t*)malloc(src_size);
     const size_t rd = fread(result, 1, src_size, f_dec);
     int ok = (rd == src_size && memcmp(src, result, src_size) == 0);
@@ -1023,7 +1026,7 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
 
     if (ok) {
         fwrite(src, 1, src_size, f_src);
-        rewind(f_src);
+        fseek(f_src, 0, SEEK_SET);
         zxc_cctx* cctx = zxc_create_cctx();
         int64_t cs = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
         if (cs == ZXC_OK) cs = zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);
@@ -1037,7 +1040,7 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
     }
 
     if (ok) {
-        rewind(f_comp);
+        fseek(f_comp, 0, SEEK_SET);
         zxc_dctx* dctx = zxc_create_dctx();
         int64_t rc = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) : -1;
         if (rc == ZXC_OK) rc = zxc_dctx_set_dict(dctx, dec_dict, dec_dict_size, NULL);
