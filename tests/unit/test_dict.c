@@ -120,7 +120,7 @@ int test_dict_zxd_roundtrip(void) {
         uint8_t v;
     } odd[] = {{5, 0x01}, {5, 0x10}, {5, 0x80}, {12, 0x01}, {13, 0x01}};
     for (size_t k = 0; k < sizeof(odd) / sizeof(odd[0]); k++) {
-        uint8_t* const bad = (uint8_t*)malloc((size_t)written);
+        uint8_t* const bad = (uint8_t*)test_malloc((size_t)written);
         memcpy(bad, zxd, (size_t)written);
         bad[odd[k].at] = odd[k].v;
         zxc_store_le16(bad + 14, 0);
@@ -368,7 +368,7 @@ int test_dict_block_safe_roundtrip(void) {
 
     enum { NPAT = 256, PLEN = 40 };
     const size_t dict_size = (size_t)NPAT * PLEN;
-    uint8_t* dict = (uint8_t*)malloc(dict_size);
+    uint8_t* dict = (uint8_t*)test_malloc(dict_size);
     for (int i = 0; i < NPAT; i++) {
         uint32_t x = (uint32_t)i * 2654435761U;
         for (int j = 0; j < PLEN; j++) {
@@ -381,26 +381,26 @@ int test_dict_block_safe_roundtrip(void) {
     uint32_t s = 777U;
     for (int i = NPAT - 1; i > 0; i--) {
         s = s * 1103515245U + 12345U;
-        int j = (int)(s % (uint32_t)(i + 1));
+        const uint32_t j = s % (uint32_t)(i + 1);
         int tmp = order[i];
         order[i] = order[j];
         order[j] = tmp;
     }
     const size_t src_size = (size_t)NPAT * (PLEN + 1);
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     for (int k = 0; k < NPAT; k++) {
         memcpy(src + (size_t)k * (PLEN + 1), dict + (size_t)order[k] * PLEN, PLEN);
         src[(size_t)k * (PLEN + 1) + PLEN] = (uint8_t)k;
     }
 
     const size_t comp_bound = zxc_compress_block_bound(src_size);
-    uint8_t* compressed = (uint8_t*)malloc(comp_bound);
-    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    uint8_t* compressed = (uint8_t*)test_malloc(comp_bound);
+    uint8_t* decompressed = (uint8_t*)test_malloc(src_size);
     zxc_cctx* cctx = zxc_create_cctx();
     zxc_dctx* dctx = zxc_create_dctx();
 
     int result = 0;
-    if (!dict || !src || !compressed || !decompressed || !cctx || !dctx) {
+    if (!cctx || !dctx) {
         printf("  [FAIL] allocation failed\n");
         goto cleanup;
     }
@@ -553,20 +553,15 @@ int test_dict_stream_roundtrip(void) {
     const size_t dict_size = sizeof(dict_content) - 1;
 
     const size_t src_size = 8192;
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     gen_dict_friendly_data(src, src_size, dict_content, dict_size);
 
-    FILE* f_src = tmpfile();
-    FILE* f_comp = tmpfile();
-    FILE* f_dec = tmpfile();
-    if (!f_src || !f_comp || !f_dec) {
-        printf("  [FAIL] tmpfile() failed\n");
-        free(src);
-        return 0;
-    }
+    FILE* f_src = test_tmpfile();
+    FILE* f_comp = test_tmpfile();
+    FILE* f_dec = test_tmpfile();
 
     fwrite(src, 1, src_size, f_src);
-    rewind(f_src);
+    fseek(f_src, 0, SEEK_SET);
 
     zxc_cctx* cctx = zxc_create_cctx();
     int64_t comp_sz = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
@@ -583,7 +578,7 @@ int test_dict_stream_roundtrip(void) {
         return 0;
     }
 
-    rewind(f_comp);
+    fseek(f_comp, 0, SEEK_SET);
     zxc_dctx* dctx = zxc_create_dctx();
     int64_t dec_sz = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) : -1;
     if (dec_sz == ZXC_OK) dec_sz = zxc_dctx_set_dict(dctx, dict_content, dict_size, NULL);
@@ -599,8 +594,8 @@ int test_dict_stream_roundtrip(void) {
         return 0;
     }
 
-    rewind(f_dec);
-    uint8_t* result = (uint8_t*)malloc(src_size);
+    fseek(f_dec, 0, SEEK_SET);
+    uint8_t* result = (uint8_t*)test_malloc(src_size);
     const size_t rd = fread(result, 1, src_size, f_dec);
     int ok = (rd == src_size && memcmp(src, result, src_size) == 0);
 
@@ -622,7 +617,7 @@ int test_dict_stream_roundtrip(void) {
 int test_dict_large_dict_roundtrip(void) {
     printf("=== TEST: Dict - large dict (32KB) with small blocks (4KB) ===\n");
 
-    uint8_t* dict = (uint8_t*)malloc(32768);
+    uint8_t* dict = (uint8_t*)test_malloc(32768);
     for (size_t i = 0; i < 32768; i++) dict[i] = (uint8_t)(i * 7 + 13);
     const size_t dict_size = 32768;
 
@@ -686,7 +681,7 @@ int test_dict_safe_loop_backref(void) {
 
     enum { NPAT = 256, PLEN = 40 };
     const size_t dict_size = (size_t)NPAT * PLEN;
-    uint8_t* dict = (uint8_t*)malloc(dict_size);
+    uint8_t* dict = (uint8_t*)test_malloc(dict_size);
     for (int i = 0; i < NPAT; i++) {
         uint32_t x = (uint32_t)i * 2654435761U;
         for (int j = 0; j < PLEN; j++) {
@@ -700,14 +695,14 @@ int test_dict_safe_loop_backref(void) {
     uint32_t s = 12345U;
     for (int i = NPAT - 1; i > 0; i--) {
         s = s * 1103515245U + 12345U;
-        int j = (int)(s % (uint32_t)(i + 1));
+        const uint32_t j = s % (uint32_t)(i + 1);
         int tmp = order[i];
         order[i] = order[j];
         order[j] = tmp;
     }
 
     const size_t src_size = (size_t)NPAT * (PLEN + 1);
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     for (int k = 0; k < NPAT; k++) {
         memcpy(src + (size_t)k * (PLEN + 1), dict + (size_t)order[k] * PLEN, PLEN);
         src[(size_t)k * (PLEN + 1) + PLEN] = (uint8_t)k;  // literal separator (anti-merge)
@@ -897,7 +892,7 @@ int test_dict_seekable_roundtrip(void) {
         return 0;
     }
 
-    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    uint8_t* decompressed = (uint8_t*)test_malloc(src_size);
     int64_t dec_size = zxc_seekable_decompress_range(s, decompressed, src_size, 0, src_size);
     if (dec_size != (int64_t)src_size) {
         printf("  [FAIL] decompress_range returned %lld, expected %zu\n", (long long)dec_size,
@@ -959,7 +954,7 @@ int test_dict_seekable_mt_roundtrip(void) {
     zxc_seekable_set_dict(s, dict_content, dict_size, NULL);
 
     /* Full range MT decompress */
-    uint8_t* decompressed = (uint8_t*)malloc(src_size);
+    uint8_t* decompressed = (uint8_t*)test_malloc(src_size);
     int64_t dec_size = zxc_seekable_decompress_range_mt(s, decompressed, src_size, 0, src_size, 4);
     if (dec_size != (int64_t)src_size) {
         printf("  [FAIL] decompress_range_mt returned %lld (%s)\n", (long long)dec_size,
@@ -1009,35 +1004,26 @@ static const uint8_t k_dict_b[] =
 static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, size_t dec_dict_size,
                                   int64_t want_err) {
     const size_t src_size = 8192;
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
 
-    FILE* f_src = tmpfile();
-    FILE* f_comp = tmpfile();
-    FILE* f_dec = tmpfile();
-    int ok = 1;
-    if (!f_src || !f_comp || !f_dec) {
-        printf("  [FAIL] %s: tmpfile() failed\n", label);
-        ok = 0;
-    }
+    FILE* f_src = test_tmpfile();
+    FILE* f_comp = test_tmpfile();
+    FILE* f_dec = test_tmpfile();
+
+    fwrite(src, 1, src_size, f_src);
+    fseek(f_src, 0, SEEK_SET);
+    zxc_cctx* cctx = zxc_create_cctx();
+    int64_t cs = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
+    if (cs == ZXC_OK) cs = zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);
+    if (cs == ZXC_OK) cs = zxc_cctx_set_dict(cctx, k_dict_a, sizeof(k_dict_a) - 1, NULL);
+    if (cs == ZXC_OK) cs = zxc_stream_compress(f_src, f_comp, cctx);
+    zxc_free_cctx(cctx);
+    int ok = cs > 0;
+    if (!ok) printf("  [FAIL] %s: stream_compress failed\n", label);
 
     if (ok) {
-        fwrite(src, 1, src_size, f_src);
-        rewind(f_src);
-        zxc_cctx* cctx = zxc_create_cctx();
-        int64_t cs = cctx ? zxc_cctx_set_param(cctx, ZXC_C_LEVEL, ZXC_LEVEL_DEFAULT) : -1;
-        if (cs == ZXC_OK) cs = zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1);
-        if (cs == ZXC_OK) cs = zxc_cctx_set_dict(cctx, k_dict_a, sizeof(k_dict_a) - 1, NULL);
-        if (cs == ZXC_OK) cs = zxc_stream_compress(f_src, f_comp, cctx);
-        zxc_free_cctx(cctx);
-        if (cs <= 0) {
-            printf("  [FAIL] %s: stream_compress failed\n", label);
-            ok = 0;
-        }
-    }
-
-    if (ok) {
-        rewind(f_comp);
+        fseek(f_comp, 0, SEEK_SET);
         zxc_dctx* dctx = zxc_create_dctx();
         int64_t rc = dctx ? zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) : -1;
         if (rc == ZXC_OK) rc = zxc_dctx_set_dict(dctx, dec_dict, dec_dict_size, NULL);
@@ -1050,9 +1036,9 @@ static int stream_dict_error_case(const char* label, const uint8_t* dec_dict, si
         }
     }
 
-    if (f_src) fclose(f_src);
-    if (f_comp) fclose(f_comp);
-    if (f_dec) fclose(f_dec);
+    fclose(f_src);
+    fclose(f_comp);
+    fclose(f_dec);
     free(src);
     return ok;
 }
@@ -1071,7 +1057,7 @@ int test_dict_seekable_dict_id_checks(void) {
     printf("=== TEST: Dict - seekable decode rejects missing/wrong dict ===\n");
 
     const size_t src_size = 8192;
-    uint8_t* src = (uint8_t*)malloc(src_size);
+    uint8_t* src = (uint8_t*)test_malloc(src_size);
     gen_dict_friendly_data(src, src_size, k_dict_a, sizeof(k_dict_a) - 1);
 
     size_t comp_bound = zxc_compress_bound(src_size);
@@ -1180,7 +1166,7 @@ int test_dict_huf_zxd_roundtrip(void) {
     const void* samples[NS];
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
-        bufs[i] = (uint8_t*)malloc(SCAP);
+        bufs[i] = (uint8_t*)test_malloc(SCAP);
         sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x1000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
@@ -1215,7 +1201,7 @@ int test_dict_huf_zxd_roundtrip(void) {
         /* One-call creator must produce byte-identical .zxd output (the
          * trainers are deterministic). */
         const size_t one_bound = zxc_dict_save_bound(ZXC_DICT_SIZE_MAX);
-        zxd_one = (uint8_t*)malloc(one_bound);
+        zxd_one = (uint8_t*)test_malloc(one_bound);
         const int64_t one_sz = zxc_dict_train(samples, sizes, NS, zxd_one, one_bound);
         if (one_sz != zsz || memcmp(zxd_one, zxd, (size_t)zsz) != 0) {
             printf("  [FAIL] zxc_dict_train (%lld B) != 3-step pipeline (%lld B)\n",
@@ -1279,11 +1265,11 @@ int test_dict_huf_table_roundtrip(void) {
     const void* samples[NS];
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
-        bufs[i] = (uint8_t*)malloc(SCAP);
+        bufs[i] = (uint8_t*)test_malloc(SCAP);
         sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x2000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
-    uint8_t* heldout = (uint8_t*)malloc(HCAP);
+    uint8_t* heldout = (uint8_t*)test_malloc(HCAP);
     const size_t hsz = gen_structured_sample(heldout, HCAP, 0xBEEFU);
 
     int ok = 0;
@@ -1746,11 +1732,11 @@ int test_dict_ctx_table_cache_recovers(void) {
     const void* samples[NS];
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
-        bufs[i] = (uint8_t*)malloc(SCAP);
+        bufs[i] = (uint8_t*)test_malloc(SCAP);
         sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x4000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
-    uint8_t* heldout = (uint8_t*)malloc(HCAP);
+    uint8_t* heldout = (uint8_t*)test_malloc(HCAP);
     const size_t hsz = gen_structured_sample(heldout, HCAP, 0xBADCU);
     uint8_t dict_buf[8192];
     uint8_t huf[ZXC_HUF_TABLE_SIZE];
@@ -1806,7 +1792,7 @@ int test_dict_ctx_table_without_dict(void) {
     const void* samples[NS];
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
-        bufs[i] = (uint8_t*)malloc(SCAP);
+        bufs[i] = (uint8_t*)test_malloc(SCAP);
         sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x5000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
@@ -1922,11 +1908,11 @@ int test_dict_block_huf_roundtrip(void) {
     const void* samples[NS];
     size_t sizes[NS];
     for (int i = 0; i < NS; i++) {
-        bufs[i] = (uint8_t*)malloc(SCAP);
+        bufs[i] = (uint8_t*)test_malloc(SCAP);
         sizes[i] = gen_structured_sample(bufs[i], SCAP, 0x3000U + (uint32_t)i);
         samples[i] = bufs[i];
     }
-    uint8_t* heldout = (uint8_t*)malloc(HCAP);
+    uint8_t* heldout = (uint8_t*)test_malloc(HCAP);
     const size_t hsz = gen_structured_sample(heldout, HCAP, 0xC0DEU);
     uint8_t dict_buf[8192];
     uint8_t huf[ZXC_HUF_TABLE_SIZE];

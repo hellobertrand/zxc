@@ -773,10 +773,10 @@ int test_swapped_blocks_stream(void) {
     memset(val_buf + 256 * 1024, 0xBB, 256 * 1024);
     memset(val_buf + 512 * 1024, 0xCC, input_sz - 512 * 1024);
 
-    FILE* f_in = tmpfile();
-    FILE* f_comp = tmpfile();
+    FILE* f_in = test_tmpfile();
+    FILE* f_comp = test_tmpfile();
     fwrite(val_buf, 1, input_sz, f_in);
-    rewind(f_in);
+    fseek(f_in, 0, SEEK_SET);
 
     // 2. Compress with Checksum Enabled
     zxc_cctx* const ccfg = zxc_create_cctx();
@@ -790,8 +790,8 @@ int test_swapped_blocks_stream(void) {
 
     // 3. Read compressed data to memory
     long comp_sz = ftell(f_comp);
-    rewind(f_comp);
-    uint8_t* comp_buf = malloc((size_t)comp_sz);
+    fseek(f_comp, 0, SEEK_SET);
+    uint8_t* comp_buf = test_malloc((size_t)comp_sz);
     if (fread(comp_buf, 1, comp_sz, f_comp) != (size_t)comp_sz) {
         printf("[FAIL] Failed to read compressed data\n");
         free(val_buf);
@@ -827,7 +827,7 @@ int test_swapped_blocks_stream(void) {
 
     // 5. Swap Block 1 and Block 2
     // To safely swap, we need a new buffer
-    uint8_t* swapped_buf = malloc((size_t)comp_sz);
+    uint8_t* swapped_buf = test_malloc((size_t)comp_sz);
 
     // Copy File Header
     // Copy File Header
@@ -848,12 +848,12 @@ int test_swapped_blocks_stream(void) {
     memcpy(swapped_buf + w_off, comp_buf + remaining_off, remaining_len);
 
     // 6. Write to File for Decompression
-    FILE* f_bad = tmpfile();
+    FILE* f_bad = test_tmpfile();
     fwrite(swapped_buf, 1, (size_t)comp_sz, f_bad);
-    rewind(f_bad);
+    fseek(f_bad, 0, SEEK_SET);
 
     // 7. Attempt Decompression
-    FILE* f_out = tmpfile();
+    FILE* f_out = test_tmpfile();
     zxc_dctx* const dcfg = zxc_create_dctx();
     if (dcfg) {
         zxc_dctx_set_param(dcfg, ZXC_D_THREADS, 1);

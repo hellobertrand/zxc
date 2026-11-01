@@ -182,19 +182,16 @@ int test_encoder_output_pinned(void) {
     static const size_t k_dict_block_size[] = {4096};
     const size_t cap = zxc_compress_bound(PIN_INPUT_SIZE);
 
-    uint8_t* const src = (uint8_t*)malloc((size_t)PIN_N_INPUTS * PIN_INPUT_SIZE);
-    uint8_t* const comp = (uint8_t*)malloc(cap);
-    uint8_t* const back = (uint8_t*)malloc(PIN_INPUT_SIZE);
-    uint8_t* const dict = (uint8_t*)malloc(PIN_DICT_CAP);
-    int ok = src && comp && back && dict;
-    if (!ok) printf("  [FAIL] allocation\n");
+    uint8_t* const src = (uint8_t*)test_malloc((size_t)PIN_N_INPUTS * PIN_INPUT_SIZE);
+    uint8_t* const comp = (uint8_t*)test_malloc(cap);
+    uint8_t* const back = (uint8_t*)test_malloc(PIN_INPUT_SIZE);
+    uint8_t* const dict = (uint8_t*)test_malloc(PIN_DICT_CAP);
+    int ok = 1;
 
-    if (ok) {
-        g_pin_rng = 0x5A58432D50494E31ULL;
-        pin_gen_text(src, PIN_INPUT_SIZE);
-        pin_gen_records(src + PIN_INPUT_SIZE, PIN_INPUT_SIZE);
-        pin_gen_mixed(src + 2 * (size_t)PIN_INPUT_SIZE, PIN_INPUT_SIZE);
-    }
+    g_pin_rng = 0x5A58432D50494E31ULL;
+    pin_gen_text(src, PIN_INPUT_SIZE);
+    pin_gen_records(src + PIN_INPUT_SIZE, PIN_INPUT_SIZE);
+    pin_gen_mixed(src + 2 * (size_t)PIN_INPUT_SIZE, PIN_INPUT_SIZE);
 
     // A mismatch does not stop the dictionary pass: one run prints both tables.
     pin_t got[PIN_N_LEVELS];

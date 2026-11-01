@@ -1141,40 +1141,31 @@ int test_seekable_empty_file(void) {
     }
 
     /* Streaming API: empty file via tmpfile() should work */
-    FILE* fin = tmpfile();
-    FILE* fout = tmpfile();
-    if (fin && fout) {
-        zxc_cctx* const cfg = zxc_create_cctx();
-        int64_t stream_sz = ZXC_ERROR_MEMORY;
-        if (cfg && zxc_cctx_set_param(cfg, ZXC_C_LEVEL, 3) == ZXC_OK &&
-            zxc_cctx_set_param(cfg, ZXC_C_SEEKABLE, 1) == ZXC_OK)
-            stream_sz = zxc_stream_compress(fin, fout, cfg);
-        zxc_free_cctx(cfg);
-        if (stream_sz < 0) {
-            printf("Failed: stream compress empty (got %lld)\n", (long long)stream_sz);
-            fclose(fin);
-            fclose(fout);
-            free(dst);
-            return 0;
-        }
+    FILE* const fin = test_tmpfile();
+    FILE* const fout = test_tmpfile();
+    FILE* const fdec = test_tmpfile();
+    zxc_cctx* const cfg = zxc_create_cctx();
+    int64_t stream_sz = ZXC_ERROR_MEMORY;
+    if (cfg && zxc_cctx_set_param(cfg, ZXC_C_LEVEL, 3) == ZXC_OK &&
+        zxc_cctx_set_param(cfg, ZXC_C_SEEKABLE, 1) == ZXC_OK)
+        stream_sz = zxc_stream_compress(fin, fout, cfg);
+    zxc_free_cctx(cfg);
+    int64_t dsz = -1;
+    if (stream_sz < 0) {
+        printf("Failed: stream compress empty (got %lld)\n", (long long)stream_sz);
+    } else {
         /* Decompress the stream output */
-        rewind(fout);
-        FILE* fdec = tmpfile();
-        if (fdec) {
-            int64_t dsz = zxc_stream_decompress(fout, fdec, NULL);
-            if (dsz != 0) {
-                printf("Failed: stream decompress empty should return 0 (got %lld)\n",
-                       (long long)dsz);
-                fclose(fin);
-                fclose(fout);
-                fclose(fdec);
-                free(dst);
-                return 0;
-            }
-            fclose(fdec);
-        }
-        fclose(fin);
-        fclose(fout);
+        fseek(fout, 0, SEEK_SET);
+        dsz = zxc_stream_decompress(fout, fdec, NULL);
+        if (dsz != 0)
+            printf("Failed: stream decompress empty should return 0 (got %lld)\n", (long long)dsz);
+    }
+    fclose(fin);
+    fclose(fout);
+    fclose(fdec);
+    if (dsz != 0) {
+        free(dst);
+        return 0;
     }
 
     free(dst);

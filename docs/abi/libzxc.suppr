@@ -51,3 +51,9 @@
 [suppress_type]
   type_kind = struct
   name = zxc_seekable_s
+
+# glibc's FILE: only passed as FILE*; layout is libc's (changed in glibc 2.43).
+[suppress_type]
+  type_kind = struct
+  accessed_through = pointer
+  name = _IO_FILE

@@ -248,8 +248,8 @@ int test_decompress_block_safe(void) {
         size_t comp_cap = 0;
         int64_t csz = sbs_compress(src, n, 3, 0, &comp, &comp_cap);
         const uint64_t dbound = zxc_decompress_block_bound(n);
-        uint8_t* dst_fast = (uint8_t*)malloc((size_t)dbound);
-        uint8_t* dst_safe = (uint8_t*)malloc(n);
+        uint8_t* dst_fast = (uint8_t*)test_malloc((size_t)dbound);
+        uint8_t* dst_safe = (uint8_t*)test_malloc(n);
 
         zxc_dctx* dctx1 = zxc_create_dctx();
         zxc_dctx* dctx2 = zxc_create_dctx();
@@ -298,16 +298,18 @@ int test_decompress_block_safe(void) {
      *    dst_capacity == uncompressed_size; must succeed with the safe API. */
     {
         const size_t n = 32 * 1024;
-        uint8_t* src = (uint8_t*)malloc(n);
+        uint8_t* src = (uint8_t*)test_malloc(n);
         gen_random_data(src, n); /* random data -> heavy literal runs, varint-prone */
         uint8_t* comp = NULL;
         size_t comp_cap = 0;
         int64_t csz = sbs_compress(src, n, 3, 0, &comp, &comp_cap);
         if (csz <= 0) {
             printf("Failed: compress literal-heavy\n");
+            free(comp);
+            free(src);
             return 0;
         }
-        uint8_t* dst = (uint8_t*)malloc(n);
+        uint8_t* dst = (uint8_t*)test_malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
         int64_t r = zxc_decompress_block_safe(dctx, comp, (size_t)csz, dst, n);
@@ -326,14 +328,14 @@ int test_decompress_block_safe(void) {
     /* 5a. Corrupted LZ block, strict decoder: an error, or exact bytes if padding was hit. */
     {
         const size_t n = 16 * 1024;
-        uint8_t* src = (uint8_t*)malloc(n);
+        uint8_t* src = (uint8_t*)test_malloc(n);
         gen_lz_data(src, n);
         uint8_t* comp = NULL;
         size_t comp_cap = 0;
         int64_t csz = sbs_compress(src, n, 3, 1, &comp, &comp_cap); /* with checksum */
         const int lz = csz > ZXC_BLOCK_HEADER_SIZE && comp[0] != ZXC_BLOCK_RAW;
         if (lz) comp[ZXC_BLOCK_HEADER_SIZE + (csz - ZXC_BLOCK_HEADER_SIZE) / 2] ^= 0xA5;
-        uint8_t* dst = (uint8_t*)malloc(n);
+        uint8_t* dst = (uint8_t*)test_malloc(n);
 
         zxc_dctx* dctx = zxc_create_dctx();
         const int set = dctx && zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK;

@@ -56,12 +56,12 @@ int test_buffer_api(void) {
     printf("=== TEST: Unit - Buffer API (zxc_compress/zxc_decompress) ===\n");
 
     size_t src_size = 128 * 1024;
-    uint8_t* src = malloc(src_size);
+    uint8_t* src = test_malloc(src_size);
     gen_lz_data(src, src_size);
 
     // 1. Calculate max compressed size
     size_t max_dst_size = zxc_compress_bound(src_size);
-    uint8_t* compressed = malloc(max_dst_size);
+    uint8_t* compressed = test_malloc(max_dst_size);
     int checksum_enabled = 1;
 
     // 2. Compress
@@ -76,7 +76,7 @@ int test_buffer_api(void) {
     printf("Compressed %zu bytes to %lld bytes\n", src_size, (long long)compressed_size);
 
     // 3. Decompress
-    uint8_t* decompressed = malloc(src_size);
+    uint8_t* decompressed = test_malloc(src_size);
     int64_t decompressed_size =
         test_decompress_verified(compressed, (size_t)compressed_size, decompressed, src_size);
 
@@ -169,7 +169,7 @@ int test_get_decompressed_size(void) {
     // 4. Forged footer: an implausible size (far beyond what the archive's
     //    block count could decode to) must return 0, not drive a huge
     //    allocation in callers that size buffers from this value.
-    uint8_t* forged = malloc((size_t)comp_size + ZXC_FILE_FOOTER_MAX_SIZE);
+    uint8_t* forged = test_malloc((size_t)comp_size + ZXC_FILE_FOOTER_MAX_SIZE);
     const size_t forged_sz =
         test_forge_footer_size(compressed, (size_t)comp_size, forged,
                                (size_t)comp_size + ZXC_FILE_FOOTER_MAX_SIZE, UINT64_MAX);
@@ -197,7 +197,7 @@ int test_buffer_error_codes(void) {
     /* ------------------------------------------------------------------ */
 
     // 1. NULL src
-    int64_t r = zxc_compress(NULL, 100, (void*)1, 100, 3);
+    int64_t r = zxc_compress(NULL, 100, TEST_POISON_PTR, 100, 3);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
         return 0;
@@ -205,7 +205,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_compress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 2. NULL dst
-    r = zxc_compress((void*)1, 100, NULL, 100, 3);
+    r = zxc_compress(TEST_POISON_PTR, 100, NULL, 100, 3);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT, (long long)r);
         return 0;
@@ -213,7 +213,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_compress NULL dst -> ZXC_ERROR_NULL_INPUT\n");
 
     // 3. src_size == 0 produces a valid empty frame (header + EOF + footer)
-    uint8_t dummy[16];
+    uint8_t dummy[16] = {0};
     uint8_t empty_dst[64];
     r = zxc_compress(NULL, 0, empty_dst, sizeof(empty_dst), 3);
     if (r <= 0) {
@@ -307,7 +307,7 @@ int test_buffer_error_codes(void) {
     /* ------------------------------------------------------------------ */
 
     // 8. NULL src
-    r = zxc_decompress(NULL, 100, (void*)1, 100);
+    r = zxc_decompress(NULL, 100, TEST_POISON_PTR, 100);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL src: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
                (long long)r);
@@ -316,7 +316,7 @@ int test_buffer_error_codes(void) {
     printf("  [PASS] zxc_decompress NULL src -> ZXC_ERROR_NULL_INPUT\n");
 
     // 9. NULL dst
-    r = zxc_decompress((void*)1, 100, NULL, 100);
+    r = zxc_decompress(TEST_POISON_PTR, 100, NULL, 100);
     if (r != ZXC_ERROR_NULL_INPUT) {
         printf("  [FAIL] decompress NULL dst: expected %d, got %lld\n", ZXC_ERROR_NULL_INPUT,
                (long long)r);
@@ -377,10 +377,10 @@ int test_buffer_error_codes(void) {
 
     // Prepare a valid compressed buffer for subsequent decompress error tests
     const size_t test_src_sz = 1024;
-    uint8_t* test_src = malloc(test_src_sz);
+    uint8_t* test_src = test_malloc(test_src_sz);
     gen_lz_data(test_src, test_src_sz);
     const size_t comp_cap = zxc_compress_bound(test_src_sz);
-    uint8_t* comp_buf = malloc(comp_cap);
+    uint8_t* comp_buf = test_malloc(comp_cap);
     const int64_t comp_sz =
         test_compress_cfg(test_src, test_src_sz, comp_buf, comp_cap, 3, 0, 1, 0);
     if (comp_sz <= 0) {
@@ -392,7 +392,7 @@ int test_buffer_error_codes(void) {
 
     // 12. Corrupt block header (damage the first block header byte after file header)
     {
-        uint8_t* corrupt = malloc((size_t)comp_sz);
+        uint8_t* corrupt = test_malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
         // Corrupt the block type byte at offset ZXC_FILE_HEADER_SIZE
         corrupt[ZXC_FILE_HEADER_SIZE] = 0xFF;  // Invalid block type
@@ -430,7 +430,7 @@ int test_buffer_error_codes(void) {
 
     // 14. Stored size mismatch (corrupt the source size in footer)
     {
-        uint8_t* corrupt = malloc((size_t)comp_sz);
+        uint8_t* corrupt = test_malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
         // Exact code: aimed at the digest instead, this passes on BAD_CHECKSUM
         // without testing the size.
@@ -453,7 +453,7 @@ int test_buffer_error_codes(void) {
 
     // 15. Block checksum failure (corrupt the last block's trailing checksum)
     {
-        uint8_t* corrupt = malloc((size_t)comp_sz);
+        uint8_t* corrupt = test_malloc((size_t)comp_sz);
         memcpy(corrupt, comp_buf, (size_t)comp_sz);
         // Last byte before the EOF block: the last block's checksum.
         corrupt[(size_t)comp_sz - test_footer_len(comp_buf, (size_t)comp_sz) -
@@ -615,7 +615,7 @@ int test_buffer_api_scratch_buf(void) {
             return 0;
         }
 
-        uint8_t* dec = malloc(sz);  // exactly sz, no extra room
+        uint8_t* dec = test_malloc(sz);  // exactly sz, no extra room
         const int64_t dec_sz = test_decompress_verified(comp, (size_t)comp_sz, dec, sz);
         if (dec_sz != (int64_t)sz || memcmp(src, dec, sz) != 0) {
             printf("  [FAIL] exact-fit 1KB\n");
@@ -731,7 +731,7 @@ int test_decompress_fast_vs_safe_path(void) {
     // dst (rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE at every iteration).
     {
         const size_t big_cap = src_sz + ZXC_BLOCK_SIZE_DEFAULT;  // way more than enough
-        uint8_t* dst = malloc(big_cap);
+        uint8_t* dst = test_malloc(big_cap);
         const int64_t dec_sz = test_decompress_verified(comp, (size_t)comp_sz, dst, big_cap);
         if (dec_sz != (int64_t)src_sz) {
             printf("  [FAIL] fast path size: expected %zu, got %lld\n", src_sz, (long long)dec_sz);
@@ -757,7 +757,7 @@ int test_decompress_fast_vs_safe_path(void) {
     // < runtime_chunk_size (256KB) + ZXC_PAD_SIZE (32). This forces the
     // safe path (bounce buffer) for the second block.
     {
-        uint8_t* dst = malloc(src_sz);  // no slack at all
+        uint8_t* dst = test_malloc(src_sz);  // no slack at all
         const int64_t dec_sz = test_decompress_verified(comp, (size_t)comp_sz, dst, src_sz);
         if (dec_sz != (int64_t)src_sz) {
             printf("  [FAIL] safe path size: expected %zu, got %lld\n", src_sz, (long long)dec_sz);
@@ -783,7 +783,7 @@ int test_decompress_fast_vs_safe_path(void) {
     // the safe path here.
     {
         const size_t tight_cap = src_sz + ZXC_PAD_SIZE - 1;
-        uint8_t* dst = malloc(tight_cap);
+        uint8_t* dst = test_malloc(tight_cap);
         const int64_t dec_sz = test_decompress_verified(comp, (size_t)comp_sz, dst, tight_cap);
         if (dec_sz != (int64_t)src_sz) {
             printf("  [FAIL] boundary size: expected %zu, got %lld\n", src_sz, (long long)dec_sz);
@@ -1384,11 +1384,11 @@ static int frame_info_same(const zxc_frame_info_t* a, const zxc_frame_info_t* b)
 int test_frame_info(void) {
     printf("=== TEST: Frame info (buffer and FILE*) ===\n");
     enum { N = 100000 };
-    uint8_t* const src = malloc(N);
+    uint8_t* const src = test_malloc(N);
     const size_t cap = zxc_compress_bound(N) + 1;
-    uint8_t* const arc = malloc(cap);
-    int ok = src && arc && zxc_frame_info_size() == sizeof(zxc_frame_info_t);
-    if (ok) gen_lz_data(src, N);
+    uint8_t* const arc = test_malloc(cap);
+    int ok = zxc_frame_info_size() == sizeof(zxc_frame_info_t);
+    gen_lz_data(src, N);
 
     static uint8_t dict[4096];
     memset(dict, 'z', sizeof(dict));

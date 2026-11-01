@@ -81,6 +81,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_epoch_pos(const uint32_t head, const uint3
  */
 static ZXC_ALWAYS_INLINE uint16_t zxc_chain_delta(const uint32_t cur_pos, const uint32_t prev_idx) {
     const uint32_t dist = cur_pos - prev_idx;
+    // cppcheck-suppress bitwiseOnBoolean
     const uint32_t valid = 0U - (uint32_t)((prev_idx != 0) & (dist < ZXC_LZ_WINDOW_SIZE));
     return (uint16_t)(dist & valid);
 }
@@ -595,6 +596,7 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
     // skip_head still drives the chain walk on level >= 3 (advances past the
     // mismatched head without comparing). On level <= 2 it is always 0 here:
     // either match_idx == 0 (filter-skip) or stored_tag == cur_tag.
+    // cppcheck-suppress bitwiseOnBoolean
     const int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
 
     // Split table writes

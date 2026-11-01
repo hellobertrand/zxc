@@ -249,11 +249,11 @@ static void max_progress(const uint64_t done, const uint64_t total, const void* 
 int test_container_engine_reuse(void) {
     printf("=== TEST: Container - FILE* engine reused across frames ===\n");
     const size_t n = 3 * 4096 + 17, nbig = 300000, total = 5 * n + 2 * nbig;
-    uint8_t* const src = malloc(total);
+    uint8_t* const src = test_malloc(total);
     cbuf_t b = {0};
     size_t ends[7] = {0};
-    int ok = src != NULL;
-    if (ok) gen_lz_data(src, total);
+    int ok = 1;
+    gen_lz_data(src, total);
 
     // Three small frames, two with large blocks (positioned reads), two small again.
     const frame_cfg_t small = {.level = 3, .block_size = 4096, .checksum_enabled = 1};

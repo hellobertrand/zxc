@@ -9,6 +9,7 @@
 #define ZXC_TEST_COMMON_H
 
 #include <fcntl.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -58,6 +59,29 @@ static inline void test_aligned_free(void* p) { free(p); }
  * test payloads. */
 void zxc_test_srand(uint64_t seed);
 uint32_t zxc_test_rand(void);
+
+// Non-NULL, never dereferenced
+#define TEST_POISON_PTR ((void*)(uintptr_t)1)
+
+// malloc() exiting on failure; never NULL, even for 0
+static inline void* test_malloc(const size_t n) {
+    void* const p = malloc(n ? n : 1);
+    if (!p) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    return p;
+}
+
+// tmpfile() exiting on failure
+static inline FILE* test_tmpfile(void) {
+    FILE* const f = tmpfile();
+    if (!f) {
+        perror("tmpfile");
+        exit(EXIT_FAILURE);
+    }
+    return f;
+}
 
 /* --- Data generators ---------------------------------------------------- */
 

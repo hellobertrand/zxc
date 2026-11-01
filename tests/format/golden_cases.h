@@ -32,6 +32,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -60,6 +61,16 @@ static uint32_t gc_lcg_next(uint32_t* s) {
     return *s;
 }
 
+/* Exits on failure, like test_malloc(). */
+static uint8_t* gc_alloc(const size_t n) {
+    uint8_t* const b = (uint8_t*)malloc(n ? n : 1);
+    if (!b) {
+        perror("malloc");
+        exit(EXIT_FAILURE);
+    }
+    return b;
+}
+
 /* Empty input: exercises an archive with only an EOF block + footer. */
 static size_t gc_make_empty(uint8_t** out) {
     *out = NULL;
@@ -69,7 +80,7 @@ static size_t gc_make_empty(uint8_t** out) {
 /* Incompressible high-entropy bytes -> forces a RAW block (PAK/SPL expand). */
 static size_t gc_make_raw(uint8_t** out) {
     const size_t n = 4096;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     uint32_t s = 0x1234567U;
     for (size_t i = 0; i < n; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
     *out = b;
@@ -88,7 +99,7 @@ static size_t gc_fill_text(uint8_t* b, size_t n) {
 
 static size_t gc_make_text(uint8_t** out) {
     const size_t n = 8192;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     gc_fill_text(b, n);
     *out = b;
     return n;
@@ -101,7 +112,7 @@ static size_t gc_make_text(uint8_t** out) {
  * matches, yet only a small skewed alphabet is used. */
 static size_t gc_make_huffman(uint8_t** out) {
     const size_t n = 16384;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     /* Heavily skewed 8-symbol alphabet (entropy ~2 bits/symbol). */
     static const uint8_t alpha[16] = {'a', 'a', 'a', 'a', 'a', 'a', 'b', 'b',
                                       'b', 'b', 'c', 'c', 'd', 'e', 'f', 'g'};
@@ -116,7 +127,7 @@ static size_t gc_make_huffman(uint8_t** out) {
  * Huffman codes, exercising the 11-bit path the DENSITY cap (<= 8 bits) can't. */
 static size_t gc_make_huffman_wide(uint8_t** out) {
     const size_t n = 16384;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     uint32_t s = 0x0C0FFEE1U;
     for (size_t i = 0; i < n; i++) {
         const uint64_t u = (gc_lcg_next(&s) >> 16) & 0xFFFFU; /* uniform 0..65535 */
@@ -131,7 +142,7 @@ static size_t gc_make_huffman_wide(uint8_t** out) {
 /* Several block_size-worth of text -> multiple data blocks in one archive. */
 static size_t gc_make_multiblock(uint8_t** out) {
     const size_t n = 5 * 4096 + 777; /* 5 full 4 KB blocks + a short tail */
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     gc_fill_text(b, n);
     *out = b;
     return n;
@@ -144,7 +155,7 @@ static size_t gc_make_multiblock(uint8_t** out) {
 static size_t gc_make_offset16(uint8_t** out) {
     const size_t period = 1024;
     const size_t n = 8 * period;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     uint32_t s = 0x5EED1234U;
     for (size_t i = 0; i < period; i++) b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
     for (size_t i = period; i < n; i++) b[i] = b[i % period];
@@ -158,7 +169,7 @@ static size_t gc_make_offset16(uint8_t** out) {
  * The other SPL cases use raw (0) or Huffman (2) literals. */
 static size_t gc_make_rle_literals(uint8_t** out) {
     const size_t n = 16384;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     uint32_t s = 0x1357BD13U;
     for (size_t i = 0; i < n; i += 5) {
         b[i] = (uint8_t)(gc_lcg_next(&s) >> 24);
@@ -188,7 +199,7 @@ static const uint8_t gc_dict_content[] =
  * the dictionary (the file header then carries HAS_DICTIONARY + dict_id). */
 static size_t gc_make_dict_payload(uint8_t** out) {
     const size_t n = 4096;
-    uint8_t* b = (uint8_t*)malloc(n);
+    uint8_t* b = gc_alloc(n);
     static const char req[] =
         "GET /api/v1/users/4242/profile HTTP/1.1\r\nHost: api.example.com\r\n"
         "Accept: application/json\r\nUser-Agent: zxc-client\r\n\r\n";
@@ -204,7 +215,7 @@ static size_t gc_make_dict_payload(uint8_t** out) {
  * both the per-block table (no 128-byte header) and RAW/RLE. */
 static size_t gc_make_huffman_dict_payload(uint8_t** out) {
     const size_t cap = 4096;
-    uint8_t* b = (uint8_t*)malloc(cap);
+    uint8_t* b = gc_alloc(cap);
     uint32_t st = 0x5EEDCAFEU;
     size_t n = 0;
     while (n + 160 < cap) {

@@ -1,0 +1,6 @@
+# Tests exit on allocation failure: no OOM path to check
+nullPointerOutOfMemory:tests/*
+nullPointerArithmeticOutOfMemory:tests/*
+nullPointerOutOfResources:tests/*
+# Silent while tests/ has no such finding
+unmatchedSuppression:tests/*
