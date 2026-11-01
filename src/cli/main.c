@@ -1286,8 +1286,9 @@ static FILE* zxc_create_output(const char* path, int force, int owner_only, int*
     if (fd == -1) return NULL;
     FILE* const f = fdopen(fd, "wb");
     if (!f) {
-        const int err = errno;  // close() may clobber it
+        const int err = errno;  // close() and unlink() may clobber it
         close(fd);
+        if (!*special) unlink(path);  // created above with O_EXCL: ours
         errno = err;
     }
     return f;
