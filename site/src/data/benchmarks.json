@@ -1,6 +1,6 @@
 {
   "_comment": "Source: docs/WHITEPAPER.md section 7.5 tables (lzbench 2.4.1, silesia.tar, single thread). Update this file when new numbers are published; the landing page is regenerated from it at build time.",
-  "zxcVersion": "0.15.0",
+  "zxcVersion": "1.0.0",
   "corpus": "silesia.tar",
   "corpusBytes": 211947520,
   "tool": "lzbench 2.4.1",
