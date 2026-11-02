@@ -23,9 +23,9 @@
  */
 
 /** @brief Major version number. */
-#define ZXC_VERSION_MAJOR 0
+#define ZXC_VERSION_MAJOR 1
 /** @brief Minor version number. */
-#define ZXC_VERSION_MINOR 15
+#define ZXC_VERSION_MINOR 0
 /** @brief Patch version number. */
 #define ZXC_VERSION_PATCH 0
 /** @brief Release code name. */
@@ -37,14 +37,14 @@
 /** @endcond */
 
 /**
- * @brief Human-readable version string in "MAJOR.MINOR.PATCH" form (e.g. "0.15.0").
+ * @brief Human-readable version string in "MAJOR.MINOR.PATCH" form (e.g. "1.0.0).
  */
 #define ZXC_LIB_VERSION_STR    \
     ZXC_STR(ZXC_VERSION_MAJOR) \
     "." ZXC_STR(ZXC_VERSION_MINOR) "." ZXC_STR(ZXC_VERSION_PATCH)
 
 /**
- * @brief Version as one integer, MAJOR * 10000 + MINOR * 100 + PATCH (e.g. 1500 for 0.15.0).
+ * @brief Version as one integer, MAJOR * 10000 + MINOR * 100 + PATCH (e.g. 1500 for 1.0.0).
  *
  * Orders like the version triple, so a header requirement reads
  * `#if ZXC_VERSION_NUMBER >= 10000`. zxc_version_number() returns the same
