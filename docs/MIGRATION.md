@@ -33,8 +33,9 @@ change: see [0.15.x → 1.0.0](#015x--100-format-v9-unchanged).
 
 **No archive migration.** ZXC 1.0.0 keeps format **v9** and `.zxd` version 2:
 archives and dictionaries written by 0.15.x read as they are, and 0.15.x reads what
-1.0.0 writes. The one stricter rule is that decoders now reject non-zero reserved
-bits and bytes in file and block headers, which 0.15.x does not write.
+1.0.0 writes. The one stricter rule is that non-zero reserved bits and bytes are now
+rejected in file and block headers and in `.zxd` headers (`ZXC_ERROR_BAD_HEADER` for
+a dictionary). 0.15.x writes zeros there, so only a third-party writer can be affected.
 
 What changes is the C API, its ABI and the CLI defaults.
 
@@ -166,13 +167,18 @@ Scripts that call `zxc` need to check these:
 - **`-T N` means N workers**, with the reader and writer threads on top.
 - **`zxc -V` changes format**: `ZXC CLI v1.0.0 "Hydrogen" (build arm64 64-bit LE), by ...`.
   The license line is gone.
-- **Long options that take no argument reject one**: `--keep=1` is an error.
+- **On Windows, long options that take no argument reject one**: `--keep=1` is an
+  error, as it already was on Linux and macOS.
 
 ### Bindings
 
-The bindings keep their calling conventions, but an out-of-range level is now an
-error instead of being clamped: `ErrBadLevel` in Go, `RuntimeError` in Python, a
-thrown error in Node.js.
+The high-level calls of the bindings keep their shape, with two exceptions:
+
+- **An out-of-range level is now an error instead of being clamped:** `ErrBadLevel`
+  in Go, `RuntimeError` in Python, a thrown error in Node.js and WASM.
+- **Rust:** `compress_bound()`, `compress_block_bound()` and
+  `decompress_block_bound()` return `usize` instead of `u64`. `zxc-compress-sys`
+  follows the C API above: the option structs are gone and the functions are renamed.
 
 ---
 

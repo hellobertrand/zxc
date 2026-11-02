@@ -135,7 +135,8 @@ the right one:
 libzxc follows the shared-library versioning convention:
 
 ```
-libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
+libzxc.so.{SOVERSION}.{MINOR}.{PATCH}   # the file
+libzxc.so.{SOVERSION}                   # its soname, the name binaries load
 ```
 
 | Field | Description | Current |
@@ -150,8 +151,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.1.0.0` |
-| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.1.0.0.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.6.0.0` |
+| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.6.0.0.dylib` |
 | Windows | `libzxc.dll` + `zxc.lib` (MSVC import, built from the shipped `libzxc.def`) or `libzxc.dll.a` (MinGW import) |
 
 ---
@@ -402,7 +403,7 @@ ZXC_EXPORT unsigned zxc_version_number(void);
 ```
 
 Returns the version of the loaded library as one integer,
-`MAJOR * 10000 + MINOR * 100 + PATCH` (e.g. `1500` for 1.0.0). The header
+`MAJOR * 10000 + MINOR * 100 + PATCH` (e.g. `10000` for 1.0.0). The header
 defines the same packing as `ZXC_VERSION_NUMBER`; comparing the two detects a
 runtime library older than the one the program was compiled against.
 
