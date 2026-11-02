@@ -7,7 +7,7 @@ version byte for exact equality and rejects anything else with
 
 | Format | Introduced by | A decoder reads | Headline change |
 | :--- | :--- | :--- | :--- |
-| **v9** | ZXC **0.15.x** | v9 only | Multiplicative header and block checksums; block checksums cover the decoded bytes and the footer carries an optional archive digest; seek table rebuilt as self-validating groups, announced by `HAS_SEEK_TABLE`; dictionaries move to `.zxd` version 2 |
+| **v9** | ZXC **0.15.x**, kept by 1.0.x | v9 only | Multiplicative header and block checksums; block checksums cover the decoded bytes and the footer carries an optional archive digest; seek table rebuilt as self-validating groups, announced by `HAS_SEEK_TABLE`; dictionaries move to `.zxd` version 2 |
 | **v8** | ZXC 0.14.x | v8 only | Block sub-header 16 → 12 bytes; section descriptors cut to the sizes the header cannot imply |
 | **v7** | ZXC 0.13.x | v7 only | Huffman bits use the **PivCo** wire layout; new **level 7 (ULTRA)** adds Huffman-coded tokens |
 | **v6** | ZXC 0.12.x | v6 only | **NUM** block removed; **PAK** renumbered type 3 → 2 |
@@ -24,56 +24,37 @@ before the header checksum is compared — and no shipped tool upgrades one, so 
 dictionary is migrated alongside the archives that use it: see
 [Migrating a dictionary](#migrating-a-dictionary) below.
 
+Upgrading from 0.15.x involves no transcode, but the C API and the CLI defaults
+change: see [0.15.x → 1.0.0](#015x--100-format-v9-unchanged).
+
 ---
 
-## v8 → v9 (ZXC 0.15.x)
+## 0.15.x → 1.0.0 (format v9 unchanged)
 
-Format **v9** is a deliberate, non-backward-compatible break with **v8**. The
-compressed data itself is unchanged; the break is in the integrity fields and in
-the seek table:
+**No archive migration.** ZXC 1.0.0 keeps format **v9** and `.zxd` version 2:
+archives and dictionaries written by 0.15.x read as they are, and 0.15.x reads what
+1.0.0 writes. The one stricter rule is that decoders now reject non-zero reserved
+bits and bytes in file and block headers, which 0.15.x does not write.
 
-- **Header and block checksums are multiplicative** (§ 7.1). The previous
-  construction mixed with an XOR mask, which left part of the compressed size
-  unprotected; the same 2 bytes now cover it.
-- **Block checksums are taken over the decoded bytes**, not the compressed ones,
-  and each is **seeded with the block's frame position**, so a block moved or
-  duplicated within an archive no longer verifies.
-- **The whole-archive hash is gone**; the footer instead carries an optional
-  8-byte **archive digest** folded from the block checksums (§ 7.3).
-- **The footer stores its sizes on the bytes they need** (§ 8): the digest,
-  then the source size, the compressed frame size and a last byte giving their lengths.
-  A tool that read the v8 size 12 bytes from the end must parse it back from
-  that last byte instead, or call `zxc_get_frame_info()`. The public macro
-  `ZXC_FILE_FOOTER_SIZE` is gone with the fixed footer: use
-  `ZXC_FILE_FOOTER_MIN_SIZE` / `ZXC_FILE_FOOTER_MAX_SIZE` (digest excluded) for
-  bounds.
-- **The seek table is rebuilt as self-validating groups** of one 64-bit anchor
-  and 64 block sizes, and its presence is announced by the `HAS_SEEK_TABLE`
-  header flag (bit 5) instead of being probed for.
-- **Dictionaries move to `.zxd` version 2**, re-signed with the new header
-  checksum.
+What changes is the C API, its ABI and the CLI defaults.
 
-> A v8 build is ZXC **0.14.x**. Keep it until every archive you care about is
-> transcoded — it is the only thing that can read v8 data.
+### C API: option structs become context parameters
 
-### C API: option structs become context parameters (0.15.x)
-
-This is a **source and ABI break for C callers**, independent of the format
-change: the SOVERSION moves from 5 to **6**. The two option structs
+This is a **source and ABI break for C callers**: the SOVERSION moves from 5 to **6**. The two option structs
 `zxc_compress_opts_t` / `zxc_decompress_opts_t`, their size helpers
 `zxc_compress_opts_size()` / `zxc_decompress_opts_size()` and the trailing
 `opts` argument of every entry point are gone. Settings now live on a context
 and are set one at a time by identifier (`zxc_cparam_t`, `zxc_dparam_t` in
-`zxc_opts.h`); the one-shot forms take a level and nothing else. Two new
-symbols report the bounds, `zxc_cparam_bounds()` / `zxc_dparam_bounds()`, and
+`zxc_opts.h`); the one-shot forms take a level and nothing else. `zxc_cctx_get_param()` / `zxc_dctx_get_param()` read a
+setting back, `zxc_cparam_bounds()` / `zxc_dparam_bounds()` report the bounds, and
 one error code is new, `ZXC_ERROR_BAD_PARAM` (-20). The full contract is in
 [API.md §6.1 and §9](API.md#61-parameter-identifiers).
 
 The same SOVERSION break renames the dictionary functions under one `zxc_dict_`
 prefix, makes the bound functions return `size_t` and adds
-`zxc_version_number()`:
+`zxc_version_number()` and `zxc_version_codename()`:
 
-| 0.14.x | 0.15.x |
+| 0.15.x | 1.0.x |
 | :--- | :--- |
 | `zxc_train_dict(...)` | `zxc_dict_train_content(...)` (same arguments) |
 | `zxc_train_dict_huf(...)` | `zxc_dict_train_huf(...)` (same arguments) |
@@ -81,10 +62,11 @@ prefix, makes the bound functions return `size_t` and adds
 | `zxc_dict_get_id(buf, size)` | `zxc_dict_read_id(buf, size)` |
 | `uint64_t zxc_compress_bound()`, `zxc_compress_block_bound()`, `zxc_decompress_block_bound()`, `zxc_estimate_cctx_size()` | the same functions return `size_t`; 0 still means "too large for this platform" |
 | — | `zxc_version_number()`: `MAJOR*10000 + MINOR*100 + PATCH` of the loaded library, with the `ZXC_VERSION_NUMBER` macro for the headers |
+| — | `zxc_version_codename()`: the release code name of the loaded library, with the `ZXC_VERSION_CODENAME` macro for the headers |
 
 Option structs and their call sites:
 
-| 0.14.x | 0.15.x |
+| 0.15.x | 1.0.x |
 | :--- | :--- |
 | `zxc_compress(src, n, dst, cap, NULL)` | `zxc_compress(src, n, dst, cap, 0)` (0 = default level) |
 | `zxc_compress(src, n, dst, cap, &(zxc_compress_opts_t){.level = 5})` | `zxc_compress(src, n, dst, cap, 5)` |
@@ -117,23 +99,20 @@ Behaviour changes to know about, beyond the mechanical rewrite:
   (`zxc_stream_decompress(fin, fout, NULL)`). Dictionary archives likewise need
   a `zxc_dctx` with `zxc_dctx_set_dict()`: the simple form returns
   `ZXC_ERROR_DICT_REQUIRED`.
-- **A setter refuses instead of clamping.** The structs let any `level` through
-  and clamped it to 1–7; `zxc_cctx_set_param(c, ZXC_C_LEVEL, 9)` returns
+- **A setter refuses instead of clamping.** The structs let any `level` through:
+  above 7 it became 7, and a negative one the default.
+  `zxc_cctx_set_param(c, ZXC_C_LEVEL, 9)` returns
   `ZXC_ERROR_BAD_LEVEL` and leaves the level unchanged. An invalid
   `ZXC_C_BLOCK_SIZE` is `ZXC_ERROR_BAD_BLOCK_SIZE`; an out-of-bounds thread
   count, checksum or seekable flag, or an unknown identifier, is
   `ZXC_ERROR_BAD_PARAM`. The one-shot `zxc_compress(..., level)` refuses too:
-  `zxc_compress(..., 99)`, ULTRA in 0.14, is now `ZXC_ERROR_BAD_LEVEL`. Check
+  `zxc_compress(..., 99)`, ULTRA in 0.15, is now `ZXC_ERROR_BAD_LEVEL`. Check
   the return value of each setter.
-- **`0` means default, not "keep".** The structs' zero field fell back to the
-  creation value; `zxc_cctx_set_param(c, ZXC_C_LEVEL, 0)` restores the library
+- **`0` means default, not "keep".** On a reusable context, a zero `level` or
+  `block_size` in the structs reused the value of the previous call;
+  `zxc_cctx_set_param(c, ZXC_C_LEVEL, 0)` restores the library
   default (3), whatever the context held before. `zxc_cctx_reset()` /
   `zxc_dctx_reset()` restore everything and detach the dictionary and callback.
-- **`zxc_decompress_dctx()` reports the same error codes as `zxc_decompress()`.**
-  A truncated input is `ZXC_ERROR_SRC_TOO_SMALL` and a malformed header
-  reports what the header parse found (`ZXC_ERROR_BAD_MAGIC`,
-  `ZXC_ERROR_BAD_VERSION`, `ZXC_ERROR_BAD_BLOCK_SIZE`), where 0.14 flattened
-  both to `ZXC_ERROR_NULL_INPUT` or `ZXC_ERROR_BAD_HEADER`.
 - **Settings persist by construction.** There is no "sticky" rule to remember:
   a parameter stays in force until set again. Code that passed a fresh struct
   to each call to override one field now calls `zxc_cctx_set_param()` once and
@@ -146,9 +125,10 @@ Behaviour changes to know about, beyond the mechanical rewrite:
   `zxc_cctx_set_param()` / `zxc_*ctx_set_dict()`, no longer by the compress or
   decompress call. `zxc_init_static_cctx()` takes its block size and level as
   explicit arguments; `0` is invalid there, not a default.
-- **The dictionary is copied on attach.** The struct fields kept the `dict` /
-  `dict_huf` pointers and the bytes had to outlive every call; `zxc_cctx_set_dict()`
-  / `zxc_dctx_set_dict()` copy them (at most `ZXC_DICT_SIZE_MAX` + 128 bytes), so
+- **The dictionary is attached once and copied.** The struct fields applied to one
+  call, so the dictionary was passed again each time. `zxc_cctx_set_dict()` /
+  `zxc_dctx_set_dict()` keep it on the context until it is detached and copy the
+  bytes (at most `ZXC_DICT_SIZE_MAX` + 128 bytes), so
   the caller's buffers are free once the setter returns, as with
   `zxc_seekable_set_dict()`. A failed copy is `ZXC_ERROR_MEMORY`.
 - **The `FILE*` and push creators take a context.** `zxc_stream_compress()` /
@@ -158,8 +138,73 @@ Behaviour changes to know about, beyond the mechanical rewrite:
   `zxc_dstream_create()` copy the parameters at creation. A dictionary on the
   context passed to a push creator fails creation (returns `NULL`), as the
   dictionary fields did.
+- **Thread counts mean workers.** `ZXC_C_THREADS` / `ZXC_D_THREADS` set the number
+  of encode or decode workers, with the reader and writer threads on top. `0` is
+  auto-detection, described in [API.md §6.1](API.md#61-parameter-identifiers).
+- **The block API's margin shrinks.** `ZXC_DECOMPRESS_TAIL_PAD` goes from 2112 to
+  2084 bytes, and `zxc_decompress_block_bound()` follows. A destination sized with
+  the old value stays large enough.
 - **SOVERSION 6.** Binaries built against `libzxc.so.5` do not load against
   this release; rebuild them against the new headers.
+
+### CLI behaviour
+
+Scripts that call `zxc` need to check these:
+
+- **Input files are kept by default.** 0.15.x removed the input once its output
+  was written. Add `--rm` to do that now; it is ignored with `-c`, `-o`, an output
+  file name, `-t` and `-l`, and `-k` takes precedence over it.
+- **The output takes the input's metadata**: permission bits, access and
+  modification times, group, and owner when run as root. 0.15.x left the output
+  with the default mode and the current time, so a build rule comparing timestamps
+  now sees the input's date. `--no-preserve` restores that behaviour.
+- **`-r` selects files by name.** Compressing skips `.zxc` files; decompressing and
+  `-t` select only them. A link given as the starting path is now ignored too.
+- **An output that is the input under another name is refused**, even with `-f`:
+  another letter case on a case-insensitive filesystem, a short name, or, on
+  Windows, a hard link or symbolic link.
+- **`-T N` means N workers**, with the reader and writer threads on top.
+- **`zxc -V` changes format**: `ZXC CLI v1.0.0 "Hydrogen" (build arm64 64-bit LE), by ...`.
+  The license line is gone.
+- **Long options that take no argument reject one**: `--keep=1` is an error.
+
+### Bindings
+
+The bindings keep their calling conventions, but an out-of-range level is now an
+error instead of being clamped: `ErrBadLevel` in Go, `RuntimeError` in Python, a
+thrown error in Node.js.
+
+---
+
+## v8 → v9 (ZXC 0.15.x)
+
+Format **v9** is a deliberate, non-backward-compatible break with **v8**. The
+compressed data itself is unchanged; the break is in the integrity fields and in
+the seek table:
+
+- **Header and block checksums are multiplicative** (§ 7.1). The previous
+  construction mixed with an XOR mask, which left part of the compressed size
+  unprotected; the same 2 bytes now cover it.
+- **Block checksums are taken over the decoded bytes**, not the compressed ones,
+  and each is **seeded with the block's frame position**, so a block moved or
+  duplicated within an archive no longer verifies.
+- **The whole-archive hash is gone**; the footer instead carries an optional
+  8-byte **archive digest** folded from the block checksums (§ 7.3).
+- **The footer stores its sizes on the bytes they need** (§ 8): the digest,
+  then the source size, the compressed frame size and a last byte giving their lengths.
+  A tool that read the v8 size 12 bytes from the end must parse it back from
+  that last byte instead, or call `zxc_get_frame_info()`. The public macro
+  `ZXC_FILE_FOOTER_SIZE` is gone with the fixed footer: use
+  `ZXC_FILE_FOOTER_MIN_SIZE` / `ZXC_FILE_FOOTER_MAX_SIZE` (digest excluded) for
+  bounds.
+- **The seek table is rebuilt as self-validating groups** of one 64-bit anchor
+  and 64 block sizes, and its presence is announced by the `HAS_SEEK_TABLE`
+  header flag (bit 5) instead of being probed for.
+- **Dictionaries move to `.zxd` version 2**, re-signed with the new header
+  checksum.
+
+> A v8 build is ZXC **0.14.x**. Keep it until every archive you care about is
+> transcoded — it is the only thing that can read v8 data.
 
 ### Windows archives (0.15.x)
 
@@ -248,6 +293,8 @@ Only if **both** are true:
 1. You have archives produced by an older build of ZXC (**v8** or earlier), **and**
 2. You want to read them with **v9-only** tools (ZXC 0.15.x+), or standardize your
    stored data on v9.
+
+Archives written by 0.15.x are already v9, so ZXC 1.0.x reads them as they are.
 
 If you keep the old build around, it can still read its own archives — migration
 is not urgent. There is no rush to convert data at rest.
@@ -353,7 +400,7 @@ diff <(zxc-old -dc old.zxc) <(zxc-new -dc new.zxc) && echo OK
 
 ## v5 → v6 (historical)
 
-Format **v6** was the previous break, with **v5**:
+Format **v6** was an earlier break, with **v5**:
 
 - The **NUM** block (v5 type 2 — a numeric delta/ZigZag/bit-packed codec) was
   removed.
@@ -362,8 +409,8 @@ Format **v6** was the previous break, with **v5**:
 
 Because v5 and v6 number their block types differently, a v6 decoder rejects v5
 archives outright with `ZXC_ERROR_BAD_VERSION`. The transcode recipe above applies
-directly — use a v5 build on the decompress side. To land straight on v8, pipe a
-v5 build into a v8 build (`zxc-v5 -dc old.zxc | zxc-new -z -c`); there is no need
+directly — use a v5 build on the decompress side. To land straight on v9, pipe a
+v5 build into a v9 build (`zxc-v5 -dc old.zxc | zxc-new -z -c`); there is no need
 to stop at the versions in between.
 
 ## Notes
@@ -376,5 +423,5 @@ to stop at the versions in between.
   identical.
 - There is no in-place, byte-preserving converter between format versions: the wire
   layout differs at every step (v5 NUM blocks, the v6 → v7 Huffman/PivCo change,
-  the v7 → v8 header and descriptor rework), so the data must be decoded and
-  re-encoded, which the transcode above does.
+  the v7 → v8 header and descriptor rework, the v8 → v9 integrity fields), so the
+  data must be decoded and re-encoded, which the transcode above does.
