@@ -2,7 +2,7 @@
 
 <h1>ZXC: Lossless compression library for ultra-fast decode</h1>
 
-<p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. At every compression level ZXC decodes faster than LZ4, and produces output of equal or smaller size.</p>
+<p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. Levels 1 to 6 decode faster than the LZ4 mode of matching ratio, at equal or smaller size.</p>
 
 <p>ZXC is free software, released under the <a href="https://opensource.org/license/bsd-3-clause">BSD 3-Clause License</a>. It has no dependencies, and official bindings exist for Rust, Python, Node.js and Go.</p>
 
