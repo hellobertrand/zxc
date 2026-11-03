@@ -520,6 +520,55 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
     }
 }
 
+// x86-64 runs out of registers in the 4x loops, where arm64 does not, and its
+// 32-byte load takes a base+index address in one instruction. So on x86-64 the
+// batches read their fields from memory sequence by sequence instead of holding
+// them live, and test the on-wire offset, whose bias folds into the address.
+// arm64 keeps the loaded words and the biased offset: `ldp` has no address mode
+// for the unbiased source, which would cost it two loads and an add, and reading
+// the PAK fields one by one would double the loads of a batch.
+#if defined(__x86_64__) || defined(_M_X64)
+#define ZXC_DECODE_X86_64 1
+#else
+#define ZXC_DECODE_X86_64 0
+#endif
+
+/**
+ * @brief @ref zxc_decode_copy_match_short on the on-wire offset.
+ *
+ * @param[in,out] d_ptr Output cursor, as in @ref zxc_decode_copy_match_short.
+ * @param[in]     raw   Back-reference distance minus @ref ZXC_LZ_OFFSET_BIAS.
+ * @param[in]     ml    Match length, @c <= 32.
+ */
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short_raw(uint8_t* RESTRICT d_ptr,
+                                                              const size_t raw, const uint64_t ml) {
+#if ZXC_DECODE_X86_64
+    if (LIKELY(raw >= 32 - ZXC_LZ_OFFSET_BIAS)) {
+        zxc_copy32(d_ptr, d_ptr - ZXC_LZ_OFFSET_BIAS - raw);
+        return;
+    }
+#endif
+    zxc_decode_copy_match_short(d_ptr, (uint32_t)raw + ZXC_LZ_OFFSET_BIAS, ml);
+}
+
+/**
+ * @brief @ref zxc_decode_copy_match on the on-wire offset.
+ *
+ * @param[in,out] d_ptr Output cursor, as in @ref zxc_decode_copy_match.
+ * @param[in]     raw   Back-reference distance minus @ref ZXC_LZ_OFFSET_BIAS.
+ * @param[in]     ml    Match length in bytes.
+ */
+static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_raw(uint8_t* RESTRICT d_ptr, const size_t raw,
+                                                        const uint64_t ml) {
+#if ZXC_DECODE_X86_64
+    if (LIKELY(raw >= 32 - ZXC_LZ_OFFSET_BIAS)) {
+        zxc_wild_copy32(d_ptr, d_ptr - ZXC_LZ_OFFSET_BIAS - raw, ml);
+        return;
+    }
+#endif
+    zxc_decode_copy_match(d_ptr, (uint32_t)raw + ZXC_LZ_OFFSET_BIAS, ml);
+}
+
 // Match emission only. The literal copy lives in the per-format sequence macros
 // because the two formats want different strategies: SPL's inline ll is at most
 // 14, so one zxc_copy16 covers it, while PAK's reaches 254 and needs the
@@ -542,6 +591,17 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
         d_ptr += ml;                     \
     } while (0)
 
+// Same two emissions on the on-wire offset: off = raw + bias, so `avail < off`
+// reads `avail <= raw` and needs no add.
+#define DECODE_MATCH_SAFE_RAW(ml, raw, COPY)                                           \
+    do {                                                                               \
+        if (UNLIKELY((size_t)(d_ptr - d_floor) <= (raw))) return ZXC_ERROR_BAD_OFFSET; \
+        COPY(d_ptr, raw, ml);                                                          \
+        d_ptr += ml;                                                                   \
+    } while (0)
+
+#define DECODE_MATCH_FAST_RAW(ml, raw, COPY) DECODE_MATCH_FAST(ml, raw, COPY)
+
 /**
  * @brief True when the SPL offset stream stores 1-byte offsets, 2-byte otherwise.
  *
@@ -555,104 +615,133 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  */
 #define SPL_OFF8 (gh.enc_off == 1)
 
+// Token byte @p k of the batch: read at its sequence on x86-64, where holding the
+// word live costs a register; extracted from the word loaded once elsewhere.
+#if ZXC_DECODE_X86_64
+#define ZXC_SPL_TOKENS_LOAD ((void)0)
+#define ZXC_SPL_TOKEN(k) ((uint64_t)t_ptr[k])
+#else
+#define ZXC_SPL_TOKENS_LOAD const uint64_t tokens = zxc_le32(t_ptr)
+#define ZXC_SPL_TOKEN(k) ((tokens >> (8 * (k))) & 0xFF)
+#endif
+#define ZXC_SPL_TOKEN_LL(k) (ZXC_SPL_TOKEN(k) >> ZXC_TOKEN_LIT_BITS)
+
 /**
  * @brief Decodes one SPL sequence of a 4x batch: extracts ll/ml, applies the
  *        varint extensions with their bounds checks, then emits via @p DECODE.
  *
  * Like `DECODE_MATCH_SAFE`, references the call site's local names (e_ptr,
- * e_end, l_ptr, l_end, d_ptr, d_end). @p RESERVE is the sum of the inline
+ * e_end, l_ptr, l_end, d_ptr, d_end). @p K is the sequence's rank in the batch
+ * and @p RAW its on-wire offset. @p RESERVE is the sum of the inline
  * (pre-varint) literal lengths of the batch's remaining sequences, so one
  * l_ptr bound covers the whole batch; @p N_REM counts the remaining
  * sequences, reserving their worst-case inline output in the d_ptr bound
  * (0 for the last sequence - the compiler folds the dead terms). @p ON_FAIL
  * is `goto rollback_*` in the state-saving safe variants and
  * `return ZXC_ERROR_OVERFLOW` otherwise.
+ *
+ * ml includes the minimum match from the start: the escape test and the length
+ * then share one register, where a separate nibble costs GCC a second extraction.
  */
-#define DECODE_SPL_SEQ(LL, ML, OFF, RESERVE, N_REM, DECODE, ON_FAIL)                            \
-    do {                                                                                        \
-        uint64_t ll = (LL);                                                                     \
-        uint64_t ml = (ML);                                                                     \
-        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                                \
-            ll += zxc_read_varint(&e_ptr, e_end);                                               \
-            const uint64_t reserve = (RESERVE);                                                 \
-            /* An extended ll eats the batch's destination budget, so reserve                   \
-             * this sequence's match and the remaining ones too. ml is still                    \
-             * the raw nibble here; an escaped one re-checks itself below. */                   \
-            if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                              \
-                         ll + ml + ZXC_LZ_MIN_MATCH_LEN +                                       \
-                                 (N_REM) * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE >      \
-                             (size_t)(d_end - d_ptr)))                                          \
-                ON_FAIL;                                                                        \
-            zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                         \
-        } else {                                                                                \
-            /* ll <= 14 here, so one 16-byte store covers it. */                                \
-            zxc_copy16(d_ptr, l_ptr);                                                           \
-        }                                                                                       \
-        l_ptr += ll;                                                                            \
-        d_ptr += ll;                                                                            \
-        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK)) {                                                \
-            ml += zxc_read_varint(&e_ptr, e_end);                                               \
-            /* d_ptr already carries the literals, hence no `ll +` term here. */                \
-            if (UNLIKELY(ml + ZXC_LZ_MIN_MATCH_LEN + (N_REM) * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + \
-                             ZXC_PAD_SIZE >                                                     \
-                         (size_t)(d_end - d_ptr)))                                              \
-                ON_FAIL;                                                                        \
-            ml += ZXC_LZ_MIN_MATCH_LEN;                                                         \
-            DECODE(ml, OFF, zxc_decode_copy_match);                                             \
-        } else {                                                                                \
-            /* Inline nibble: ml <= ZXC_SPL_MAX_INLINE_ML, so no length ladder. */              \
-            ml += ZXC_LZ_MIN_MATCH_LEN;                                                         \
-            DECODE(ml, OFF, zxc_decode_copy_match_short);                                       \
-        }                                                                                       \
+#define DECODE_SPL_SEQ(K, RAW, RESERVE, N_REM, DECODE, ON_FAIL)                              \
+    do {                                                                                     \
+        const uint64_t tok = ZXC_SPL_TOKEN(K);                                               \
+        uint64_t ll = tok >> ZXC_TOKEN_LIT_BITS;                                             \
+        uint64_t ml = (tok & ZXC_TOKEN_ML_MASK) + ZXC_LZ_MIN_MATCH_LEN;                      \
+        if (UNLIKELY(ll == ZXC_TOKEN_LL_MASK)) {                                             \
+            ll += zxc_read_varint(&e_ptr, e_end);                                            \
+            const uint64_t reserve = (RESERVE);                                              \
+            /* An extended ll eats the batch's destination budget, so reserve                \
+             * this sequence's match and the remaining ones too. ml is still                 \
+             * the inline length here; an escaped one re-checks itself below. */             \
+            if (UNLIKELY(ll + reserve > (size_t)(l_end - l_ptr) ||                           \
+                         ll + ml + (N_REM) * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
+                             (size_t)(d_end - d_ptr)))                                       \
+                ON_FAIL;                                                                     \
+            zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                      \
+        } else {                                                                             \
+            /* ll <= 14 here, so one 16-byte store covers it. */                             \
+            zxc_copy16(d_ptr, l_ptr);                                                        \
+        }                                                                                    \
+        l_ptr += ll;                                                                         \
+        d_ptr += ll;                                                                         \
+        if (UNLIKELY(ml == ZXC_TOKEN_ML_MASK + ZXC_LZ_MIN_MATCH_LEN)) {                      \
+            ml += zxc_read_varint(&e_ptr, e_end);                                            \
+            /* d_ptr already carries the literals, hence no `ll +` term here. */             \
+            if (UNLIKELY(ml + (N_REM) * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE >      \
+                         (size_t)(d_end - d_ptr)))                                           \
+                ON_FAIL;                                                                     \
+            DECODE##_RAW(ml, RAW, zxc_decode_copy_match_raw);                                \
+        } else {                                                                             \
+            /* Inline nibble: ml <= ZXC_SPL_MAX_INLINE_ML, so no length ladder. */           \
+            DECODE##_RAW(ml, RAW, zxc_decode_copy_match_short_raw);                          \
+        }                                                                                    \
     } while (0)
 
 /**
- * @brief One full SPL 4x batch: token word, four offsets (1- or 2-byte form),
- *        four @ref DECODE_SPL_SEQ emissions, sequence-count update.
+ * @brief One full SPL 4x batch: four offsets (1- or 2-byte form), four
+ *        @ref DECODE_SPL_SEQ emissions. t_ptr counts the sequences left.
  *
  * The offsets stay packed in one u64 of 16-bit lanes, 1-byte offsets spread
  * into it, and each sequence extracts its own: four decoded offsets held live
  * cost x86-64 spills.
  */
-#define DECODE_SPL_BATCH_4X(DECODE, ON_FAIL)                                                       \
-    do {                                                                                           \
-        uint32_t tokens = zxc_le32(t_ptr);                                                         \
-        t_ptr += sizeof(uint32_t);                                                                 \
-        uint64_t offs;                                                                             \
-        if (SPL_OFF8) {                                                                            \
-            uint64_t x = zxc_le32(o_ptr);                                                          \
-            o_ptr += sizeof(uint32_t);                                                             \
-            x = (x | (x << 16)) & 0x0000FFFF0000FFFFULL;                                           \
-            offs = (x | (x << 8)) & 0x00FF00FF00FF00FFULL;                                         \
-        } else {                                                                                   \
-            offs = zxc_le64(o_ptr);                                                                \
-            o_ptr += sizeof(uint64_t);                                                             \
-        }                                                                                          \
-        DECODE_SPL_SEQ((tokens & 0x0F0) >> 4, (tokens & 0x00F),                                    \
-                       ZXC_LZ_OFFSET_BIAS + (uint32_t)(offs & 0xFFFF),                             \
-                       ((tokens >> 12) & 0xF) + ((tokens >> 20) & 0xF) + (tokens >> 28), 3U,       \
-                       DECODE, ON_FAIL);                                                           \
-        DECODE_SPL_SEQ((tokens & 0x0F000) >> 12, (tokens & 0x00F00) >> 8,                          \
-                       ZXC_LZ_OFFSET_BIAS + (uint32_t)((offs >> 16) & 0xFFFF),                     \
-                       ((tokens >> 20) & 0xF) + (tokens >> 28), 2U, DECODE, ON_FAIL);              \
-        DECODE_SPL_SEQ((tokens & 0x0F00000) >> 20, (tokens & 0x00F0000) >> 16,                     \
-                       ZXC_LZ_OFFSET_BIAS + (uint32_t)((offs >> 32) & 0xFFFF), (tokens >> 28), 1U, \
-                       DECODE, ON_FAIL);                                                           \
-        DECODE_SPL_SEQ((tokens >> 28), (tokens >> 24) & 0x0F,                                      \
-                       ZXC_LZ_OFFSET_BIAS + (uint32_t)(offs >> 48), 0, 0U, DECODE, ON_FAIL);       \
-        n_seq -= 4;                                                                                \
+#define DECODE_SPL_BATCH_4X(DECODE, ON_FAIL)                                                      \
+    do {                                                                                          \
+        ZXC_SPL_TOKENS_LOAD;                                                                      \
+        uint64_t offs;                                                                            \
+        if (SPL_OFF8) {                                                                           \
+            uint64_t x = zxc_le32(o_ptr);                                                         \
+            o_ptr += sizeof(uint32_t);                                                            \
+            x = (x | (x << 16)) & 0x0000FFFF0000FFFFULL;                                          \
+            offs = (x | (x << 8)) & 0x00FF00FF00FF00FFULL;                                        \
+        } else {                                                                                  \
+            offs = zxc_le64(o_ptr);                                                               \
+            o_ptr += sizeof(uint64_t);                                                            \
+        }                                                                                         \
+        DECODE_SPL_SEQ(0, (offs & 0xFFFF),                                                        \
+                       ZXC_SPL_TOKEN_LL(1) + ZXC_SPL_TOKEN_LL(2) + ZXC_SPL_TOKEN_LL(3), 3U,       \
+                       DECODE, ON_FAIL);                                                          \
+        DECODE_SPL_SEQ(1, ((offs >> 16) & 0xFFFF), ZXC_SPL_TOKEN_LL(2) + ZXC_SPL_TOKEN_LL(3), 2U, \
+                       DECODE, ON_FAIL);                                                          \
+        DECODE_SPL_SEQ(2, ((offs >> 32) & 0xFFFF), ZXC_SPL_TOKEN_LL(3), 1U, DECODE, ON_FAIL);     \
+        DECODE_SPL_SEQ(3, (offs >> 48), 0, 0U, DECODE, ON_FAIL);                                  \
+        t_ptr += sizeof(uint32_t);                                                                \
     } while (0)
 
+// The sequence word is off16 | ml8 | ll8 in stream order. x86-64 reads its fields
+// directly, with no word held live across the batch; elsewhere the four words are
+// loaded once and the fields extracted.
+static_assert(ZXC_SEQ_OFF_BITS == 16 && ZXC_SEQ_ML_BITS == 8 && ZXC_SEQ_LL_BITS == 8,
+              "DECODE_PAK_SEQ reads the fields of a sequence word as bytes");
+#if ZXC_DECODE_X86_64
+#define ZXC_PAK_WORDS_LOAD ((void)0)
+#define ZXC_PAK_WORDS_DONE seq_ptr += 4 * sizeof(uint32_t)
+#define ZXC_PAK_LL(k) ((uint64_t)seq_ptr[sizeof(uint32_t) * (k) + 3])
+#define ZXC_PAK_ML(k) ((uint64_t)seq_ptr[sizeof(uint32_t) * (k) + 2])
+#define ZXC_PAK_RAW(k) ((size_t)zxc_le16(seq_ptr + sizeof(uint32_t) * (k)))
+#else
+#define ZXC_PAK_WORDS_LOAD                                        \
+    const uint32_t s0 = zxc_le32(seq_ptr);                        \
+    const uint32_t s1 = zxc_le32(seq_ptr + sizeof(uint32_t));     \
+    const uint32_t s2 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t)); \
+    const uint32_t s3 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t)); \
+    seq_ptr += 4 * sizeof(uint32_t)
+#define ZXC_PAK_WORDS_DONE ((void)0)
+#define ZXC_PAK_LL(k) ((uint64_t)(s##k >> ZXC_SEQ_LL_SHIFT))
+#define ZXC_PAK_ML(k) ((uint64_t)((s##k >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK))
+#define ZXC_PAK_RAW(k) ((size_t)(s##k & ZXC_SEQ_OFF_MASK))
+#endif
+
 /**
- * @brief PAK twin of @ref DECODE_SPL_SEQ, decoding one sequence word @p S
- *        (ll in the top byte, ml bits, 16-bit offset). References the call
+ * @brief PAK twin of @ref DECODE_SPL_SEQ, decoding the sequence word of rank @p K
+ *        (ll in the top byte, ml byte, 16-bit offset). References the call
  *        site's extras_ptr/extras_end instead of e_ptr/e_end.
  */
-#define DECODE_PAK_SEQ(S, RESERVE, N_REM, DECODE, ON_FAIL)                                   \
+#define DECODE_PAK_SEQ(K, RESERVE, N_REM, DECODE, ON_FAIL)                                   \
     do {                                                                                     \
-        uint64_t ll = (S) >> ZXC_SEQ_LL_SHIFT;                                               \
-        const uint32_t mb = ((S) >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK;                     \
-        uint64_t ml = mb + ZXC_LZ_MIN_MATCH_LEN;                                             \
+        uint64_t ll = ZXC_PAK_LL(K);                                                         \
+        uint64_t ml = ZXC_PAK_ML(K) + ZXC_LZ_MIN_MATCH_LEN;                                  \
         if (UNLIKELY(ll == ZXC_SEQ_LL_MASK)) {                                               \
             ll += zxc_read_varint(&extras_ptr, extras_end);                                  \
             const uint64_t reserve = (RESERVE);                                              \
@@ -662,18 +751,18 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
                              (size_t)(d_end - d_ptr)))                                       \
                 ON_FAIL;                                                                     \
         }                                                                                    \
-        if (UNLIKELY(mb == ZXC_SEQ_ML_MASK)) {                                               \
+        if (UNLIKELY(ml == ZXC_SEQ_ML_MASK + ZXC_LZ_MIN_MATCH_LEN)) {                        \
             ml += zxc_read_varint(&extras_ptr, extras_end);                                  \
             if (UNLIKELY(ll + ml + (N_REM) * ZXC_PAK_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE > \
                          (size_t)(d_end - d_ptr)))                                           \
                 ON_FAIL;                                                                     \
         }                                                                                    \
-        const uint32_t off = ((S) & ZXC_SEQ_OFF_MASK) + ZXC_LZ_OFFSET_BIAS;                  \
+        const size_t raw = ZXC_PAK_RAW(K);                                                   \
         /* PAK keeps the ladder: its inline ll reaches 254. */                               \
         zxc_decode_copy_literals(d_ptr, l_ptr, ll);                                          \
         l_ptr += ll;                                                                         \
         d_ptr += ll;                                                                         \
-        DECODE(ml, off, zxc_decode_copy_match);                                              \
+        DECODE##_RAW(ml, raw, zxc_decode_copy_match_raw);                                    \
     } while (0)
 
 /**
@@ -681,22 +770,16 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
  *        statement of the post-threshold FAST loops ((void)0 elsewhere),
  *        placed exactly where the hand-unrolled bodies had it.
  */
-#define DECODE_PAK_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                          \
-    do {                                                                                        \
-        uint32_t s1 = zxc_le32(seq_ptr);                                                        \
-        uint32_t s2 = zxc_le32(seq_ptr + sizeof(uint32_t));                                     \
-        uint32_t s3 = zxc_le32(seq_ptr + 2 * sizeof(uint32_t));                                 \
-        uint32_t s4 = zxc_le32(seq_ptr + 3 * sizeof(uint32_t));                                 \
-        seq_ptr += 4 * sizeof(uint32_t);                                                        \
-        PREFETCH;                                                                               \
-        DECODE_PAK_SEQ(                                                                         \
-            s1, (s2 >> ZXC_SEQ_LL_SHIFT) + (s3 >> ZXC_SEQ_LL_SHIFT) + (s4 >> ZXC_SEQ_LL_SHIFT), \
-            3U, DECODE, ON_FAIL);                                                               \
-        DECODE_PAK_SEQ(s2, (s3 >> ZXC_SEQ_LL_SHIFT) + (s4 >> ZXC_SEQ_LL_SHIFT), 2U, DECODE,     \
-                       ON_FAIL);                                                                \
-        DECODE_PAK_SEQ(s3, (s4 >> ZXC_SEQ_LL_SHIFT), 1U, DECODE, ON_FAIL);                      \
-        DECODE_PAK_SEQ(s4, 0, 0U, DECODE, ON_FAIL);                                             \
-        n_seq -= 4;                                                                             \
+#define DECODE_PAK_BATCH_4X(DECODE, ON_FAIL, PREFETCH)                                         \
+    do {                                                                                       \
+        ZXC_PAK_WORDS_LOAD;                                                                    \
+        PREFETCH;                                                                              \
+        DECODE_PAK_SEQ(0, ZXC_PAK_LL(1) + ZXC_PAK_LL(2) + ZXC_PAK_LL(3), 3U, DECODE, ON_FAIL); \
+        DECODE_PAK_SEQ(1, ZXC_PAK_LL(2) + ZXC_PAK_LL(3), 2U, DECODE, ON_FAIL);                 \
+        DECODE_PAK_SEQ(2, ZXC_PAK_LL(3), 1U, DECODE, ON_FAIL);                                 \
+        DECODE_PAK_SEQ(3, 0, 0U, DECODE, ON_FAIL);                                             \
+        ZXC_PAK_WORDS_DONE;                                                                    \
+        n_seq -= 4;                                                                            \
     } while (0)
 
 /**
@@ -994,6 +1077,10 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
         (spl_sz_lit > spl_margin_1x) ? l_end - spl_margin_1x : l_ptr;
 
     uint32_t n_seq = gh.n_sequences;
+    // One token per sequence: t_ptr doubles as the 4x loops' count, and n_seq comes
+    // back from it for the 1x loops.
+    const uint8_t* const t_end_seq = t_ptr + n_seq;
+    const uint8_t* const t_stop_4x = n_seq >= 4 ? t_end_seq - 3 : t_ptr;
 
     // Offsets only need checking until the output is wider than the widest offset
     // the format can encode (256 for 1-byte offsets, 65536 for 2-byte); past that
@@ -1002,11 +1089,13 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
     const size_t off_span = SPL_OFF8 ? (1U << 8) : (1U << 16);
     const size_t span = (dict_size >= off_span) ? 0 : off_span - dict_size;
     const uint8_t* const d_bounds = (span >= dst_capacity) ? d_end : dst + span;
+    // The SAFE loops stop at the first of the two; the FAST loops re-test d_end_safe.
+    const uint8_t* const d_stop_safe = d_end_safe < d_bounds ? d_end_safe : d_bounds;
 
     // --- SAFE Loop: offset validation until d_bounds (4x unroll) ---
     if (safe) {
         // SAFE variant: save per-batch state so overflow can rollback.
-        while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x && d_ptr < d_bounds) {
+        while (t_ptr < t_stop_4x && d_ptr < d_stop_safe && l_ptr < l_end_safe_4x) {
             const uint8_t* const t_save = t_ptr;
             const uint8_t* const o_save = o_ptr;
             const uint8_t* const e_save = e_ptr;
@@ -1024,14 +1113,14 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
             break;
         }
     } else {
-        while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x && d_ptr < d_bounds) {
+        while (t_ptr < t_stop_4x && d_ptr < d_stop_safe && l_ptr < l_end_safe_4x) {
             DECODE_SPL_BATCH_4X(DECODE_MATCH_SAFE, return ZXC_ERROR_OVERFLOW);
         }
     }
 
     // --- FAST Loop: After threshold, no offset validation needed (4x unroll) ---
     if (safe) {
-        while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x) {
+        while (t_ptr < t_stop_4x && d_ptr < d_end_safe && l_ptr < l_end_safe_4x) {
             const uint8_t* const t_save = t_ptr;
             const uint8_t* const o_save = o_ptr;
             const uint8_t* const e_save = e_ptr;
@@ -1049,10 +1138,12 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
             break;
         }
     } else {
-        while (n_seq >= 4 && d_ptr < d_end_safe && l_ptr < l_end_safe_4x) {
+        while (t_ptr < t_stop_4x && d_ptr < d_end_safe && l_ptr < l_end_safe_4x) {
             DECODE_SPL_BATCH_4X(DECODE_MATCH_FAST, return ZXC_ERROR_OVERFLOW);
         }
     }
+
+    n_seq = (uint32_t)(t_end_seq - t_ptr);
 
     // Validate vbyte reads didn't overflow
     if (UNLIKELY(e_ptr > e_end)) return ZXC_ERROR_CORRUPT_DATA;
@@ -1246,13 +1337,15 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
     const size_t off_span = 1U << 16;
     const size_t span = (dict_size >= off_span) ? 0 : off_span - dict_size;
     const uint8_t* const d_bounds = (span >= dst_capacity) ? d_end : dst + span;
+    // The SAFE loops stop at the first of the two; the FAST loops re-test d_end_fast.
+    const uint8_t* const d_stop_safe = d_end_fast < d_bounds ? d_end_fast : d_bounds;
 
     // --- SAFE loop: validate offsets until d_bounds (4x unroll) ---
     if (safe) {
         // SAFE variant: save per-batch state so an OVERFLOW can rollback and
         // hand over to the 1x loop / Safe Path. Wild writes already committed
         // are deterministically overwritten when the 1x loop replays.
-        while (n_seq >= 4 && d_ptr < d_end_fast && l_ptr < l_end_safe_4x && d_ptr < d_bounds) {
+        while (n_seq >= 4 && d_ptr < d_stop_safe && l_ptr < l_end_safe_4x) {
             const uint8_t* const t_save = seq_ptr;
             const uint8_t* const e_save = extras_ptr;
             uint8_t* const d_save = d_ptr;
@@ -1268,7 +1361,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_pak_impl(const zxc_cctx_t* RESTRIC
             break;
         }
     } else {
-        while (n_seq >= 4 && d_ptr < d_end_fast && l_ptr < l_end_safe_4x && d_ptr < d_bounds) {
+        while (n_seq >= 4 && d_ptr < d_stop_safe && l_ptr < l_end_safe_4x) {
             DECODE_PAK_BATCH_4X(DECODE_MATCH_SAFE, return ZXC_ERROR_OVERFLOW, (void)0);
         }
     }
@@ -1573,8 +1666,19 @@ static ZXC_NOINLINE int zxc_decode_block_pak_safe(const zxc_cctx_t* RESTRICT ctx
 
 #undef DECODE_PAK_BATCH_4X
 #undef DECODE_PAK_SEQ
+#undef ZXC_PAK_RAW
+#undef ZXC_PAK_ML
+#undef ZXC_PAK_LL
+#undef ZXC_PAK_WORDS_DONE
+#undef ZXC_PAK_WORDS_LOAD
 #undef DECODE_SPL_BATCH_4X
 #undef DECODE_SPL_SEQ
+#undef ZXC_SPL_TOKEN_LL
+#undef ZXC_SPL_TOKEN
+#undef ZXC_SPL_TOKENS_LOAD
+#undef DECODE_MATCH_FAST_RAW
+#undef DECODE_MATCH_SAFE_RAW
+#undef ZXC_DECODE_X86_64
 #undef DECODE_MATCH_FAST
 #undef SPL_OFF8
 #undef DECODE_MATCH_SAFE
