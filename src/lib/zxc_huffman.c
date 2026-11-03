@@ -1406,11 +1406,11 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         uint8x16x2_t tb;
         tb.val[0] = vld1q_u8(L + lp);
         tb.val[1] = vld1q_u8(R + rp);
-        const int pc0 = ZXC_PIVCO_POPCNT8(b0);
+        const size_t pc0 = (size_t)ZXC_PIVCO_POPCNT8(b0);
         const uint8x8_t ia = vld1_u8(zxc_pivco_idxa_u8[b0]);
         const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[pc0][b1]);
         vst1q_u8(out + i, vqtbl2q_u8(tb, vcombine_u8(ia, ib)));
-        const int pc = pc0 + ZXC_PIVCO_POPCNT8(b1);
+        const size_t pc = pc0 + (size_t)ZXC_PIVCO_POPCNT8(b1);
         ZXC_PIVCO_MERGE_STEP(16, pc);
     }
 #else /* x86 tiers */
@@ -1444,12 +1444,12 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
     // second cursor is lp + (16 - pcA), never lp + 16.
     while (i + 32 <= n) {
         const uint8_t* cb = bits + (i >> 3);
-        const int pcA0 = zxc_pivco_popcnt32(cb[0]);
-        const int pcA = pcA0 + zxc_pivco_popcnt32(cb[1]);
-        const int pcB0 = zxc_pivco_popcnt32(cb[2]);
-        const int pcB = pcB0 + zxc_pivco_popcnt32(cb[3]);
-        const size_t lpB = lp + (size_t)(16 - pcA);
-        const size_t rpB = rp + (size_t)pcA;
+        const size_t pcA0 = (size_t)zxc_pivco_popcnt32(cb[0]);
+        const size_t pcA = pcA0 + (size_t)zxc_pivco_popcnt32(cb[1]);
+        const size_t pcB0 = (size_t)zxc_pivco_popcnt32(cb[2]);
+        const size_t pcB = pcB0 + (size_t)zxc_pivco_popcnt32(cb[3]);
+        const size_t lpB = lp + (16 - pcA);
+        const size_t rpB = rp + pcA;
         const __m256i vl = _mm256_inserti128_si256(
             _mm256_castsi128_si256(_mm_loadu_si128((const __m128i*)(const void*)(L + lp))),
             _mm_loadu_si128((const __m128i*)(const void*)(L + lpB)), 1);
@@ -1467,19 +1467,19 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
             (__m256i*)(void*)(out + i),
             _mm256_blendv_epi8(_mm256_shuffle_epi8(vl, ix), _mm256_shuffle_epi8(vr, ix),
                                _mm256_slli_epi16(ix, 3)));
-        lp = lpB + (size_t)(16 - pcB);
-        rp = rpB + (size_t)pcB;
+        lp = lpB + (16 - pcB);
+        rp = rpB + pcB;
         i += 32;
     }
 #else
     while (i + 32 <= n) {
         const uint8_t* cb = bits + (i >> 3);
-        const int pcA0 = zxc_pivco_popcnt32(cb[0]);
-        const int pcA = pcA0 + zxc_pivco_popcnt32(cb[1]);
-        const int pcB0 = zxc_pivco_popcnt32(cb[2]);
-        const int pcB = pcB0 + zxc_pivco_popcnt32(cb[3]);
-        const size_t lpB = lp + (size_t)(16 - pcA);
-        const size_t rpB = rp + (size_t)pcA;
+        const size_t pcA0 = (size_t)zxc_pivco_popcnt32(cb[0]);
+        const size_t pcA = pcA0 + (size_t)zxc_pivco_popcnt32(cb[1]);
+        const size_t pcB0 = (size_t)zxc_pivco_popcnt32(cb[2]);
+        const size_t pcB = pcB0 + (size_t)zxc_pivco_popcnt32(cb[3]);
+        const size_t lpB = lp + (16 - pcA);
+        const size_t rpB = rp + pcA;
         const __m128i vlA = _mm_loadu_si128((const __m128i*)(const void*)(L + lp));
         const __m128i vrA = _mm_loadu_si128((const __m128i*)(const void*)(R + rp));
         const __m128i vlB = _mm_loadu_si128((const __m128i*)(const void*)(L + lpB));
@@ -1500,8 +1500,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
                          _mm_shuffle_epi8(vrB, _mm_sub_epi8(ixB, _mm_set1_epi8(16))));
         _mm_storeu_si128((__m128i*)(void*)(out + i), selA);
         _mm_storeu_si128((__m128i*)(void*)(out + i + 16), selB);
-        lp = lpB + (size_t)(16 - pcB);
-        rp = rpB + (size_t)pcB;
+        lp = lpB + (16 - pcB);
+        rp = rpB + pcB;
         i += 32;
     }
 #endif
