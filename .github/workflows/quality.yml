@@ -189,7 +189,7 @@ jobs:
         run: |
           mkdir -p build_clang
 
-          scan-build cmake -S . -B build_clang -DCMAKE_BUILD_TYPE=Debug
+          scan-build cmake -S . -B build_clang -DCMAKE_BUILD_TYPE=Debug -DZXC_NATIVE_ARCH=OFF
           scan-build --status-bugs cmake --build build_clang
 
       - name: Build for Valgrind (Debug)
