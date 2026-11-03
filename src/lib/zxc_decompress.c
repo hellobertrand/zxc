@@ -469,11 +469,14 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_short(uint8_t* RESTRICT d_pt
 }
 
 /**
- * @brief SPL match copy: bounded form when the ml nibble did not saturate.
+ * @brief SPL match copy for the 1x loop: bounded form when the ml nibble did not
+ *        saturate.
  *
- * The test is exact (the escape always yields more) and statically decidable
- * from either predecessor, so jump threading folds it away. PAK uses
- * @ref zxc_decode_copy_match directly - its inline ml reaches 259.
+ * The test is exact (the escape always yields more). The 1x loop needs it because
+ * its rollback runs between the escape test and the copy; @ref DECODE_SPL_SEQ picks
+ * the helper in each arm instead, since the offset check of its SAFE form stops
+ * jump threading from folding this test. PAK uses @ref zxc_decode_copy_match
+ * directly - its inline ml reaches 259.
  */
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_match_spl(uint8_t* RESTRICT d_ptr, const uint32_t off,
                                                         const uint64_t ml) {
@@ -594,9 +597,13 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
                              ZXC_PAD_SIZE >                                                     \
                          (size_t)(d_end - d_ptr)))                                              \
                 ON_FAIL;                                                                        \
+            ml += ZXC_LZ_MIN_MATCH_LEN;                                                         \
+            DECODE(ml, OFF, zxc_decode_copy_match);                                             \
+        } else {                                                                                \
+            /* Inline nibble: ml <= ZXC_SPL_MAX_INLINE_ML, so no length ladder. */              \
+            ml += ZXC_LZ_MIN_MATCH_LEN;                                                         \
+            DECODE(ml, OFF, zxc_decode_copy_match_short);                                       \
         }                                                                                       \
-        ml += ZXC_LZ_MIN_MATCH_LEN;                                                             \
-        DECODE(ml, OFF, zxc_decode_copy_match_spl);                                             \
     } while (0)
 
 /**
