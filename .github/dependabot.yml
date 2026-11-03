@@ -6,7 +6,7 @@ updates:
     schedule:
       interval: monthly
   - package-ecosystem: pip
-    directory: /wrappers/python
+    directory: /bindings/python
     schedule:
       interval: monthly
   - package-ecosystem: pip
@@ -14,15 +14,15 @@ updates:
     schedule:
       interval: monthly
   - package-ecosystem: cargo
-    directory: /wrappers/rust
+    directory: /bindings/rust
     schedule:
       interval: monthly
   - package-ecosystem: npm
-    directory: /wrappers/nodejs
+    directory: /bindings/nodejs
     schedule:
       interval: monthly
   - package-ecosystem: gomod
-    directory: /wrappers/go
+    directory: /bindings/go
     schedule:
       interval: monthly
   - package-ecosystem: docker

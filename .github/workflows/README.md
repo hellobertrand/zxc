@@ -104,27 +104,27 @@ Regenerates [`CHANGELOG`](../../CHANGELOG) with [`git-cliff`](https://git-cliff.
 
 ## Language Bindings
 
-### wrapper-rust.yml - Wrapper Rust
+### binding-rust.yml - Binding Rust
 **Triggers:** Release published, manual dispatch
 
 Tests and publishes Rust crates to crates.io via trusted publishing. Verifies the version matches the release tag, runs tests across platforms, and publishes `zxc-compress-sys` (FFI bindings) followed by `zxc-compress` (safe wrapper).
 
-### wrapper-python.yml - Wrapper Python
+### binding-python.yml - Binding Python
 **Triggers:** Release published, manual dispatch
 
 Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.14, then publishes to PyPI via trusted publishing.
 
-### wrapper-wasm.yml - Wrapper WASM
+### binding-wasm.yml - Binding WASM
 **Triggers:** Release published, publish on main, manual dispatch
 
 Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts. On tags, publishes the `zxc-wasm` package to npm via trusted publishing.
 
-### wrapper-nodejs.yml - Wrapper Node.js
+### binding-nodejs.yml - Binding Node.js
 **Triggers:** Release published, manual dispatch
 
 Builds and publishes the Node.js package to npm via trusted publishing. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed.
 
-### wrapper-go.yml - Wrapper Go
+### binding-go.yml - Binding Go
 **Triggers:** Release published, manual dispatch
 
 Runs comprehensive tests for the Go bindings across various platforms and architectures to ensure the Go package is stable and functional.

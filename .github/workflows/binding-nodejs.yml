@@ -1,4 +1,4 @@
-name: Wrapper Node.js
+name: Binding Node.js
 
 on:
   workflow_dispatch:   # also how build.yml's release-wrappers publishes, at the tag
@@ -8,14 +8,14 @@ on:
       - 'src/**'
       - 'include/**'
       - 'CMakeLists.txt'
-      - 'wrappers/nodejs/**'
-      - '.github/workflows/wrapper-nodejs.yml'
+      - 'bindings/nodejs/**'
+      - '.github/workflows/binding-nodejs.yml'
   pull_request:
     branches: [ main, candidate ]
     paths:
       - 'include/**'
-      - 'wrappers/nodejs/**'
-      - '.github/workflows/wrapper-nodejs.yml'
+      - 'bindings/nodejs/**'
+      - '.github/workflows/binding-nodejs.yml'
 
 permissions:
   contents: read
@@ -46,7 +46,7 @@ jobs:
             arch: ARM64
     defaults:
       run:
-        working-directory: ./wrappers/nodejs
+        working-directory: ./bindings/nodejs
 
     steps:
       - name: Checkout Repository
@@ -79,7 +79,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: prebuilt-${{ matrix.os }}-${{ matrix.arch }}
-          path: wrappers/nodejs/prebuilds/
+          path: bindings/nodejs/prebuilds/
 
   test:
     name: Test on ${{ matrix.os }} Node ${{ matrix.node }}
@@ -92,7 +92,7 @@ jobs:
         node: ["22", "24", "26"]
     defaults:
       run:
-        working-directory: ./wrappers/nodejs
+        working-directory: ./bindings/nodejs
 
     steps:
       - name: Checkout Repository
@@ -121,7 +121,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./wrappers/nodejs
+        working-directory: ./bindings/nodejs
 
     steps:
       - name: Checkout Repository
@@ -141,7 +141,7 @@ jobs:
           set -euo pipefail
           mkdir consumer && cd consumer
           tar xzf ../zxc-compress-*.tgz
-          cp "$GITHUB_WORKSPACE/wrappers/nodejs/package-lock.json" package/
+          cp "$GITHUB_WORKSPACE/bindings/nodejs/package-lock.json" package/
           (cd package && npm ci --omit=dev)
           node -e '
             const zxc = require("./package");
@@ -161,7 +161,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        working-directory: ./wrappers/nodejs
+        working-directory: ./bindings/nodejs
 
     steps:
       - name: Checkout Repository

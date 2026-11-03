@@ -11,31 +11,22 @@ Designed for *Write Once, Read Many* workloads like ML datasets, game assets, an
 - **Functional options** - clean, composable configuration (`WithLevel`, `WithChecksum`, `WithThreads`).
 - **Typed errors** - sentinel error values for every ZXC error code.
 
-## Prerequisites
-
-Build the ZXC core library as a static library:
+## Installation
 
 ```bash
-cd /path/to/zxc
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF \
-      -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-cmake --build build
+go get github.com/hellobertrand/zxc/bindings/go
 ```
 
-## Installation (from source)
-
-```bash
-git clone https://github.com/hellobertrand/zxc.git
-cd zxc/wrappers/go
-CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
-```
+The module carries the C sources, so all it needs is cgo and a C compiler. On
+Windows and 32-bit ARM it compiles the baseline code only, without AVX2 or NEON
+paths chosen at run time.
 
 ## Versioning
 
-Releases are tagged `wrappers/go/vX.Y.Z`, so the module can be pinned to one:
+Releases are tagged `bindings/go/vX.Y.Z`, so the module can be pinned to one:
 
 ```bash
-go get github.com/hellobertrand/zxc/wrappers/go@v0.14.0
+go get github.com/hellobertrand/zxc/bindings/go@v0.14.0
 ```
 
 Without a version, `go get` resolves to a pseudo-version of the default branch,
@@ -50,7 +41,7 @@ import (
     "fmt"
     "log"
 
-    zxc "github.com/hellobertrand/zxc/wrappers/go"
+    zxc "github.com/hellobertrand/zxc/bindings/go"
 )
 
 func main() {
@@ -96,14 +87,14 @@ n, err = zxc.DecompressFile("output.zxc", "restored.bin")
 ## Testing
 
 ```bash
-cd zxc/wrappers/go
-CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -v -count=1 ./...
+cd zxc/bindings/go
+go test -v -count=1 ./...
 ```
 
 ## Benchmarks
 
 ```bash
-CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem ./...
+go test -bench=. -benchmem ./...
 ```
 
 ## License

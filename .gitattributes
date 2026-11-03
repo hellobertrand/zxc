@@ -12,4 +12,4 @@
 
 # Kept out of `git archive` and GitHub's source tarballs.
 /site      export-ignore
-/wrappers  export-ignore
+/bindings  export-ignore

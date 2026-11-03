@@ -47,11 +47,11 @@ jobs:
         run: rustup component add rustfmt
 
       - name: Check Formatting
-        working-directory: wrappers/rust
+        working-directory: bindings/rust
         run: cargo fmt --all --check
 
       - name: Check Docs
-        working-directory: wrappers/rust
+        working-directory: bindings/rust
         run: cargo doc --workspace --no-deps
         env:
           RUSTDOCFLAGS: -D warnings
@@ -71,7 +71,7 @@ jobs:
 
       - name: Check Formatting
         run: |
-          unformatted=$(gofmt -l wrappers/go)
+          unformatted=$(gofmt -l bindings/go)
           if [ -n "$unformatted" ]; then
             echo "::error::gofmt would reformat:"; echo "$unformatted"
             exit 1
@@ -89,7 +89,7 @@ jobs:
         run: pipx install black==26.5.1
 
       - name: Check Formatting
-        run: black --check wrappers/python/src wrappers/python/tests
+        run: black --check bindings/python/src bindings/python/tests
 
   js-format:
     name: Code Quality - Prettier
@@ -102,10 +102,10 @@ jobs:
       - name: Check Formatting
         run: |
           npx --yes prettier@3.9.5 --check \
-            "wrappers/nodejs/lib/*.js" \
-            "wrappers/nodejs/test/*.js" \
-            "wrappers/wasm/*.mjs" \
-            "wrappers/wasm/zxc_wasm.js"
+            "bindings/nodejs/lib/*.js" \
+            "bindings/nodejs/test/*.js" \
+            "bindings/wasm/*.mjs" \
+            "bindings/wasm/zxc_wasm.js"
 
   man-page:
     name: Code Quality - Man page

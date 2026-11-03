@@ -3,7 +3,7 @@
 #
 # Copyright (c) Bertrand Lebonnois and contributors.
 
-name: Wrapper WASM
+name: Binding WASM
 
 on:
   workflow_dispatch:
@@ -12,9 +12,9 @@ on:
     paths:
       - 'src/**'
       - 'include/**'
-      - 'wrappers/wasm/**'
+      - 'bindings/wasm/**'
       - 'CMakeLists.txt'
-      - '.github/workflows/wrapper-wasm.yml'
+      - '.github/workflows/binding-wasm.yml'
 
 permissions:
   contents: read
@@ -57,7 +57,7 @@ jobs:
           node-version: '24'
 
       - name: Run Tests
-        run: BUILD_DIR=build-wasm node wrappers/wasm/test.mjs
+        run: BUILD_DIR=build-wasm node bindings/wasm/test.mjs
 
       - name: Upload WASM Artifacts
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -66,9 +66,9 @@ jobs:
           path: |
             build-wasm/zxc.js
             build-wasm/zxc.wasm
-            wrappers/wasm/zxc_wasm.js
-            wrappers/wasm/package.json
-            wrappers/wasm/README.md
+            bindings/wasm/zxc_wasm.js
+            bindings/wasm/package.json
+            bindings/wasm/README.md
           retention-days: 30
 
   publish:
@@ -97,7 +97,7 @@ jobs:
       - name: Stage package contents
         # zxc_wasm.js dynamically imports its sibling ./zxc.js, so both
         # Emscripten outputs must ship next to it (see package.json "files").
-        run: cp build-wasm/zxc.js build-wasm/zxc.wasm wrappers/wasm/
+        run: cp build-wasm/zxc.js build-wasm/zxc.wasm bindings/wasm/
 
       - name: Setup Node.js
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -106,7 +106,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Verify Version Matches Release Tag
-        working-directory: ./wrappers/wasm
+        working-directory: ./bindings/wasm
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
@@ -123,7 +123,7 @@ jobs:
           echo "Version matches: $RELEASE_VERSION"
 
       - name: Verify Package Contents
-        working-directory: ./wrappers/wasm
+        working-directory: ./bindings/wasm
         run: |
           npm pack --dry-run
           # The tarball is useless without the Emscripten outputs.
@@ -132,7 +132,7 @@ jobs:
           done
 
       - name: Publish to npm
-        working-directory: ./wrappers/wasm
+        working-directory: ./bindings/wasm
         run: npm publish --access public
 
       - name: Summary

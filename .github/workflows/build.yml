@@ -423,12 +423,12 @@ jobs:
         run: |
           # No `set -e` short-circuit: one failed dispatch must not strand the others.
           rc=0
-          for w in wrapper-python wrapper-nodejs wrapper-wasm wrapper-rust wrapper-go; do
+          for w in binding-python binding-nodejs binding-wasm binding-rust binding-go; do
             gh workflow run "$w.yml" --ref "$GITHUB_REF_NAME" || { echo "::error::$w not dispatched"; rc=1; }
           done
           # A dispatch only means accepted. Green here does not mean the packages shipped.
           sleep 10
-          for w in wrapper-python wrapper-nodejs wrapper-wasm wrapper-rust wrapper-go; do
+          for w in binding-python binding-nodejs binding-wasm binding-rust binding-go; do
             gh run list --workflow "$w.yml" --branch "$GITHUB_REF_NAME" --limit 1 \
               --json url,status --jq '"  \(.[0].status)  \(.[0].url)"' || true
           done

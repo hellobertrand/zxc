@@ -1,4 +1,4 @@
-name: Wrapper Go
+name: Binding Go
 
 on:
   workflow_dispatch:
@@ -8,14 +8,14 @@ on:
       - 'src/**'
       - 'include/**'
       - 'CMakeLists.txt'
-      - 'wrappers/go/**'
-      - '.github/workflows/wrapper-go.yml'
+      - 'bindings/go/**'
+      - '.github/workflows/binding-go.yml'
   pull_request:
     branches: [ main, candidate ]
     paths:
       - 'include/**'
-      - 'wrappers/go/**'
-      - '.github/workflows/wrapper-go.yml'
+      - 'bindings/go/**'
+      - '.github/workflows/binding-go.yml'
 
 permissions:
   contents: read
@@ -61,42 +61,29 @@ jobs:
           go-version: '1.21'
           cache: false
 
-      - name: Build ZXC Core Library (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-          cmake --build build --parallel
-
-      - name: Build ZXC Core Library (Windows)
-        if: runner.os == 'Windows'
-        run: |
-          cmake -B build -G "MinGW Makefiles" -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-          cmake --build build --parallel
-
-      - name: Run Go Tests (Unix)
-        if: runner.os != 'Windows'
-        working-directory: ./wrappers/go
-        run: CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -v -count=1 ./...
-
-      - name: Run Go Tests (Windows)
-        if: runner.os == 'Windows'
-        working-directory: ./wrappers/go
+      - name: Run Go Tests
+        working-directory: ./bindings/go
         env:
           CGO_ENABLED: "1"
-          CGO_LDFLAGS: "-L../../build -lzxc"
         run: go test -v -count=1 ./...
 
-      - name: Run Go Benchmarks (Unix)
-        if: runner.os != 'Windows' && github.event_name != 'pull_request'
-        working-directory: ./wrappers/go
-        run: CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go test -bench=. -benchmem -count=1 ./...
-
-      - name: Run Go Benchmarks (Windows)
-        if: runner.os == 'Windows' && github.event_name != 'pull_request'
-        working-directory: ./wrappers/go
+      - name: Run Go Tests from a Copy of the Module
+        if: runner.os != 'Windows'
         env:
           CGO_ENABLED: "1"
-          CGO_LDFLAGS: "-L../../build -lzxc"
+        run: |
+          # What `go get` sees: nothing above the module directory.
+          bindings/go/scripts/vendor_core.sh
+          cp -R bindings/go "$RUNNER_TEMP/module"
+          rm -rf bindings/go/zxc-core
+          cd "$RUNNER_TEMP/module"
+          go test -count=1 ./...
+
+      - name: Run Go Benchmarks
+        if: github.event_name != 'pull_request'
+        working-directory: ./bindings/go
+        env:
+          CGO_ENABLED: "1"
         run: go test -bench=. -benchmem -count=1 ./...
 
   tag-module:
@@ -120,14 +107,20 @@ jobs:
           # Go resolves versions of a submodule from tags prefixed with the
           # module directory. Without this tag, `go get ...@v0.13.3` fails and
           # consumers are stuck on pseudo-versions of the default branch.
-          MODULE_TAG="wrappers/go/${RELEASE_TAG}"
+          MODULE_TAG="bindings/go/${RELEASE_TAG}"
 
           if git ls-remote --exit-code --tags origin "refs/tags/${MODULE_TAG}" > /dev/null 2>&1; then
             echo "${MODULE_TAG} already exists, nothing to do"
             exit 0
           fi
 
-          # Lightweight tag on the release commit: no tagger identity needed.
+          # The tag gets its own commit on top of the release, off every branch:
+          # the module zip must hold the C core, which the tree keeps above it.
+          bindings/go/scripts/vendor_core.sh
+          git add -f bindings/go/zxc-core
+          git -c user.name="github-actions[bot]" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "chore(go): vendor the C core for ${RELEASE_TAG}"
           git tag "${MODULE_TAG}" HEAD
           git push origin "${MODULE_TAG}"
 

@@ -14,7 +14,7 @@ Designed for _Write Once, Read Many_ workloads like ML datasets, game assets, an
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
-cd zxc/wrappers/nodejs
+cd zxc/bindings/nodejs
 npm install
 ```
 

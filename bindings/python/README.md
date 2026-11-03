@@ -14,7 +14,7 @@ Designed for *Write Once, Read Many* workloads like ML datasets, game assets, an
 
 ```bash
 git clone https://github.com/hellobertrand/zxc.git
-cd zxc/wrappers/python
+cd zxc/bindings/python
 python -m venv .venv
 source .venv/bin/activate 
 pip install .
@@ -154,7 +154,7 @@ you can pick the right one before decompressing.
 ## Testing
 
 ```bash
-cd zxc/wrappers/python
+cd zxc/bindings/python
 pip install pytest
 pytest tests/ -v
 ```

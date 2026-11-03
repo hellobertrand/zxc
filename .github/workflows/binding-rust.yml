@@ -1,4 +1,4 @@
-name: Wrapper Rust
+name: Binding Rust
 
 on:
   workflow_dispatch:   # also how build.yml's release-wrappers publishes, at the tag
@@ -8,14 +8,14 @@ on:
       - 'src/**'
       - 'include/**'
       - 'CMakeLists.txt'
-      - 'wrappers/rust/**'
-      - '.github/workflows/wrapper-rust.yml'
+      - 'bindings/rust/**'
+      - '.github/workflows/binding-rust.yml'
   pull_request:
     branches: [ main, candidate ]
     paths:
       - 'include/**'
-      - 'wrappers/rust/**'
-      - '.github/workflows/wrapper-rust.yml'
+      - 'bindings/rust/**'
+      - '.github/workflows/binding-rust.yml'
 
 permissions:
   contents: read
@@ -34,7 +34,7 @@ jobs:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-latest, windows-11-arm]
     defaults:
       run:
-        working-directory: ./wrappers/rust
+        working-directory: ./bindings/rust
 
     steps:
       - name: Checkout Repository
@@ -51,7 +51,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: stable
-          cache-workspaces: "wrappers/rust -> target"
+          cache-workspaces: "bindings/rust -> target"
 
       - name: Run Tests
         run: cargo test --workspace
@@ -66,7 +66,7 @@ jobs:
       id-token: write
     defaults:
       run:
-        working-directory: ./wrappers/rust
+        working-directory: ./bindings/rust
 
     steps:
       - name: Checkout Repository
@@ -76,7 +76,7 @@ jobs:
         uses: actions-rust-lang/setup-rust-toolchain@ecabd13d1c56bd1345c230e542e9144811ad706f # v2.0.0
         with:
           toolchain: stable
-          cache-workspaces: "wrappers/rust -> target"
+          cache-workspaces: "bindings/rust -> target"
 
       - name: Verify Version Matches Release Tag
         env:

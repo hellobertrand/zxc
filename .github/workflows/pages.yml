@@ -32,7 +32,7 @@ concurrency:
 jobs:
   build:
     name: Build site
-    # Library releases only: wrapper tags such as wrappers/go/v1.2.3 do not rebuild the site.
+    # Library releases only: wrapper tags such as bindings/go/v1.2.3 do not rebuild the site.
     if: github.event_name != 'release' || (startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease)
     runs-on: ubuntu-latest
     timeout-minutes: 10
