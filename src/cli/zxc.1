@@ -61,6 +61,10 @@ Without \f[I]OUTPUT\-FILE\f[R], the output name is the input name with
 on decompression.
 Without \f[I]INPUT\-FILE\f[R], \f[B]zxc\f[R] reads stdin and writes
 stdout.
+A failure or a fatal signal removes the partial output (Windows: failure
+only).
+\f[B]\-c\f[R] and \f[B]\-t\f[R] treat every operand as an input;
+otherwise, more than two need \f[B]\-m\f[R].
 .SH STANDARD MODES
 .TP
 \f[B]\-z\f[R], \f[B]\-\-compress\f[R]
@@ -173,9 +177,9 @@ without it decompression fails with a dictionary\-required error (see
 .TP
 \f[B]\-o\f[R], \f[B]\-\-output\f[R] \f[I]FILE\f[R]
 Write output to \f[I]FILE\f[R].
-For compression and decompression this overrides the positional
-\f[I]OUTPUT\-FILE\f[R] (single\-file mode only); when omitted the output
-name is derived from the input.
+For compression and decompression this replaces the positional
+\f[I]OUTPUT\-FILE\f[R], which cannot be given as well (single\-file mode
+only); when omitted the output name is derived from the input.
 For \f[B]\-\-train\f[R] it sets the dictionary path: if \f[I]FILE\f[R]
 is a directory (or ends with a path separator) the dictionary is saved
 inside it as \f[CR]dictionary_<dict_id>.zxd\f[R], otherwise
@@ -215,10 +219,10 @@ On Windows only the times are copied.
 The format stores none of these.
 .TP
 \f[B]\-f\f[R], \f[B]\-\-force\f[R]
-Overwrite \f[I]OUTPUT\-FILE\f[R] if it exists.
-An existing file or symbolic link is removed and a new file created, so
-a link at the output path is replaced, never followed; a device such as
-\f[CR]/dev/null\f[R] is written as is.
+Overwrite \f[I]OUTPUT\-FILE\f[R] if it exists, once the new output is
+complete: a failure leaves it untouched, and a symbolic link there is
+replaced, never followed.
+A device such as \f[CR]/dev/null\f[R] is written as is.
 When decompressing to stdout (with \f[B]\-c\f[R], or from stdin without
 an \f[I]OUTPUT\-FILE\f[R]), also copy input that is not a ZXC archive
 unchanged.
