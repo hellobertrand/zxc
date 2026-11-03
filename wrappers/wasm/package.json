@@ -11,10 +11,13 @@
     "zxc_wasm.js",
     "zxc.js",
     "zxc.wasm",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "test": "node test.mjs"
+    "test": "node test.mjs",
+    "prepack": "node -e \"require('node:fs').copyFileSync('../../LICENSE', 'LICENSE')\"",
+    "postpack": "node -e \"require('node:fs').rmSync('LICENSE', { force: true })\""
   },
   "keywords": [
     "compression",

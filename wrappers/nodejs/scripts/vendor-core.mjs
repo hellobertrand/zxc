@@ -19,6 +19,7 @@ import { fileURLToPath } from "node:url";
 const pkgDir = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const repoDir = resolve(pkgDir, "..", "..");
 const coreDir = join(pkgDir, "zxc-core");
+const licenseCopy = join(pkgDir, "LICENSE");
 
 // A subproject build turns the CLI, the tests and the install rules off
 // (see cmake/zxcOptions.cmake), so the core needs nothing beyond these.
@@ -26,6 +27,7 @@ const ENTRIES = ["CMakeLists.txt", "cmake", "include", "src/lib", "LICENSE"];
 
 if (process.argv.includes("--clean")) {
   rmSync(coreDir, { recursive: true, force: true });
+  rmSync(licenseCopy, { force: true });
   process.exit(0);
 }
 
@@ -40,4 +42,6 @@ for (const entry of ENTRIES) {
   mkdirSync(dirname(to), { recursive: true });
   cpSync(join(repoDir, entry), to, { recursive: true });
 }
+// npm only picks a LICENSE up at the package root.
+cpSync(join(repoDir, "LICENSE"), licenseCopy);
 console.log(`vendor-core: staged ${ENTRIES.join(", ")} into zxc-core/`);

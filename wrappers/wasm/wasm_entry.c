@@ -32,12 +32,11 @@
 int main(void) { return 0; }
 
 /**
- * 32-bit-offset shim around zxc_seekable_decompress_range.
+ * Split-offset shim around zxc_seekable_decompress_range.
  *
- * The native function takes a `uint64_t` offset; passing an `i64` through
- * cwrap without `-sWASM_BIGINT=1` is not supported. The wasm32 heap is
- * itself bounded to 4 GiB, so a 32-bit offset is sufficient for any
- * archive the runtime could materialise in memory.
+ * The native function takes a `uint64_t` offset, which cwrap cannot pass
+ * without `-sWASM_BIGINT=1`. The offset addresses decompressed bytes, so it
+ * can pass 4 GiB even though the archive fits the wasm32 heap.
  *
  * Returns the number of bytes written, or a negative `zxc_error_t` code.
  * Returns truncated to int32_t (sufficient: max single-range length is
@@ -45,9 +44,9 @@ int main(void) { return 0; }
  */
 EMSCRIPTEN_KEEPALIVE
 int32_t zxcw_seekable_decompress_range(zxc_seekable* s, void* dst, uint32_t dst_capacity,
-                                       uint32_t offset, uint32_t len) {
-    int64_t r =
-        zxc_seekable_decompress_range(s, dst, (size_t)dst_capacity, (uint64_t)offset, (size_t)len);
+                                       uint32_t offset_lo, uint32_t offset_hi, uint32_t len) {
+    const uint64_t offset = ((uint64_t)offset_hi << 32) | offset_lo;
+    int64_t r = zxc_seekable_decompress_range(s, dst, (size_t)dst_capacity, offset, (size_t)len);
     if (r > INT32_MAX) return INT32_MAX;
     if (r < INT32_MIN) return INT32_MIN;
     return (int32_t)r;

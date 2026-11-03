@@ -163,6 +163,8 @@ type Reader struct {
 	err   error
 	eof   bool // src returned io.EOF
 	one   bool // stop after the first frame (Multistream(false))
+
+	srcErr error // came with bytes from src: reported once they are decoded
 }
 
 // Multistream controls whether the reader decodes concatenated archives as one
@@ -173,7 +175,8 @@ func (r *Reader) Multistream(ok bool) { r.one = !ok }
 
 // NewReader returns a [Reader] that decompresses from r.
 //
-// Honoured options: [WithChecksum]. [WithThreads] is ignored.
+// Honoured options: [WithChecksum], verifying unless false. [WithThreads] is
+// ignored.
 func NewReader(r io.Reader, opts ...Option) (*Reader, error) {
 	ds, err := NewDStream(opts...)
 	if err != nil {
@@ -209,8 +212,8 @@ func (r *Reader) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		// Try to decompress whatever is currently buffered (or drain mode
-		// when src is at EOF).
-		if r.inPos < r.inLen || r.eof {
+		// when src has ended).
+		if r.inPos < r.inLen || r.eof || r.srcErr != nil {
 			consumed, produced, derr := r.ds.Decompress(p, r.inBuf[r.inPos:r.inLen])
 			if derr != nil {
 				r.err = derr
@@ -237,6 +240,11 @@ func (r *Reader) Read(p []byte) (int, error) {
 			}
 		}
 
+		if r.srcErr != nil {
+			r.err = r.srcErr
+			return 0, r.err
+		}
+
 		// Refill: shift consumed bytes out, then read more.
 		if r.inPos > 0 {
 			r.inLen = copy(r.inBuf, r.inBuf[r.inPos:r.inLen])
@@ -247,8 +255,11 @@ func (r *Reader) Read(p []byte) (int, error) {
 		if rerr == io.EOF {
 			r.eof = true
 		} else if rerr != nil {
-			r.err = rerr
-			return 0, rerr
+			if n == 0 {
+				r.err = rerr
+				return 0, rerr
+			}
+			r.srcErr = rerr
 		}
 		if n == 0 && !r.eof {
 			// Underlying reader returned (0, nil): treat as a benign retry by

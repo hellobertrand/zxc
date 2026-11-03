@@ -31,6 +31,10 @@ blob = zxc.compress(data)                 # level, checksum and dict are optiona
 assert zxc.decompress(blob) == data
 ```
 
+Compression writes no checksum unless `checksum=True`. Every read path
+(`decompress`, `Dctx`, `DStream`, `ZxcReader`, `stream_decompress`, `Seekable`)
+verifies the checksums an archive carries; `checksum=False` skips them.
+
 `compress()` and `decompress()` accept any object supporting the buffer
 protocol - `bytes`, `bytearray`, `memoryview`, NumPy arrays - and release the
 GIL, so Python threads run them in true parallel.

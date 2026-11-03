@@ -50,6 +50,7 @@ build-*
 !requirements/build-*
 _build
 _version.py
+/zxc-core/
 
 # Egg metadata
 *.egg-info

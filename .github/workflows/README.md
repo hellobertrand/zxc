@@ -112,7 +112,7 @@ Tests and publishes Rust crates to crates.io via trusted publishing. Verifies th
 ### wrapper-python.yml - Wrapper Python
 **Triggers:** Release published, manual dispatch
 
-Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.13, then publishes to PyPI via trusted publishing.
+Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.14, then publishes to PyPI via trusted publishing.
 
 ### wrapper-wasm.yml - Wrapper WASM
 **Triggers:** Release published, publish on main, manual dispatch

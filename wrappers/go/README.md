@@ -75,6 +75,9 @@ func main() {
 `CompressTo` writes into a caller-supplied buffer (size it with `CompressBound`).
 Both `Compress` and `CompressTo` accept empty input and emit a minimal valid frame.
 Pass `zxc.WithSeekable(true)` to append a seek table for random access via `zxc.OpenBytes`.
+`Decompress` allocates the size the archive's footer declares: on untrusted input, cap it with `zxc.WithMaxOutputSize(n)`.
+
+Compression writes no checksums unless `zxc.WithChecksum(true)`. Decompression verifies those an archive carries, on every path; `zxc.WithChecksum(false)` opts out (`SetChecksum(false)` on a `Seekable`). The block API is the exception: a bare block does not say whether it has a checksum, so it is off by default and `CompressBlock` and `DecompressBlock` must agree.
 
 ## Streaming Files
 
@@ -86,7 +89,7 @@ n, err := zxc.CompressFile("input.bin", "output.zxc",
     zxc.WithChecksum(true),
 )
 
-// Decompress
+// Decompress, verifying the checksums
 n, err = zxc.DecompressFile("output.zxc", "restored.bin")
 ```
 

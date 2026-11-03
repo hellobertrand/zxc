@@ -87,7 +87,7 @@ impl CStream {
     ///
     /// `opts.level` and `opts.checksum` are copied into the stream;
     /// `opts.seekable` is ignored (the push API is single-threaded and does
-    /// not emit a seek table). Pass `None` for all defaults.
+    /// not emit a seek table). Pass `None` for all defaults: no checksum.
     ///
     /// # Errors
     ///
@@ -222,7 +222,7 @@ impl DStream {
     /// Creates a new push decompression stream.
     ///
     /// `opts.verify_checksum` is copied into the stream. Pass `None` for the
-    /// defaults.
+    /// defaults: checksums are verified when a frame carries them.
     ///
     /// # Errors
     ///
@@ -230,24 +230,16 @@ impl DStream {
     /// is set: the push-stream decoder has no dictionary support (see
     /// [`CStream::new`]).
     pub fn new(opts: Option<&DecompressOptions>) -> Result<Self> {
-        if let Some(o) = opts {
-            if o.dict.is_some() || o.dict_huf.is_some() {
-                return Err(Error::Unsupported(
-                    "dictionaries are not supported by the push streaming API",
-                ));
-            }
+        let defaults = DecompressOptions::default();
+        let o = opts.unwrap_or(&defaults);
+        if o.dict.is_some() || o.dict_huf.is_some() {
+            return Err(Error::Unsupported(
+                "dictionaries are not supported by the push streaming API",
+            ));
         }
-        let cfg = match opts {
-            Some(o) => {
-                let mut cfg = RawDctx::new()?;
-                cfg.set_params(o.verify_checksum, 0)?;
-                Some(cfg)
-            }
-            None => None,
-        };
-        let ptr = unsafe {
-            zxc_sys::zxc_dstream_create(cfg.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()))
-        };
+        let mut cfg = RawDctx::new()?;
+        cfg.set_params(o.verify_frame(), 0)?;
+        let ptr = unsafe { zxc_sys::zxc_dstream_create(cfg.as_ptr()) };
         if ptr.is_null() {
             Err(Error::Memory)
         } else {
@@ -377,7 +369,7 @@ mod tests {
             ..Default::default()
         };
         let dopts = DecompressOptions {
-            verify_checksum: true,
+            verify_checksum: Some(true),
             ..Default::default()
         };
         let out = pstream_roundtrip(&data, Some(&copts), Some(&dopts));

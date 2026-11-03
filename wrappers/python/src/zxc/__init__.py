@@ -7,7 +7,9 @@ Copyright (c) Bertrand Lebonnois and contributors.
 
 from __future__ import annotations
 
+import errno as _errno
 import io as _io
+import os as _os
 from typing import NamedTuple
 
 from ._zxc import (
@@ -272,7 +274,8 @@ class Dictionary:
     Create with :meth:`Dictionary.train` (from samples) or
     :meth:`Dictionary.load` (from ``.zxd`` bytes), then pass the instance as
     the ``dict`` argument of :func:`compress` / :func:`decompress` /
-    :func:`stream_compress` or :meth:`Seekable.set_dict`.
+    :func:`stream_compress` / :func:`stream_decompress` or
+    :meth:`Seekable.set_dict`.
     """
 
     __slots__ = ("content", "huf", "id")
@@ -397,14 +400,14 @@ def get_frame_info(data: bytes) -> FrameInfo:
 
 
 def decompress(
-    data, decompress_size=None, checksum=False, dict=None, dict_huf=None
+    data, decompress_size=None, checksum=True, dict=None, dict_huf=None
 ) -> bytes:
     """Decompress a bytes object.
 
     Args:
         data: Compressed bytes.
         decompress_size: Expected size. If None, read from the archive footer.
-        checksum: If True, verify the checksum appended during compression.
+        checksum: Verify the checksums the archive carries, if any. False skips them.
         dict: Pre-trained dictionary content (bytes) required if the archive
             was compressed with one. Must match the dictionary ID stored in
             the archive header.
@@ -418,7 +421,48 @@ def decompress(
         decompress_size = get_decompressed_size(data)
 
     dict, dict_huf = _split_dict_arg(dict, dict_huf)
-    return pyzxc_decompress(data, decompress_size, checksum, dict, dict_huf)
+    return pyzxc_decompress(
+        data, decompress_size, checksum is not False, dict, dict_huf
+    )
+
+
+def _prepare_files(src, dst) -> bool:
+    """Validates a stream_* pair and moves the fd to src's logical position.
+
+    Returns True if src is seekable, so that :func:`_resync_src` applies.
+    """
+    if not hasattr(src, "fileno") or not hasattr(dst, "fileno"):
+        raise ValueError("src and dst must be open file-like objects")
+
+    if not src.readable():
+        raise ValueError("Source file must be readable")
+
+    if not dst.writable():
+        raise ValueError("Destination file must be writable")
+
+    if hasattr(src, "encoding"):
+        raise ValueError("Source file must be opened in binary mode")
+
+    # CRITICAL: Flush Python buffers before passing FDs to C
+    # to prevent data reordering/corruption.
+    if hasattr(src, "flush"):
+        src.flush()
+    if hasattr(dst, "flush"):
+        dst.flush()
+
+    if not (hasattr(src, "seekable") and src.seekable()):
+        return False
+    pos = src.tell()
+    # A seek inside the read-ahead keeps it: read it out so the seek reaches the fd.
+    # Not SEEK_END, which /proc files refuse.
+    if hasattr(src, "peek"):
+        src.read(len(src.peek()))
+    src.seek(pos)
+    return True
+
+
+def _resync_src(src) -> None:
+    src.seek(_os.lseek(src.fileno(), 0, _os.SEEK_CUR))
 
 
 def stream_compress(
@@ -450,64 +494,57 @@ def stream_compress(
         Number of bytes written to `dst`.
 
     Note:
+        Reads from the current position of `src`, which must be a binary file.
+        Read nothing from a non-seekable `src` first: bytes it holds in its
+        buffer are not seen, and no error tells so.
         In-memory streams like `io.BytesIO` are not supported.
         Use the in-memory `compress`/`decompress` functions for buffers.
     """
-    if not hasattr(src, "fileno") or not hasattr(dst, "fileno"):
-        raise ValueError("src and dst must be open file-like objects")
-
-    if not src.readable():
-        raise ValueError("Source file must be readable")
-
-    if not dst.writable():
-        raise ValueError("Destination file must be writable")
-
-    # CRITICAL: Flush Python buffers before passing FDs to C
-    # to prevent data reordering/corruption.
-    if hasattr(src, "flush"):
-        src.flush()
-    if hasattr(dst, "flush"):
-        dst.flush()
-
+    resync = _prepare_files(src, dst)
     dict, dict_huf = _split_dict_arg(dict, dict_huf)
-    return pyzxc_stream_compress(
-        src, dst, n_threads, level, checksum, seekable, dict, dict_huf
-    )
+    try:
+        return pyzxc_stream_compress(
+            src, dst, n_threads, level, checksum, seekable, dict, dict_huf
+        )
+    finally:
+        if resync:
+            _resync_src(src)
 
 
-def stream_decompress(src, dst, n_threads=0, checksum=False) -> int:
+def stream_decompress(
+    src, dst, n_threads=0, checksum=True, dict=None, dict_huf=None
+) -> int:
     """Decompress data from src to dst (file-like objects).
 
     Args:
         src: Readable file-like object with `fileno()` support.
         dst: Writable file-like object with `fileno()` support.
         n_threads: Number of threads to use for decompression. 0 uses default.
-        checksum: If True, verify the checksum appended during compression.
+        checksum: Verify the checksums the archive carries, if any. False skips them.
+        dict: Pre-trained dictionary content (bytes) required if the archive
+            was compressed with one.
+        dict_huf: Shared literal Huffman table (128 bytes) when the archive
+            was compressed with one.
 
     Returns:
         Number of bytes written to `dst`.
 
     Note:
+        Reads from the current position of `src`, which must be a binary file.
+        Read nothing from a non-seekable `src` first: bytes it holds in its
+        buffer are not seen, and no error tells so.
         In-memory streams like `io.BytesIO` are not supported.
         Use the in-memory `compress`/`decompress` functions for buffers.
     """
-    if not hasattr(src, "fileno") or not hasattr(dst, "fileno"):
-        raise ValueError("src and dst must be open file-like objects")
-
-    if not src.readable():
-        raise ValueError("Source file must be readable")
-
-    if not dst.writable():
-        raise ValueError("Destination file must be writable")
-
-    # CRITICAL: Flush Python buffers before passing FDs to C
-    # to prevent data reordering/corruption.
-    if hasattr(src, "flush"):
-        src.flush()
-    if hasattr(dst, "flush"):
-        dst.flush()
-
-    return pyzxc_stream_decompress(src, dst, n_threads, checksum)
+    resync = _prepare_files(src, dst)
+    dict, dict_huf = _split_dict_arg(dict, dict_huf)
+    try:
+        return pyzxc_stream_decompress(
+            src, dst, n_threads, checksum is not False, dict, dict_huf
+        )
+    finally:
+        if resync:
+            _resync_src(src)
 
 
 class Seekable:
@@ -539,7 +576,7 @@ class Seekable:
 
     __slots__ = ("_handle",)
 
-    def __init__(self, source):
+    def __init__(self, source, checksum: bool = True):
         if isinstance(source, (bytes, bytearray, memoryview)):
             self._handle = pyzxc_seekable_open(source)
         elif hasattr(source, "size") and hasattr(source, "read_at"):
@@ -549,6 +586,7 @@ class Seekable:
                 "expected bytes/bytearray/memoryview or an object with "
                 "'size' (int) and 'read_at(length, offset)' attributes"
             )
+        pyzxc_seekable_set_checksum(self._handle, checksum is not False)
 
     def _ensure_open(self) -> None:
         if self._handle is None:
@@ -587,10 +625,13 @@ class Seekable:
     def set_checksum(self, enabled: bool) -> None:
         """Turn per-block checksum verification on or off.
 
-        Off by default, as in the one-shot API. No effect without checksums in
-        the archive. Applies from the next call.
+        On by default, as ``Seekable(..., checksum=True)``. No effect without
+        checksums in the archive. Applies from the next call.
         """
         self._ensure_open()
+        # None keeps the default in the constructor: here it would turn it off.
+        if enabled is None:
+            raise TypeError("enabled must be a boolean, not None")
         pyzxc_seekable_set_checksum(self._handle, bool(enabled))
 
     def decompress_range(
@@ -689,14 +730,15 @@ class Dctx:
     """Reusable decompression context.
 
     The Python counterpart of the C ``zxc_dctx``, mirroring :class:`Cctx`.
-    Pass the dictionary the archives were compressed with. Not thread-safe.
+    Pass the dictionary the archives were compressed with. Checksums the
+    archives carry are verified unless ``checksum=False``. Not thread-safe.
     """
 
     __slots__ = ("_handle",)
 
-    def __init__(self, checksum: bool = False, dict=None, dict_huf=None):
+    def __init__(self, checksum: bool = True, dict=None, dict_huf=None):
         dict, dict_huf = _split_dict_arg(dict, dict_huf)
-        self._handle = pyzxc_dctx_create(checksum, dict, dict_huf)
+        self._handle = pyzxc_dctx_create(checksum is not False, dict, dict_huf)
 
     def decompress(self, data, decompress_size=None) -> bytes:
         """Decompress one archive produced by :meth:`Cctx.compress`.
@@ -826,11 +868,11 @@ class DStream:
     via :meth:`decompress`; each call returns the decompressed bytes
     produced so far. Concatenated archives decode as one stream; after all
     input has been fed, :attr:`finished` is ``True`` if it ended on a validated
-    footer.
+    footer. Checksums the archive carries are verified unless ``checksum=False``.
 
     Example::
 
-        ds = zxc.DStream(checksum=True)
+        ds = zxc.DStream()
         out = b"".join(ds.decompress(chunk) for chunk in compressed_chunks)
         if not ds.finished:
             raise ValueError("truncated stream")
@@ -839,8 +881,8 @@ class DStream:
 
     __slots__ = ("_handle",)
 
-    def __init__(self, checksum: bool = False):
-        self._handle = pyzxc_dstream_create(checksum)
+    def __init__(self, checksum: bool = True):
+        self._handle = pyzxc_dstream_create(checksum is not False)
 
     def decompress(self, data) -> bytes:
         """Push *data* and return the decompressed bytes produced.
@@ -918,7 +960,8 @@ class ZxcReader(_io.RawIOBase):
     Reads the source until it ends, so concatenated archives decode as one stream.
     With ``multistream=False`` it stops after the first frame instead, as on a
     source that stays open after it; bytes read ahead past that frame are then
-    lost to the source.
+    lost to the source. Checksums the frames carry are verified unless
+    ``checksum=False``.
 
     Raises :class:`OSError` with ``errno=None`` if the underlying source is
     drained before the ZXC footer is reached (truncated frame).
@@ -935,7 +978,7 @@ class ZxcReader(_io.RawIOBase):
         self,
         fileobj,
         *,
-        checksum: bool = False,
+        checksum: bool = True,
         buffer_size: int = 0,
         multistream: bool = True,
     ):
@@ -1028,15 +1071,19 @@ class ZxcWriter(_io.RawIOBase):
         self._dst = fileobj
         self._cs = CStream(level=level, checksum=checksum)
         self._finalized = False
+        self._pending = b""  # compressed bytes the sink has not taken yet
 
     def writable(self) -> bool:
         return True
 
     def write(self, b) -> int:
+        """Returns the size of *b*, all of it taken. If it raises, none of it
+        was, so the same call can be retried."""
         if self.closed:
             raise ValueError("I/O operation on closed writer")
         if self._finalized:
             raise ValueError("ZxcWriter already finalised")
+        self._drain()
         mv = memoryview(b)
         if mv.nbytes == 0:
             return 0
@@ -1045,23 +1092,56 @@ class ZxcWriter(_io.RawIOBase):
         # needed here.
         if not mv.c_contiguous:
             mv = memoryview(bytes(mv))
-        chunk = self._cs.compress(mv)
-        if chunk:
-            self._dst.write(chunk)
+        self._pending = self._cs.compress(mv)
+        try:
+            self._drain()
+        except Exception:
+            # The input is taken: raising would invite a retry that duplicates
+            # it. The next write, flush or close retries the sink and raises.
+            pass
         return mv.nbytes
 
+    def flush(self) -> None:
+        super().flush()
+        self._drain()
+
+    def _drain(self) -> None:
+        while self._pending:
+            try:
+                n = self._dst.write(self._pending)
+            except BlockingIOError as e:
+                n = getattr(e, "characters_written", 0)
+                self._pending = memoryview(self._pending)[n:]
+                raise
+            if n is None and isinstance(self._dst, _io.RawIOBase):
+                raise BlockingIOError(_errno.EAGAIN, "zxc: raw sink would block")
+            if not isinstance(n, int):
+                self._pending = b""  # a sink that reports no count took everything
+                return
+            if n <= 0:
+                raise OSError("zxc: sink accepted no bytes")
+            self._pending = memoryview(self._pending)[n:]
+
     def close(self) -> None:
+        """Finalises the frame. BlockingIOError leaves the writer open, so close()
+        can be called again; any other failure closes it."""
         if self.closed:
             return
+        blocked = False
         try:
+            self._drain()
             if not self._finalized:
-                tail = self._cs.end()
-                if tail:
-                    self._dst.write(tail)
+                self._pending = self._cs.end()
                 self._finalized = True
+            self._drain()
+        except BlockingIOError:
+            blocked = True
+            raise
         finally:
-            self._cs.close()
-            super().close()
+            if not blocked:
+                self._pending = b""  # super().close() flushes
+                self._cs.close()
+                super().close()
 
 
 # Magic word identifying a ZXC file frame: little-endian 0x9CB02EF5.

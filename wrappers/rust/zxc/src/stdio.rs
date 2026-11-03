@@ -67,10 +67,13 @@ pub struct Encoder<W: Write> {
     inner: Option<W>,
     cs: Option<CStream>,
     out_buf: Vec<u8>,
+    /// `out_buf[out_pos..out_len]` is output the writer has not taken yet.
+    out_pos: usize,
+    out_len: usize,
 }
 
 impl<W: Write> Encoder<W> {
-    /// Creates an encoder with default compression options.
+    /// Creates an encoder with default compression options: no checksum.
     pub fn new(writer: W) -> Result<Self, Error> {
         Self::with_options(writer, None)
     }
@@ -84,6 +87,8 @@ impl<W: Write> Encoder<W> {
             inner: Some(writer),
             cs: Some(cs),
             out_buf: vec![0u8; cap],
+            out_pos: 0,
+            out_len: 0,
         })
     }
 
@@ -92,8 +97,12 @@ impl<W: Write> Encoder<W> {
     /// After this call the encoder is consumed; no further writes are
     /// possible.
     pub fn finish(mut self) -> io::Result<W> {
-        self.do_finish()?;
-        // Safety: do_finish leaves both fields populated on success.
+        if let Err(e) = self.do_finish() {
+            // The caller gets no way to retry: Drop must not write to this writer again.
+            self.cs = None;
+            self.out_pos = self.out_len;
+            return Err(e);
+        }
         Ok(self.inner.take().expect("inner writer present"))
     }
 
@@ -107,22 +116,33 @@ impl<W: Write> Encoder<W> {
         self.inner.as_mut().expect("encoder not finished")
     }
 
-    fn do_finish(&mut self) -> io::Result<()> {
-        let (Some(cs), Some(w)) = (self.cs.as_mut(), self.inner.as_mut()) else {
-            return Ok(());
-        };
-        loop {
-            let p = cs.end(&mut self.out_buf).map_err(map_err)?;
-            if p.produced > 0 {
-                w.write_all(&self.out_buf[..p.produced])?;
-            }
-            if p.pending == 0 {
-                break;
+    fn drain(&mut self) -> io::Result<()> {
+        while self.out_pos < self.out_len {
+            let Some(w) = self.inner.as_mut() else {
+                return Ok(());
+            };
+            match w.write(&self.out_buf[self.out_pos..self.out_len]) {
+                Ok(0) => return Err(io::ErrorKind::WriteZero.into()),
+                Ok(n) => self.out_pos += n,
+                Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                Err(e) => return Err(e),
             }
         }
-        // Drop the CStream now so a later finish() / Drop is a no-op.
-        self.cs = None;
         Ok(())
+    }
+
+    fn do_finish(&mut self) -> io::Result<()> {
+        loop {
+            self.drain()?;
+            let Some(cs) = self.cs.as_mut() else {
+                return Ok(());
+            };
+            let p = cs.end(&mut self.out_buf).map_err(map_err)?;
+            (self.out_pos, self.out_len) = (0, p.produced);
+            if p.pending == 0 {
+                self.cs = None;
+            }
+        }
     }
 }
 
@@ -131,24 +151,24 @@ impl<W: Write> Write for Encoder<W> {
         if buf.is_empty() {
             return Ok(0);
         }
-        let cs = self
-            .cs
-            .as_mut()
-            .ok_or_else(|| io::Error::other("encoder finished"))?;
-        let w = self
-            .inner
-            .as_mut()
-            .ok_or_else(|| io::Error::other("encoder finished"))?;
+        self.drain()?;
 
         let mut total = 0;
-        let mut input = buf;
-        while !input.is_empty() {
-            let p = cs.compress(input, &mut self.out_buf).map_err(map_err)?;
-            if p.produced > 0 {
-                w.write_all(&self.out_buf[..p.produced])?;
-            }
+        while total < buf.len() {
+            let cs = self
+                .cs
+                .as_mut()
+                .ok_or_else(|| io::Error::other("encoder finished"))?;
+            let p = cs
+                .compress(&buf[total..], &mut self.out_buf)
+                .map_err(map_err)?;
             total += p.consumed;
-            input = &input[p.consumed..];
+            (self.out_pos, self.out_len) = (0, p.produced);
+            if let Err(e) = self.drain() {
+                // Err would mean nothing was consumed. The output is kept, so the
+                // next call retries it and reports a lasting failure.
+                return if total > 0 { Ok(total) } else { Err(e) };
+            }
             if p.consumed == 0 && p.produced == 0 && p.pending == 0 {
                 // No forward progress is possible — bail out to avoid spin.
                 break;
@@ -161,6 +181,7 @@ impl<W: Write> Write for Encoder<W> {
     /// once finalised, so partial flushes would produce a corrupted frame.
     /// Use [`Encoder::finish`] to complete the frame.
     fn flush(&mut self) -> io::Result<()> {
+        self.drain()?;
         if let Some(w) = self.inner.as_mut() {
             w.flush()
         } else {
@@ -214,7 +235,8 @@ pub struct Decoder<R: Read> {
 }
 
 impl<R: Read> Decoder<R> {
-    /// Creates a decoder with default decompression options.
+    /// Creates a decoder with default decompression options: checksums are
+    /// verified when a frame carries them.
     pub fn new(reader: R) -> Result<Self, Error> {
         Self::with_options(reader, None)
     }
@@ -333,8 +355,10 @@ fn map_err(e: Error) -> io::Error {
 mod tests {
     use super::*;
     use crate::Level;
-    use crate::compress;
+    use crate::{compress, decompress};
     use std::io::{Cursor, Read, Write};
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     fn roundtrip(data: &[u8]) -> Vec<u8> {
         let mut enc = Encoder::new(Vec::new()).expect("encoder");
@@ -386,7 +410,7 @@ mod tests {
             ..Default::default()
         };
         let dopts = DecompressOptions {
-            verify_checksum: true,
+            verify_checksum: Some(true),
             ..Default::default()
         };
         let mut enc = Encoder::with_options(Vec::new(), Some(&copts)).unwrap();
@@ -411,6 +435,105 @@ mod tests {
         let mut got = Vec::new();
         dec.read_to_end(&mut got).unwrap();
         assert_eq!(got, b"drop-flush");
+    }
+
+    /// Fails once on the `fail_at`-th write, and takes at most `max_write` bytes.
+    struct FlakySink {
+        data: Vec<u8>,
+        writes: Arc<AtomicUsize>,
+        fail_at: usize,
+        max_write: usize,
+    }
+    impl FlakySink {
+        fn new(fail_at: usize, max_write: usize) -> Self {
+            Self {
+                data: Vec::new(),
+                writes: Arc::default(),
+                fail_at,
+                max_write,
+            }
+        }
+    }
+    impl Write for FlakySink {
+        fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+            if self.writes.fetch_add(1, Ordering::Relaxed) == self.fail_at {
+                return Err(io::ErrorKind::WouldBlock.into());
+            }
+            let n = buf.len().min(self.max_write);
+            self.data.extend_from_slice(&buf[..n]);
+            Ok(n)
+        }
+        fn flush(&mut self) -> io::Result<()> {
+            Ok(())
+        }
+    }
+
+    fn noise(len: usize) -> Vec<u8> {
+        let mut rng: u32 = 0x2E5B_9A17;
+        (0..len)
+            .map(|_| {
+                rng = rng.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                (rng >> 16) as u8
+            })
+            .collect()
+    }
+
+    #[test]
+    fn encoder_keeps_output_across_a_sink_error() {
+        let payload = noise(600 * 1024);
+        // The first write carries the header and the first block.
+        for (fail_at, max_write) in [(0, usize::MAX), (0, 4096), (1, 4096), (9, 4096)] {
+            let mut enc = Encoder::new(FlakySink::new(fail_at, max_write)).unwrap();
+            let mut done = 0;
+            let mut errors = 0;
+            while done < payload.len() {
+                match enc.write(&payload[done..]) {
+                    Ok(n) => done += n,
+                    Err(e) => {
+                        assert_eq!(e.kind(), io::ErrorKind::WouldBlock);
+                        errors += 1;
+                    }
+                }
+            }
+            assert!(errors <= 1);
+            enc.flush().ok();
+            let sink = enc.finish().unwrap();
+            assert_eq!(decompress(&sink.data).unwrap(), payload);
+        }
+    }
+
+    #[test]
+    fn failed_finish_stops_writing() {
+        // The header goes out on the first write, the rest fails in finish().
+        let sink = FlakySink::new(1, usize::MAX);
+        let writes = sink.writes.clone();
+        let mut enc = Encoder::new(sink).unwrap();
+        enc.write_all(b"never reaches the sink").unwrap();
+        assert_eq!(writes.load(Ordering::Relaxed), 1);
+        assert!(enc.finish().is_err());
+        assert_eq!(writes.load(Ordering::Relaxed), 2, "Drop wrote again");
+    }
+
+    #[test]
+    fn lasting_sink_failure_is_reported() {
+        struct Dead;
+        impl Write for Dead {
+            fn write(&mut self, _: &[u8]) -> io::Result<usize> {
+                Err(io::Error::other("dead"))
+            }
+            fn flush(&mut self) -> io::Result<()> {
+                Ok(())
+            }
+        }
+        let mut enc = Encoder::new(Dead).unwrap();
+        let chunk = noise(1 << 20);
+        // Output of a call that consumed its input fails on the next one.
+        assert!((0..2).try_for_each(|_| enc.write_all(&chunk)).is_err());
+        assert!(enc.flush().is_err());
+
+        let mut enc = Encoder::new(Dead).unwrap();
+        enc.write_all(b"small").unwrap();
+        assert!(enc.finish().is_err());
     }
 
     /// Hands out one byte per read, so a read ends on every frame boundary.

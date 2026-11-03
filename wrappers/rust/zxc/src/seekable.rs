@@ -66,6 +66,22 @@ pub struct Seekable {
 unsafe impl Send for Seekable {}
 
 impl Seekable {
+    /// The handle, with the C default of no verification turned on.
+    fn verifying(
+        inner: NonNull<zxc_sys::zxc_seekable>,
+        file: Option<*mut libc::FILE>,
+        _buf: Option<Vec<u8>>,
+        reader_ctx: Option<*mut Box<dyn ReadAt>>,
+    ) -> Self {
+        unsafe { zxc_sys::zxc_seekable_set_checksum(inner.as_ptr(), 1) };
+        Self {
+            inner,
+            file,
+            _buf,
+            reader_ctx,
+        }
+    }
+
     /// Opens a seekable archive from an owned in-memory buffer.
     ///
     /// The buffer is held alive for the lifetime of the returned handle.
@@ -73,12 +89,7 @@ impl Seekable {
     pub fn from_bytes(data: Vec<u8>) -> Result<Self> {
         let ptr = unsafe { zxc_sys::zxc_seekable_open(data.as_ptr() as *const c_void, data.len()) };
         let inner = NonNull::new(ptr).ok_or(Error::InvalidData)?;
-        Ok(Self {
-            inner,
-            file: None,
-            _buf: Some(data),
-            reader_ctx: None,
-        })
+        Ok(Self::verifying(inner, None, Some(data), None))
     }
 
     /// Opens a seekable archive from a file path.
@@ -102,12 +113,7 @@ impl Seekable {
                 return Err(Error::InvalidData);
             }
         };
-        Ok(Self {
-            inner,
-            file: Some(f),
-            _buf: None,
-            reader_ctx: None,
-        })
+        Ok(Self::verifying(inner, Some(f), None, None))
     }
 
     /// Opens a seekable archive backed by a user-supplied [`ReadAt`]
@@ -157,12 +163,7 @@ impl Seekable {
                 return Err(Error::InvalidData);
             }
         };
-        Ok(Self {
-            inner,
-            file: None,
-            _buf: None,
-            reader_ctx: Some(ctx_raw),
-        })
+        Ok(Self::verifying(inner, None, None, Some(ctx_raw)))
     }
 
     /// Total number of data blocks (excludes the EOF marker block).
@@ -242,8 +243,8 @@ impl Seekable {
 
     /// Turns per-block checksum verification on or off.
     ///
-    /// Off by default, as in the one-shot API. No effect on an archive without
-    /// checksums. Applies from the next call.
+    /// On by default, as in [`decompress`](crate::decompress). No effect on an
+    /// archive without checksums. Applies from the next call.
     ///
     /// # Errors
     ///
@@ -349,8 +350,12 @@ unsafe extern "C" fn reader_trampoline(
         // `open_reader` and `Drop`.
         let reader: &Box<dyn ReadAt> = unsafe { &*(ctx as *const Box<dyn ReadAt>) };
         // SAFETY: the C library guarantees `dst` points to `len` writable
-        // bytes for the duration of the call.
-        let buf = unsafe { std::slice::from_raw_parts_mut(dst as *mut u8, len) };
+        // bytes for the duration of the call. They start uninitialized, and a
+        // safe `read_at` may read them: zero them first.
+        let buf = unsafe {
+            std::ptr::write_bytes(dst as *mut u8, 0, len);
+            std::slice::from_raw_parts_mut(dst as *mut u8, len)
+        };
         match reader.read_at(buf, offset) {
             Ok(()) => len as i64,
             Err(_) => zxc_sys::ZXC_ERROR_IO as i64,
@@ -439,15 +444,16 @@ mod tests {
         arc[16 + 8 + 4] ^= 0xFF;
 
         let mut out = vec![0u8; 512];
+        // Default is on.
         let mut on = Seekable::from_bytes(arc.clone()).expect("open failed");
-        on.set_checksum(true).expect("set_checksum(true)");
         assert!(matches!(
             on.decompress_range(&mut out, 0, 512),
             Err(Error::BadChecksum)
         ));
 
-        // Default is off: bytes come back, wrong.
+        // Opted out: bytes come back, wrong.
         let mut off = Seekable::from_bytes(arc).expect("open failed");
+        off.set_checksum(false).expect("set_checksum(false)");
         assert_eq!(off.decompress_range(&mut out, 0, 512).unwrap(), 512);
         assert_ne!(&out[..], &payload[..512]);
     }
@@ -586,6 +592,34 @@ mod tests {
             .expect("decompress_range failed");
         assert_eq!(n, len);
         assert_eq!(out, payload[start..start + len]);
+    }
+
+    /// Fails if the buffer `read_at` is handed holds anything but zeros.
+    struct ZeroedDstReader(Vec<u8>);
+
+    impl ReadAt for ZeroedDstReader {
+        fn size(&self) -> u64 {
+            self.0.len() as u64
+        }
+        fn read_at(&self, dst: &mut [u8], offset: u64) -> std::io::Result<()> {
+            if dst.iter().any(|&b| b != 0) {
+                return Err(std::io::Error::other("uninitialized dst"));
+            }
+            let off = offset as usize;
+            dst.copy_from_slice(&self.0[off..off + dst.len()]);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn open_reader_hands_out_zeroed_buffers() {
+        let payload = b"seekable record payload ".repeat(40_000);
+        let reader = ZeroedDstReader(build_archive(&payload));
+        let mut s = Seekable::open_reader(reader).expect("open_reader failed");
+        let mut out = vec![0xAAu8; 4096];
+        s.decompress_range(&mut out, 100_000, 4096)
+            .expect("decompress_range failed");
+        assert_eq!(out, payload[100_000..104_096]);
     }
 
     #[test]

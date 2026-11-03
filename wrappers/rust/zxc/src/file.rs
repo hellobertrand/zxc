@@ -33,10 +33,55 @@ struct Output {
 
 static TMP_SEQ: AtomicU32 = AtomicU32::new(0);
 
+/// The file `path` ends up naming, which need not exist: canonicalize() fails on
+/// a link to a missing target.
+fn resolve_output(path: &Path) -> PathBuf {
+    if let Ok(resolved) = fs::canonicalize(path) {
+        return resolved;
+    }
+    let mut path = path.to_path_buf();
+    // A loop ends here too, and fails when opened.
+    for _ in 0..40 {
+        let Ok(target) = fs::read_link(&path) else {
+            break;
+        };
+        path = path.parent().unwrap_or(Path::new("")).join(target);
+    }
+    path
+}
+
+#[cfg(unix)]
+fn same_file(a: &File, b: &File) -> io::Result<bool> {
+    use std::os::unix::fs::MetadataExt;
+    let (a, b) = (a.metadata()?, b.metadata()?);
+    Ok((a.dev(), a.ino()) == (b.dev(), b.ino()))
+}
+
+#[cfg(windows)]
+fn same_file(a: &File, b: &File) -> io::Result<bool> {
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    fn id(f: &File) -> io::Result<(u32, u32, u32)> {
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(f.as_raw_handle() as _, &mut info) } == 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok((
+            info.dwVolumeSerialNumber,
+            info.nFileIndexHigh,
+            info.nFileIndexLow,
+        ))
+    }
+    Ok(id(a)? == id(b)?)
+}
+
 impl Output {
-    fn create(path: &Path) -> io::Result<Self> {
+    /// `input` is the open source, which a pipeline must not overwrite.
+    fn create(path: &Path, input: &File) -> io::Result<Self> {
         // Replace a link's target, not the link.
-        let path = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        let path = resolve_output(path);
         // Opening the existing output fails where File::create would, tells a
         // device or FIFO apart, gives the mode the replacement keeps, and is
         // the handle to fall back on.
@@ -49,20 +94,26 @@ impl Output {
                         pending: None,
                     });
                 }
+                if same_file(&file, input)? {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "input and output are the same file",
+                    ));
+                }
                 Some((file, meta.permissions()))
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => None,
             Err(e) => return Err(e),
         };
         let (file, tmp) = loop {
-            let mut tmp = path.clone().into_os_string();
-            tmp.push(format!(
-                ".{}-{}.zxc-tmp",
+            // Not derived from the output's name, which may leave no room for a suffix.
+            let tmp = path.parent().unwrap_or(Path::new("")).join(format!(
+                ".zxc-{}-{}.tmp",
                 std::process::id(),
                 TMP_SEQ.fetch_add(1, Ordering::Relaxed)
             ));
             match OpenOptions::new().write(true).create_new(true).open(&tmp) {
-                Ok(file) => break (file, PathBuf::from(tmp)),
+                Ok(file) => break (file, tmp),
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
                 Err(e) if e.kind() == io::ErrorKind::PermissionDenied => match existing.take() {
                     // The directory refuses a sibling: truncate the output in place.
@@ -122,7 +173,7 @@ pub struct StreamCompressOptions {
     /// Number of worker threads (default: `None` = auto-detect CPU cores).
     /// At most the library maximum (512); more is [`Error::BadParam`].
     pub threads: Option<usize>,
-    /// Enable checksum for data integrity (default: `true`)
+    /// Write checksums for data integrity (default: `false`)
     pub checksum: bool,
     /// Enable seek table for random-access decompression (default: `false`)
     pub seekable: bool,
@@ -133,7 +184,7 @@ impl Default for StreamCompressOptions {
         Self {
             level: Level::Default,
             threads: None,
-            checksum: true,
+            checksum: false,
             seekable: false,
         }
     }
@@ -154,7 +205,14 @@ impl StreamCompressOptions {
         self
     }
 
-    /// Disable checksum computation.
+    /// Writes checksums for data integrity.
+    pub fn with_checksum(mut self) -> Self {
+        self.checksum = true;
+        self
+    }
+
+    /// Writes no checksums, which is the default.
+    #[deprecated(note = "checksums are off by default: drop this call")]
     pub fn without_checksum(mut self) -> Self {
         self.checksum = false;
         self
@@ -173,7 +231,7 @@ pub struct StreamDecompressOptions {
     /// Number of worker threads (default: `None` = auto-detect CPU cores).
     /// At most the library maximum (512); more is [`Error::BadParam`].
     pub threads: Option<usize>,
-    /// Verify checksum during decompression (default: `true`)
+    /// Verify checksums when the archive carries them (default: `true`)
     pub verify_checksum: bool,
 }
 
@@ -202,6 +260,7 @@ impl StreamDecompressOptions {
 
 /// Errors specific to the streaming file API.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum StreamError {
     /// I/O error during file operations
     #[error("I/O error: {0}")]
@@ -210,14 +269,6 @@ pub enum StreamError {
     /// Error from buffer operations
     #[error("buffer error: {0}")]
     BufferError(#[from] Error),
-
-    /// Streaming compression failed
-    #[error("stream compression failed")]
-    CompressionFailed,
-
-    /// Streaming decompression failed
-    #[error("stream decompression failed")]
-    DecompressionFailed,
 
     /// Invalid compressed file
     #[error("invalid compressed file")]
@@ -459,6 +510,9 @@ pub fn compress_file<P: AsRef<Path>>(
 /// field — including `seekable`, which appends a seek table for
 /// random-access decompression via [`crate::seekable::Seekable`].
 ///
+/// An output that is the input file (links included) is refused with
+/// [`io::ErrorKind::InvalidInput`].
+///
 /// # Example
 ///
 /// ```rust,no_run
@@ -486,7 +540,7 @@ pub fn compress_file_with_options<P: AsRef<Path>>(
     )?;
 
     let f_in = File::open(input)?;
-    let f_out = Output::create(output.as_ref())?;
+    let f_out = Output::create(output.as_ref(), &f_in)?;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
@@ -552,6 +606,9 @@ pub fn decompress_file<P: AsRef<Path>>(
 /// [`StreamDecompressOptions`] field — including `verify_checksum`, which
 /// can be disabled to skip integrity verification.
 ///
+/// An output that is the input file (links included) is refused with
+/// [`io::ErrorKind::InvalidInput`].
+///
 /// # Example
 ///
 /// ```rust,no_run
@@ -570,7 +627,7 @@ pub fn decompress_file_with_options<P: AsRef<Path>>(
     cfg.set_params(opts.verify_checksum, thread_param(opts.threads))?;
 
     let f_in = File::open(input)?;
-    let f_out = Output::create(output.as_ref())?;
+    let f_out = Output::create(output.as_ref(), &f_in)?;
 
     unsafe {
         let c_in = file_to_c_file_read(&f_in);
@@ -778,6 +835,156 @@ mod tests {
             assert_eq!(mode & 0o777, 0o600, "output mode not kept");
             decompress_file(&arc, &std::path::PathBuf::from("/dev/null"), None).unwrap();
         }
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn assert_same_file_refused(input: &std::path::Path, output: &std::path::Path, keep: &[u8]) {
+        for r in [
+            compress_file(input, output, Level::Default, Some(1), None),
+            decompress_file(input, output, Some(1)),
+        ] {
+            match r {
+                Err(StreamError::Io(e)) => {
+                    assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput)
+                }
+                other => panic!("same file not refused: {other:?}"),
+            }
+            assert_eq!(fs::read(input).unwrap(), keep);
+        }
+    }
+
+    #[test]
+    fn test_file_same_input_and_output_refused() {
+        let dir = std::path::PathBuf::from(temp_path("same_file"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (file, hard, other) = (dir.join("file"), dir.join("hard"), dir.join("other"));
+        let keep = b"precious payload";
+        fs::write(&file, keep).unwrap();
+        fs::hard_link(&file, &hard).unwrap();
+
+        assert_same_file_refused(&file, &file, keep);
+        assert_same_file_refused(&file, &hard, keep);
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            2,
+            "temporary file left"
+        );
+
+        compress_file(&file, &other, Level::Default, Some(1), None).unwrap();
+        assert_eq!(decompress(&fs::read(&other).unwrap()).unwrap(), keep);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    /// Here the output would be truncated in place, under the open input.
+    #[cfg(unix)]
+    #[test]
+    fn test_file_same_file_in_read_only_directory_refused() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        if unsafe { libc::geteuid() } == 0 {
+            return; // root writes anywhere
+        }
+        let dir = std::path::PathBuf::from(temp_path("same_file_locked"));
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o755));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (file, link) = (dir.join("file"), dir.join("link"));
+        let keep = b"precious payload";
+        fs::write(&file, keep).unwrap();
+        symlink(&file, &link).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o555)).unwrap();
+
+        let caught = std::panic::catch_unwind(|| {
+            assert_same_file_refused(&file, &file, keep);
+            assert_same_file_refused(&file, &link, keep);
+        });
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o755)).unwrap();
+        let _ = fs::remove_dir_all(&dir);
+        caught.unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_file_dangling_link_output_keeps_the_link() {
+        use std::os::unix::fs::symlink;
+        let dir = std::path::PathBuf::from(temp_path("dangling_link"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let input = dir.join("in");
+        let payload = b"through a dangling link";
+        fs::write(&input, payload).unwrap();
+        // link -> middle -> target, the first hop relative, the target missing.
+        let (link, middle, target) = (dir.join("link"), dir.join("middle"), dir.join("target"));
+        symlink("middle", &link).unwrap();
+        symlink(&target, &middle).unwrap();
+
+        compress_file(&input, &link, Level::Default, Some(1), None).unwrap();
+
+        assert!(
+            fs::symlink_metadata(&link)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert!(
+            fs::symlink_metadata(&middle)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
+        assert_eq!(decompress(&fs::read(&target).unwrap()).unwrap(), payload);
+
+        // A loop stays an error.
+        let looped = dir.join("loop");
+        symlink("loop", &looped).unwrap();
+        assert!(compress_file(&input, &looped, Level::Default, Some(1), None).is_err());
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_file_checksum_builders() {
+        let dir = std::path::PathBuf::from(temp_path("checksum_builders"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (input, out) = (dir.join("in"), dir.join("out"));
+        fs::write(&input, b"builders").unwrap();
+        let has = |opts: &StreamCompressOptions| {
+            compress_file_with_options(&input, &out, opts).unwrap();
+            frame_info(&fs::read(&out).unwrap()).unwrap().has_checksum
+        };
+        let on = StreamCompressOptions::with_level(Level::Fast)
+            .threads(1)
+            .with_checksum();
+        assert!(has(&on));
+        #[allow(deprecated)]
+        let off = on.without_checksum();
+        assert!(!has(&off));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_file_output_name_at_the_length_limit() {
+        let dir = std::path::PathBuf::from(temp_path("long_name"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let (input, arc) = (dir.join("in"), dir.join("arc"));
+        let payload = b"long output name";
+        fs::write(&input, payload).unwrap();
+        compress_file(&input, &arc, Level::Default, Some(1), None).unwrap();
+
+        // Legal on the file systems CI runs on, with no room for a suffix.
+        let output = dir.join("n".repeat(250));
+        for _new_then_existing in 0..2 {
+            compress_file(&input, &output, Level::Default, Some(1), None).unwrap();
+            assert_eq!(decompress(&fs::read(&output).unwrap()).unwrap(), payload);
+            decompress_file(&arc, &output, Some(1)).unwrap();
+            assert_eq!(fs::read(&output).unwrap(), payload);
+        }
+        assert_eq!(
+            fs::read_dir(&dir).unwrap().count(),
+            3,
+            "temporary file left"
+        );
         let _ = fs::remove_dir_all(&dir);
     }
 

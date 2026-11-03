@@ -359,3 +359,31 @@ describe("pstream lifecycle", () => {
     ds.close();
   });
 });
+
+describe("Package metadata", () => {
+  const { execSync } = require("node:child_process");
+  const { readFileSync } = require("node:fs");
+  const { join } = require("node:path");
+  const root = join(__dirname, "..");
+  const manifest = (dir) =>
+    JSON.parse(readFileSync(join(root, dir, "package.json"), "utf8"));
+
+  test("the tarball carries a root LICENSE", () => {
+    const out = execSync("npm pack --dry-run --json --ignore-scripts=false", {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const json = JSON.parse(out.slice(out.indexOf("[")));
+    expect(json[0].files.map((f) => f.path)).toContain("LICENSE");
+  }, 60000);
+
+  test("engines does not promise less than the build tool needs", () => {
+    const semver = require("semver");
+    const ours = manifest(".").engines.node;
+    for (const dep of ["cmake-js", "node-addon-api"]) {
+      const theirs = manifest(`node_modules/${dep}`).engines.node;
+      expect(semver.subset(ours, theirs), `${dep}: ${theirs}`).toBe(true);
+    }
+  });
+});

@@ -7,7 +7,7 @@ High-performance lossless compression for the browser and Node.js via WebAssembl
 - **Buffer API**: Compress and decompress `Uint8Array` buffers
 - **Reusable Contexts**: Amortise allocation overhead across multiple operations
 - **All Levels**: Compression levels 1–7
-- **Checksum Support**: Optional integrity verification
+- **Checksum Support**: Optional on compression, verified on decompression whenever the archive carries them
 - **Tiny Footprint**: ~60 KB `.wasm` file (scalar build, no SIMD)
 
 ## Quick Start
@@ -49,7 +49,7 @@ const zxc = await createZXC();
 const data = new Uint8Array(readFileSync('input.bin'));
 
 const compressed = zxc.compress(data, { level: 5, checksum: true });
-const decompressed = zxc.decompress(compressed, { checksum: true });
+const decompressed = zxc.decompress(compressed);
 ```
 
 ## API Reference
@@ -63,13 +63,18 @@ Initialise the WASM module. Returns a frozen API object.
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `level` | `number` | `3` | Compression level (1–7) |
-| `checksum` | `boolean` | `false` | Enable integrity checksums |
+| `checksum` | `boolean` | `false` | Write integrity checksums |
 
 ### `zxc.decompress(data, opts?) -> Uint8Array`
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `checksum` | `boolean` | `false` | Verify integrity checksums |
+| `checksum` | `boolean` | `true` | Verify the checksums the archive carries |
+| `maxOutputSize` | `number` | none | Refuse an archive declaring more decompressed bytes |
+
+Without `maxOutputSize`, the size comes from the archive's footer and is allocated
+as is, so a forged footer can grow the WASM heap up to 2 GiB, for good, before the
+decode fails. Set it on untrusted input.
 
 ### `zxc.compressBound(inputSize) -> number`
 
@@ -102,7 +107,7 @@ ctx.free(); // Release WASM memory
 ### `zxc.createDecompressContext(opts?) -> DecompressContext`
 
 Create a reusable decompression context. `opts` takes the same `checksum`,
-`dict` and `dictHuf` as `decompress`.
+`dict`, `dictHuf` and `maxOutputSize` as `decompress`.
 
 ```js
 const ctx = zxc.createDecompressContext({ dict });

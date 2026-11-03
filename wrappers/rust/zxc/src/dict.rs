@@ -360,7 +360,7 @@ mod tests {
         let archive = compress_with_options(&sample, &copts).expect("compress with dict");
 
         let dopts = DecompressOptions {
-            verify_checksum: true,
+            verify_checksum: Some(true),
             dict: Some(dict),
             dict_huf: None,
         };

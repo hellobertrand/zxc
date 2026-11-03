@@ -64,6 +64,8 @@ func EstimateCctxSize(srcSize, level int) uint64 {
 // [NewCctx] and always defer a call to Close to release the native memory.
 // A context dropped without Close is freed by a finalizer, but only once the
 // garbage collector runs, which native memory alone never triggers.
+//
+// Cctx is not safe for concurrent use; one goroutine per context.
 type Cctx struct {
 	ptr *C.zxc_cctx
 
@@ -126,8 +128,11 @@ func (c *Cctx) Close() error {
 //
 // Per-call [WithLevel] / [WithChecksum] override the values given to
 // [NewCctx]; when omitted, the creation-time settings apply.
-// [WithDict]/[WithDictHuf] fall back to [NewCctx]'s. A block carries no
-// dictionary id, so pass the same pair to [Dctx.DecompressBlock].
+// [WithDict]/[WithDictHuf] fall back to [NewCctx]'s, except that a per-call
+// [WithDict] takes only the table given with it. A block carries no
+// dictionary id, so pass the same pair to [Dctx.DecompressBlock]. Nor does it say
+// whether it has a checksum, off by default: enable [WithChecksum] on both sides
+// or neither.
 func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if c == nil || c.ptr == nil {
 		return 0, ErrNullInput
@@ -148,12 +153,7 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if !o.checksumSet {
 		o.checksum = c.checksum
 	}
-	if !o.dictSet {
-		o.dict = c.dict
-	}
-	if !o.dictHufSet {
-		o.dictHuf = c.dictHuf
-	}
+	o.inheritDict(c.dict, c.dictHuf)
 	if err := setCParam(c.ptr, C.ZXC_C_LEVEL, int64(o.level)); err != nil {
 		return 0, err
 	}
@@ -183,20 +183,24 @@ func (c *Cctx) CompressBlock(src, dst []byte, opts ...Option) (int, error) {
 
 // Dctx is a reusable decompression context for the Block API. Always defer a
 // call to [Dctx.Close]; as with [Cctx], a finalizer is only a safety net.
+//
+// Dctx is not safe for concurrent use; one goroutine per context.
 type Dctx struct {
 	ptr *C.zxc_dctx
 
-	// Creation-time dictionary, used by decode calls that do not carry one.
-	dict    []byte
-	dictHuf []byte
+	// Creation-time settings, used by decode calls that do not carry their own.
+	checksum bool
+	dict     []byte
+	dictHuf  []byte
 	// See Cctx.overridden.
 	overridden bool
 }
 
 // NewDctx creates a new decompression context.
 //
-// [WithDict] and [WithDictHuf] become the defaults for every decode call that
-// does not override them, mirroring [NewCctx].
+// [WithChecksum], [WithDict] and [WithDictHuf] become the defaults for every
+// decode call that does not override them, mirroring [NewCctx]. Unlike frame
+// decoding, verification is off unless requested: see [Dctx.DecompressBlock].
 func NewDctx(opts ...Option) (*Dctx, error) {
 	o := applyOptions(opts)
 	if len(o.dictHuf) > 0 && len(o.dictHuf) != HufTableSize {
@@ -210,9 +214,21 @@ func NewDctx(opts ...Option) (*Dctx, error) {
 		C.zxc_free_dctx(ptr)
 		return nil, err
 	}
-	d := &Dctx{ptr: ptr, dict: o.dict, dictHuf: o.dictHuf}
+	d := &Dctx{ptr: ptr, checksum: o.checksum, dict: o.dict, dictHuf: o.dictHuf}
 	runtime.SetFinalizer(d, (*Dctx).Close)
 	return d, nil
+}
+
+// inheritDict falls back to a context's creation-time dictionary. Its table
+// belongs to it, so a call's own dictionary never pairs with that table.
+func (o *options) inheritDict(dict, huf []byte) {
+	if o.dictSet {
+		return
+	}
+	o.dict = dict
+	if !o.dictHufSet {
+		o.dictHuf = huf
+	}
 }
 
 // prepare sets a decode call's options on the native context: the checksum
@@ -220,12 +236,10 @@ func NewDctx(opts ...Option) (*Dctx, error) {
 // (the creation-time one is put back).
 func (d *Dctx) prepare(opts []Option) error {
 	o := applyOptions(opts)
-	if !o.dictSet {
-		o.dict = d.dict
+	if !o.checksumSet {
+		o.checksum = d.checksum
 	}
-	if !o.dictHufSet {
-		o.dictHuf = d.dictHuf
-	}
+	o.inheritDict(d.dict, d.dictHuf)
 	if err := setDParam(d.ptr, C.ZXC_D_CHECKSUM, boolParam(o.checksum)); err != nil {
 		return err
 	}
@@ -255,8 +269,10 @@ func (d *Dctx) Close() error {
 // dst should be at least [DecompressBlockBound](uncompressedSize) to enable
 // the fast decode path. For a strictly-sized destination buffer use
 // [Dctx.DecompressBlockSafe] instead. [WithDict]/[WithDictHuf] fall back to
-// [NewDctx]'s and must match those used at compression: a block carries no
-// dictionary id.
+// [NewDctx]'s, except that a per-call [WithDict] takes only the table given with
+// it, and must match those used at compression: a block carries no
+// dictionary id. Nor does it say whether it has a checksum, so nothing is
+// verified by default: enable [WithChecksum] on both sides or neither.
 func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 	if d == nil || d.ptr == nil {
 		return 0, ErrNullInput
@@ -289,8 +305,9 @@ func (d *Dctx) DecompressBlock(src, dst []byte, opts ...Option) (int, error) {
 // DecompressBlockSafe is a strict-sized variant of [Dctx.DecompressBlock]:
 // it accepts a destination buffer sized exactly to the uncompressed length,
 // with no tail-pad required. Slightly slower than the fast path; output is
-// bit-identical. Takes the same [WithDict]/[WithDictHuf]; a dictionary decodes
-// through the bounce path, so dst may hold more than the strict tail.
+// bit-identical. Takes the same [WithChecksum] and [WithDict]/[WithDictHuf]; a
+// dictionary decodes through the bounce path, so dst may hold more than the
+// strict tail.
 func (d *Dctx) DecompressBlockSafe(src, dst []byte, opts ...Option) (int, error) {
 	if d == nil || d.ptr == nil {
 		return 0, ErrNullInput

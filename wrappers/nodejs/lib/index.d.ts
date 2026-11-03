@@ -66,7 +66,7 @@ export interface CompressOptions {
   /** Compression level (1-7). Defaults to LEVEL_DEFAULT; an out-of-range
    *  value throws with `code === ERROR_BAD_LEVEL`. */
   level?: number;
-  /** Enable checksum verification. Defaults to false. */
+  /** Write block checksums and the archive digest. Defaults to false. */
   checksum?: boolean;
   /** Enable seek table for random-access decompression. Defaults to false. */
   seekable?: boolean;
@@ -82,7 +82,7 @@ export interface CompressOptions {
 export interface DecompressOptions {
   /** Expected decompressed size. If omitted, read from header. */
   size?: number;
-  /** Enable checksum verification. Defaults to false. */
+  /** Verify the checksums the archive carries. Defaults to true. */
   checksum?: boolean;
   /** Pre-trained dictionary: a {@link Dictionary} instance, or raw content
    *  bytes. Required when the archive references a dictionary. */
@@ -91,6 +91,9 @@ export interface DecompressOptions {
    *  with one (the dictionary ID binds the pair). Ignored when `dict` is a
    *  {@link Dictionary}. */
   dictHuf?: Buffer | Uint8Array;
+  /** Refuse a larger size, read from the footer or given as `size`, before
+   *  allocating. No limit by default. */
+  maxOutputSize?: number;
 }
 
 /**
@@ -267,12 +270,14 @@ export interface CctxOptions {
 }
 
 export interface DctxOptions {
-  /** Verify the block checksums and archive digest when present. Defaults to false. */
+  /** Verify the block checksums and archive digest when present. Defaults to true. */
   checksum?: boolean;
   /** A {@link Dictionary}, or raw dictionary content. */
   dict?: Dictionary | Buffer | Uint8Array;
   /** Shared literal table (128 bytes); a {@link Dictionary} carries its own. */
   dictHuf?: Buffer | Uint8Array;
+  /** As in {@link DecompressOptions}: applies to every call. */
+  maxOutputSize?: number;
 }
 
 /**
@@ -316,7 +321,7 @@ export class CStream {
 }
 
 export interface DStreamOptions {
-  /** Verify the block checksums and archive digest when present. Defaults to false. */
+  /** Verify the block checksums and archive digest when present. Defaults to true. */
   checksum?: boolean;
 }
 
@@ -394,10 +399,11 @@ export interface SeekableReader {
   size: number;
   /**
    * Fill `buf` with `buf.length` bytes starting at `offset` in the
-   * archive. Throwing causes the surrounding Seekable operation to
-   * fail with an I/O error.
+   * archive. Throwing, returning anything but `undefined` or `buf.length`
+   * (a Promise from an async function, for one), or detaching `buf` fails the
+   * surrounding Seekable operation with an I/O error. `buf` starts zero-filled.
    */
-  readAt(buf: Buffer, offset: number): void;
+  readAt(buf: Buffer, offset: number): number | void;
 }
 
 /**
@@ -442,7 +448,8 @@ export class Seekable {
   /**
    * Decompress `length` bytes starting at `offset` (in the original
    * uncompressed byte stream). Only the blocks overlapping the
-   * requested range are read.
+   * requested range are read. Throws a `RangeError` unless both are
+   * integers in `[0, 2**53)`.
    */
   decompressRange(offset: number, length: number): Buffer;
   /**
@@ -451,12 +458,15 @@ export class Seekable {
    * once per dictionary when concatenated frames use several. One no frame
    * uses throws, unless no frame needs one. The content is copied internally.
    */
-  setDict(dict: Buffer | Uint8Array, dictHuf?: Buffer | Uint8Array): void;
+  setDict(
+    dict: Dictionary | Buffer | Uint8Array,
+    dictHuf?: Buffer | Uint8Array,
+  ): void;
   /**
    * Turns per-block checksum verification on or off.
    *
-   * Off by default, as in the one-shot API. No effect without checksums in
-   * the archive. Applies from the next call.
+   * On by default, as in `decompress`. No effect without checksums in the
+   * archive. Applies from the next call.
    */
   setChecksum(enabled: boolean): void;
   /** Release native resources. Idempotent. */
@@ -474,6 +484,7 @@ export function seekTableSize(numBlocks: number): number;
  * Low-level: write a seek table (header + entries) for the given
  * per-block on-disk compressed sizes. Most callers do not need this -
  * the buffer and streaming APIs emit a seek table automatically when
- * `seekable: true` is set.
+ * `seekable: true` is set. Throws a `RangeError` on an entry that is not an
+ * integer in `[0, 2**32)`.
  */
 export function writeSeekTable(compSizes: number[]): Buffer;

@@ -67,8 +67,8 @@ jobs:
       - name: Build wheels
         run: python -m cibuildwheel wrappers/python --output-dir wheelhouse
         env:
-          # Build for Python 3.10-3.13
-          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-*"
+          # Build for Python 3.10-3.14
+          CIBW_BUILD: "cp310-* cp311-* cp312-* cp313-* cp314-*"
           # Skip 32-bit, musllinux, and Python 3.10-3.11 on Windows (missing Development.Module)
           CIBW_SKIP: "*-win32 *-manylinux_i686 *-musllinux_* cp310-win* cp311-win*"
           CIBW_ARCHS: "${{ matrix.arch }}"
@@ -98,7 +98,9 @@ jobs:
         run: python -m pip install --require-hashes -r wrappers/python/requirements/sdist.txt
 
       - name: Build sdist
-        run: python -m build --sdist
+        run: |
+          python scripts/vendor_core.py
+          python -m build --sdist
         working-directory: ./wrappers/python
 
       - name: Upload sdist
@@ -107,6 +109,35 @@ jobs:
           name: sdist
           path: ./wrappers/python/dist/*.tar.gz
 
+  test_sdist:
+    name: Install from the sdist and test
+    needs: [build_sdist]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+
+      - name: Download sdist
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: sdist
+          path: sdist
+
+      # Unpacked outside the checkout: with one above it, CMake would take that core.
+      - name: Install from the sdist and run the test suite
+        run: |
+          pip install --require-hashes -r wrappers/python/requirements/build-deps.txt
+          pip install --require-hashes -r wrappers/python/requirements/test.txt
+          mkdir "$RUNNER_TEMP/unpacked"
+          tar xzf sdist/*.tar.gz -C "$RUNNER_TEMP/unpacked" --strip-components=1
+          pip install --no-build-isolation --no-deps "$RUNNER_TEMP/unpacked"
+          pytest "$RUNNER_TEMP/unpacked/tests" -v
+
   test_wheels:
     name: Test wheels on ${{ matrix.os }} ${{ matrix.python }}
     needs: [build_wheels]
@@ -114,7 +145,7 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm, macos-26, macos-26-intel, windows-latest, windows-11-arm]
-        python: ["3.12", "3.13"]
+        python: ["3.12", "3.13", "3.14"]
     
     steps:
       - name: Checkout Repository
@@ -142,7 +173,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: [build_wheels, build_sdist, test_wheels]
+    needs: [build_wheels, build_sdist, test_sdist, test_wheels]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     permissions:
