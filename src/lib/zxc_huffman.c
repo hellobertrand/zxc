@@ -1364,6 +1364,21 @@ int zxc_huf_dict_tree_build(const uint8_t* RESTRICT packed_lengths, zxc_pivco_tr
         i += (w);                   \
     } while (0)
 
+#if defined(ZXC_USE_NEON64) && !defined(__ARM_FEATURE_CSSC)
+// Before FEAT_CSSC, AArch64 counts bits through a vector register: four
+// instructions per byte in the merge loop, against one load from here.
+#define ZXC_PC2(n) (n), (n) + 1, (n) + 1, (n) + 2
+#define ZXC_PC4(n) ZXC_PC2(n), ZXC_PC2((n) + 1), ZXC_PC2((n) + 1), ZXC_PC2((n) + 2)
+#define ZXC_PC6(n) ZXC_PC4(n), ZXC_PC4((n) + 1), ZXC_PC4((n) + 1), ZXC_PC4((n) + 2)
+static const uint8_t zxc_pivco_popcnt8_tab[256] = {ZXC_PC6(0), ZXC_PC6(1), ZXC_PC6(1), ZXC_PC6(2)};
+#undef ZXC_PC6
+#undef ZXC_PC4
+#undef ZXC_PC2
+#define ZXC_PIVCO_POPCNT8(b) ((int)zxc_pivco_popcnt8_tab[b])
+#elif defined(ZXC_USE_NEON64)
+#define ZXC_PIVCO_POPCNT8(b) zxc_pivco_popcnt32(b)
+#endif
+
 /**
  * @brief Merge two adjacent child sequences under control bits.
  *
@@ -1391,11 +1406,11 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         uint8x16x2_t tb;
         tb.val[0] = vld1q_u8(L + lp);
         tb.val[1] = vld1q_u8(R + rp);
-        const int pc0 = zxc_pivco_popcnt32(b0);
+        const int pc0 = ZXC_PIVCO_POPCNT8(b0);
         const uint8x8_t ia = vld1_u8(zxc_pivco_idxa_u8[b0]);
         const uint8x8_t ib = vld1_u8(zxc_pivco_idxb_pre[pc0][b1]);
         vst1q_u8(out + i, vqtbl2q_u8(tb, vcombine_u8(ia, ib)));
-        const int pc = pc0 + zxc_pivco_popcnt32(b1);
+        const int pc = pc0 + ZXC_PIVCO_POPCNT8(b1);
         ZXC_PIVCO_MERGE_STEP(16, pc);
     }
 #else /* x86 tiers */
@@ -1543,6 +1558,7 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
 }
 
 #undef ZXC_PIVCO_MERGE_STEP
+#undef ZXC_PIVCO_POPCNT8
 
 /**
  * @brief Decode a flat subtree's packed D-bit code run into symbols.
