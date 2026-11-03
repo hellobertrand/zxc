@@ -158,6 +158,7 @@ int test_frame_info(void);
 int test_footer_strictness(void);
 int test_decompress_inplace(void);
 int test_decompress_fast_vs_safe_path(void);
+int test_decompress_no_tail_margin(void);
 int test_max_compressed_size_logic(void);
 int test_decompress_empty_frame_null_dst(void);
 
