@@ -59,7 +59,7 @@ if(ZXC_TARGET_X86)
         zxc_add_variant(_avx512 "/arch:AVX512;/D__BMI__;/D__BMI2__;/D__LZCNT__")
     else()
         set(ZXC_AVX2_FLAGS   -mavx2 -mbmi -mbmi2 -mlzcnt)
-        set(ZXC_AVX512_FLAGS -mavx512f -mavx512bw -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt)
+        set(ZXC_AVX512_FLAGS -mavx512f -mavx512bw -mavx512vl -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt)
         if(APPLE AND ZXC_TARGET_AARCH64)
             # Universal build: every variant is compiled for every slice, so the
             # x86 flags must be confined to the x86 one. -Xarch_<arch> covers the
