@@ -113,6 +113,9 @@
 #include <direct.h>
 #include <fcntl.h>
 #include <io.h>
+#include <process.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 #include <windows.h>
 
 #ifdef __MINGW32__
@@ -125,6 +128,9 @@ int _dowildcard = -1;  // MinGW-w64 globs argv, as setargv.obj does for MSVC
 #define isatty _isatty
 #define fileno _fileno
 #define unlink _unlink
+#define close _close
+#define fdopen _fdopen
+#define getpid _getpid
 #define fseeko _fseeki64
 #define ftello _ftelli64
 
@@ -583,9 +589,32 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                int checksum, int level, size_t block_size, int json_output,
                                int seekable, const void* dict, size_t dict_size);
 
+#define ZXC_TEMP_PREFIX ".zxc-"
+#define ZXC_TEMP_SUFFIX ".tmp"
+
+/** @brief The part of @p path after its last separator. */
+static const char* zxc_base_name(const char* path) {
+    const char* slash = strrchr(path, '/');
+#ifdef _WIN32
+    const char* const bslash = strrchr(path, '\\');
+    if (bslash && (!slash || bslash > slash)) slash = bslash;
+#endif
+    return slash ? slash + 1 : path;
+}
+
+// What a killed process left while replacing an output.
+static int zxc_is_temp_output(const char* path) {
+    const char* const base = zxc_base_name(path);
+    const size_t len = strlen(base);
+    const size_t sfx = strlen(ZXC_TEMP_SUFFIX);
+    return strncmp(base, ZXC_TEMP_PREFIX, strlen(ZXC_TEMP_PREFIX)) == 0 && len >= sfx &&
+           strcmp(base + len - sfx, ZXC_TEMP_SUFFIX) == 0;
+}
+
 // Compression skips archives; decompression and -t take archives only, since a
 // tree keeps its sources.
 static int zxc_walk_takes(zxc_mode_t mode, const char* path) {
+    if (zxc_is_temp_output(path)) return 0;
     const int archive = zxc_has_archive_ext(path);
     if (mode == MODE_COMPRESS) return !archive;
     if (mode == MODE_DECOMPRESS || mode == MODE_INTEGRITY) return archive;
@@ -1238,61 +1267,163 @@ static int zxc_archive_has_checksum(FILE* f) {
     return c.checksummed == 0 ? 0 : c.checksummed == c.frames ? 1 : 2;
 }
 
-/**
- * @brief Creates the output file at @p path.
- *
- * Anything already there fails with EEXIST unless @p force replaces it, so a
- * link's target, the input or a read-only file is never written through. A
- * device, FIFO or socket, even behind a link (/dev/stdout), is written as is.
- *
- * @param owner_only 1 for 0600, 0 for 0644 (ignored on Windows).
- * @param[out] special 1 when writing to a device, FIFO or socket.
- * @return The stream, or NULL with errno set.
- */
-static FILE* zxc_create_output(const char* path, int force, int owner_only, int* special) {
-    *special = 0;
-#ifdef _WIN32
-    (void)owner_only;
-    if (!force && access(path, F_OK) == 0) {
-        errno = EEXIST;
-        return NULL;
+/** @brief An output being written; the caller closes @c f before commit or discard. */
+typedef struct {
+    FILE* f;
+    const char* path;
+    char tmp[4096 + 64];  // Written instead of path when replacing it
+    int special;          // Device, FIFO or socket: never removed
+} zxc_output_t;
+
+#ifndef _WIN32
+static char g_partial_path[sizeof(((zxc_output_t*)0)->tmp)];
+static volatile sig_atomic_t g_partial_armed = 0;
+
+static void zxc_fatal_signal(const int sig) {
+    if (g_partial_armed) unlink(g_partial_path);
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+// Signals inherited as ignored stay ignored.
+static void zxc_install_signal_cleanup(void) {
+    static const int sigs[] = {SIGHUP, SIGINT, SIGQUIT, SIGTERM, SIGPIPE, SIGXCPU, SIGXFSZ};
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = zxc_fatal_signal;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = SA_RESTART;
+    for (size_t i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) {
+        struct sigaction old;
+        if (sigaction(sigs[i], NULL, &old) == 0 && old.sa_handler != SIG_IGN)
+            sigaction(sigs[i], &sa, NULL);
     }
-    return fopen(path, "wb");
+}
+
+static void zxc_set_partial_output(const char* path) {
+    g_partial_armed = 0;
+    if (path) {
+        snprintf(g_partial_path, sizeof(g_partial_path), "%s", path);
+        g_partial_armed = 1;
+    }
+}
 #else
-    struct stat st;
-    const int exists = lstat(path, &st) == 0;
-    if (exists && !force) {
-        errno = EEXIST;
-        return NULL;
-    }
-    struct stat target;  // stat fails on a dangling link: replaced below
-    *special = exists && stat(path, &target) == 0 && !S_ISREG(target.st_mode);
-    int fd;
-    if (*special) {
-        // No O_TRUNC: the link may have been swapped since, so recheck the fd
-        fd = open(path, O_WRONLY);
-        struct stat opened;
-        if (fd != -1 && (fstat(fd, &opened) != 0 || S_ISREG(opened.st_mode))) {
-            close(fd);
-            errno = EEXIST;
-            return NULL;
-        }
-    } else {
-        if (exists && unlink(path) != 0) return NULL;
-        // O_EXCL: a link planted since is refused, not followed
-        fd = open(path, O_CREAT | O_EXCL | O_WRONLY,
-                  owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
-    }
+// An open file cannot be removed on Windows.
+static void zxc_install_signal_cleanup(void) {}
+static void zxc_set_partial_output(const char* path) { (void)path; }
+#endif
+
+static FILE* zxc_stream_from_fd(const int fd) {
     if (fd == -1) return NULL;
     FILE* const f = fdopen(fd, "wb");
     if (!f) {
-        const int err = errno;  // close()/unlink() may clobber it
+        const int err = errno;  // close() may clobber it
         close(fd);
-        if (!*special) unlink(path);  // ours: created with O_EXCL
         errno = err;
     }
     return f;
+}
+
+// O_EXCL: a link planted since is refused, not followed.
+static FILE* zxc_open_new(const char* path, const int owner_only) {
+#ifdef _WIN32
+    (void)owner_only;
+    const int fd = _open(path, _O_CREAT | _O_EXCL | _O_WRONLY | _O_BINARY, _S_IREAD | _S_IWRITE);
+#else
+    const int fd = open(path, O_CREAT | O_EXCL | O_WRONLY,
+                        owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 #endif
+    FILE* const f = zxc_stream_from_fd(fd);
+    if (!f && fd != -1) {
+        const int err = errno;  // unlink() may clobber it
+        unlink(path);
+        errno = err;
+    }
+    return f;
+}
+
+static FILE* zxc_open_special(const char* path) {
+#ifdef _WIN32
+    return fopen(path, "wb");
+#else
+    // No O_TRUNC: the link may have been swapped since, so recheck the fd
+    const int fd = open(path, O_WRONLY);
+    struct stat opened;
+    if (fd != -1 && (fstat(fd, &opened) != 0 || S_ISREG(opened.st_mode))) {
+        close(fd);
+        errno = EEXIST;
+        return NULL;
+    }
+    return zxc_stream_from_fd(fd);
+#endif
+}
+
+/**
+ * @brief Opens the output at @p path, which must outlive @p o.
+ *
+ * Anything there fails with EEXIST unless @p force replaces it, and only at
+ * zxc_output_commit(). A device, FIFO or socket is written as is.
+ *
+ * @param owner_only 1 for 0600, 0 for 0644 (ignored on Windows).
+ * @return 0, or -1 with errno set.
+ */
+static int zxc_output_open(zxc_output_t* o, const char* path, const int force,
+                           const int owner_only) {
+    o->path = path;
+    o->tmp[0] = '\0';
+#ifdef _WIN32
+    struct _stati64 st;
+    const int exists = access(path, F_OK) == 0;
+    o->special = exists && (_stati64(path, &st) != 0 || (st.st_mode & _S_IFMT) != _S_IFREG);
+#else
+    struct stat st;
+    const int exists = lstat(path, &st) == 0;  // stat fails on a dangling link: replaced
+    o->special = exists && stat(path, &st) == 0 && !S_ISREG(st.st_mode);
+#endif
+    if (exists && !force) {
+        errno = EEXIST;
+        return -1;
+    }
+    if (exists && !o->special) {
+        // Same directory for an atomic rename; short for names at the length limit.
+        const int dir_len = (int)(zxc_base_name(path) - path);
+        // Next name past what a killed process left under this pid.
+        for (unsigned i = 0; i < 100; i++) {
+            snprintf(o->tmp, sizeof(o->tmp), "%.*s" ZXC_TEMP_PREFIX "%ld-%u" ZXC_TEMP_SUFFIX,
+                     dir_len, path, (long)getpid(), i);
+            o->f = zxc_open_new(o->tmp, owner_only);
+            if (o->f || errno != EEXIST) break;
+        }
+    } else {
+        o->f = o->special ? zxc_open_special(path) : zxc_open_new(path, owner_only);
+    }
+    if (!o->f) return -1;
+    if (!o->special) zxc_set_partial_output(o->tmp[0] ? o->tmp : path);
+    return 0;
+}
+
+/** @brief Puts the finished output in place; 0, or -1 with errno set. */
+static int zxc_output_commit(const zxc_output_t* o) {
+    // Armed until the rename: a signal then only finds the name gone.
+    int rc = 0;
+    if (o->tmp[0]) {
+#ifdef _WIN32
+        if (!MoveFileExA(o->tmp, o->path, MOVEFILE_REPLACE_EXISTING)) {
+            errno = EACCES;
+            rc = -1;
+        }
+#else
+        rc = rename(o->tmp, o->path);
+#endif
+    }
+    if (rc == 0) zxc_set_partial_output(NULL);
+    return rc;
+}
+
+/** @brief Removes what zxc_output_open() created. */
+static void zxc_output_discard(const zxc_output_t* o) {
+    if (!o->special) unlink(o->tmp[0] ? o->tmp : o->path);
+    zxc_set_partial_output(NULL);
 }
 
 #ifdef _WIN32
@@ -1407,6 +1538,22 @@ static int zxc_set_file_attrs(FILE* f, const zxc_file_attrs_t* a) {
 #endif
 }
 
+// -t -j over several files prints one array, as -l -j does.
+static int g_test_json_array = 0;
+static int g_test_json_count = 0;
+
+static void zxc_test_json_separator(void) {
+    if (g_test_json_array && g_test_json_count++) printf(",\n");
+}
+
+static void zxc_test_json_cannot_open(const char* path) {
+    zxc_test_json_separator();
+    printf(
+        "{\n  \"filename\": \"%s\",\n  \"status\": \"failed\",\n  \"error\": \"cannot open "
+        "file\"\n}\n",
+        path);
+}
+
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum_enabled, int level, size_t block_size, int json_output,
@@ -1419,19 +1566,21 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     int use_stdin = 1;
     int use_stdout = 0;
     int created_out_file = 0;
-    int out_special = 0;  // device or FIFO: never unlinked
+    zxc_output_t output;
     int overall_ret = 0;
     zxc_file_attrs_t in_attrs = {0};
 
     if (in_path && strcmp(in_path, "-") != 0) {
         if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
+            if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
         }
 
         f_in = fopen(resolved_in_path, "rb");
         if (!f_in) {
             zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
+            if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
         }
         use_stdin = 0;
@@ -1506,8 +1655,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
         if (g_preserve && !use_stdin) zxc_get_file_attrs(f_in, &in_attrs);
         // Private while written if the input's mode is restored at the end
-        f_out = zxc_create_output(resolved_out_path, force, in_attrs.valid, &out_special);
-        if (!f_out) {
+        if (zxc_output_open(&output, resolved_out_path, force, in_attrs.valid) != 0) {
             if (errno == EEXIST && !force)
                 zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
             else
@@ -1515,7 +1663,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             if (!use_stdin) fclose(f_in);
             return 1;
         }
-        if (out_special) in_attrs.valid = 0;
+        f_out = output.f;
+        if (output.special) in_attrs.valid = 0;
         created_out_file = 1;
     }
 
@@ -1528,17 +1677,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         return 1;
     }
 
-    // Set stdin/stdout to binary mode if using them
+    // POSIX has no binary mode; reopening would truncate stdout and rewind stdin.
 #ifdef _WIN32
     if (use_stdin) _setmode(_fileno(stdin), _O_BINARY);
     if (use_stdout) _setmode(_fileno(stdout), _O_BINARY);
-
-#else
-    // POSIX has no binary mode. Never reopen stdout: "wb" truncates a >> target.
-    if (use_stdin) {
-        if (!freopen(NULL, "rb", stdin))
-            zxc_log("Warning: Failed to reopen stdin in binary mode\n");
-    }
 #endif
 
     // Determine if we should show progress bar and get file size
@@ -1662,7 +1804,13 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (bytes >= 0 && write_error) {
         zxc_log("Error: %s: write failed: %s\n", created_out_file ? resolved_out_path : "<stdout>",
                 strerror(errno));
-        if (created_out_file && !out_special) unlink(resolved_out_path);
+        if (created_out_file) zxc_output_discard(&output);
+        return 1;
+    }
+
+    if (bytes >= 0 && created_out_file && zxc_output_commit(&output) != 0) {
+        zxc_log("Error: cannot replace %s: %s\n", resolved_out_path, strerror(errno));
+        zxc_output_discard(&output);
         return 1;
     }
 
@@ -1683,6 +1831,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                   : use_stdin ? "unknown (streamed input)"
                                               : "unknown (frame unreadable)";
             if (json_output) {
+                zxc_test_json_separator();
                 printf(
                     "{\n"
                     "  \"filename\": \"%s\",\n"
@@ -1720,6 +1869,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             const int needs_dict =
                 (err_code == ZXC_ERROR_DICT_REQUIRED || err_code == ZXC_ERROR_DICT_MISMATCH);
             if (json_output) {
+                zxc_test_json_separator();
                 printf(
                     "{\n"
                     "  \"filename\": \"%s\",\n"
@@ -1735,7 +1885,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             }
         } else {
             zxc_log("Error: %s: %s\n", in_path ? in_path : "<stdin>", zxc_error_name((int)bytes));
-            if (created_out_file && !out_special) unlink(resolved_out_path);
+            if (created_out_file) zxc_output_discard(&output);
         }
         overall_ret = 1;
     }
@@ -1757,6 +1907,7 @@ int main(int argc, char** argv) {
     // Reader gone (zxc -dc f | head): die quietly, even if the parent ignored SIGPIPE
     signal(SIGPIPE, SIG_DFL);
 #endif
+    zxc_install_signal_cleanup();
 
     /* As "unzxc", default to decompression; as "zxccat", to zxc -dcf on every
      * argument. An explicit mode flag below still wins. */
@@ -2222,9 +2373,8 @@ int main(int argc, char** argv) {
             }
         }
 
-        int special;  // device or FIFO: never unlinked
-        FILE* const out = zxc_create_output(final_path, force, 0, &special);
-        if (!out) {
+        zxc_output_t out;
+        if (zxc_output_open(&out, final_path, force, 0) != 0) {
             if (errno == EEXIST && !force)
                 fprintf(stderr, "Output exists. Use -f to overwrite '%s'.\n", final_path);
             else
@@ -2233,12 +2383,18 @@ int main(int argc, char** argv) {
             free(dict);
             return 1;
         }
-        const size_t nwritten = fwrite(zxd, 1, (size_t)zxd_sz, out);
-        const int close_rc = fclose(out);
+        const size_t nwritten = fwrite(zxd, 1, (size_t)zxd_sz, out.f);
+        const int close_rc = fclose(out.f);
         free(zxd);
         if (nwritten != (size_t)zxd_sz || close_rc != 0) {
             fprintf(stderr, "Error: failed to write '%s': %s\n", final_path, strerror(errno));
-            if (!special) unlink(final_path);
+            zxc_output_discard(&out);
+            free(dict);
+            return 1;
+        }
+        if (zxc_output_commit(&out) != 0) {
+            fprintf(stderr, "Error: cannot replace '%s': %s\n", final_path, strerror(errno));
+            zxc_output_discard(&out);
             free(dict);
             return 1;
         }
@@ -2570,9 +2726,21 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    // No output name to tell apart: every operand is an input.
+    const int all_inputs = multiple_mode || cat_mode || to_stdout || mode == MODE_INTEGRITY;
+    if (!all_inputs && argc - optind > (output_path ? 1 : 2)) {
+        zxc_log("Error: too many file operands; use -m for several input files.\n");
+        free(dict);
+        return 1;
+    }
+
     // Default to processing at least once (for stdin) if no files are passed and not in a mode that
     // strictly needs files
     const int num_files_to_process = (optind < argc) ? (argc - optind) : 1;
+
+    g_test_json_array =
+        mode == MODE_INTEGRITY && json_output && (num_files_to_process > 1 || recursive_mode);
+    if (g_test_json_array) printf("[\n");
 
     for (int file_idx = 0; file_idx < num_files_to_process; file_idx++) {
         const char* current_arg = (optind < argc) ? argv[start_optind + file_idx] : NULL;
@@ -2588,10 +2756,12 @@ int main(int argc, char** argv) {
         } else {
             // -o takes precedence over a positional OUTPUT-FILE.
             const char* explicit_out_path = NULL;
-            if (!multiple_mode && !to_stdout) {
+            if (!all_inputs) {
                 if (output_path)
                     explicit_out_path = output_path;
-                else if (optind + 1 < argc && current_arg && strcmp(current_arg, "-") != 0)
+                else if (optind + 1 < argc && current_arg &&
+                         (strcmp(current_arg, "-") != 0 ||
+                          strcmp(argv[start_optind + 1], "-") != 0))
                     explicit_out_path = argv[start_optind + 1];
             }
 
@@ -2600,10 +2770,9 @@ int main(int argc, char** argv) {
                                                block_size, json_output, seekable, dict, dict_size);
         }
 
-        if (!multiple_mode && !cat_mode) {
-            break;  // Standard mode only does the first argument as input
-        }
+        if (!all_inputs) break;
     }
+    if (g_test_json_array) printf("]\n");
     free(dict);
     return overall_ret;
 }

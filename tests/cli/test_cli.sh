@@ -2282,5 +2282,257 @@ else
 fi
 rm -f "$LINK_IN" "$LINK_OUT"
 
+# A read error is not the end of the input: no archive of what was read so far
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] directory as stdin: POSIX only" ;;
+    *)
+        READ_ERR_OUT="$TEST_DIR/read_error.zxc"
+        if "$ZXC_BIN" -q -o "$READ_ERR_OUT" < "$TEST_DIR" 2>/dev/null; then
+            log_fail "Compressing an unreadable stdin reported success"
+        elif [ -e "$READ_ERR_OUT" ]; then
+            log_fail "Compressing an unreadable stdin left an output"
+        else
+            log_pass "A read error on the input fails and leaves no output"
+        fi
+        ;;
+esac
+
+# stdin is used as it is: never reopened, so neither lost nor rewound
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] closed or positioned stdin: POSIX only" ;;
+    *)
+        STDIN_OUT="$TEST_DIR/stdin_closed.zxc"
+        if "$ZXC_BIN" -q -o "$STDIN_OUT" <&- 2>/dev/null; then
+            log_fail "Compressing a closed stdin reported success"
+        else
+            log_pass "A closed stdin fails"
+        fi
+        rm -f "$STDIN_OUT"
+
+        STDIN_POS="$TEST_DIR/stdin_pos"
+        printf 'SKIPMEpayload' > "$STDIN_POS"
+        if [ "$( (head -c 6 > /dev/null; "$ZXC_BIN" -c | "$ZXC_BIN" -dc) < "$STDIN_POS" )" = "payload" ]; then
+            log_pass "stdin keeps the position it was handed"
+        else
+            log_fail "stdin was rewound"
+        fi
+        rm -f "$STDIN_POS"
+        ;;
+esac
+
+# File operands: none is ever silently dropped
+OP_A="$TEST_DIR/op_a"; OP_B="$TEST_DIR/op_b"; OP_C="$TEST_DIR/op_c"
+printf 'first operand' > "$OP_A"; printf 'second operand' > "$OP_B"; printf 'third' > "$OP_C"
+if "$ZXC_BIN" -q -k -f "$OP_A" "$OP_B" "$OP_C" 2>/dev/null; then
+    log_fail "Three operands without -m were accepted"
+elif [ "$(cat "$OP_B")" = "second operand" ]; then
+    log_pass "Three operands without -m are refused, nothing overwritten"
+else
+    log_fail "Three operands without -m overwrote the second"
+fi
+if "$ZXC_BIN" -q -k -f "$OP_A" "$OP_B" -o "$OP_C" 2>/dev/null; then
+    log_fail "Two operands with -o were accepted"
+else
+    log_pass "Two operands with -o are refused"
+fi
+"$ZXC_BIN" -q -k -f -C -o "${OP_A}.zxc" "$OP_A"
+"$ZXC_BIN" -q -k -f -C -o "${OP_B}.zxc" "$OP_B"
+if [ "$("$ZXC_BIN" -dc "${OP_A}.zxc" "${OP_B}.zxc")" = "first operandsecond operand" ]; then
+    log_pass "-dc decodes every operand"
+else
+    log_fail "-dc dropped an operand"
+fi
+if [ "$("$ZXC_BIN" -c "$OP_A" "$OP_B" | "$ZXC_BIN" -dc)" = "first operandsecond operand" ]; then
+    log_pass "-c compresses every operand"
+else
+    log_fail "-c dropped an operand"
+fi
+cp "${OP_B}.zxc" "${OP_B}.bad.zxc"
+printf 'XXXX' | dd of="${OP_B}.bad.zxc" bs=1 seek=16 conv=notrunc 2>/dev/null
+if "$ZXC_BIN" -t "${OP_A}.zxc" "${OP_B}.bad.zxc" > /dev/null 2>&1; then
+    log_fail "-t skipped the second operand"
+else
+    log_pass "-t tests every operand"
+fi
+printf 'from stdin' | "$ZXC_BIN" -q -f - "$OP_C"
+if [ "$("$ZXC_BIN" -dc "$OP_C")" = "from stdin" ]; then
+    log_pass "A second operand names the output of stdin input"
+else
+    log_fail "A second operand after - was ignored"
+fi
+rm -f "$OP_A" "$OP_B" "$OP_C" "${OP_A}.zxc" "${OP_B}.zxc" "${OP_B}.bad.zxc"
+
+# A corrupt block: the output is every block before it, however the jobs finish
+RACE_DATA="$TEST_DIR/race_data"; RACE_XC="$TEST_DIR/race.zxc"
+head -c 1048576 /dev/urandom > "$RACE_DATA"
+"$ZXC_BIN" -q -k -f -C -B 256K -o "$RACE_XC" "$RACE_DATA"
+RACE_SZ=$(wc -c < "$RACE_XC" | tr -d ' ')
+printf 'XXXX' | dd of="$RACE_XC" bs=1 seek=$((RACE_SZ * 5 / 8)) conv=notrunc 2>/dev/null
+for RACE_T in 1 4; do
+    for RACE_I in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+        RACE_OUT=$("$ZXC_BIN" -dc -T "$RACE_T" "$RACE_XC" 2>/dev/null | wc -c | tr -d ' ') || true
+        if [ "$RACE_OUT" != "524288" ]; then
+            log_fail "Corrupt block at -T $RACE_T: $RACE_OUT bytes before the error, expected 524288"
+        fi
+    done
+done
+log_pass "A corrupt block leaves exactly the blocks before it"
+rm -f "$RACE_DATA" "$RACE_XC"
+
+# -f replaces the output only once the new one is complete
+FORCE_DIR="$TEST_DIR/force_dir"; mkdir -p "$FORCE_DIR"
+printf 'not an archive' > "$FORCE_DIR/bad.zxc"
+printf 'precious' > "$FORCE_DIR/keep"
+if "$ZXC_BIN" -q -df "$FORCE_DIR/bad.zxc" "$FORCE_DIR/keep" 2>/dev/null; then
+    log_fail "-df of a bad archive reported success"
+elif [ "$(cat "$FORCE_DIR/keep")" != "precious" ]; then
+    log_fail "-df of a bad archive destroyed the existing output"
+elif ls -A "$FORCE_DIR" | grep -q '^\.zxc-'; then
+    log_fail "-df of a bad archive left a temporary file"
+else
+    log_pass "-f keeps the existing output when the operation fails"
+fi
+printf 'fresh content' > "$FORCE_DIR/in"
+"$ZXC_BIN" -q -k -f -o "$FORCE_DIR/in.zxc" "$FORCE_DIR/in"
+"$ZXC_BIN" -q -df "$FORCE_DIR/in.zxc" "$FORCE_DIR/keep"
+if [ "$(cat "$FORCE_DIR/keep")" != "fresh content" ]; then
+    log_fail "-df did not replace the existing output"
+elif ls -A "$FORCE_DIR" | grep -q '^\.zxc-'; then
+    log_fail "-df left a temporary file"
+else
+    log_pass "-f replaces the existing output on success"
+fi
+rm -rf "$FORCE_DIR"
+
+# A fatal signal leaves no partial output, and the output being replaced intact
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] signal cleanup: POSIX only" ;;
+    *)
+        SIG_DIR="$TEST_DIR/sig_dir"; mkdir -p "$SIG_DIR"
+        SIG_FIFO="$SIG_DIR/fifo"; mkfifo "$SIG_FIFO"
+        SIG_OUT="$SIG_DIR/out.zxc"
+
+        # $1: extra option, $2: the file to wait for, $3: signal (default TERM)
+        sig_run() {
+            "$ZXC_BIN" -q $1 -o "$SIG_OUT" < "$SIG_FIFO" &
+            SIG_PID=$!
+            exec 9> "$SIG_FIFO"
+            printf 'partial' >&9
+            SIG_N=0
+            while [ "$SIG_N" -lt 100 ] && ! ls -A "$SIG_DIR" | grep -q "$2"; do
+                sleep 0.1
+                SIG_N=$((SIG_N + 1))
+            done
+            kill "-${3:-TERM}" "$SIG_PID"
+            SIG_RC=0
+            wait "$SIG_PID" || SIG_RC=$?
+            exec 9>&-
+        }
+
+        sig_run "" '^out\.zxc$'
+        if [ "$SIG_RC" -ne 143 ]; then
+            log_fail "SIGTERM: exit status $SIG_RC instead of 143"
+        elif [ -e "$SIG_OUT" ]; then
+            log_fail "SIGTERM left a partial output"
+        else
+            log_pass "A fatal signal removes the partial output"
+        fi
+
+        printf 'precious' > "$SIG_OUT"
+        sig_run "-f" '^\.zxc-'
+        if [ "$SIG_RC" -ne 143 ]; then
+            log_fail "SIGTERM with -f: exit status $SIG_RC instead of 143"
+        elif [ "$(cat "$SIG_OUT")" != "precious" ]; then
+            log_fail "SIGTERM with -f damaged the existing output"
+        elif ls -A "$SIG_DIR" | grep -q '^\.zxc-'; then
+            log_fail "SIGTERM with -f left a temporary file"
+        else
+            log_pass "A fatal signal leaves the output being replaced intact"
+        fi
+
+        rm -f "$SIG_OUT"
+        for SIG_SPEC in PIPE:141 XCPU:152; do
+            sig_run "" '^out\.zxc$' "${SIG_SPEC%:*}"
+            if [ "$SIG_RC" -ne "${SIG_SPEC#*:}" ] || [ -e "$SIG_OUT" ]; then
+                log_fail "SIG${SIG_SPEC%:*}: status $SIG_RC, or a partial output left"
+            fi
+        done
+        log_pass "SIGPIPE and SIGXCPU also remove the partial output"
+        rm -rf "$SIG_DIR"
+        ;;
+esac
+
+# "- -" is stdin to stdout; no file named after the second dash
+DASH_OUT="$TEST_DIR/dash.out"
+rm -f ./-
+printf 'through' | "$ZXC_BIN" -q - - > "$DASH_OUT"
+if [ -e ./- ]; then
+    rm -f ./-
+    log_fail "zxc - - created a file named -"
+elif [ "$("$ZXC_BIN" -dc "$DASH_OUT")" = "through" ]; then
+    log_pass "zxc - - writes to stdout"
+else
+    log_fail "zxc - - lost its output"
+fi
+rm -f "$DASH_OUT"
+
+# -t -j over several files is one JSON document, a missing file included
+JT_A="$TEST_DIR/jt_a.zxc"
+printf 'json test' | "$ZXC_BIN" -q > "$JT_A"
+JT_OUT=$("$ZXC_BIN" -t -j "$JT_A" "$TEST_DIR/jt_missing.zxc" "$JT_A" 2>/dev/null) || true
+if [ "$(printf '%s\n' "$JT_OUT" | head -1)" = "[" ] && [ "$(printf '%s\n' "$JT_OUT" | tail -1)" = "]" ] &&
+    [ "$(printf '%s\n' "$JT_OUT" | grep -c '^,$')" = "2" ] &&
+    [ "$(printf '%s\n' "$JT_OUT" | grep -c '"status"')" = "3" ]; then
+    log_pass "-t -j over several files prints one array"
+else
+    log_fail "-t -j over several files: $JT_OUT"
+fi
+rm -f "$JT_A"
+
+# -f steps over a temporary left under this pid; -r takes none of them
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] leftover temporary: POSIX only" ;;
+    *)
+        STALE_DIR="$TEST_DIR/stale_dir"; mkdir -p "$STALE_DIR"
+        printf 'stale input' > "$STALE_DIR/in"; printf 'old' > "$STALE_DIR/tgt"
+        STALE_ARGS="-q -k -f -o $STALE_DIR/tgt $STALE_DIR/in"
+        if ZXC_BIN="$ZXC_BIN" STALE_DIR="$STALE_DIR" STALE_ARGS="$STALE_ARGS" \
+            sh -c ': > "$STALE_DIR/.zxc-$$-0.tmp"; exec "$ZXC_BIN" $STALE_ARGS' &&
+            [ "$("$ZXC_BIN" -dc "$STALE_DIR/tgt")" = "stale input" ]; then
+            log_pass "-f steps over a temporary left under its pid"
+        else
+            log_fail "-f failed on a temporary left under its pid"
+        fi
+        "$ZXC_BIN" -q -r -k -f "$STALE_DIR"
+        if ls -A "$STALE_DIR" | grep -q '^\.zxc-.*\.zxc$'; then
+            log_fail "-r compressed a leftover temporary"
+        else
+            log_pass "-r leaves leftover temporaries alone"
+        fi
+        rm -rf "$STALE_DIR"
+        ;;
+esac
+
+# A failed write is reported as such, even with a corrupt block further on
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] write failure code: POSIX only" ;;
+    *)
+        WF_DATA="$TEST_DIR/wf_data"; WF_XC="$TEST_DIR/wf.zxc"
+        head -c 8388608 /dev/urandom > "$WF_DATA"
+        "$ZXC_BIN" -q -k -f -C -B 2M -o "$WF_XC" "$WF_DATA"
+        WF_SZ=$(wc -c < "$WF_XC" | tr -d ' ')
+        printf 'XXXX' | dd of="$WF_XC" bs=1 seek=$((WF_SZ * 7 / 8)) conv=notrunc 2>/dev/null
+        for WF_I in 1 2 3 4 5; do
+            WF_ERR=$("$ZXC_BIN" -dc -T 4 "$WF_XC" 2>&1 1</dev/null) || true
+            case "$WF_ERR" in
+                *ZXC_ERROR_IO*) ;;
+                *) log_fail "Write failure reported as: $WF_ERR" ;;
+            esac
+        done
+        log_pass "A failed write is reported as an I/O error"
+        rm -f "$WF_DATA" "$WF_XC"
+        ;;
+esac
+
 echo "All tests passed!"
 exit 0

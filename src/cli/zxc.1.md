@@ -21,7 +21,7 @@
 
 ZXC follows the *write once, read many* model: it spends more effort on compression to produce a bitstream that decodes as fast as possible, moving the complexity from the decoder to the encoder. It targets very high decompression speed on modern architectures while keeping competitive compression ratios, and suits data such as game assets, firmware or application bundles that is compressed once on a build server and decompressed many times on user devices.
 
-By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the output name is the input name with `.zxc` appended on compression, or with `.zxc` removed on decompression. Without *INPUT-FILE*, **zxc** reads stdin and writes stdout.
+By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the output name is the input name with `.zxc` appended on compression, or with `.zxc` removed on decompression. Without *INPUT-FILE*, **zxc** reads stdin and writes stdout. A failure or a fatal signal removes the partial output (Windows: failure only). **-c** and **-t** treat every operand as an input; otherwise, more than two need **-m**.
 
 
 ## STANDARD MODES
@@ -71,7 +71,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Use a pre-trained dictionary (`.zxd`) for compression or decompression. On compression, the archive records the dictionary's `dict_id` in its header. On decompression, **-D** is **required** for any archive that was compressed with a dictionary: there is no auto-lookup, and without it decompression fails with a dictionary-required error (see **DICTIONARIES**).
 
 **-o**, **--output** *FILE*
-: Write output to *FILE*. For compression and decompression this overrides the positional *OUTPUT-FILE* (single-file mode only); when omitted the output name is derived from the input. For **--train** it sets the dictionary path: if *FILE* is a directory (or ends with a path separator) the dictionary is saved inside it as `dictionary_<dict_id>.zxd`, otherwise *FILE* is used verbatim; when omitted the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory.
+: Write output to *FILE*. For compression and decompression this replaces the positional *OUTPUT-FILE*, which cannot be given as well (single-file mode only); when omitted the output name is derived from the input. For **--train** it sets the dictionary path: if *FILE* is a directory (or ends with a path separator) the dictionary is saved inside it as `dictionary_<dict_id>.zxd`, otherwise *FILE* is used verbatim; when omitted the dictionary is written to `dictionary_<dict_id>.zxd` in the current directory.
 
 **-S**, **--seekable**
 : Append a seek table to the archive during compression. The archive then supports random access: the decoder locates and decompresses any block in `O(1)` without reading the whole file. Suited to compressed filesystems, game assets and log analysis.
@@ -86,7 +86,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Do not copy the input's attributes to the output. By default, when the input is a regular file, the output takes its permission bits (no setuid, setgid or sticky), access and modification times, group and, as root, owner; decompression thus restores the original's. The output is created `0600` and gets its final mode once complete; a group that cannot be kept loses its permission bits. If the mode or times cannot be set, **zxc** warns and keeps the input. On Windows only the times are copied. The format stores none of these.
 
 **-f**, **--force**
-: Overwrite *OUTPUT-FILE* if it exists. An existing file or symbolic link is removed and a new file created, so a link at the output path is replaced, never followed; a device such as `/dev/null` is written as is. When decompressing to stdout (with **-c**, or from stdin without an *OUTPUT-FILE*), also copy input that is not a ZXC archive unchanged. A named file is decoded only if it starts with the 4-byte magic word. stdin cannot be rewound, so there only its first byte counts: input that starts with `0xF5`, which never starts UTF-8 text, is decoded as an archive.
+: Overwrite *OUTPUT-FILE* if it exists, once the new output is complete: a failure leaves it untouched, and a symbolic link there is replaced, never followed. A device such as `/dev/null` is written as is. When decompressing to stdout (with **-c**, or from stdin without an *OUTPUT-FILE*), also copy input that is not a ZXC archive unchanged. A named file is decoded only if it starts with the 4-byte magic word. stdin cannot be rewound, so there only its first byte counts: input that starts with `0xF5`, which never starts UTF-8 text, is decoded as an archive.
 
 **-c**, **--stdout**
 : Write to stdout, even when it is a terminal; compressed data to a terminal needs **-f**.
