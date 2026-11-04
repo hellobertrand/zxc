@@ -39,18 +39,16 @@ jobs:
         if [ "${{ matrix.language }}" = "c-cpp" ]; then
           make
         elif [ "${{ matrix.language }}" = "rust" ]; then
-          cd wrappers/rust
+          cd bindings/rust
           cargo build --workspace --all-targets
         elif [ "${{ matrix.language }}" = "python" ]; then
-          python3 -m pip install --require-hashes -r wrappers/python/requirements/build-deps.txt
-          python3 -m pip install -e wrappers/python --no-build-isolation --no-deps
+          python3 -m pip install --require-hashes -r bindings/python/requirements/build-deps.txt
+          python3 -m pip install -e bindings/python --no-build-isolation --no-deps
         elif [ "${{ matrix.language }}" = "go" ]; then
-          cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED_LIBS=OFF -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
-          cmake --build build --parallel
-          cd wrappers/go
-          CGO_ENABLED=1 CGO_LDFLAGS="-L../../build -lzxc -lpthread" go build ./...
+          cd bindings/go
+          CGO_ENABLED=1 go build ./...
         elif [ "${{ matrix.language }}" = "javascript-typescript" ]; then
-          cd wrappers/nodejs
+          cd bindings/nodejs
           npm ci
         fi
 

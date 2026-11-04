@@ -1,7 +1,7 @@
 # Tests
 
 Everything that exercises the library and the CLI lives here, one suite per
-directory. `wrappers/*/tests` hold the language bindings' own suites.
+directory. `bindings/*/tests` hold the language bindings' own suites.
 
 ```
 unit/          C unit tests of the public API and internals (ctest target: zxc_test)

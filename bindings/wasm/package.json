@@ -34,6 +34,6 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/hellobertrand/zxc.git",
-    "directory": "wrappers/wasm"
+    "directory": "bindings/wasm"
   }
 }

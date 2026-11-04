@@ -25,7 +25,15 @@
 package zxc
 
 /*
-#cgo CFLAGS:  -I${SRCDIR}/../../include -DZXC_STATIC_DEFINE
+#cgo CFLAGS: -O3 -DNDEBUG -DZXC_STATIC_DEFINE
+#cgo CFLAGS: -I${SRCDIR}/zxc-core -I${SRCDIR}/zxc-core/include -I${SRCDIR}/zxc-core/src/lib/vendors
+#cgo CFLAGS: -I${SRCDIR}/../.. -I${SRCDIR}/../../include -I${SRCDIR}/../../src/lib/vendors
+#cgo linux CFLAGS: -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+#cgo darwin windows CFLAGS: -D_GNU_SOURCE
+#cgo freebsd netbsd openbsd dragonfly CFLAGS: -D_GNU_SOURCE -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE
+// Baseline only: arm needs per-file NEON flags, and Windows GCC needs an assembler
+// flag cgo refuses to keep AVX stack spills from faulting (PR54412).
+#cgo arm windows CFLAGS: -DZXC_ONLY_DEFAULT
 #cgo LDFLAGS: -lpthread
 
 #include <stdlib.h>

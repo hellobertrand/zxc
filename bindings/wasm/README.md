@@ -138,7 +138,7 @@ emcmake cmake -B build-wasm -DCMAKE_BUILD_TYPE=Release
 cmake --build build-wasm
 
 # Test
-BUILD_DIR=build-wasm node wrappers/wasm/test.mjs
+BUILD_DIR=build-wasm node bindings/wasm/test.mjs
 ```
 
 The build produces `build-wasm/zxc.js` and `build-wasm/zxc.wasm`.

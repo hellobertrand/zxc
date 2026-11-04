@@ -81,7 +81,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     # Join list with commas for Emscripten linker flag
     string(JOIN "," ZXC_WASM_EXPORTS_STR ${ZXC_WASM_EXPORTS})
 
-    add_executable(zxc_wasm wrappers/wasm/wasm_entry.c)
+    add_executable(zxc_wasm bindings/wasm/wasm_entry.c)
     target_link_libraries(zxc_wasm PRIVATE zxc_lib)
     set_target_properties(zxc_wasm PROPERTIES
         OUTPUT_NAME "zxc"

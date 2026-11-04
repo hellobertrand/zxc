@@ -2,6 +2,6 @@
 exclude:
   code:
     - tests/**
-    - wrappers/go/*_test.go
-    - wrappers/nodejs/test/**
-    - wrappers/python/tests/**
+    - bindings/go/*_test.go
+    - bindings/nodejs/test/**
+    - bindings/python/tests/**

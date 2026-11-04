@@ -84,13 +84,13 @@ build-cov/
 
 # WASM build outputs staged into the npm package
 build-wasm/
-wrappers/wasm/zxc.js
-wrappers/wasm/zxc.wasm
+bindings/wasm/zxc.js
+bindings/wasm/zxc.wasm
 
 # Meson
 builddir*/
 subprojects/
-wrappers/nodejs/zxc-core/
+bindings/nodejs/zxc-core/
 
 # site
 site/dist/

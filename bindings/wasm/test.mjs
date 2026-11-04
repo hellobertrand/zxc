@@ -3,7 +3,7 @@
  * ZXC WASM Roundtrip Test
  *
  * Validates compress -> decompress correctness via Node.js.
- * Run: node wrappers/wasm/test.mjs
+ * Run: node bindings/wasm/test.mjs
  *
  * Expects the built zxc.js + zxc.wasm to be in the build directory.
  * The BUILD_DIR environment variable can override the default path.
