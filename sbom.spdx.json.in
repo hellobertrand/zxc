@@ -19,7 +19,7 @@
       "filesAnalyzed": false,
       "licenseConcluded": "BSD-3-Clause",
       "licenseDeclared": "BSD-3-Clause",
-      "copyrightText": "NOASSERTION",
+      "copyrightText": "Copyright (c) 2025 Bertrand Lebonnois and contributors",
       "primaryPackagePurpose": "APPLICATION",
       "externalRefs": [
         {

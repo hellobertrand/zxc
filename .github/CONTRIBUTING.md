@@ -47,6 +47,8 @@ To maintain legal clarity and recognize all contributors, every new source file 
 | `.h` | `/* SPDX-License-Identifier: BSD-3-Clause */` |
 | `.py`, `.pyi`, `.sh`, `.cmake`, `.cmake.in`, `CMakeLists.txt`, `Makefile`, `Kbuild`, `meson.build`, `meson_options.txt`, `Dockerfile` | `# SPDX-License-Identifier: BSD-3-Clause` |
 
+The copyright line carries no year. A file you write from scratch may name you instead: `Copyright (c) <Name> and contributors.`
+
 For example, in a `.c` file:
 
 ```C
