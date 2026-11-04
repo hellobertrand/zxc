@@ -13,7 +13,6 @@ import importlib.metadata
 import pathlib
 
 import zxc
-from zxc import _zxc
 
 DIST = importlib.metadata.distribution("zxc-compress")
 
@@ -35,7 +34,7 @@ def test_requires_python_is_declared():
 
 
 def test_extension_carries_the_abi_tag():
-    assert _zxc.__file__.endswith(importlib.machinery.EXTENSION_SUFFIXES[0])
+    assert zxc._zxc.__file__.endswith(importlib.machinery.EXTENSION_SUFFIXES[0])
 
 
 def _stub_function(name, cls=None):

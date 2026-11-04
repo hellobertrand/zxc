@@ -10,6 +10,7 @@ from __future__ import annotations
 import errno as _errno
 import io as _io
 import os as _os
+import stat as _stat
 from typing import NamedTuple
 
 from ._zxc import (
@@ -451,6 +452,10 @@ def _prepare_files(src, dst) -> bool:
         dst.flush()
 
     if not (hasattr(src, "seekable") and src.seekable()):
+        return False
+    # Windows calls pipes seekable, and what is read from one below would be lost.
+    mode = _os.fstat(src.fileno()).st_mode
+    if not (_stat.S_ISREG(mode) or _stat.S_ISBLK(mode)):
         return False
     pos = src.tell()
     # A seek inside the read-ahead keeps it: read it out so the seek reaches the fd.

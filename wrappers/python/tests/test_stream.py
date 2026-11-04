@@ -311,11 +311,11 @@ def test_stream_source_refusing_seek_end(tmp_path):
     assert zxc.decompress(arc_path.read_bytes()) == PAYLOAD[10:]
 
 
-@pytest.mark.skipif(not os.path.exists("/proc/cpuinfo"), reason="needs /proc")
+@pytest.mark.skipif(not os.path.exists("/proc/version"), reason="needs /proc")
 def test_stream_compress_proc_file(tmp_path):
     arc_path = tmp_path / "arc"
-    with open("/proc/cpuinfo", "rb") as f:
+    with open("/proc/version", "rb") as f:
         expected = f.read()
-    with open("/proc/cpuinfo", "rb") as src, open(arc_path, "wb") as dst:
+    with open("/proc/version", "rb") as src, open(arc_path, "wb") as dst:
         zxc.stream_compress(src, dst)
     assert zxc.decompress(arc_path.read_bytes()) == expected

@@ -145,23 +145,24 @@ def test_oversized_dictionary_is_rejected_at_creation():
         ctx(dict=b"x" * 65535).close()
 
 
-_RAW = os.urandom(1 << 26)
-_ARCHIVE = zxc.compress(os.urandom(300) * (1 << 18))
+@pytest.fixture(scope="module")
+def slow_inputs():
+    return os.urandom(1 << 26), zxc.compress(os.urandom(300) * (1 << 18))
 
 
 @pytest.mark.parametrize(
     "make",
     [
-        lambda: (h := zxc.Cctx(level=1), lambda: h.compress(_RAW)),
-        lambda: (h := zxc.Dctx(), lambda: h.decompress(_ARCHIVE)),
-        lambda: (h := zxc.CStream(level=1), lambda: h.compress(_RAW)),
-        lambda: (h := zxc.DStream(), lambda: h.decompress(_ARCHIVE)),
+        lambda raw, _: (h := zxc.Cctx(level=1), lambda: h.compress(raw)),
+        lambda _, arc: (h := zxc.Dctx(), lambda: h.decompress(arc)),
+        lambda raw, _: (h := zxc.CStream(level=1), lambda: h.compress(raw)),
+        lambda _, arc: (h := zxc.DStream(), lambda: h.decompress(arc)),
     ],
     ids=["Cctx", "Dctx", "CStream", "DStream"],
 )
-def test_close_refused_during_a_call_on_another_thread(make):
+def test_close_refused_during_a_call_on_another_thread(make, slow_inputs):
     for _ in range(20):
-        handle, call = make()
+        handle, call = make(*slow_inputs)
         started = threading.Event()
 
         def run():

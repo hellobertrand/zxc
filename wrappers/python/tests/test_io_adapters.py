@@ -296,11 +296,13 @@ PAYLOAD = bytes(range(256)) * 4000
 def test_writer_keeps_output_the_sink_blocked_on():
     sink = _FlakySink()
     w = zxc.ZxcWriter(sink, level=1)
-    assert w.write(PAYLOAD) == len(PAYLOAD)
+    taken = w.write(PAYLOAD)
+    assert taken == len(PAYLOAD)
     with pytest.raises(BlockingIOError):
         w.write(PAYLOAD)  # not taken
     sink.up = True
-    assert w.write(PAYLOAD) == len(PAYLOAD)
+    taken = w.write(PAYLOAD)
+    assert taken == len(PAYLOAD)
     w.close()
     assert zxc.decompress(bytes(sink.data)) == PAYLOAD * 2
 

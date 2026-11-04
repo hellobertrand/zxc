@@ -46,7 +46,8 @@ def _ctx(data, tmp_path):
     ids=["compress", "Cctx", "CStream", "ZxcWriter", "stream_compress"],
 )
 def test_default_compression_writes_no_checksum(write, tmp_path):
-    assert zxc.get_frame_info(write(PAYLOAD, tmp_path)).has_checksum is False
+    info = zxc.get_frame_info(write(PAYLOAD, tmp_path))
+    assert info.has_checksum is False
 
 
 def _dctx(arc, _, **kw):
@@ -132,7 +133,8 @@ def test_none_keeps_verification(read, tmp_path):
     ids=["compress", "Cctx", "CStream"],
 )
 def test_none_writes_no_checksum(write):
-    assert zxc.get_frame_info(write(PAYLOAD)).has_checksum is False
+    info = zxc.get_frame_info(write(PAYLOAD))
+    assert info.has_checksum is False
 
 
 def test_none_writes_no_checksum_through_files(tmp_path):

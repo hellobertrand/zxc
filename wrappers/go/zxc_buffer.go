@@ -185,11 +185,11 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 
 	// The footer value is plausibility-checked in C (a forged size returns 0);
 	// only guard what Go's make() cannot represent.
-	if size > math.MaxInt {
-		return nil, ErrInvalidData
-	}
 	if o.maxOutputSet && size > o.maxOutput {
 		return nil, ErrDstTooSmall
+	}
+	if size > math.MaxInt {
+		return nil, ErrInvalidData
 	}
 
 	dst := make([]byte, size)
