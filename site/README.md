@@ -14,12 +14,16 @@ The only npm dependency is [`marked`](https://www.npmjs.com/package/marked),
 pinned in `package-lock.json`. The design is deliberately plain, in the style of
 GNU project pages and Texinfo manuals: no framework and no inline JavaScript.
 
-Pages make three kinds of third-party request:
+Pages make four kinds of third-party request:
 
 - Noto Sans and Noto Sans Mono from Google Fonts (`layout()` in `build.mjs`),
   with system fonts as fallback;
-- the GitHub API, for the star count (`src/assets/site.js`, cached for an hour
-  in `localStorage`; the build also fetches it once to render it statically);
+- the GitHub star button in the masthead, rendered by
+  [buttons.github.io](https://buttons.github.io) (`header()` and `layout()` in
+  `build.mjs`; without the script it is a plain link);
+- the GitHub API, for the star count in the body of the pages
+  (`src/assets/site.js`, cached for an hour in `localStorage`; the build also
+  fetches it once to render it statically);
 - the Repology packaging badge on the landing page (`src/index.html`).
 
 ## Local preview

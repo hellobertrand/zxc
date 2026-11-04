@@ -291,7 +291,7 @@ function makeMarkdown(doc) {
 
 // Content hashes for cache busting, so CSS/JS can be cached as immutable.
 const ASSET_V = { css: "", js: "" };
-// Filled in by build(): shown in the footer.
+// Filled in by build(): shown by starCount().
 const META = { version: "", releaseDate: "", stars: null };
 
 // ---------------------------------------------------------------------------
@@ -307,6 +307,14 @@ const NAV = [
   ["/#help", "Help"],
 ];
 
+// One plain sentence, GNU style, with the GitHub star count: no button, no badge.
+// The count is refreshed by site.js and hidden until known, so the line reads fine without it.
+function starCount() {
+  const n = META.stars === null ? "" : META.stars.toLocaleString("en-US");
+  const count = `<span class="gh-stars" data-gh-stars${META.stars === null ? " hidden" : ""}> (<svg viewBox="0 0 16 16" width="14" height="14" role="img" aria-label="stars"><path fill="currentColor" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.751.751 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25Z"/></svg> <span data-gh-stars-n>${n}</span> so far)</span>`;
+  return `If ZXC is useful to you, a <a href="${GH}">star on GitHub</a> helps others find it${count}.`;
+}
+
 function header(active) {
   const links = NAV.map(([href, label]) =>
     `<li><a href="${href}"${active === href ? ' aria-current="page"' : ""}>${label}</a></li>`).join("");
@@ -315,8 +323,9 @@ function header(active) {
   <div class="inner">
     <div>
       <p class="site-name"><a href="/">ZXC</a></p>
-      <p class="site-tag">Asymmetric lossless compression, built for ultra-fast decode</p>
+      <p class="site-tag">High-performance lossless compression, built for ultra-fast decode</p>
     </div>
+    <p class="site-stars"><a class="github-button" href="${GH}" data-color-scheme="no-preference: light; light: light; dark: dark;" data-icon="octicon-star" data-show-count="true" aria-label="Star hellobertrand/zxc on GitHub">Star</a></p>
   </div>
   <nav class="navbar" aria-label="Main"><ul>${links}</ul></nav>
 </header>`;
@@ -329,7 +338,7 @@ function footer() {
     <p><a href="#main">Back to top</a></p>
     <p>Copyright &copy; 2025 Bertrand Lebonnois and contributors.</p>
     <p>ZXC is free software, released under the BSD 3-Clause License. This site is generated from the <a href="${GH}">zxc repository</a>; please report problems with it on the <a href="${GH}/issues">issue tracker</a>.</p>
-    <p>Updated: ${today} (ZXC ${esc(META.version)})<span data-gh-stars${META.stars === null ? " hidden" : ""}> | <a class="gh-stars" href="${GH}" aria-label="GitHub stars"><svg viewBox="0 0 16 16" width="14" height="14" aria-hidden="true"><path fill="currentColor" d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg> <span data-gh-stars-n>${META.stars === null ? "" : META.stars.toLocaleString("en-US")}</span></a></span></p>
+    <p>Updated: ${today} (ZXC ${esc(META.version)})</p>
   </div>
 </footer>`;
 }
@@ -338,7 +347,7 @@ function footer() {
 
 function docBody(doc, { html, toc, title }, version) {
   const t = esc(title || doc.title);
-  const meta = `<p class="doc-meta">ZXC ${esc(version)}. Generated from <a href="${GH}/blob/${BRANCH}/${doc.file}"><code>${esc(doc.file)}</code></a>; corrections are welcome as <a href="${GH}/edit/main/${doc.file}">pull requests</a>.</p>`;
+  const meta = `<p class="doc-meta">ZXC ${esc(version)}. Generated from <a href="${GH}/blob/${BRANCH}/${doc.file}"><code>${esc(doc.file)}</code></a>; corrections are welcome as <a href="${GH}/edit/main/${doc.file}">pull requests</a>. ${starCount()}</p>`;
   const contents = doc.slug === "changelog" ? "" : contentsBlock(toc);
   return `<div class="inner prose">
 ${nodeNav(doc)}
@@ -378,6 +387,7 @@ function layout({ title, description, urlPath, body, active, jsonLd }) {
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans:ital,wght@0,400;0,700;1,400&family=Noto+Sans+Mono:wght@400;700&display=swap">
 <link rel="stylesheet" href="/assets/site.css?v=${ASSET_V.css}">
 <script src="/assets/site.js?v=${ASSET_V.js}" defer></script>
+<script src="https://buttons.github.io/buttons.js" async defer></script>
 ${jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : ""}
 </head>
 <body>
@@ -620,11 +630,12 @@ async function build() {
     .replaceAll("{{FORMAT_VERSION}}", esc(formatVersion))
     .replaceAll("{{BENCH_TOOL}}", esc(bench.tool))
     .replaceAll("{{RELEASE_DATE}}", releaseDate ? `, released on ${releaseDate}` : "")
+    .replaceAll("{{STARS}}", () => starCount())
     .replace("{{BENCH_FIGURE}}", () => renderFigure(bench))
     .replace("{{BENCH_TABLES}}", () => renderBenchTables(bench))
     .replace("{{LEVELS_TABLE}}", () => renderLevels(bench));
   await write("/", layout({
-    title: "ZXC: Lossless compression built for ultra-fast decode",
+    title: "ZXC: Lossless compression library for ultra-fast decode",
     description: "ZXC is a lossless compression C library for write-once, read-many data. It decodes faster than LZ4 at a smaller size, with seekable archives, dictionaries and SIMD on ARM and x86.",
     urlPath: "/",
     body: highlightHtml(landing),
@@ -634,7 +645,7 @@ async function build() {
       "@type": "SoftwareSourceCode",
       name: "ZXC",
       alternateName: "libzxc",
-      description: "Asymmetric lossless compression library built for ultra-fast decode.",
+      description: "High-performance lossless compression library built for ultra-fast decode.",
       codeRepository: GH,
       programmingLanguage: "C",
       license: "https://opensource.org/license/bsd-3-clause",
@@ -680,6 +691,7 @@ ${entries.filter((d) => d.group === g).map((d) => `  <dt><a href="${d.href}"${d.
     body: `<div class="inner">
 <h1>ZXC documentation</h1>
 <p>This documentation describes ZXC ${esc(version)}. It is generated from the <code>docs/</code> directory of the source repository, so it always matches the released code. If you are new to ZXC, start with the <a href="/#start">quick start</a> and then the <a href="/docs/examples/">examples</a>.</p>
+<p class="doc-meta">${starCount()}</p>
 ${lists}
 </div>`,
   }));

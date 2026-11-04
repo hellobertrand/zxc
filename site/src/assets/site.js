@@ -26,7 +26,7 @@
     });
   }
 
-  // GitHub star count in the footer: refresh the build-time figure,
+  // GitHub star count: refresh the build-time figure,
   // at most once an hour per browser.
   var stars = document.querySelectorAll("[data-gh-stars]");
   if (stars.length && window.fetch) {

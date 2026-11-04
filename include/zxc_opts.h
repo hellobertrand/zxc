@@ -71,8 +71,8 @@ typedef enum {
 /**
  * @brief Decompression parameters, set on a @c zxc_dctx with zxc_dctx_set_param().
  *
- * Same rules as @ref zxc_cparam_t: 0 restores the default, other values must
- * sit within zxc_dparam_bounds(). The dictionary and the progress callback
+ * Same rules as @ref zxc_cparam_t, so 0 restores the default and other values
+ * must sit within zxc_dparam_bounds(). The dictionary and the progress callback
  * go through zxc_dctx_set_dict() and zxc_dctx_set_progress().
  */
 typedef enum {
