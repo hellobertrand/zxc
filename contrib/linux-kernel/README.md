@@ -157,5 +157,7 @@ The stock `posix_memalign` / `_aligned_malloc` helpers are `static inline` in
 
 ## Licensing
 
-BSD-3-Clause. A module calling `EXPORT_SYMBOL_GPL` symbols declares
-`MODULE_LICENSE("Dual BSD/GPL")`; BSD-3 is GPL-compatible.
+BSD-3-Clause, per the SPDX tags; the kernel accepts it on its own
+(`LICENSES/preferred/`). `MODULE_LICENSE("Dual BSD/GPL")` is the
+loader's string for a BSD module, not a license statement
+(`Documentation/process/license-rules.rst`).

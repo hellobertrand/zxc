@@ -368,14 +368,16 @@ describe("Package metadata", () => {
   const manifest = (dir) =>
     JSON.parse(readFileSync(join(root, dir, "package.json"), "utf8"));
 
-  test("the tarball carries a root LICENSE", () => {
+  test("the tarball carries a root LICENSE and the third-party notices", () => {
     const out = execSync("npm pack --dry-run --json --ignore-scripts=false", {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
     const json = JSON.parse(out.slice(out.indexOf("[")));
-    expect(json[0].files.map((f) => f.path)).toContain("LICENSE");
+    const paths = json[0].files.map((f) => f.path);
+    expect(paths).toContain("LICENSE");
+    expect(paths).toContain("THIRD_PARTY_NOTICES");
   }, 60000);
 
   test("engines does not promise less than the build tool needs", () => {

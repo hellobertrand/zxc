@@ -1984,6 +1984,10 @@ async function main() {
       (f) => f.path,
     );
     assert(files.includes("LICENSE"), "the tarball carries a LICENSE");
+    assert(
+      files.includes("THIRD_PARTY_NOTICES"),
+      "the tarball carries the third-party notices",
+    );
   }
 
   // --- Summary ---
