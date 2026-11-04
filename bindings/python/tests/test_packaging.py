@@ -22,7 +22,9 @@ def test_version_matches_the_distribution():
 
 
 def test_license_is_shipped():
-    assert any(f.name == "LICENSE" for f in DIST.files)
+    names = {f.name for f in DIST.files}
+    assert "LICENSE" in names
+    assert "THIRD_PARTY_NOTICES" in names
 
 
 def test_c_source_is_not_shipped():

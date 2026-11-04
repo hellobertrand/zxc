@@ -12,12 +12,13 @@
     "zxc.js",
     "zxc.wasm",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES"
   ],
   "scripts": {
     "test": "node test.mjs",
-    "prepack": "node -e \"require('node:fs').copyFileSync('../../LICENSE', 'LICENSE')\"",
-    "postpack": "node -e \"require('node:fs').rmSync('LICENSE', { force: true })\""
+    "prepack": "node -e \"for (const f of ['LICENSE', 'THIRD_PARTY_NOTICES']) require('node:fs').copyFileSync('../../' + f, f)\"",
+    "postpack": "node -e \"for (const f of ['LICENSE', 'THIRD_PARTY_NOTICES']) require('node:fs').rmSync(f, { force: true })\""
   },
   "keywords": [
     "compression",

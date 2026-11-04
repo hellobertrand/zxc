@@ -406,7 +406,7 @@ Two byte-frozen suites guard the format:
 ## License & Credits
 
 **ZXC** Copyright © Bertrand Lebonnois and contributors.
-Licensed under the **BSD 3-Clause License**. See LICENSE for details.
+Licensed under the **BSD 3-Clause License**. See LICENSE for details; bundled third-party components are listed in THIRD_PARTY_NOTICES.
 
 **Third-Party Components:**
 - **[rapidhash](https://github.com/Nicoshev/rapidhash)** by [Nicolas De Carli](https://github.com/Nicoshev) (MIT) - Used for high-speed, platform-independent checksums.

@@ -1,10 +1,11 @@
 #!/bin/sh
 # SPDX-License-Identifier: BSD-3-Clause
-# Release archive docs: LICENSE.txt, MANUAL.md and README.md into $2.
+# Release archive docs: LICENSE.txt, THIRD_PARTY_NOTICES.txt, MANUAL.md and README.md into $2.
 # $1 = version, stdin = the archive's contents list; GITHUB_REPOSITORY names the repo.
 set -eu
 contents=$(cat)
 cp LICENSE "$2/LICENSE.txt"
+cp THIRD_PARTY_NOTICES "$2/THIRD_PARTY_NOTICES.txt"
 cp src/cli/zxc.1.md "$2/MANUAL.md"
 cat > "$2/README.md" <<README
 # ZXC $1
@@ -26,5 +27,5 @@ $contents
 gh attestation verify <archive> --repo ${GITHUB_REPOSITORY}
 \`\`\`
 
-License: BSD-3-Clause (see LICENSE.txt)
+License: BSD-3-Clause (see LICENSE.txt; bundled rapidhash is MIT, see THIRD_PARTY_NOTICES.txt)
 README
