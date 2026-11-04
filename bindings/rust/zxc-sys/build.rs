@@ -286,6 +286,7 @@ fn main() {
             &[
                 "-mavx512f",
                 "-mavx512bw",
+                "-mavx512vl",
                 "-mavx512vbmi",
                 "-mavx512vbmi2",
                 "-mbmi",
