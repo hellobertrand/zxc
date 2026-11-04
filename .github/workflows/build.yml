@@ -108,7 +108,7 @@ jobs:
 
       - name: Upload Artifacts
         if: github.event_name == 'release'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
@@ -228,7 +228,7 @@ jobs:
 
       - name: Upload Artifacts
         if: github.event_name == 'release'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: zxc-${{ matrix.platform }}
           path: ${{ env.ARCHIVE }}
@@ -264,7 +264,7 @@ jobs:
           "$ZXC" -7 "zxc-${VERSION}.tar" -o "zxc-${VERSION}.tar.zxc"   # 7 = ULTRA, the densest level
 
       - name: Upload source artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: source
           path: |
@@ -305,7 +305,7 @@ jobs:
           jq empty "$SBOM_FILE"
 
       - name: Upload SBOM artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: sbom
           path: zxc-${{ steps.ref.outputs.version }}-sbom.spdx.json
