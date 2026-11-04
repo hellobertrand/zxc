@@ -1,4 +1,5 @@
 #!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
 # Copies the C core into the module: a module zip holds nothing above its directory.
 set -eu
 mod=$(cd "$(dirname "$0")/.." && pwd)

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause
 // cgo has one set of flags per package, so a variant selects its ISA from the source.
 #define ZXC_FUNCTION_SUFFIX _avx512
 #ifdef __clang__

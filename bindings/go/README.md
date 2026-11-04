@@ -23,14 +23,13 @@ paths chosen at run time.
 
 ## Versioning
 
-Releases are tagged `bindings/go/vX.Y.Z`, so the module can be pinned to one:
+Releases are tagged `bindings/go/vX.Y.Z`: `go get` picks the latest, `@vX.Y.Z`
+pins one.
 
-```bash
-go get github.com/hellobertrand/zxc/bindings/go@v0.14.0
-```
+Only these tags carry the C core, which the repository keeps above the module
+directory. A branch or a commit (`@main`, a pseudo-version) does not build.
 
-Without a version, `go get` resolves to a pseudo-version of the default branch,
-which tracks development rather than the release line.
+Versions up to v0.15.0 are published as `github.com/hellobertrand/zxc/wrappers/go`.
 
 ## Quick Start
 
