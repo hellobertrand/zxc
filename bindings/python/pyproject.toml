@@ -8,7 +8,7 @@ dynamic = ["version"]
 description = "ZXC: Package for high-performance asymmetric lossless compression built for ultra-fast decode"
 readme = "README.md"
 license = "BSD-3-Clause"
-license-files = ["LICENSE"]
+license-files = ["LICENSE", "THIRD_PARTY_NOTICES"]
 requires-python = ">=3.10"
 
 [project.urls]

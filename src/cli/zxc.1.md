@@ -192,4 +192,4 @@ Report bugs at <https://github.com/hellobertrand/zxc/issues>.
 Bertrand Lebonnois
 
 ## LICENSE
-BSD 3-Clause License.
+BSD 3-Clause License. Bundles rapidhash (MIT); see THIRD_PARTY_NOTICES in the source tree.
