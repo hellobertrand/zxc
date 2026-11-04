@@ -292,9 +292,10 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 /// Decompresses data with full options control.
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
     // Invalid input falls through with size 0, for the C decoder to name the error.
-    let size = decompressed_size(compressed).unwrap_or(0) as usize;
+    let claimed = decompressed_size(compressed).unwrap_or(0);
+    // The footer is untrusted: its claim can exceed usize, or what the allocator grants.
+    let size = usize::try_from(claimed).map_err(|_| Error::Memory)?;
     let mut output: Vec<u8> = Vec::new();
-    // The footer is untrusted: its claim can exceed what the allocator grants.
     output.try_reserve_exact(size).map_err(|_| Error::Memory)?;
 
     let written =

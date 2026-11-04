@@ -371,6 +371,7 @@ export default async function createZXC(moduleOverrides, factory) {
   const ZXC_C_CHECKSUM = 4;
   const ZXC_C_SEEKABLE = 5;
   const ZXC_D_CHECKSUM = 2;
+  const ZXC_ERROR_SRC_TOO_SMALL = -3;
   const ZXC_ERROR_BAD_LEVEL = -18;
 
   /** Throw a descriptive error when a context setter returns a code. */
@@ -1248,6 +1249,14 @@ export default async function createZXC(moduleOverrides, factory) {
           throw new RangeError("ZXC: length must be an integer in [0, 2^53)");
         }
         if (length === 0) return new Uint8Array(0);
+        // Before _alloc: the heap never shrinks, so a wild length would cost it for good.
+        const total = _u64(_seekable_decompressed_size(handle));
+        if (offset > total || length > total - offset) {
+          const r = ZXC_ERROR_SRC_TOO_SMALL;
+          throw new Error(
+            `ZXC seekable decompress error: ${_error_name(r)} (${r})`,
+          );
+        }
         const dstPtr = _alloc(length);
         try {
           const r = _seekable_decompress_range(

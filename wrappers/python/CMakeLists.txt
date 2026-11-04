@@ -9,12 +9,13 @@ project(zxc_python C)
 find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
 
 # ---- Core ----
-# The checkout when there is one, else the copy an sdist carries (scripts/vendor_core.py).
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/../../src/lib/zxc_common.c)
-    set(ZXC_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
-elseif(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/zxc-core/CMakeLists.txt)
+# An sdist (PKG-INFO) uses the copy it carries (scripts/vendor_core.py), a checkout its own.
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/PKG-INFO)
     set(ZXC_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/zxc-core)
 else()
+    set(ZXC_CORE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+endif()
+if(NOT EXISTS ${ZXC_CORE_DIR}/src/lib/zxc_common.c)
     message(FATAL_ERROR "ZXC core not found: sdist built without scripts/vendor_core.py?")
 endif()
 add_subdirectory(${ZXC_CORE_DIR} ${CMAKE_CURRENT_BINARY_DIR}/zxc_core_build)

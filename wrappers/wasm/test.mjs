@@ -1659,6 +1659,20 @@ async function main() {
         pastEnd,
         "an in-range integer past the end is the library's error",
       );
+
+      const small = zxc.createSeekable(zeros);
+      const heapBefore = zxc._module.HEAPU8.length;
+      let wild = false;
+      try {
+        small.decompressRange(0, 0x7ffffff0);
+      } catch (e) {
+        wild = /SRC_TOO_SMALL/.test(e.message);
+      }
+      small.free();
+      assert(
+        wild && zxc._module.HEAPU8.length === heapBefore,
+        "a length past the end is refused before the heap grows",
+      );
     } finally {
       s.free();
     }

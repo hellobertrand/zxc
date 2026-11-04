@@ -128,7 +128,6 @@ jobs:
           name: sdist
           path: sdist
 
-      # Unpacked outside the checkout: with one above it, CMake would take that core.
       - name: Install from the sdist and run the test suite
         run: |
           pip install --require-hashes -r wrappers/python/requirements/build-deps.txt
