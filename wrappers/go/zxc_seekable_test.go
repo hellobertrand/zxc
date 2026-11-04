@@ -73,12 +73,10 @@ func TestSeekableSetChecksum(t *testing.T) {
 		t.Fatalf("write corrupt: %v", err)
 	}
 
+	// Verifying is the default.
 	verifying, err := Open(bad)
 	if err != nil {
 		t.Fatalf("Open(corrupt): %v", err)
-	}
-	if err := verifying.SetChecksum(true); err != nil {
-		t.Fatalf("SetChecksum(true): %v", err)
 	}
 	_, err = verifying.DecompressRange(out, 0, len(out))
 	verifying.Close()
@@ -86,10 +84,13 @@ func TestSeekableSetChecksum(t *testing.T) {
 		t.Fatalf("verifying: want ErrBadChecksum, got %v", err)
 	}
 
-	// Default is off: bytes come back, wrong, with no error.
+	// Opted out: bytes come back, wrong, with no error.
 	skipping, err := Open(bad)
 	if err != nil {
 		t.Fatalf("Open(corrupt): %v", err)
+	}
+	if err := skipping.SetChecksum(false); err != nil {
+		t.Fatalf("SetChecksum(false): %v", err)
 	}
 	n, err := skipping.DecompressRange(out, 0, len(out))
 	skipping.Close()

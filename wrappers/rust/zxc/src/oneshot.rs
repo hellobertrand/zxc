@@ -74,7 +74,7 @@ pub fn compress(data: &[u8], level: Level, checksum: Option<bool>) -> Result<Vec
 /// use zxc::{compress_with_options, CompressOptions, Level};
 ///
 /// let data = b"Hello, world!";
-/// let opts = CompressOptions::with_level(Level::Compact).without_checksum();
+/// let opts = CompressOptions::with_level(Level::Compact);
 /// let compressed = compress_with_options(data, &opts)?;
 /// # Ok::<(), zxc::Error>(())
 /// ```
@@ -187,11 +187,21 @@ pub fn decompressed_size(compressed: &[u8]) -> Option<u64> {
         zxc_sys::zxc_get_decompressed_size(compressed.as_ptr() as *const c_void, compressed.len())
     };
 
-    if size == 0 && !compressed.is_empty() {
-        None
-    } else {
-        Some(size)
+    if size != 0 {
+        return Some(size);
     }
+    // The C call also returns 0 on failure. The probe covers concatenated empty
+    // frames, which frame_info refuses, but not a dictionary-bound frame, which it
+    // would have to decode: hence both.
+    let probe = unsafe {
+        zxc_sys::zxc_decompress(
+            compressed.as_ptr() as *const c_void,
+            compressed.len(),
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    (frame_info(compressed).is_ok() || probe == 0).then_some(0)
 }
 
 /// What a frame's header and footer declare, read by [`frame_info`].
@@ -262,6 +272,7 @@ pub fn frame_info(compressed: &[u8]) -> Result<FrameInfo> {
 ///
 /// This is a convenience function that queries the output size and allocates
 /// the buffer automatically. For zero-allocation usage, see [`decompress_to`].
+/// Checksums are verified when the archive carries them.
 ///
 /// # Example
 ///
@@ -280,11 +291,12 @@ pub fn decompress(compressed: &[u8]) -> Result<Vec<u8>> {
 
 /// Decompresses data with full options control.
 pub fn decompress_with_options(compressed: &[u8], options: &DecompressOptions) -> Result<Vec<u8>> {
-    // `decompressed_size` returns None for an ambiguous 0 (a valid empty-payload
-    // archive or invalid input); fall back to 0 and let the C decoder validate
-    // the frame (it returns a negative error code on genuinely corrupt input).
-    let size = decompressed_size(compressed).unwrap_or(0) as usize;
-    let mut output = Vec::with_capacity(size);
+    // Invalid input falls through with size 0, for the C decoder to name the error.
+    let claimed = decompressed_size(compressed).unwrap_or(0);
+    // The footer is untrusted: its claim can exceed usize, or what the allocator grants.
+    let size = usize::try_from(claimed).map_err(|_| Error::Memory)?;
+    let mut output: Vec<u8> = Vec::new();
+    output.try_reserve_exact(size).map_err(|_| Error::Memory)?;
 
     let written =
         unsafe { impl_decompress(compressed, output.as_mut_ptr(), output.capacity(), options)? };
@@ -312,7 +324,7 @@ unsafe fn impl_decompress(
     options: &DecompressOptions,
 ) -> Result<usize> {
     crate::dict_parts(options.dict.as_deref(), options.dict_huf.as_deref())?;
-    let simple = !options.verify_checksum && options.dict.is_none();
+    let simple = !options.verify_frame() && options.dict.is_none();
     let written = if simple {
         // The simple form: no checksum verification, no dictionary.
         unsafe {
@@ -325,7 +337,7 @@ unsafe fn impl_decompress(
         }
     } else {
         let mut dctx = RawDctx::new()?;
-        dctx.configure(options, 0)?;
+        dctx.configure(options, options.verify_frame())?;
         unsafe {
             zxc_sys::zxc_decompress_dctx(
                 dctx.as_ptr(),
@@ -488,17 +500,30 @@ mod tests {
         let data = b"Test with and without checksum";
 
         // With checksum
-        let opts_with = CompressOptions::with_level(Level::Default);
+        let opts_with = CompressOptions::with_level(Level::Default).with_checksum();
         let compressed = compress_with_options(data, &opts_with).unwrap();
         let decompressed = decompress(&compressed).unwrap();
         assert_eq!(&decompressed[..], &data[..]);
 
         // Without checksum
-        let opts_without = CompressOptions::with_level(Level::Fast).without_checksum();
+        let opts_without = CompressOptions::with_level(Level::Fast);
         let compressed = compress_with_options(data, &opts_without).unwrap();
         let decompressed =
             decompress_with_options(&compressed, &DecompressOptions::skip_checksum()).unwrap();
         assert_eq!(&decompressed[..], &data[..]);
+    }
+
+    #[test]
+    fn checksum_builders() {
+        let has = |opts: &CompressOptions| {
+            let frame = compress_with_options(b"builders", opts).unwrap();
+            frame_info(&frame).unwrap().has_checksum
+        };
+        let on = CompressOptions::with_level(Level::Fast).with_checksum();
+        assert!(has(&on));
+        #[allow(deprecated)]
+        let off = on.without_checksum();
+        assert!(!has(&off));
     }
 
     #[test]
@@ -507,6 +532,37 @@ mod tests {
         let compressed = compress(data, Level::Default, None).unwrap();
         let size = decompressed_size(&compressed);
         assert_eq!(size, Some(data.len() as u64));
+    }
+
+    #[test]
+    fn decompressed_size_tells_empty_from_invalid() {
+        let empty = compress(b"", Level::Default, None).unwrap();
+        assert_eq!(decompressed_size(&empty), Some(0));
+        assert_eq!(
+            decompressed_size(&[empty.clone(), empty.clone()].concat()),
+            Some(0)
+        );
+
+        let opts = CompressOptions::default().with_seekable();
+        let seekable = compress_with_options(b"", &opts).unwrap();
+        assert_eq!(decompressed_size(&seekable), Some(0));
+        let opts = CompressOptions::default().with_dict(vec![7u8; 256]);
+        let dict_bound = compress_with_options(b"", &opts).unwrap();
+        assert_ne!(get_dict_id(&dict_bound), 0);
+        assert_eq!(decompressed_size(&dict_bound), Some(0));
+
+        assert_eq!(decompressed_size(&[]), None);
+        assert_eq!(
+            decompressed_size(b"not a zxc archive, not even close"),
+            None
+        );
+        assert_eq!(decompressed_size(&empty[..empty.len() - 1]), None);
+
+        // The README's sizing recipe, on the frame it used to panic on.
+        let size = decompressed_size(&empty).expect("valid ZXC frame");
+        let mut buffer = vec![0u8; size as usize];
+        let n = decompress_to(&empty, &mut buffer, &DecompressOptions::default()).unwrap();
+        assert_eq!(n, 0);
     }
 
     #[test]

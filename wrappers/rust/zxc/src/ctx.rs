@@ -137,10 +137,11 @@ impl RawDctx {
         })
     }
 
-    /// Applies a whole [`DecompressOptions`], dictionary included.
-    pub(crate) fn configure(&mut self, opts: &DecompressOptions, threads: i64) -> Result<()> {
+    /// Applies a [`DecompressOptions`]' dictionary, and `verify` as resolved by
+    /// the caller for its API.
+    pub(crate) fn configure(&mut self, opts: &DecompressOptions, verify: bool) -> Result<()> {
         let (dict, dict_huf) = crate::dict_parts(opts.dict.as_deref(), opts.dict_huf.as_deref())?;
-        self.set_params(opts.verify_checksum, threads)?;
+        self.set_params(verify, 0)?;
         self.set_dict(dict, dict_huf)
     }
 }
@@ -216,10 +217,13 @@ impl Cctx {
             .set_params(opts.level, opts.checksum, opts.seekable, 0)?;
         let override_dict = opts.dict.is_some() || opts.dict_huf.is_some();
         if override_dict || self.overridden {
-            let (dict, dict_huf) = crate::dict_parts(
-                opts.dict.as_deref().or(self.dict.as_deref()),
-                opts.dict_huf.as_deref().or(self.dict_huf.as_deref()),
-            )?;
+            // The creation-time table belongs to the creation-time dictionary.
+            let (dict, created_huf) = match opts.dict.as_deref() {
+                Some(d) => (Some(d), None),
+                None => (self.dict.as_deref(), self.dict_huf.as_deref()),
+            };
+            let (dict, dict_huf) =
+                crate::dict_parts(dict, opts.dict_huf.as_deref().or(created_huf))?;
             self.inner.set_dict(dict, dict_huf)?;
             self.overridden = override_dict;
         }
@@ -263,7 +267,9 @@ impl Dctx {
         opts: &DecompressOptions,
         call: impl FnOnce(*mut zxc_sys::zxc_dctx) -> i64,
     ) -> Result<usize> {
-        self.inner.configure(opts, 0)?;
+        // A bare block cannot say whether it carries a checksum.
+        let verify = opts.verify_checksum.unwrap_or(false);
+        self.inner.configure(opts, verify)?;
         let res = call(self.inner.as_ptr());
         if res < 0 {
             Err(error_from_code(res))
@@ -278,6 +284,10 @@ impl Dctx {
     /// to enable the fast path. For strictly-sized
     /// destinations, use [`Dctx::decompress_block_safe`]. A block carries no
     /// dictionary id: pass the same dictionary options as at compression.
+    ///
+    /// Nor does it say whether it carries a checksum, so both sides must agree:
+    /// verification is off unless `opts.verify_checksum` is `Some(true)`, which
+    /// fails on a block compressed without a checksum.
     pub fn decompress_block(
         &mut self,
         src: &[u8],
@@ -298,7 +308,7 @@ impl Dctx {
     /// Strict-sized variant of [`Dctx::decompress_block`]: accepts
     /// `dst.len() == uncompressed_size` exactly (no tail pad required).
     /// Slightly slower than the fast path; output is bit-identical. Same
-    /// dictionary options as [`Dctx::decompress_block`]; a dictionary decodes
+    /// checksum and dictionary options as [`Dctx::decompress_block`]; a dictionary decodes
     /// through the bounce path, so `dst` may hold more than the strict tail.
     pub fn decompress_block_safe(
         &mut self,
@@ -435,6 +445,69 @@ mod tests {
                     .is_err()
             );
         }
+    }
+
+    /// Literal-heavy text: small blocks of it prefer a shared table to their own.
+    fn skewed(seed: u32, len: usize) -> Vec<u8> {
+        const ALPHABET: &[u8] = b"eeeeeeeeeeeettttttttttaaaaaaaaooooooiiiiiinnnnnnsssssrrrrrhhhhlllddduuccmmffppggwwyybbvkxjqz   ";
+        let mut rng = seed;
+        (0..len)
+            .map(|_| {
+                rng = rng.wrapping_mul(1_103_515_245).wrapping_add(12_345);
+                ALPHABET[(rng >> 16) as usize % ALPHABET.len()]
+            })
+            .collect()
+    }
+
+    #[test]
+    fn per_call_dictionary_does_not_inherit_the_creation_table() {
+        let samples: Vec<Vec<u8>> = (0..64).map(|i| skewed(100 + i, 1500)).collect();
+        let refs: Vec<&[u8]> = samples.iter().map(|s| s.as_slice()).collect();
+        let dict = train_dict(&refs, 4096).unwrap();
+        let huf = train_dict_huf(&refs, &dict).unwrap().to_vec();
+        let other: Vec<u8> = (0..2048u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+
+        let block = skewed(9999, 1000);
+        let mut comp = vec![0u8; compress_block_bound(block.len())];
+        let mut plain = comp.clone();
+        let mut out = vec![0u8; decompress_block_bound(block.len())];
+        let created = CompressOptions::with_level(Level::Ultra)
+            .with_dict(dict.clone())
+            .with_dict_huf(huf.clone());
+        let call = CompressOptions::with_level(Level::Ultra).with_dict(other.clone());
+        let dopts = DecompressOptions::default().with_dict(other.clone());
+
+        let mut cctx = Cctx::new(Some(&created)).unwrap();
+        let n = cctx.compress_block(&block, &mut comp, &call).unwrap();
+        let m = Cctx::new(None)
+            .unwrap()
+            .compress_block(&block, &mut plain, &call)
+            .unwrap();
+        assert_eq!(comp[..n], plain[..m], "the creation-time table leaked");
+        let k = Dctx::new()
+            .unwrap()
+            .decompress_block(&comp[..n], &mut out, &dopts)
+            .expect("decodable with the options given to compress");
+        assert_eq!(&out[..k], block.as_slice());
+
+        // A call without a dictionary still gets the creation-time pair back.
+        let n = cctx
+            .compress_block(
+                &block,
+                &mut comp,
+                &CompressOptions::with_level(Level::Ultra),
+            )
+            .unwrap();
+        let pair = DecompressOptions::default()
+            .with_dict(dict.clone())
+            .with_dict_huf(huf.clone());
+        let k = Dctx::new()
+            .unwrap()
+            .decompress_block(&comp[..n], &mut out, &pair)
+            .unwrap();
+        assert_eq!(&out[..k], block.as_slice());
     }
 
     #[test]

@@ -180,9 +180,8 @@ var (
 
 	// ErrDictUnsupported is returned by the push streaming API when dictionary
 	// options are supplied: the push-stream format carries no dictionary ID, so
-	// dictionary compression would produce undecodable archives. Static C
-	// contexts report the same condition (ZXC_ERROR_DICT_UNSUPPORTED).
-	ErrDictUnsupported = errors.New("zxc: dictionaries are not supported by the push streaming API")
+	// dictionary compression would produce undecodable archives.
+	ErrDictUnsupported = &Error{Code: int(C.ZXC_ERROR_DICT_UNSUPPORTED), Name: "dictionary not supported by this API"}
 
 	// ErrSeekableInUse is returned when ReadAt calls Close, SetDict or a nested
 	// DecompressRange on its [Seekable], which would free or share what the
@@ -251,6 +250,9 @@ type options struct {
 	dict     []byte
 	dictHuf  []byte
 
+	maxOutput    uint64
+	maxOutputSet bool
+
 	// *Set records whether the caller supplied the option explicitly, so a
 	// per-call option can fall back to the context's value, and an empty one
 	// can clear it (see Cctx).
@@ -280,7 +282,13 @@ func WithLevel(l Level) Option {
 	}
 }
 
-// WithChecksum enables checksum computation and verification.
+// WithChecksum controls checksums. Compression writes them when true; off by
+// default. Decompression verifies those an archive carries unless false; an
+// archive without checksums decodes either way. [Seekable] takes
+// [Seekable.SetChecksum] instead.
+//
+// The Block API is the exception: a bare block does not say whether it carries a
+// checksum, so it is off on both sides by default and both sides must agree.
 func WithChecksum(enabled bool) Option {
 	return func(o *options) {
 		o.checksum = enabled
@@ -312,10 +320,14 @@ func WithDict(dict []byte) Option {
 }
 
 // WithDictionary attaches a [Dictionary] (content + shared table) in one call.
+// A nil Dictionary clears it, as an empty [WithDict] does.
 func WithDictionary(d *Dictionary) Option {
 	return func(o *options) {
-		o.dict, o.dictSet = d.Content(), true
-		o.dictHuf, o.dictHufSet = d.Huf(), true
+		o.dict, o.dictHuf = nil, nil
+		if d != nil {
+			o.dict, o.dictHuf = d.content, d.huf
+		}
+		o.dictSet, o.dictHufSet = true, true
 	}
 }
 
@@ -326,6 +338,19 @@ func WithDictionary(d *Dictionary) Option {
 func WithDictHuf(huf []byte) Option {
 	return func(o *options) { o.dictHuf, o.dictHufSet = huf, true }
 }
+
+// WithMaxOutputSize makes [Decompress] refuse, with [ErrDstTooSmall] and before
+// allocating, an archive whose footer declares more than n bytes. There is no
+// limit by default: a small forged archive can declare far more than the machine
+// can allocate, which is a fatal, unrecoverable error in Go, so set this on
+// untrusted input. Other entry points write to caller-supplied storage and
+// ignore it.
+func WithMaxOutputSize(n uint64) Option {
+	return func(o *options) { o.maxOutput, o.maxOutputSet = n, true }
+}
+
+// verifyChecksum is the frame decoders' setting: on unless opted out.
+func (o options) verifyChecksum() bool { return o.checksum || !o.checksumSet }
 
 func applyOptions(opts []Option) options {
 	o := defaultOptions()
@@ -389,7 +414,7 @@ func configureCctx(ptr *C.zxc_cctx, o options) error {
 // configureDctx sets the checksum and thread count of o on ptr, then attaches
 // its dictionary.
 func configureDctx(ptr *C.zxc_dctx, o options) error {
-	if err := setDParam(ptr, C.ZXC_D_CHECKSUM, boolParam(o.checksum)); err != nil {
+	if err := setDParam(ptr, C.ZXC_D_CHECKSUM, boolParam(o.verifyChecksum())); err != nil {
 		return err
 	}
 	if err := setDParam(ptr, C.ZXC_D_THREADS, int64(o.threads)); err != nil {

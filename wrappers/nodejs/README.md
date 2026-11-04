@@ -20,7 +20,7 @@ npm install
 
 ### Prerequisites
 
-- Node.js >= 16.0.0
+- Node.js ^20.17.0 or >= 22.9.0
 - CMake >= 3.21
 - A C17/C++17 compiler (GCC, Clang, or MSVC)
 
@@ -51,7 +51,7 @@ Compress a Buffer.
 | ------------------ | --------- | --------------- | -------------------------------------------- |
 | `data`             | `Buffer`  | -               | Input data                                   |
 | `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (1–7); out of range throws |
-| `options.checksum` | `boolean` | `false`         | Enable checksum                              |
+| `options.checksum` | `boolean` | `false`         | Write checksums                              |
 | `options.seekable` | `boolean` | `false`         | Append a seek table (see `Seekable`)         |
 | `options.dict`     | `Buffer`  | -               | Pre-trained dictionary (or a `Dictionary`)   |
 
@@ -61,14 +61,20 @@ Returns: `Buffer` - compressed data.
 
 Decompress a ZXC compressed Buffer.
 
-| Parameter          | Type      | Default | Description                                |
-| ------------------ | --------- | ------- | ------------------------------------------ |
-| `data`             | `Buffer`  | -       | Compressed data                            |
-| `options.size`     | `number`  | auto    | Expected decompressed size                 |
-| `options.checksum` | `boolean` | `false` | Verify checksum                            |
-| `options.dict`     | `Buffer`  | -       | Dictionary the archive was compressed with |
+| Parameter               | Type      | Default | Description                                |
+| ----------------------- | --------- | ------- | ------------------------------------------ |
+| `data`                  | `Buffer`  | -       | Compressed data                            |
+| `options.size`          | `number`  | auto    | Expected decompressed size                 |
+| `options.checksum`      | `boolean` | `true`  | Verify the checksums the archive carries   |
+| `options.dict`          | `Buffer`  | -       | Dictionary the archive was compressed with |
+| `options.maxOutputSize` | `number`  | none    | Refuse a larger size before allocating     |
 
 Returns: `Buffer` - decompressed data.
+
+The size comes from the archive's footer, unverified until the decode ends. A
+forged one that cannot be allocated throws a `RangeError`; one that can is
+reserved for the time of the call. `maxOutputSize` (on `Dctx` too) refuses it
+first: set it on untrusted input.
 
 ### `new Cctx(options?)` / `new Dctx(options?)`
 
@@ -82,7 +88,7 @@ point refuses rather than clamps).
 | Parameter          | Type      | Default         | Description                      |
 | ------------------ | --------- | --------------- | -------------------------------- |
 | `options.level`    | `number`  | `LEVEL_DEFAULT` | Compression level (`Cctx` only)  |
-| `options.checksum` | `boolean` | `false`         | Enable or verify checksums       |
+| `options.checksum` | `boolean` | see below       | Write or verify checksums        |
 | `options.dict`     | `Buffer`  | -               | Dictionary used by every call    |
 | `options.dictHuf`  | `Buffer`  | -               | Shared literal table (128 bytes) |
 
@@ -94,6 +100,10 @@ const restored = archives.map((a) => dctx.decompress(a));
 cctx.close();
 dctx.close();
 ```
+
+`Cctx` writes no checksums unless asked. `Dctx`, like `decompress`, `DStream`,
+`DecompressStream` and `Seekable`, verifies them whenever the archive carries
+them; `checksum: false` (`setChecksum(false)` on `Seekable`) opts out.
 
 A context is not thread-safe, and `close()` is idempotent.
 

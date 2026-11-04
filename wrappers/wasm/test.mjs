@@ -45,6 +45,38 @@ function arraysEqual(a, b) {
   return true;
 }
 
+/** An archive whose footer claims `size`, its body padded to `padTo` bytes. */
+function forgeFooter(zxc, size, padTo) {
+  const le = (n) => {
+    const out = [];
+    let v = BigInt(n);
+    do {
+      out.push(Number(v & 255n));
+      v >>= 8n;
+    } while (v > 0n);
+    return out;
+  };
+  const seed = zxc.compress(new Uint8Array(3));
+  const lens = seed[seed.length - 1];
+  const body = seed.subarray(
+    0,
+    seed.length - 1 - (lens & 7) - 1 - (lens >> 4) - 1,
+  );
+  const sz = le(size);
+  for (let nf = 1; nf <= 8; nf++) {
+    const total = padTo + sz.length + nf + 1;
+    const frame = le(total);
+    if (frame.length !== nf) continue;
+    const out = new Uint8Array(total);
+    out.set(body, 0);
+    out.set(sz, padTo);
+    out.set(frame, padTo + sz.length);
+    out[total - 1] = (sz.length - 1) | ((nf - 1) << 4);
+    return out;
+  }
+  throw new Error("unreachable");
+}
+
 async function main() {
   console.log("ZXC WASM Test Suite\n");
 
@@ -1039,10 +1071,11 @@ async function main() {
     } finally {
       sOn.free();
     }
-    // Default is off: bytes come back, wrong, with no error.
+    // Opted out: bytes come back, wrong, with no error.
     let silent = null;
     const sOff = zxc.createSeekable(bad);
     try {
+      sOff.setChecksum(false);
       silent = sOff.decompressRange(0, 512);
     } finally {
       sOff.free();
@@ -1337,9 +1370,15 @@ async function main() {
       [0x100000010, "4 GiB + 16 (wraps to 16)"],
     ];
     for (const [length, label] of cases) {
+      // Saves allocating the real thing; the length is all this path reads.
+      class Sized extends Uint8Array {
+        get length() {
+          return length;
+        }
+      }
       let msg = "";
       try {
-        zxc.getDecompressedSize({ length });
+        zxc.getDecompressedSize(new Sized(0));
       } catch (e) {
         msg = String(e.message);
       }
@@ -1412,6 +1451,539 @@ async function main() {
       arraysEqual(first, a) && threw,
       "bytes after a footer that start no frame: frame first, then an error",
     );
+  }
+
+  // --- Wrapper input and lifetime contracts ---
+  {
+    console.log("\n-- Input conversion --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const refuses = (fn) => {
+      try {
+        fn();
+        return false;
+      } catch (e) {
+        return e instanceof TypeError;
+      }
+    };
+    const bytes = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const archive = zxc.compress(bytes);
+
+    assert(
+      arraysEqual(zxc.decompress(zxc.compress(bytes.buffer)), bytes),
+      "compress(ArrayBuffer) keeps the bytes",
+    );
+    const wide = new Uint16Array(bytes.buffer);
+    assert(
+      arraysEqual(zxc.decompress(zxc.compress(wide)), bytes),
+      "compress(Uint16Array) takes its bytes, not wrapped elements",
+    );
+    assert(
+      arraysEqual(
+        zxc.decompress(zxc.compress(new DataView(bytes.buffer, 2, 4))),
+        bytes.subarray(2, 6),
+      ),
+      "compress(DataView) honours its window",
+    );
+    assert(
+      arraysEqual(zxc.decompress(archive.buffer), bytes),
+      "decompress(ArrayBuffer) reads the archive",
+    );
+
+    const dStream = zxc.createDStream();
+    assert(
+      arraysEqual(dStream.decompress(archive.buffer), bytes),
+      "dstream takes an ArrayBuffer instead of dropping it",
+    );
+    dStream.free();
+
+    const cStream = zxc.createCStream();
+    const head = cStream.compress(bytes.buffer);
+    const tail = cStream.end();
+    cStream.free();
+    assert(
+      arraysEqual(zxc.decompress(new Uint8Array([...head, ...tail])), bytes),
+      "cstream takes an ArrayBuffer instead of looping forever",
+    );
+
+    for (const [name, bad] of [
+      ["string", "hello"],
+      ["number[]", [1, 2, 300]],
+      ["number", 7],
+      ["plain object", { length: 3 }],
+    ]) {
+      const refused = {
+        compress: () => zxc.compress(bad),
+        decompress: () => zxc.decompress(bad),
+        getDecompressedSize: () => zxc.getDecompressedSize(bad),
+        getFrameInfo: () => zxc.getFrameInfo(bad),
+        "cctx.compress": () => zxc.createCompressContext().compress(bad),
+        "dctx.decompress": () => zxc.createDecompressContext().decompress(bad),
+        "cstream.compress": () => zxc.createCStream().compress(bad),
+        "dstream.decompress": () => zxc.createDStream().decompress(bad),
+        createSeekable: () => zxc.createSeekable(bad),
+        "opts.dict": () => zxc.compress(bytes, { dict: bad }),
+        "opts.dictHuf": () => zxc.compress(bytes, { dictHuf: bad }),
+        trainDict: () => zxc.trainDict([bad]),
+        trainDictHuf: () => zxc.trainDictHuf([bad], bytes),
+        dictTrain: () => zxc.dictTrain([bad]),
+        dictSave: () => zxc.dictSave(bad, new Uint8Array(128)),
+        dictLoad: () => zxc.dictLoad(bad),
+        dictHuf: () => zxc.dictHuf(bad),
+        dictId: () => zxc.dictId(bad),
+      };
+      const accepted = Object.entries(refused)
+        .filter(([, fn]) => !refuses(fn))
+        .map(([k]) => k);
+      assert(
+        accepted.length === 0,
+        `a ${name} is refused everywhere` +
+          (accepted.length ? ` -- accepted by ${accepted.join(", ")}` : ""),
+      );
+    }
+
+    const reader = new ReadableStream({
+      start(c) {
+        c.enqueue("hello");
+        c.close();
+      },
+    })
+      .pipeThrough(zxc.createCompressTransformStream())
+      .getReader();
+    let streamError = null;
+    try {
+      while (!(await reader.read()).done);
+    } catch (e) {
+      streamError = e;
+    }
+    assert(
+      streamError instanceof TypeError,
+      "the compress TransformStream errors on a string chunk",
+    );
+
+    console.log("\n-- Seek table entries --");
+    for (const bad of [2 ** 32 + 5, 2 ** 32, -1, 1.5, NaN, Infinity, "5"]) {
+      let err = null;
+      try {
+        zxc.writeSeekTable([100, bad]);
+      } catch (e) {
+        err = e;
+      }
+      assert(
+        err instanceof RangeError,
+        `writeSeekTable refuses ${String(bad)}`,
+      );
+    }
+    assert(
+      zxc.writeSeekTable([0, 0xffffffff]).length === zxc.seekTableSize(2),
+      "writeSeekTable takes the whole u32 range",
+    );
+  }
+
+  {
+    console.log("\n-- Seekable: offsets past 4 GiB --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    // 2^26 x 64 frames put the marked frame at exactly 2^32: decompressed
+    // bytes past 4 GiB, from an archive that fits the heap.
+    const frameSize = 2 ** 26;
+    const plain = new Uint8Array(frameSize);
+    const zeros = zxc.compress(plain, { seekable: true, level: 1 });
+    const marker = new TextEncoder().encode("PAST-4GIB");
+    plain.set(marker, 5);
+    const marked = zxc.compress(plain, { seekable: true, level: 1 });
+    const archive = new Uint8Array(zeros.length * 64 + marked.length);
+    for (let i = 0; i < 64; i++) archive.set(zeros, i * zeros.length);
+    archive.set(marked, zeros.length * 64);
+
+    const s = zxc.createSeekable(archive);
+    try {
+      assert(
+        s.decompressedSize() === 65 * frameSize,
+        "65 frames, 2^32 + 2^26 bytes",
+      );
+      assert(
+        arraysEqual(s.decompressRange(2 ** 32 + 5, marker.length), marker),
+        "a range past 2^32 reads the right bytes",
+      );
+      const across = s.decompressRange(2 ** 32 - 2, 2 + 5 + marker.length);
+      assert(
+        arraysEqual(across.subarray(7), marker) &&
+          across.subarray(0, 7).every((b) => b === 0),
+        "a range across 2^32 reads the right bytes",
+      );
+      for (const bad of [2 ** 53, -1, 1.5, NaN, Infinity]) {
+        let threw = false;
+        try {
+          s.decompressRange(bad, 1);
+        } catch (_) {
+          threw = true;
+        }
+        assert(threw, `decompressRange refuses the offset ${bad}`);
+      }
+      for (const [offset, length] of [
+        [0, NaN],
+        [0, 1.5],
+        [0, -1],
+        [0, Infinity],
+        [0, "10"],
+        [0, undefined],
+        [0, 2 ** 53],
+        [NaN, 1],
+        [1.5, 1],
+        [-1, 1],
+        [2 ** 53, 1],
+      ]) {
+        let err = null;
+        try {
+          s.decompressRange(offset, length);
+        } catch (e) {
+          err = e;
+        }
+        assert(
+          err instanceof RangeError,
+          `decompressRange(${offset}, ${String(length)}) throws a RangeError`,
+        );
+      }
+      assert(
+        s.decompressRange(2 ** 33, 0).length === 0,
+        "a zero length stays valid at any offset",
+      );
+      let pastEnd = false;
+      try {
+        s.decompressRange(2 ** 33, 1);
+      } catch (e) {
+        pastEnd = /SRC_TOO_SMALL/.test(e.message);
+      }
+      assert(
+        pastEnd,
+        "an in-range integer past the end is the library's error",
+      );
+
+      const small = zxc.createSeekable(zeros);
+      const heapBefore = zxc._module.HEAPU8.length;
+      let wild = false;
+      try {
+        small.decompressRange(0, 0x7ffffff0);
+      } catch (e) {
+        wild = /SRC_TOO_SMALL/.test(e.message);
+      }
+      small.free();
+      assert(
+        wild && zxc._module.HEAPU8.length === heapBefore,
+        "a length past the end is refused before the heap grows",
+      );
+    } finally {
+      s.free();
+    }
+  }
+
+  {
+    console.log("\n-- maxOutputSize --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    const payload = new Uint8Array(1000).fill(7);
+    const archive = zxc.compress(payload);
+
+    assert(
+      zxc.decompress(archive, { maxOutputSize: 1000 }).length === 1000,
+      "a size equal to maxOutputSize decodes",
+    );
+    let refused = false;
+    try {
+      zxc.decompress(archive, { maxOutputSize: 999 });
+    } catch (e) {
+      refused = /maxOutputSize/.test(e.message);
+    }
+    assert(refused, "a size above maxOutputSize is refused");
+
+    const ctx = zxc.createDecompressContext({ maxOutputSize: 999 });
+    refused = false;
+    try {
+      ctx.decompress(archive);
+    } catch (e) {
+      refused = /maxOutputSize/.test(e.message);
+    }
+    ctx.free();
+    assert(refused, "the context applies maxOutputSize to every call");
+
+    for (const bad of [-1, 1.5, NaN, "10"]) {
+      let threw = false;
+      try {
+        zxc.decompress(archive, { maxOutputSize: bad });
+      } catch (e) {
+        threw = e instanceof RangeError;
+      }
+      assert(threw, `maxOutputSize ${String(bad)} is refused`);
+    }
+
+    // 1.9 GB claimed from 32 KB: 8 bytes for each of its 3800 blocks looks plausible.
+    const forged = forgeFooter(zxc, 1900 * 1048576, 32000);
+    assert(
+      zxc.getDecompressedSize(forged) === 1900 * 1048576,
+      "the forged footer passes the plausibility check",
+    );
+    const heapBefore = zxc._module.HEAPU8.length;
+    refused = false;
+    try {
+      zxc.decompress(forged, { maxOutputSize: 1048576 });
+    } catch (e) {
+      refused = /maxOutputSize/.test(e.message);
+    }
+    assert(
+      refused && zxc._module.HEAPU8.length === heapBefore,
+      "maxOutputSize refuses a forged footer without growing the heap",
+    );
+  }
+
+  {
+    console.log("\n-- Freed handles --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    let module;
+    const stageMallocs = [];
+    const zxc = await createZXC({}, async (o) => {
+      module = await ZXCModule(o);
+      const real = module._malloc;
+      module.realMalloc = real;
+      module._malloc = (n) => {
+        const p = real(n);
+        if (n === 12) stageMallocs.push(p);
+        return p;
+      };
+      return module;
+    });
+    const archive = zxc.compress(new Uint8Array(100));
+    const seekArchive = zxc.compress(new Uint8Array(100), { seekable: true });
+
+    const throwsFreed = (fn) => {
+      try {
+        fn();
+        return false;
+      } catch (e) {
+        return /already freed/.test(e.message);
+      }
+    };
+
+    // The descriptors of a freed stream may belong to someone else by now.
+    stageMallocs.length = 0;
+    const cs = zxc.createCStream();
+    const [, outDesc] = stageMallocs;
+    cs.free();
+    let owned = 0;
+    for (let i = 0; i < 64 && owned !== outDesc; i++)
+      owned = module.realMalloc(12);
+    assert(owned === outDesc, "the freed descriptor has a new owner");
+    module.HEAPU32[owned >> 2] = 0xdeadbeef;
+    assert(
+      throwsFreed(() => cs.end()),
+      "cstream.end after free throws",
+    );
+    assert(
+      throwsFreed(() => cs.compress(new Uint8Array(4))),
+      "cstream.compress after free throws",
+    );
+    assert(
+      module.HEAPU32[owned >> 2] === 0xdeadbeef,
+      "a freed stream leaves the new owner's bytes alone",
+    );
+
+    const ds = zxc.createDStream();
+    ds.free();
+    assert(
+      throwsFreed(() => ds.decompress(archive)),
+      "dstream.decompress after free throws",
+    );
+    cs.free();
+    ds.free();
+
+    const s = zxc.createSeekable(seekArchive);
+    s.free();
+    for (const [name, fn] of Object.entries({
+      numBlocks: () => s.numBlocks(),
+      decompressedSize: () => s.decompressedSize(),
+      blockCompressedSize: () => s.blockCompressedSize(0),
+      blockDecompressedSize: () => s.blockDecompressedSize(0),
+      setDict: () => s.setDict(new Uint8Array(4)),
+      setChecksum: () => s.setChecksum(true),
+      decompressRange: () => s.decompressRange(0, 1),
+    })) {
+      assert(throwsFreed(fn), `seekable.${name} after free throws`);
+    }
+  }
+
+  {
+    console.log("\n-- Checksum defaults --");
+    const { default: createZXC } = await import("./zxc_wasm.js");
+    const zxc = await createZXC({}, ZXCModule);
+    // Incompressible, so the block is stored raw: a flipped payload byte decodes
+    // fine and only the checksum can object.
+    const payload = new Uint8Array(64 * 1024);
+    let x = 0x12345678;
+    for (let i = 0; i < payload.length; i++) {
+      x ^= x << 13;
+      x ^= x >>> 17;
+      x ^= x << 5;
+      payload[i] = x & 0xff;
+    }
+    const flip = (archive) => {
+      const bad = archive.slice();
+      bad[16 + 8 + 100] ^= 0xff;
+      return bad;
+    };
+    const concat = (chunks) => {
+      const out = new Uint8Array(chunks.reduce((n, c) => n + c.length, 0));
+      let at = 0;
+      for (const c of chunks) {
+        out.set(c, at);
+        at += c.length;
+      }
+      return out;
+    };
+    const pipe = async (transform, input) => {
+      const reader = new ReadableStream({
+        start(c) {
+          c.enqueue(input);
+          c.close();
+        },
+      })
+        .pipeThrough(transform)
+        .getReader();
+      const chunks = [];
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) return concat(chunks);
+        chunks.push(value);
+      }
+    };
+
+    const cctx = zxc.createCompressContext();
+    const cs = zxc.createCStream();
+    const pushed = concat([cs.compress(payload), cs.end()]);
+    cs.free();
+    const written = [
+      ["compress", zxc.compress(payload)],
+      ["context", cctx.compress(payload)],
+      ["cstream", pushed],
+      ["transform", await pipe(zxc.createCompressTransformStream(), payload)],
+    ];
+    cctx.free();
+    for (const [name, a] of written) {
+      assert(
+        !zxc.getFrameInfo(a).hasChecksum,
+        `${name} writes none by default`,
+      );
+    }
+
+    const paths = [
+      ["decompress", false, (a, o) => zxc.decompress(a, o)],
+      [
+        "context",
+        false,
+        (a, o) => {
+          const d = zxc.createDecompressContext(o);
+          try {
+            return d.decompress(a);
+          } finally {
+            d.free();
+          }
+        },
+      ],
+      [
+        "dstream",
+        false,
+        (a, o) => {
+          const d = zxc.createDStream(o);
+          try {
+            return d.decompress(a);
+          } finally {
+            d.free();
+          }
+        },
+      ],
+      [
+        "transform",
+        false,
+        (a, o) => pipe(zxc.createDecompressTransformStream(o), a),
+      ],
+      [
+        "seekable",
+        true,
+        (a, o) => {
+          const s = zxc.createSeekable(a);
+          try {
+            if (o) s.setChecksum(o.checksum);
+            return s.decompressRange(0, payload.length);
+          } finally {
+            s.free();
+          }
+        },
+      ],
+    ];
+    for (const [name, seekable, read] of paths) {
+      const opts = { level: 1, seekable };
+      const signed = zxc.compress(payload, { ...opts, checksum: true });
+      let msg = "";
+      try {
+        await read(flip(signed));
+      } catch (e) {
+        msg = e.message;
+      }
+      assert(/BAD_CHECKSUM/.test(msg), `${name} rejects corruption by default`);
+
+      const out = await read(flip(signed), { checksum: false });
+      assert(
+        out.length === payload.length && !arraysEqual(out, payload),
+        `${name} opts out without BAD_CHECKSUM`,
+      );
+
+      const plain = await read(zxc.compress(payload, opts));
+      assert(arraysEqual(plain, payload), `${name} reads an unsigned archive`);
+    }
+
+    const plainArchive = zxc.compress(payload, { level: 1 });
+    for (const bad of [1, 0, "yes", "no", {}]) {
+      const opts = { checksum: bad };
+      const accepted = Object.entries({
+        compress: () => zxc.compress(payload, opts),
+        decompress: () => zxc.decompress(plainArchive, opts),
+        cctx: () => zxc.createCompressContext(opts),
+        dctx: () => zxc.createDecompressContext(opts),
+        cstream: () => zxc.createCStream(opts),
+        dstream: () => zxc.createDStream(opts),
+      })
+        .filter(([, fn]) => {
+          try {
+            fn();
+            return true;
+          } catch (e) {
+            return !(e instanceof TypeError);
+          }
+        })
+        .map(([k]) => k);
+      assert(
+        accepted.length === 0,
+        `checksum: ${JSON.stringify(bad)} is refused` +
+          (accepted.length ? ` -- accepted by ${accepted.join(", ")}` : ""),
+      );
+    }
+    assert(
+      !zxc.getFrameInfo(zxc.compress(payload, { checksum: null })).hasChecksum,
+      "a null checksum keeps the default",
+    );
+  }
+
+  {
+    console.log("\n-- Package metadata --");
+    const { execSync } = await import("node:child_process");
+    const out = execSync("npm pack --dry-run --json --ignore-scripts=false", {
+      cwd: __dirname,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const files = JSON.parse(out.slice(out.indexOf("[")))[0].files.map(
+      (f) => f.path,
+    );
+    assert(files.includes("LICENSE"), "the tarball carries a LICENSE");
   }
 
   // --- Summary ---

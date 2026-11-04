@@ -30,10 +30,55 @@ type outputFile struct {
 
 var tmpSeq atomic.Uint32
 
-func createOutput(path string) (*outputFile, error) {
-	if p, err := filepath.EvalSymlinks(path); err == nil {
-		path = p // replace a link's target, not the link
+// errSameFile refuses an output that is the input: the in-place fallback would
+// truncate the input before reading it, and Windows cannot rename over it.
+var errSameFile = fmt.Errorf("zxc: input and output are the same file: %w", ErrBadParam)
+
+// checkNotSameFile only concerns regular files: a device or FIFO is written in
+// place, with nothing to truncate or rename.
+func checkNotSameFile(in *os.File, output string) error {
+	inInfo, err := in.Stat()
+	if err != nil {
+		return err
 	}
+	if !inInfo.Mode().IsRegular() {
+		return nil
+	}
+	if outInfo, err := os.Stat(output); err == nil && os.SameFile(inInfo, outInfo) {
+		return errSameFile
+	}
+	return nil
+}
+
+// resolveOutput follows symlinks, so a link's target is replaced, not the link.
+// EvalSymlinks refuses a dangling one; its target is then created, as os.Create
+// would. A cycle stays unresolved for the open to report.
+func resolveOutput(path string) string {
+	if p, err := filepath.EvalSymlinks(path); err == nil {
+		return p
+	}
+	cur := path
+	for i := 0; i < 40; i++ {
+		target, err := os.Readlink(cur)
+		if err != nil {
+			return cur
+		}
+		if !filepath.IsAbs(target) {
+			dir := filepath.Dir(cur)
+			// The target is relative to the link's real directory: ".." must
+			// not be cleaned lexically across a symlinked one.
+			if d, err := filepath.EvalSymlinks(dir); err == nil {
+				dir = d
+			}
+			target = filepath.Join(dir, target)
+		}
+		cur = target
+	}
+	return path
+}
+
+func createOutput(path string) (*outputFile, error) {
+	path = resolveOutput(path)
 	// Opening the existing output fails where os.Create would, tells a
 	// device or FIFO apart, and gives the mode the replacement keeps.
 	exists := false
@@ -52,7 +97,8 @@ func createOutput(path string) (*outputFile, error) {
 		return nil, err
 	}
 	for {
-		tmp := fmt.Sprintf("%s.%d-%d.zxc-tmp", path, os.Getpid(), tmpSeq.Add(1))
+		// Not derived from the output's name, which may already be at NAME_MAX.
+		tmp := filepath.Join(filepath.Dir(path), fmt.Sprintf(".zxc-%d-%d.tmp", os.Getpid(), tmpSeq.Add(1)))
 		f, err := os.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o666)
 		switch {
 		case errors.Is(err, os.ErrExist):
@@ -109,6 +155,12 @@ func (o *outputFile) discard() {
 // This is the recommended method for large files. It uses an asynchronous
 // pipeline with separate reader, worker, and writer threads.
 //
+// A failed call leaves an existing output intact, because a regular output is
+// written to a temporary file renamed over it. That does not hold when output's
+// directory refuses new files: the output is then truncated and written in
+// place, not atomically. A regular input and output must be different files;
+// [ErrBadParam] otherwise.
+//
 // Options: [WithLevel], [WithChecksum], [WithThreads], [WithSeekable],
 // [WithDict].
 //
@@ -130,6 +182,10 @@ func CompressFile(input, output string, opts ...Option) (int64, error) {
 		return 0, fmt.Errorf("zxc: open input: %w", err)
 	}
 	defer fIn.Close()
+
+	if err := checkNotSameFile(fIn, output); err != nil {
+		return 0, err
+	}
 
 	fOut, err := createOutput(output)
 	if err != nil {
@@ -197,7 +253,9 @@ func FileDecompressedSize(path string) (int64, error) {
 	return int64(result), nil
 }
 
-// DecompressFile decompresses src to dst using multi-threaded streaming.
+// DecompressFile decompresses src to dst using multi-threaded streaming. The
+// output is handled as by [CompressFile]. Checksums the archive carries are
+// verified, unless [WithChecksum] is false.
 //
 // Options: [WithChecksum], [WithThreads], [WithDict].
 //
@@ -217,6 +275,10 @@ func DecompressFile(input, output string, opts ...Option) (int64, error) {
 		return 0, fmt.Errorf("zxc: open input: %w", err)
 	}
 	defer fIn.Close()
+
+	if err := checkNotSameFile(fIn, output); err != nil {
+		return 0, err
+	}
 
 	fOut, err := createOutput(output)
 	if err != nil {

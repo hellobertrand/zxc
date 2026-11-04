@@ -171,9 +171,9 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     ["number"],
   );
-  // Use the i32 shims from wasm_entry.c: cwrap cannot carry a uint64_t offset,
-  // block count or block index without -sWASM_BIGINT=1, and the wasm32 heap is
-  // itself bounded to 4 GiB, so 32 bits are enough for any in-memory archive.
+  // Use the i32 shims from wasm_entry.c: cwrap cannot carry a uint64_t without
+  // -sWASM_BIGINT=1. Block counts fit 32 bits, since the archive itself fits the
+  // heap; the range offset addresses decompressed bytes and goes in two words.
   const _seekable_num_blocks = Module.cwrap(
     "zxcw_seekable_get_num_blocks",
     "number",
@@ -192,7 +192,7 @@ export default async function createZXC(moduleOverrides, factory) {
   const _seekable_decompress_range = Module.cwrap(
     "zxcw_seekable_decompress_range",
     "number",
-    ["number", "number", "number", "number", "number"],
+    ["number", "number", "number", "number", "number", "number"],
   );
   const _seek_table_size = Module.cwrap("zxcw_seek_table_size", "number", [
     "number",
@@ -313,6 +313,21 @@ export default async function createZXC(moduleOverrides, factory) {
     return ptr;
   }
 
+  /**
+   * The bytes of `data` as a Uint8Array, or a TypeError. `HEAPU8.set` would take
+   * anything array-like, silently wrapping elements to bytes.
+   */
+  function _bytes(data, what = "data") {
+    if (data instanceof Uint8Array) return data;
+    if (data instanceof ArrayBuffer) return new Uint8Array(data);
+    if (ArrayBuffer.isView(data)) {
+      return new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+    }
+    throw new TypeError(
+      `ZXC: ${what} must be a Uint8Array, ArrayBuffer or ArrayBufferView`,
+    );
+  }
+
   const _getTempRet0 =
     typeof Module.getTempRet0 === "function" ? Module.getTempRet0 : null;
   function _u64(low) {
@@ -356,6 +371,7 @@ export default async function createZXC(moduleOverrides, factory) {
   const ZXC_C_CHECKSUM = 4;
   const ZXC_C_SEEKABLE = 5;
   const ZXC_D_CHECKSUM = 2;
+  const ZXC_ERROR_SRC_TOO_SMALL = -3;
   const ZXC_ERROR_BAD_LEVEL = -18;
 
   /** Throw a descriptive error when a context setter returns a code. */
@@ -365,6 +381,16 @@ export default async function createZXC(moduleOverrides, factory) {
     }
   }
 
+  /** `opts.checksum`, or `absent` when not given; a non-boolean is refused. */
+  function _readChecksum(opts, absent) {
+    const checksum = opts == null ? null : opts.checksum;
+    if (checksum == null) return absent;
+    if (typeof checksum !== "boolean") {
+      throw new TypeError("ZXC: checksum must be a boolean");
+    }
+    return checksum;
+  }
+
   /**
    * Accept a {@link Dictionary} or raw `(dict, dictHuf)` pieces in options.
    * @returns {{dict: Uint8Array|null, dictHuf: Uint8Array|null}}
@@ -372,13 +398,14 @@ export default async function createZXC(moduleOverrides, factory) {
   function _splitDictOption(opts) {
     const d = (opts && opts.dict) || null;
     const fromObject = d instanceof Dictionary;
-    const dictHuf = fromObject ? d.huf : (opts && opts.dictHuf) || null;
+    const rawHuf = fromObject ? d.huf : (opts && opts.dictHuf) || null;
+    const dictHuf = rawHuf && _bytes(rawHuf, "dictHuf");
     // Both branches: a Dictionary's huf is public and mutable, and the copy
     // writes its length into a 128-byte allocation.
     if (dictHuf && dictHuf.length !== ZXC_HUF_TABLE_SIZE) {
       throw new Error("ZXC: dictHuf must be exactly 128 bytes");
     }
-    return { dict: fromObject ? d.content : d, dictHuf };
+    return { dict: d && _bytes(fromObject ? d.content : d, "dict"), dictHuf };
   }
 
   /**
@@ -437,7 +464,7 @@ export default async function createZXC(moduleOverrides, factory) {
     // Validated before anything is allocated, so a rejected option leaks nothing.
     const split = _splitDictOption(opts);
     const level = _readLevel(opts);
-    const checksum = (opts && opts.checksum) || false;
+    const checksum = _readChecksum(opts, false);
     const seekable = (opts && opts.seekable) || false;
 
     const cctx = _create_cctx();
@@ -471,7 +498,7 @@ export default async function createZXC(moduleOverrides, factory) {
    */
   function _createDctx(opts) {
     const split = _splitDictOption(opts);
-    const checksum = (opts && opts.checksum) || false;
+    const checksum = _readChecksum(opts, true);
 
     const dctx = _create_dctx();
     if (dctx === 0) {
@@ -489,6 +516,39 @@ export default async function createZXC(moduleOverrides, factory) {
     return { dctx, release: () => _free_dctx(dctx) };
   }
 
+  /** `opts.maxOutputSize`, or Infinity when absent. */
+  function _readMaxOutput(opts) {
+    const max = opts == null ? null : opts.maxOutputSize;
+    if (max == null) return Infinity;
+    if (!Number.isSafeInteger(max) || max < 0) {
+      throw new RangeError(
+        "ZXC: maxOutputSize must be an integer in [0, 2^53)",
+      );
+    }
+    return max;
+  }
+
+  /**
+   * The size the footers declare, refused before it is allocated: linear memory
+   * never shrinks, so even a forged size that fails to decode stays paid for.
+   */
+  function _declaredSize(srcPtr, srcLen, maxOutput) {
+    const size = _u64(_get_decompressed_size(srcPtr, srcLen));
+    if (size > 0x7fffffff) {
+      // A wasm32 heap cannot address it; name the real cause rather
+      // than a generic allocation failure.
+      throw new Error(
+        `ZXC: decompressed size (${size} bytes) exceeds wasm32 addressable memory`,
+      );
+    }
+    if (size > maxOutput) {
+      throw new Error(
+        `ZXC: decompressed size (${size} bytes) exceeds maxOutputSize (${maxOutput})`,
+      );
+    }
+    return size;
+  }
+
   // --- Public API ----------------------------------------------------------
 
   /**
@@ -497,7 +557,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @param {Uint8Array} data - Input data to compress.
    * @param {object} [opts] - Options.
    * @param {number} [opts.level=3] - Compression level (1-7).
-   * @param {boolean} [opts.checksum=false] - Enable checksums.
+   * @param {boolean} [opts.checksum=false] - Write checksums.
    * @param {boolean} [opts.seekable=false] - Append seek table for random-access.
    * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
    *   pre-trained dictionary content.
@@ -509,6 +569,7 @@ export default async function createZXC(moduleOverrides, factory) {
    *   (`ZXC_ERROR_BAD_LEVEL`: the context parameters are not clamped).
    */
   function compress(data, opts) {
+    data = _bytes(data);
     const bound = _compress_bound(data.length);
     if (bound === 0) throw new Error("ZXC: compress_bound returned 0");
 
@@ -540,16 +601,21 @@ export default async function createZXC(moduleOverrides, factory) {
    *
    * @param {Uint8Array} data - Compressed data.
    * @param {object} [opts] - Options.
-   * @param {boolean} [opts.checksum=false] - Verify checksums.
+   * @param {boolean} [opts.checksum=true] - Verify the checksums the archive
+   *   carries.
    * @param {Dictionary|Uint8Array} [opts.dict] - A {@link Dictionary}, or raw
    *   pre-trained dictionary content.
    * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table
    *   (128 bytes) when the archive was compressed with one; redundant with a
    *   {@link Dictionary}.
+   * @param {number} [opts.maxOutputSize] - Refuse an archive declaring more
+   *   decompressed bytes, before allocating. No limit by default.
    * @returns {Uint8Array} Decompressed data.
    * @throws {Error} On decompression failure.
    */
   function decompress(data, opts) {
+    data = _bytes(data);
+    const maxOutput = _readMaxOutput(opts);
     // The options become parameters of a context that lives for this call.
     const { dctx, release } = _createDctx(opts);
 
@@ -557,18 +623,10 @@ export default async function createZXC(moduleOverrides, factory) {
     let dstPtr = 0;
 
     try {
-      // Read decompressed size from footer
       srcPtr = _alloc(data.length);
       Module.HEAPU8.set(data, srcPtr);
 
-      const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-      if (origSize > 0x7fffffff) {
-        // A wasm32 heap cannot address it; name the real cause rather
-        // than a generic allocation failure.
-        throw new Error(
-          `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-        );
-      }
+      const origSize = _declaredSize(srcPtr, data.length, maxOutput);
       dstPtr = _alloc(origSize);
 
       const result = _decompress_dctx(
@@ -607,6 +665,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {number} Original uncompressed size, or 0 if invalid.
    */
   function getDecompressedSize(data) {
+    data = _bytes(data);
     const ptr = _alloc(data.length);
     try {
       Module.HEAPU8.set(data, ptr);
@@ -627,6 +686,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @throws {Error} On an invalid frame.
    */
   function getFrameInfo(data) {
+    data = _bytes(data);
     const src = _alloc(data.length);
     const out = _alloc(FRAME_INFO_SIZE);
     try {
@@ -678,6 +738,7 @@ export default async function createZXC(moduleOverrides, factory) {
        */
       compress(data) {
         if (!cctx) throw new Error("ZXC: compression context already freed");
+        data = _bytes(data);
         const bound = _compress_bound(data.length);
         let srcPtr = 0;
         let dstPtr = 0;
@@ -717,13 +778,15 @@ export default async function createZXC(moduleOverrides, factory) {
    * Call .free() when done to release WASM memory.
    *
    * @param {object} [opts] - Options applied to every decompress() call.
-   * @param {boolean} [opts.checksum=false] - Verify checksums when present.
+   * @param {boolean} [opts.checksum=true] - Verify checksums when present.
    * @param {Dictionary|Uint8Array} [opts.dict] - Dictionary the archives
    *   were compressed with.
    * @param {Uint8Array} [opts.dictHuf] - Shared literal Huffman table.
+   * @param {number} [opts.maxOutputSize] - As in {@link decompress}.
    * @returns {{ decompress: Function, free: Function }}
    */
   function createDecompressContext(opts) {
+    const maxOutput = _readMaxOutput(opts);
     // The parameters and the dictionary copies live as long as the context.
     let { dctx, release } = _createDctx(opts);
 
@@ -735,17 +798,13 @@ export default async function createZXC(moduleOverrides, factory) {
        */
       decompress(data) {
         if (!dctx) throw new Error("ZXC: decompression context already freed");
+        data = _bytes(data);
         let srcPtr = 0;
         let dstPtr = 0;
         try {
           srcPtr = _alloc(data.length);
           Module.HEAPU8.set(data, srcPtr);
-          const origSize = _u64(_get_decompressed_size(srcPtr, data.length));
-          if (origSize > 0x7fffffff) {
-            throw new Error(
-              `ZXC: decompressed size (${origSize} bytes) exceeds wasm32 addressable memory`,
-            );
-          }
+          const origSize = _declaredSize(srcPtr, data.length, maxOutput);
           dstPtr = _alloc(origSize);
           const result = _decompress_dctx(
             dctx,
@@ -896,6 +955,8 @@ export default async function createZXC(moduleOverrides, factory) {
     return {
       /** Push input and return any compressed bytes produced. */
       compress(data) {
+        if (!cs) throw new Error("ZXC: compression stream already freed");
+        data = _bytes(data);
         if (data.length === 0) return drainCompress(stagePtr, 0);
         const srcPtr = _alloc(data.length);
         try {
@@ -907,6 +968,7 @@ export default async function createZXC(moduleOverrides, factory) {
       },
       /** Finalise: residual block + EOF + footer. */
       end() {
+        if (!cs) throw new Error("ZXC: compression stream already freed");
         return drainEnd();
       },
       /** Free the stream and its scratch buffers. Idempotent. */
@@ -930,7 +992,7 @@ export default async function createZXC(moduleOverrides, factory) {
   /**
    * Create a push-based, single-threaded decompression stream.
    * @param {object} [opts]
-   * @param {boolean} [opts.checksum=false]
+   * @param {boolean} [opts.checksum=true]
    * @returns {{ decompress(Uint8Array): Uint8Array, finished(): boolean, free(): void, inSize(): number, outSize(): number }}
    */
   function createDStream(opts) {
@@ -964,6 +1026,8 @@ export default async function createZXC(moduleOverrides, factory) {
        *  that follows a frame validated in the same call is thrown by the next
        *  call, that frame's output first. */
       decompress(data) {
+        if (!ds) throw new Error("ZXC: decompression stream already freed");
+        data = _bytes(data);
         const srcPtr = data.length > 0 ? _alloc(data.length) : 0;
         try {
           if (srcPtr) Module.HEAPU8.set(data, srcPtr);
@@ -1065,6 +1129,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * }}
    */
   function createSeekable(data) {
+    data = data && _bytes(data);
     if (!data || data.length === 0) {
       throw new Error("ZXC: createSeekable requires a non-empty buffer");
     }
@@ -1079,14 +1144,23 @@ export default async function createZXC(moduleOverrides, factory) {
       throw new Error("ZXC: invalid seekable archive");
     }
 
+    _seekable_set_checksum(handle, 1);
+
+    const requireOpen = () => {
+      if (!handle) throw new Error("ZXC: seekable handle already freed");
+    };
+
     return {
       numBlocks() {
+        requireOpen();
         return _seekable_num_blocks(handle);
       },
       decompressedSize() {
+        requireOpen();
         return _u64(_seekable_decompressed_size(handle));
       },
       blockCompressedSize(idx) {
+        requireOpen();
         if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
         const sz = _seekable_block_comp_size(handle, idx);
         // 0 is never a real size: the group is invalid.
@@ -1094,6 +1168,7 @@ export default async function createZXC(moduleOverrides, factory) {
         return sz;
       },
       blockDecompressedSize(idx) {
+        requireOpen();
         if (idx < 0 || idx >= _seekable_num_blocks(handle)) return null;
         return _seekable_block_decomp_size(handle, idx);
       },
@@ -1112,10 +1187,13 @@ export default async function createZXC(moduleOverrides, factory) {
        *        (128 bytes); redundant when `dict` is a {@link Dictionary}.
        */
       setDict(dict, dictHuf) {
+        requireOpen();
         if (dict instanceof Dictionary) {
           dictHuf = dict.huf;
           dict = dict.content;
         }
+        dict = dict && _bytes(dict, "dict");
+        dictHuf = dictHuf && _bytes(dictHuf, "dictHuf");
         if (!dict || dict.length === 0) {
           throw new Error("ZXC: setDict requires a non-empty dictionary");
         }
@@ -1143,12 +1221,13 @@ export default async function createZXC(moduleOverrides, factory) {
       /**
        * Turns per-block checksum verification on or off.
        *
-       * Off by default, as in the one-shot API. No effect without checksums
-       * in the archive. Applies from the next call.
+       * On by default, as in `decompress`. No effect without checksums in
+       * the archive. Applies from the next call.
        *
        * @param {boolean} enabled - `false` to skip verification.
        */
       setChecksum(enabled) {
+        requireOpen();
         // The Node addon throws on a non-boolean; match it so code ported
         // between the two builds behaves the same.
         if (typeof enabled !== "boolean") {
@@ -1162,21 +1241,30 @@ export default async function createZXC(moduleOverrides, factory) {
         }
       },
       decompressRange(offset, length) {
-        if (length < 0) throw new Error("ZXC: length must be non-negative");
-        // The wasm shim carries the offset as a uint32 (no BigInt);
-        // values outside [0, 2^32-1] would silently wrap and return
-        // data from the wrong position.
-        if (!Number.isInteger(offset) || offset < 0 || offset > 0xffffffff) {
-          throw new Error("ZXC: offset must be an integer in [0, 2^32-1]");
+        requireOpen();
+        if (!Number.isSafeInteger(offset) || offset < 0) {
+          throw new RangeError("ZXC: offset must be an integer in [0, 2^53)");
+        }
+        if (!Number.isSafeInteger(length) || length < 0) {
+          throw new RangeError("ZXC: length must be an integer in [0, 2^53)");
         }
         if (length === 0) return new Uint8Array(0);
+        // Before _alloc: the heap never shrinks, so a wild length would cost it for good.
+        const total = _u64(_seekable_decompressed_size(handle));
+        if (offset > total || length > total - offset) {
+          const r = ZXC_ERROR_SRC_TOO_SMALL;
+          throw new Error(
+            `ZXC seekable decompress error: ${_error_name(r)} (${r})`,
+          );
+        }
         const dstPtr = _alloc(length);
         try {
           const r = _seekable_decompress_range(
             handle,
             dstPtr,
             length,
-            offset,
+            offset >>> 0,
+            Math.floor(offset / 0x100000000),
             length,
           );
           if (r < 0) {
@@ -1217,7 +1305,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * APIs emit a seek table when `seekable: true` is set.
    *
    * @param {ArrayLike<number>} compSizes - Per-block compressed sizes,
-   *        in order. Each entry is treated as an unsigned 32-bit value.
+   *        in order, each an integer in [0, 2^32).
    * @returns {Uint8Array} The encoded seek table.
    */
   function writeSeekTable(compSizes) {
@@ -1233,7 +1321,11 @@ export default async function createZXC(moduleOverrides, factory) {
       dstPtr = _alloc(sz);
       csPtr = _alloc(numBlocks * 4);
       for (let i = 0; i < numBlocks; i++) {
-        Module.HEAPU32[(csPtr >> 2) + i] = compSizes[i] >>> 0;
+        const size = compSizes[i];
+        if (!Number.isInteger(size) || size < 0 || size > 0xffffffff) {
+          throw new RangeError("ZXC: compSizes entries must fit in a uint32");
+        }
+        Module.HEAPU32[(csPtr >> 2) + i] = size;
       }
       const r = _write_seek_table(dstPtr, sz, csPtr, numBlocks);
       if (r < 0) {
@@ -1275,7 +1367,7 @@ export default async function createZXC(moduleOverrides, factory) {
       sizesPtr = _alloc(n * 4);
       dictPtr = _alloc(cap);
       for (let i = 0; i < n; i++) {
-        const s = samples[i];
+        const s = _bytes(samples[i], "sample");
         const sp = _alloc(s.length);
         if (s.length > 0) Module.HEAPU8.set(s, sp);
         samplePtrs.push(sp);
@@ -1297,6 +1389,7 @@ export default async function createZXC(moduleOverrides, factory) {
 
   /* Shared helper: copy a Uint8Array into the heap and call an id getter. */
   function _callIdOnBuffer(fn, data) {
+    data = data && _bytes(data);
     if (!data || data.length === 0) return 0;
     const ptr = _alloc(data.length);
     try {
@@ -1345,6 +1438,8 @@ export default async function createZXC(moduleOverrides, factory) {
    * @throws {Error} On failure.
    */
   function dictSave(content, hufLengths) {
+    content = content && _bytes(content, "content");
+    hufLengths = hufLengths && _bytes(hufLengths, "hufLengths");
     if (!content || content.length === 0) {
       throw new Error("ZXC: dictSave requires non-empty content");
     }
@@ -1386,6 +1481,7 @@ export default async function createZXC(moduleOverrides, factory) {
     if (!samples || samples.length === 0) {
       throw new Error("ZXC: trainDictHuf requires at least one sample");
     }
+    dict = dict && _bytes(dict, "dict");
     if (!dict || dict.length === 0) {
       throw new Error("ZXC: trainDictHuf requires a non-empty dictionary");
     }
@@ -1401,11 +1497,12 @@ export default async function createZXC(moduleOverrides, factory) {
       dictPtr = _alloc(dict.length);
       hufPtr = _alloc(ZXC_HUF_TABLE_SIZE);
       for (let i = 0; i < n; i++) {
-        const sp = _alloc(samples[i].length);
+        const s = _bytes(samples[i], "sample");
+        const sp = _alloc(s.length);
         samplePtrs.push(sp);
-        if (samples[i].length > 0) Module.HEAPU8.set(samples[i], sp);
+        if (s.length > 0) Module.HEAPU8.set(s, sp);
         Module.HEAPU32[(ptrsPtr >> 2) + i] = sp;
-        Module.HEAPU32[(sizesPtr >> 2) + i] = samples[i].length;
+        Module.HEAPU32[(sizesPtr >> 2) + i] = s.length;
       }
       Module.HEAPU8.set(dict, dictPtr);
       const r = _train_dict_huf(
@@ -1440,6 +1537,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @returns {Uint8Array | null}
    */
   function dictHuf(zxd) {
+    zxd = zxd && _bytes(zxd, "zxd");
     if (!zxd || zxd.length === 0) return null;
     const bufPtr = _alloc(zxd.length);
     try {
@@ -1463,6 +1561,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * @throws {Error} On invalid input.
    */
   function dictLoad(zxd) {
+    zxd = zxd && _bytes(zxd, "zxd");
     if (!zxd || zxd.length === 0) {
       throw new Error("ZXC: dictLoad requires a non-empty buffer");
     }
@@ -1533,7 +1632,7 @@ export default async function createZXC(moduleOverrides, factory) {
       sizesPtr = _alloc(n * 4);
       zxdPtr = _alloc(cap);
       for (let i = 0; i < n; i++) {
-        const s = samples[i];
+        const s = _bytes(samples[i], "sample");
         const sp = _alloc(s.length);
         if (s.length > 0) Module.HEAPU8.set(s, sp);
         samplePtrs.push(sp);
@@ -1674,7 +1773,7 @@ export default async function createZXC(moduleOverrides, factory) {
    * ends before the footer is reached.
    *
    * @param {object} [opts]
-   * @param {boolean} [opts.checksum]
+   * @param {boolean} [opts.checksum=true]
    * @returns {TransformStream<Uint8Array, Uint8Array>}
    */
   function createDecompressTransformStream(opts) {

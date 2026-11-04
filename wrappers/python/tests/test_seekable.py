@@ -5,6 +5,9 @@ ZXC - High-performance lossless compression
 Copyright (c) Bertrand Lebonnois and contributors.
 """
 
+import os
+import sys
+
 import pytest
 import zxc
 
@@ -411,6 +414,19 @@ class TestSeekableChecksum:
             s.set_checksum(True)
             assert s.decompress_range(0, 512) == payload[:512]
 
+    def test_set_checksum_refuses_none(self, tmp_path):
+        """None must not turn off a verification the caller did not disable."""
+        payload = bytearray(os.urandom(256 * 1024))
+        compressed = bytearray(
+            zxc.compress(bytes(payload), seekable=True, checksum=True)
+        )
+        compressed[len(compressed) // 2] ^= 0xFF
+        with zxc.Seekable(bytes(compressed)) as s:
+            with pytest.raises(TypeError, match="None"):
+                s.set_checksum(None)
+            with pytest.raises(RuntimeError, match="BAD_CHECKSUM"):
+                s.decompress_range(0, len(payload))
+
     def test_corrupted_block_is_silent_without_verification(self, tmp_path):
         """Incompressible data means RAW blocks, which memcpy a flipped byte
         straight through: the decode succeeds and only the checksum objects.
@@ -428,12 +444,11 @@ class TestSeekableChecksum:
         compressed[16 + 8 + 4] ^= 0xFF
 
         with zxc.Seekable(bytes(compressed)) as s:
-            s.set_checksum(True)
             with pytest.raises(RuntimeError, match="BAD_CHECKSUM"):
                 s.decompress_range(0, 512)
 
-        # Default is off: bytes come back, wrong, with no error.
-        with zxc.Seekable(bytes(compressed)) as s:
+        # Opted out: bytes come back, wrong, with no error.
+        with zxc.Seekable(bytes(compressed), checksum=False) as s:
             assert s.decompress_range(0, 512) != payload[:512]
 
     def test_set_checksum_after_close_raises(self, tmp_path):
@@ -443,3 +458,42 @@ class TestSeekableChecksum:
         s.close()
         with pytest.raises(ValueError, match="closed"):
             s.set_checksum(True)
+
+
+class _Index:
+    def __index__(self):
+        return 10
+
+
+@pytest.mark.parametrize("offset", [2**64, 2**64 + 10, -(2**64), -1])
+def test_range_offset_out_of_u64_does_not_wrap(offset):
+    payload = bytes(range(256)) * 100
+    with zxc.Seekable(zxc.compress(payload, seekable=True)) as s:
+        with pytest.raises(OverflowError):
+            s.decompress_range(offset, 5)
+
+
+def test_range_offset_accepts_index_objects():
+    payload = bytes(range(256)) * 100
+    with zxc.Seekable(zxc.compress(payload, seekable=True)) as s:
+        assert s.decompress_range(_Index(), 5) == payload[10:15]
+
+
+def test_write_seek_table_refuses_sizes_over_u32():
+    assert zxc.write_seek_table([2**32 - 1])
+    with pytest.raises(OverflowError):
+        zxc.write_seek_table([2**32 + 5])
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="__buffer__ needs 3.12")
+def test_set_dict_table_closing_the_handle():
+    payload = b"x" * 100000
+    s = zxc.Seekable(zxc.compress(payload, seekable=True))
+
+    class Evil:
+        def __buffer__(self, flags):
+            s.close()
+            return memoryview(b"\0" * 128)
+
+    with pytest.raises(ValueError, match="closed"):
+        s.set_dict(b"y" * 100, Evil())

@@ -42,7 +42,8 @@ import (
 
 // Seekable is a handle to a seekable ZXC archive.
 //
-// Build one with [Open] (file-backed) or [OpenBytes] (in-memory). Always
+// Build one with [Open] (file-backed) or [OpenBytes] (in-memory). Checksums the
+// archive carries are verified; [Seekable.SetChecksum] opts out. Always
 // defer a call to [Seekable.Close] to release the native resources. A handle
 // dropped without Close is released by a finalizer once the garbage collector
 // runs; until then it keeps its file open (locked, on Windows), its source
@@ -87,6 +88,7 @@ func Open(path string) (*Seekable, error) {
 		C.fclose(f)
 		return nil, ErrInvalidData
 	}
+	C.zxc_seekable_set_checksum(ptr, 1)
 	s := &Seekable{ptr: ptr, file: f}
 	runtime.SetFinalizer(s, (*Seekable).Close)
 	return s, nil
@@ -113,6 +115,7 @@ func OpenBytes(data []byte) (*Seekable, error) {
 		s.pinner.Unpin()
 		return nil, ErrInvalidData
 	}
+	C.zxc_seekable_set_checksum(ptr, 1)
 	s.ptr = ptr
 	s.srcData = data
 	// The Seekable references its Pinner, so this finalizer runs (and unpins)
@@ -151,6 +154,7 @@ func OpenReader(r io.ReaderAt, size int64) (*Seekable, error) {
 		rc.repanic()
 		return nil, ErrInvalidData
 	}
+	C.zxc_seekable_set_checksum(ptr, 1)
 	s := &Seekable{ptr: ptr, rhandle: h, rctx: rc, hasRH: true}
 	runtime.SetFinalizer(s, (*Seekable).Close)
 	return s, nil
@@ -312,8 +316,8 @@ func (s *Seekable) DecompressRange(dst []byte, offset uint64, length int) (int, 
 
 // SetChecksum turns per-block checksum verification on or off.
 //
-// Off by default, as in the one-shot API. No effect on an archive without
-// checksums. Applies from the next call.
+// On from the moment the handle opens, as in the one-shot API. No effect on an
+// archive without checksums. Applies from the next call.
 func (s *Seekable) SetChecksum(enabled bool) error {
 	if s == nil || s.ptr == nil {
 		return ErrNullInput
@@ -332,6 +336,9 @@ func (s *Seekable) SetChecksum(enabled bool) error {
 
 // SetDictionary attaches a [Dictionary] (content + shared table) in one call.
 func (s *Seekable) SetDictionary(d *Dictionary) error {
+	if d == nil {
+		return ErrNullInput
+	}
 	return s.SetDict(d.Content(), d.Huf())
 }
 

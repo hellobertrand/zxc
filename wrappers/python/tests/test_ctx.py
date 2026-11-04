@@ -7,6 +7,10 @@ Copyright (c) Bertrand Lebonnois and contributors.
 Reusable compression and decompression contexts.
 """
 
+import os
+import threading
+import time
+
 import pytest
 
 import zxc
@@ -139,3 +143,47 @@ def test_oversized_dictionary_is_rejected_at_creation():
         with pytest.raises(RuntimeError, match="ZXC_ERROR_DICT_TOO_LARGE"):
             ctx(dict=b"x" * 65536)
         ctx(dict=b"x" * 65535).close()
+
+
+@pytest.fixture(scope="module")
+def slow_inputs():
+    return os.urandom(1 << 26), zxc.compress(os.urandom(300) * (1 << 18))
+
+
+@pytest.mark.parametrize(
+    "make",
+    [
+        lambda raw, _: (h := zxc.Cctx(level=1), lambda: h.compress(raw)),
+        lambda _, arc: (h := zxc.Dctx(), lambda: h.decompress(arc)),
+        lambda raw, _: (h := zxc.CStream(level=1), lambda: h.compress(raw)),
+        lambda _, arc: (h := zxc.DStream(), lambda: h.decompress(arc)),
+    ],
+    ids=["Cctx", "Dctx", "CStream", "DStream"],
+)
+def test_close_refused_during_a_call_on_another_thread(make, slow_inputs):
+    for _ in range(20):
+        handle, call = make(*slow_inputs)
+        started = threading.Event()
+
+        def run():
+            started.set()
+            try:
+                call()
+            except ValueError:
+                pass  # close() got in first: this round proves nothing
+
+        t = threading.Thread(target=run)
+        t.start()
+        started.wait()
+        time.sleep(0.001)
+        try:
+            handle.close()
+            refused = False
+        except RuntimeError as e:
+            assert "in use" in str(e)
+            refused = True
+        t.join()
+        handle.close()
+        if refused:
+            return
+    pytest.fail("close() never landed during a call")

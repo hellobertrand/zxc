@@ -8,6 +8,8 @@ dynamic = ["version"]
 description = "ZXC: Package for high-performance asymmetric lossless compression built for ultra-fast decode"
 readme = "README.md"
 license = "BSD-3-Clause"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
 
 [project.urls]
 Homepage = "https://github.com/hellobertrand/zxc"
@@ -15,6 +17,12 @@ Homepage = "https://github.com/hellobertrand/zxc"
 [tool.scikit-build]
 metadata.version.provider = "scikit_build_core.metadata.setuptools_scm"
 wheel.packages = ["src/zxc"]
+wheel.exclude = ["*.c"]
+sdist.include = ["zxc-core"]
+
+[[tool.scikit-build.generate]]
+path = "zxc/_version.py"
+template = '__version__ = "${version}"'
 
 [tool.setuptools_scm]
 root = "../../"

@@ -5,10 +5,12 @@ ZXC - High-performance lossless compression
 Copyright (c) Bertrand Lebonnois and contributors.
 """
 
-import pytest
-import zxc
+import errno
 import io
 import os
+
+import pytest
+import zxc
 
 
 @pytest.mark.parametrize(
@@ -185,3 +187,135 @@ def test_stream_write_failure_at_flush(tmp_path, direction):
     with open(src_path, "rb") as src, _closed_pipe() as dst:
         with pytest.raises(RuntimeError, match="ZXC_ERROR_IO"):
             fn(src, dst)
+
+
+PAYLOAD = bytes(range(256)) * 400  # larger than a BufferedReader's read-ahead
+
+
+@pytest.mark.parametrize("size", [1000, len(PAYLOAD)])
+def test_stream_compress_starts_at_logical_position(tmp_path, size):
+    src_path, arc_path = tmp_path / "src", tmp_path / "arc"
+    src_path.write_bytes(PAYLOAD[:size])
+    with open(src_path, "rb") as src, open(arc_path, "wb") as dst:
+        assert src.read(10) == PAYLOAD[:10]
+        zxc.stream_compress(src, dst)
+        # Resynced: the old read-ahead must not come back.
+        assert src.tell() == size
+        assert src.read() == b""
+    assert zxc.decompress(arc_path.read_bytes()) == PAYLOAD[10:size]
+
+
+def test_stream_compress_after_seek_inside_read_ahead(tmp_path):
+    src_path, arc_path = tmp_path / "src", tmp_path / "arc"
+    src_path.write_bytes(PAYLOAD)
+    with open(src_path, "rb") as src, open(arc_path, "wb") as dst:
+        src.read(1)
+        src.seek(0)
+        zxc.stream_compress(src, dst)
+    assert zxc.decompress(arc_path.read_bytes()) == PAYLOAD
+
+
+def test_stream_decompress_starts_at_logical_position(tmp_path):
+    arc = zxc.compress(PAYLOAD)
+    arc_path, out_path = tmp_path / "arc", tmp_path / "out"
+    arc_path.write_bytes(b"HEADER" + arc)
+    with open(arc_path, "rb") as src, open(out_path, "wb") as dst:
+        assert src.read(6) == b"HEADER"
+        zxc.stream_decompress(src, dst)
+        assert src.read() == b""
+    assert out_path.read_bytes() == PAYLOAD
+
+
+def test_stream_source_resynced_after_failure(tmp_path):
+    src_path, out_path = tmp_path / "src", tmp_path / "out"
+    src_path.write_bytes(b"garbage" * 3000)
+    with open(src_path, "rb") as src, open(out_path, "wb") as dst:
+        src.read(1)
+        with pytest.raises(RuntimeError):
+            zxc.stream_decompress(src, dst)
+        assert src.tell() == os.lseek(src.fileno(), 0, os.SEEK_CUR)
+
+
+@pytest.mark.parametrize("fn", [zxc.stream_compress, zxc.stream_decompress])
+def test_stream_refuses_text_source(tmp_path, fn):
+    src_path = tmp_path / "src"
+    src_path.write_bytes(b"data")
+    with open(src_path, "r") as src, open(tmp_path / "out", "wb") as dst:
+        with pytest.raises(ValueError, match="binary mode"):
+            fn(src, dst)
+
+
+def _feed_pipe(data):
+    r, w = os.pipe()
+    with open(w, "wb") as f:
+        f.write(data)
+    return open(r, "rb")
+
+
+def test_stream_accepts_untouched_pipe(tmp_path):
+    arc_path = tmp_path / "arc"
+    with _feed_pipe(b"x" * 4000) as src, open(arc_path, "wb") as dst:
+        zxc.stream_compress(src, dst)
+    assert zxc.decompress(arc_path.read_bytes()) == b"x" * 4000
+
+
+def test_stream_decompress_with_dictionary(tmp_path):
+    samples = [(b"sample %d lorem ipsum dolor sit amet " % i) * 30 for i in range(200)]
+    d = zxc.Dictionary.train(samples)
+    data = samples[3] * 10
+    src_path, arc_path, out_path = tmp_path / "s", tmp_path / "a", tmp_path / "o"
+    src_path.write_bytes(data)
+    with open(src_path, "rb") as src, open(arc_path, "wb") as dst:
+        zxc.stream_compress(src, dst, dict=d)
+
+    def run(**kwargs):
+        with open(arc_path, "rb") as src, open(out_path, "wb") as dst:
+            return zxc.stream_decompress(src, dst, **kwargs)
+
+    assert run(dict=d) == len(data)
+    assert out_path.read_bytes() == data
+    assert run(dict=d.content, dict_huf=d.huf) == len(data)
+    with pytest.raises(RuntimeError, match="DICT_REQUIRED"):
+        run()
+    with pytest.raises(RuntimeError, match="DICT_MISMATCH"):
+        run(dict=b"other" * 100)
+    with pytest.raises(ValueError, match="128 bytes"):
+        run(dict=d.content, dict_huf=b"short")
+    with pytest.raises(TypeError):
+        run(dict=1)
+
+
+@pytest.mark.parametrize("fn", [zxc.stream_compress, zxc.stream_decompress])
+def test_stream_memory_file_keeps_its_error(tmp_path, fn):
+    # src fails first: the exception must surface, with dst left uncalled.
+    with pytest.raises(io.UnsupportedOperation):
+        fn(io.BytesIO(b"data"), io.BytesIO())
+    with open(tmp_path / "s", "wb+") as src, pytest.raises(io.UnsupportedOperation):
+        fn(src, io.BytesIO())
+
+
+class _NoSeekEnd(io.FileIO):
+    def seek(self, pos, whence=os.SEEK_SET):
+        if whence == os.SEEK_END:
+            raise OSError(errno.EINVAL, "no SEEK_END")
+        return super().seek(pos, whence)
+
+
+def test_stream_source_refusing_seek_end(tmp_path):
+    src_path, arc_path = tmp_path / "src", tmp_path / "arc"
+    src_path.write_bytes(PAYLOAD)
+    with io.BufferedReader(_NoSeekEnd(src_path)) as src, open(arc_path, "wb") as dst:
+        src.read(10)
+        zxc.stream_compress(src, dst)
+        assert src.read() == b""
+    assert zxc.decompress(arc_path.read_bytes()) == PAYLOAD[10:]
+
+
+@pytest.mark.skipif(not os.path.exists("/proc/version"), reason="needs /proc")
+def test_stream_compress_proc_file(tmp_path):
+    arc_path = tmp_path / "arc"
+    with open("/proc/version", "rb") as f:
+        expected = f.read()
+    with open("/proc/version", "rb") as src, open(arc_path, "wb") as dst:
+        zxc.stream_compress(src, dst)
+    assert zxc.decompress(arc_path.read_bytes()) == expected

@@ -107,7 +107,7 @@ pub struct CompressOptions {
     /// Compression level (default: `Level::Default`)
     pub level: Level,
 
-    /// Enable checksum for data integrity (default: `true`)
+    /// Write checksums for data integrity (default: `false`)
     pub checksum: bool,
 
     /// Enable seek table for random-access decompression (default: `false`)
@@ -132,7 +132,7 @@ impl Default for CompressOptions {
     fn default() -> Self {
         Self {
             level: Level::Default,
-            checksum: true,
+            checksum: false,
             seekable: false,
             dict: None,
             dict_huf: None,
@@ -149,7 +149,14 @@ impl CompressOptions {
         }
     }
 
-    /// Disable checksum computation for faster compression.
+    /// Writes checksums for data integrity.
+    pub fn with_checksum(mut self) -> Self {
+        self.checksum = true;
+        self
+    }
+
+    /// Writes no checksums, which is the default.
+    #[deprecated(note = "checksums are off by default: drop this call")]
     pub fn without_checksum(mut self) -> Self {
         self.checksum = false;
         self
@@ -188,8 +195,10 @@ impl CompressOptions {
 /// Options for decompression operations.
 #[derive(Debug, Clone)]
 pub struct DecompressOptions {
-    /// Verify checksum during decompression (default: `true`)
-    pub verify_checksum: bool,
+    /// Verify checksums. `None` (the default) verifies them when the archive
+    /// carries them, except on the block API, whose blocks cannot say so: see
+    /// [`Dctx::decompress_block`].
+    pub verify_checksum: Option<bool>,
 
     /// Pre-trained dictionary content (default: `None`).
     ///
@@ -207,7 +216,7 @@ pub struct DecompressOptions {
 impl Default for DecompressOptions {
     fn default() -> Self {
         Self {
-            verify_checksum: true,
+            verify_checksum: None,
             dict: None,
             dict_huf: None,
         }
@@ -218,7 +227,7 @@ impl DecompressOptions {
     /// Create options that skip checksum verification.
     pub fn skip_checksum() -> Self {
         Self {
-            verify_checksum: false,
+            verify_checksum: Some(false),
             ..Default::default()
         }
     }
@@ -240,6 +249,11 @@ impl DecompressOptions {
         self.dict = Some(dictionary.content().to_vec());
         self.dict_huf = Some(dictionary.huf().to_vec());
         self
+    }
+
+    /// The setting for a frame, whose header says whether it carries checksums.
+    pub(crate) fn verify_frame(&self) -> bool {
+        self.verify_checksum.unwrap_or(true)
     }
 }
 

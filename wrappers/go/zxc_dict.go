@@ -183,7 +183,7 @@ func DictSave(content, hufLengths []byte) ([]byte, error) {
 		return nil, ErrSrcTooSmall
 	}
 	if len(hufLengths) != HufTableSize {
-		return nil, ErrInvalidData
+		return nil, ErrBadHufTable
 	}
 	bound := uint64(C.zxc_dict_save_bound(C.size_t(len(content))))
 	buf := make([]byte, bound)

@@ -8,7 +8,9 @@ Tests for the io.RawIOBase adapters (zxc.ZxcReader / zxc.ZxcWriter)
 and the zxc.detect_zxc helper.
 """
 
+import errno
 import io
+import os
 
 import pytest
 import zxc
@@ -195,3 +197,172 @@ def test_detect_zxc_accepts_memoryview_and_bytearray():
     frame = zxc.compress(b"x")
     assert zxc.detect_zxc(memoryview(frame))
     assert zxc.detect_zxc(bytearray(frame))
+
+
+class _ShortRaw(io.RawIOBase):
+    def __init__(self):
+        self.data = bytearray()
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        n = min(len(b), 100)
+        self.data += bytes(b[:n])
+        return n
+
+
+def test_writer_completes_short_raw_writes():
+    payload = os.urandom(1 << 20)
+    sink = _ShortRaw()
+    with zxc.ZxcWriter(sink) as w:
+        w.write(payload)
+    assert zxc.decompress(bytes(sink.data)) == payload
+
+
+def test_writer_refuses_raw_sink_that_would_block():
+    class WouldBlock(io.RawIOBase):
+        def writable(self):
+            return True
+
+        def write(self, b):
+            return None
+
+    w = zxc.ZxcWriter(WouldBlock())
+    w.write(b"x")
+    with pytest.raises(BlockingIOError):
+        w.write(b"y")
+    with pytest.raises(BlockingIOError):
+        w.close()
+    assert not w.closed
+    w._dst = io.BytesIO()  # let the finalizer close quietly
+    w.close()
+
+
+def test_writer_refuses_raw_sink_taking_nothing():
+    class Stuck(io.RawIOBase):
+        def writable(self):
+            return True
+
+        def write(self, b):
+            return 0
+
+    w = zxc.ZxcWriter(Stuck())
+    w.write(b"x")
+    with pytest.raises(OSError, match="no bytes"):
+        w.write(b"y")
+    with pytest.raises(OSError, match="no bytes"):
+        w.close()
+    assert w.closed
+
+
+def test_writer_accepts_duck_sink_without_count():
+    class Sink:
+        def __init__(self):
+            self.data = b""
+
+        def write(self, b):
+            self.data += bytes(b)
+
+    sink = Sink()
+    with zxc.ZxcWriter(sink) as w:
+        w.write(b"duck typed")
+    assert zxc.decompress(sink.data) == b"duck typed"
+
+
+class _FlakySink(io.RawIOBase):
+    """Fails with *failure* (or would block, for None) until `up` is set."""
+
+    def __init__(self, failure=None):
+        self.data = bytearray()
+        self.failure = failure
+        self.up = False
+
+    def writable(self):
+        return True
+
+    def write(self, b):
+        if not self.up:
+            if self.failure:
+                raise self.failure
+            return None
+        self.data += bytes(b)
+        return len(b)
+
+
+PAYLOAD = bytes(range(256)) * 4000
+
+
+def test_writer_keeps_output_the_sink_blocked_on():
+    sink = _FlakySink()
+    w = zxc.ZxcWriter(sink, level=1)
+    taken = w.write(PAYLOAD)
+    assert taken == len(PAYLOAD)
+    with pytest.raises(BlockingIOError):
+        w.write(PAYLOAD)  # not taken
+    sink.up = True
+    taken = w.write(PAYLOAD)
+    assert taken == len(PAYLOAD)
+    w.close()
+    assert zxc.decompress(bytes(sink.data)) == PAYLOAD * 2
+
+
+def test_writer_flush_drains_after_a_block():
+    sink = _FlakySink()
+    w = zxc.ZxcWriter(sink, level=1)
+    w.write(PAYLOAD)
+    with pytest.raises(BlockingIOError):
+        w.flush()
+    sink.up = True
+    w.flush()
+    assert sink.data
+    w.close()
+    assert zxc.decompress(bytes(sink.data)) == PAYLOAD
+
+
+def test_writer_close_can_be_retried_after_a_block():
+    sink = _FlakySink()
+    w = zxc.ZxcWriter(sink, level=1)
+    w.write(PAYLOAD)
+    with pytest.raises(BlockingIOError):
+        w.close()
+    assert not w.closed
+    sink.up = True
+    w.close()
+    assert w.closed
+    assert zxc.decompress(bytes(sink.data)) == PAYLOAD
+
+
+def test_writer_counts_what_a_blocked_buffered_sink_took():
+    class Partial(_FlakySink):
+        def write(self, b):
+            if not self.up:
+                self.up = True
+                self.data += bytes(b[:3])
+                raise BlockingIOError(errno.EAGAIN, "full", 3)
+            return super().write(b)
+
+    sink = Partial()
+    with zxc.ZxcWriter(sink, level=1) as w:
+        w.write(PAYLOAD)
+    assert zxc.decompress(bytes(sink.data)) == PAYLOAD
+
+
+def test_writer_recovers_from_a_passing_sink_failure():
+    sink = _FlakySink(OSError("transient"))
+    w = zxc.ZxcWriter(sink, level=1)
+    w.write(PAYLOAD)
+    sink.up = True
+    w.close()
+    assert zxc.decompress(bytes(sink.data)) == PAYLOAD
+
+
+def test_writer_surfaces_a_lasting_sink_failure():
+    sink = _FlakySink(OSError("disk full"))
+    w = zxc.ZxcWriter(sink, level=1)
+    w.write(PAYLOAD)
+    with pytest.raises(OSError, match="disk full"):
+        w.write(PAYLOAD)
+    with pytest.raises(OSError, match="disk full"):
+        w.close()
+    assert w.closed

@@ -171,8 +171,8 @@ type DStream struct {
 
 // NewDStream creates a push decompression stream.
 //
-// Honoured options: [WithChecksum]. [WithThreads] is ignored.
-// [WithDict]/[WithDictionary] return [ErrDictUnsupported] (see [NewCStream]).
+// Honoured options: [WithChecksum], verifying unless false. [WithThreads] is
+// ignored. [WithDict]/[WithDictionary] return [ErrDictUnsupported] (see [NewCStream]).
 func NewDStream(opts ...Option) (*DStream, error) {
 	o := applyOptions(opts)
 	if len(o.dict) > 0 || len(o.dictHuf) > 0 {

@@ -63,7 +63,7 @@ def compress(
 def decompress(
     data: bytes,
     decompress_size: Optional[int] = None,
-    checksum: bool = False,
+    checksum: bool = True,
     dict: Optional[bytes] = None,
     dict_huf: Optional[bytes] = None,
 ) -> bytes: ...
@@ -78,7 +78,12 @@ def stream_compress(
     dict_huf: Optional[bytes] = None,
 ) -> int: ...
 def stream_decompress(
-    src: FileLike, dst: FileLike, n_threads: int = 0, checksum: bool = False
+    src: FileLike,
+    dst: FileLike,
+    n_threads: int = 0,
+    checksum: bool = True,
+    dict: "Dictionary | bytes | None" = None,
+    dict_huf: Optional[bytes] = None,
 ) -> int: ...
 def get_decompressed_size(data: bytes) -> int: ...
 
@@ -124,7 +129,9 @@ def library_version() -> str: ...
 class Seekable:
     """Random-access decompression of a seekable ZXC archive."""
 
-    def __init__(self, source: bytes | bytearray | memoryview | object) -> None: ...
+    def __init__(
+        self, source: bytes | bytearray | memoryview | object, checksum: bool = True
+    ) -> None: ...
     @property
     def num_blocks(self) -> int: ...
     @property
@@ -165,7 +172,7 @@ class Dctx:
 
     def __init__(
         self,
-        checksum: bool = False,
+        checksum: bool = True,
         dict: "Dictionary | bytes | None" = None,
         dict_huf: bytes | None = None,
     ) -> None: ...
@@ -193,7 +200,7 @@ class CStream:
 class DStream:
     """Push-based, single-threaded decompression stream."""
 
-    def __init__(self, checksum: bool = False) -> None: ...
+    def __init__(self, checksum: bool = True) -> None: ...
     def decompress(self, data: bytes) -> bytes: ...
     @property
     def finished(self) -> bool: ...
@@ -218,8 +225,9 @@ class ZxcReader(_io.RawIOBase):
         self,
         fileobj: IO[bytes],
         *,
-        checksum: bool = False,
+        checksum: bool = True,
         buffer_size: int = 0,
+        multistream: bool = True,
     ) -> None: ...
     def readable(self) -> bool: ...
     def readinto(self, b: bytearray) -> Optional[int]: ...

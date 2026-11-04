@@ -326,7 +326,7 @@ function dictLoad(zxd) {
  * @param {object} [options] - Compression options.
  * @param {number} [options.level=LEVEL_DEFAULT] - Compression level (1-7); an out-of-range
  *   value throws with `code === ERROR_BAD_LEVEL`.
- * @param {boolean} [options.checksum=false] - Enable checksum verification.
+ * @param {boolean} [options.checksum=false] - Write block checksums and the archive digest.
  * @param {boolean} [options.seekable=false] - Enable seek table for random-access decompression.
  * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
  * @returns {Buffer} Compressed data.
@@ -374,14 +374,34 @@ function getFrameInfo(data) {
   return native.getFrameInfo(data);
 }
 
+/** `options.maxOutputSize`, or Infinity when absent. */
+function _readMaxOutput(options) {
+  const max = options.maxOutputSize;
+  if (max === undefined || max === null) return Infinity;
+  if (!Number.isSafeInteger(max) || max < 0) {
+    throw new RangeError("maxOutputSize must be an integer in [0, 2^53)");
+  }
+  return max;
+}
+
+function _checkOutputSize(size, max) {
+  if (size > max) {
+    throw new Error(
+      `zxc: decompressed size (${size} bytes) exceeds maxOutputSize (${max})`,
+    );
+  }
+}
+
 /**
  * Decompress a ZXC compressed Buffer.
  *
  * @param {Buffer} data - Compressed data.
  * @param {object} [options] - Decompression options.
  * @param {number} [options.size] - Expected decompressed size. If omitted, read from header.
- * @param {boolean} [options.checksum=false] - Enable checksum verification.
+ * @param {boolean} [options.checksum=true] - Verify the checksums the archive carries.
  * @param {Buffer|Uint8Array} [options.dict] - Pre-trained dictionary content (raw bytes).
+ * @param {number} [options.maxOutputSize] - Refuse a larger size, read from the footer or
+ *   given as `size`, before allocating. No limit by default.
  * @returns {Buffer} Decompressed data.
  */
 function decompress(data, options = {}) {
@@ -389,13 +409,15 @@ function decompress(data, options = {}) {
     throw new TypeError("data must be a Buffer");
   }
 
-  const checksum = options.checksum ?? false;
+  const checksum = options.checksum ?? true;
   const { dict, dictHuf } = _splitDictOption(options);
+  const maxOutput = _readMaxOutput(options);
 
   let size = options.size;
   if (size === undefined) {
     size = getDecompressedSize(data);
   }
+  _checkOutputSize(size, maxOutput);
 
   return native.decompress(data, size, checksum, dict, dictHuf);
 }
@@ -422,7 +444,7 @@ class Cctx extends native.Cctx {
 
 /**
  * Reusable decompression context, mirroring {@link Cctx}. Options:
- * `checksum`, `dict`, `dictHuf`.
+ * `checksum` (verifies by default), `dict`, `dictHuf`, `maxOutputSize`.
  *
  * @example
  *   const dctx = new zxc.Dctx({ dict });
@@ -430,9 +452,20 @@ class Cctx extends native.Cctx {
  *   dctx.close();
  */
 class Dctx extends native.Dctx {
+  #maxOutput;
+
   constructor(options = {}) {
     const { dict, dictHuf } = _splitDictOption(options);
+    const maxOutput = _readMaxOutput(options);
     super({ ...options, dict, dictHuf });
+    this.#maxOutput = maxOutput;
+  }
+
+  decompress(data) {
+    if (this.#maxOutput !== Infinity && ArrayBuffer.isView(data)) {
+      _checkOutputSize(native.getDecompressedSize(data), this.#maxOutput);
+    }
+    return super.decompress(data);
   }
 }
 
@@ -459,7 +492,7 @@ const CStream = native.CStream;
  * Push-based, single-threaded decompression stream.
  *
  * @example
- *   const ds = new zxc.DStream({ checksum: true });
+ *   const ds = new zxc.DStream();
  *   for await (const part of compressed) sink.write(ds.decompress(part));
  *   if (!ds.finished()) throw new Error('truncated');
  *   ds.close();
@@ -474,7 +507,7 @@ const DStream = native.DStream;
  * table - produce one by passing `{ seekable: true }` to `compress`). The
  * Buffer is copied into the addon's heap and kept alive for the lifetime
  * of the handle; call `.close()` to release both the native handle and
- * the copy.
+ * the copy. Checksums are verified unless `setChecksum(false)` is called.
  *
  * @example
  *   const s = new zxc.Seekable(compressedBuf);
@@ -485,7 +518,17 @@ const DStream = native.DStream;
  *     s.close();
  *   }
  */
-const Seekable = native.Seekable;
+class Seekable extends native.Seekable {
+  /**
+   * @param {Dictionary|Buffer|Uint8Array} dict
+   * @param {Buffer|Uint8Array} [dictHuf] - Ignored when `dict` is a {@link Dictionary}.
+   */
+  setDict(dict, dictHuf) {
+    return dict instanceof Dictionary
+      ? super.setDict(dict.content, dict.huf)
+      : super.setDict(dict, dictHuf);
+  }
+}
 
 /**
  * Encoded byte size of a seek table covering `numBlocks` data blocks.

@@ -35,13 +35,14 @@
   },
   "homepage": "https://github.com/hellobertrand/zxc",
   "engines": {
-    "node": ">=16.0.0"
+    "node": "^20.17.0 || >=22.9.0"
   },
   "dependencies": {
     "node-addon-api": "^8.5.0",
     "cmake-js": "^8.0.0"
   },
   "devDependencies": {
+    "semver": "^7.7.3",
     "vitest": "^5.0.2"
   },
   "binary": {

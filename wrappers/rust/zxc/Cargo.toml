@@ -4,6 +4,7 @@ description = "ZXC: Package for high-performance asymmetric lossless compression
 version.workspace = true
 authors.workspace = true
 edition.workspace = true
+rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 homepage.workspace = true
@@ -23,6 +24,7 @@ libc = "0.2"
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61.2", features = [
   "Win32_Foundation",
+  "Win32_Storage_FileSystem",
   "Win32_System_Threading",
 ] }
 

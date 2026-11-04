@@ -61,6 +61,18 @@ static bool ReadLevel(Napi::Env env, Napi::Value v, int64_t* level) {
     return true;
 }
 
+// An absent (undefined or null) `checksum` keeps *checksum; anything but a boolean
+// is refused rather than coerced.
+static bool ReadChecksum(Napi::Env env, Napi::Value v, int* checksum) {
+    if (v.IsUndefined() || v.IsNull()) return true;
+    if (!v.IsBoolean()) {
+        Napi::TypeError::New(env, "checksum must be a boolean").ThrowAsJavaScriptException();
+        return false;
+    }
+    *checksum = v.As<Napi::Boolean>().Value() ? 1 : 0;
+    return true;
+}
+
 static bool SetDParam(Napi::Env env, zxc_dctx* d, zxc_dparam_t param, int64_t value) {
     const int r = zxc_dctx_set_param(d, param, value);
     if (r != ZXC_OK) {
@@ -91,6 +103,18 @@ static bool SetDDict(Napi::Env env, zxc_dctx* d, const void* dict, size_t dict_s
         return false;
     }
     return true;
+}
+
+// node::Buffer::New aborts the process when the allocation fails, and these sizes
+// can come from an unverified footer: Buffer.allocUnsafeSlow throws a RangeError.
+static Napi::Buffer<uint8_t> NewBufferOrThrow(Napi::Env env, size_t size) {
+    // The JS call costs about 100 ns, measurable on small payloads.
+    if (size <= (size_t{1} << 20)) return Napi::Buffer<uint8_t>::New(env, size);
+    Napi::Object buffer = env.Global().Get("Buffer").As<Napi::Object>();
+    return buffer.Get("allocUnsafeSlow")
+        .As<Napi::Function>()
+        .Call(buffer, {Napi::Number::New(env, static_cast<double>(size))})
+        .As<Napi::Buffer<uint8_t>>();
 }
 
 // =============================================================================
@@ -133,9 +157,7 @@ static Napi::Value Compress(const Napi::CallbackInfo& info) {
     if (!ReadLevel(env, info[1], &level)) return env.Undefined();
 
     int checksum = 0;
-    if (info.Length() >= 3 && info[2].IsBoolean()) {
-        checksum = info[2].As<Napi::Boolean>().Value() ? 1 : 0;
-    }
+    if (!ReadChecksum(env, info[2], &checksum)) return env.Undefined();
 
     int seekable = 0;
     if (info.Length() >= 4 && info[3].IsBoolean()) {
@@ -220,10 +242,8 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
     size_t src_size = src_buf.Length();
     size_t decompress_size = static_cast<size_t>(info[1].As<Napi::Number>().Int64Value());
 
-    int checksum = 0;
-    if (info.Length() >= 3 && info[2].IsBoolean()) {
-        checksum = info[2].As<Napi::Boolean>().Value() ? 1 : 0;
-    }
+    int checksum = 1;
+    if (!ReadChecksum(env, info[2], &checksum)) return env.Undefined();
 
     const void* dict = nullptr;
     size_t dict_size = 0;
@@ -246,7 +266,7 @@ static Napi::Value Decompress(const Napi::CallbackInfo& info) {
         dict_huf = huf_buf.Data();
     }
 
-    Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, decompress_size);
+    Napi::Buffer<uint8_t> dst_buf = NewBufferOrThrow(env, decompress_size);
 
     static uint8_t kEmptyDst = 0;
     void* dst =
@@ -626,9 +646,7 @@ static bool ReadCtxOptions(Napi::Env env, const Napi::CallbackInfo& info, int64_
     if (info.Length() < 1 || !info[0].IsObject()) return true;
     Napi::Object o = info[0].As<Napi::Object>();
     if (level && o.Has("level") && !ReadLevel(env, o.Get("level"), level)) return false;
-    if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
-        *checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
-    }
+    if (!ReadChecksum(env, o.Get("checksum"), checksum)) return false;
     if (o.Has("dict") && o.Get("dict").IsBuffer()) {
         Napi::Buffer<uint8_t> b = o.Get("dict").As<Napi::Buffer<uint8_t>>();
         *dict = b.Data();
@@ -733,7 +751,7 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
 
     explicit DctxWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DctxWrap>(info) {
         Napi::Env env = info.Env();
-        int checksum = 0;
+        int checksum = 1;
         const uint8_t* dict = nullptr;
         size_t dict_size = 0;
         const uint8_t* huf = nullptr;
@@ -768,7 +786,7 @@ class DctxWrap : public Napi::ObjectWrap<DctxWrap> {
         Napi::Buffer<uint8_t> src = info[0].As<Napi::Buffer<uint8_t>>();
         const size_t orig =
             static_cast<size_t>(zxc_get_decompressed_size(src.Data(), src.Length()));
-        Napi::Buffer<uint8_t> dst_buf = Napi::Buffer<uint8_t>::New(env, orig);
+        Napi::Buffer<uint8_t> dst_buf = NewBufferOrThrow(env, orig);
 
         static uint8_t kEmptyDst = 0;
         void* dst = orig > 0 ? static_cast<void*>(dst_buf.Data()) : static_cast<void*>(&kEmptyDst);
@@ -806,15 +824,13 @@ class CStreamWrap : public Napi::ObjectWrap<CStreamWrap> {
     explicit CStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<CStreamWrap>(info) {
         Napi::Env env = info.Env();
         int64_t level = 0;
-        int64_t checksum = 0;
+        int checksum = 0;
         int64_t block_size = 0;
 
         if (info.Length() >= 1 && info[0].IsObject()) {
             Napi::Object o = info[0].As<Napi::Object>();
             if (o.Has("level") && !ReadLevel(env, o.Get("level"), &level)) return;
-            if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
-                checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
-            }
+            if (!ReadChecksum(env, o.Get("checksum"), &checksum)) return;
             if (o.Has("blockSize") && o.Get("blockSize").IsNumber()) {
                 block_size = o.Get("blockSize").As<Napi::Number>().Int64Value();
             }
@@ -956,12 +972,10 @@ class DStreamWrap : public Napi::ObjectWrap<DStreamWrap> {
 
     explicit DStreamWrap(const Napi::CallbackInfo& info) : Napi::ObjectWrap<DStreamWrap>(info) {
         Napi::Env env = info.Env();
-        int64_t checksum = 0;
-        if (info.Length() >= 1 && info[0].IsObject()) {
-            Napi::Object o = info[0].As<Napi::Object>();
-            if (o.Has("checksum") && o.Get("checksum").IsBoolean()) {
-                checksum = o.Get("checksum").As<Napi::Boolean>().Value() ? 1 : 0;
-            }
+        int checksum = 1;
+        if (info.Length() >= 1 && info[0].IsObject() &&
+            !ReadChecksum(env, info[0].As<Napi::Object>().Get("checksum"), &checksum)) {
+            return;
         }
 
         // Configuration carrier only, freed once the stream has copied it.
@@ -1154,7 +1168,9 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 read_at_ref_.Reset();
                 Napi::Error::New(env, "zxc_seekable_open_reader failed (invalid archive?)")
                     .ThrowAsJavaScriptException();
+                return;
             }
+            zxc_seekable_set_checksum(s_, 1);
             return;
         }
 
@@ -1178,7 +1194,9 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         if (!s_) {
             Napi::Error::New(env, "zxc_seekable_open failed (invalid archive?)")
                 .ThrowAsJavaScriptException();
+            return;
         }
+        zxc_seekable_set_checksum(s_, 1);
     }
 
     ~SeekableWrap() {
@@ -1208,6 +1226,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
     static int64_t ReadAtTrampoline(void* ctx, void* dst, size_t len, uint64_t offset) {
         auto* self = static_cast<SeekableWrap*>(ctx);
         if (!self || self->read_at_ref_.IsEmpty()) return ZXC_ERROR_IO;
+        if (len == 0) return 0;
         try {
             Napi::Env env = self->env_;
             Napi::HandleScope scope(env);
@@ -1215,11 +1234,20 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
             // fill, then memcpy back into `dst`. This avoids exposing the
             // C-side pointer to JS lifetime hazards.
             Napi::Buffer<uint8_t> jsbuf = Napi::Buffer<uint8_t>::New(env, len);
-            self->read_at_ref_.Call({jsbuf, Napi::Number::New(env, static_cast<double>(offset))});
-            // The callback may have detached/transferred the ArrayBuffer,
-            // in which case Data() is null.
-            if (!jsbuf.Data()) return ZXC_ERROR_IO;
-            std::memcpy(dst, jsbuf.Data(), len);
+            // napi buffers are uninitialised: a partial fill must not expose the heap.
+            std::memset(jsbuf.Data(), 0, len);
+            Napi::Value ret = self->read_at_ref_.Call(
+                {jsbuf, Napi::Number::New(env, static_cast<double>(offset))});
+            if (!ret.IsUndefined() && (!ret.IsNumber() || ret.As<Napi::Number>().DoubleValue() !=
+                                                              static_cast<double>(len)))
+                return ZXC_ERROR_IO;
+            // Not jsbuf.Data(): it was cached at construction and dangles if the
+            // callback detached or transferred the ArrayBuffer.
+            void* data = nullptr;
+            size_t avail = 0;
+            if (napi_get_buffer_info(env, jsbuf, &data, &avail) != napi_ok || !data || avail != len)
+                return ZXC_ERROR_IO;
+            std::memcpy(dst, data, len);
             return static_cast<int64_t>(len);
         } catch (const std::exception&) {
             return ZXC_ERROR_IO;
@@ -1297,10 +1325,10 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        uint64_t offset = static_cast<uint64_t>(info[0].As<Napi::Number>().Int64Value());
-        int64_t length = info[1].As<Napi::Number>().Int64Value();
-        if (length < 0) {
-            Napi::TypeError::New(env, "length must be non-negative").ThrowAsJavaScriptException();
+        uint64_t offset = 0;
+        uint64_t length = 0;
+        if (!ExactUint64FromJs(env, info[0], "offset", &offset) ||
+            !ExactUint64FromJs(env, info[1], "length", &length)) {
             return env.Undefined();
         }
         if (in_native_call_) {
@@ -1308,7 +1336,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        Napi::Buffer<uint8_t> out = Napi::Buffer<uint8_t>::New(env, static_cast<size_t>(length));
+        Napi::Buffer<uint8_t> out = NewBufferOrThrow(env, static_cast<size_t>(length));
         if (length == 0) return out;
 
         in_native_call_ = true;
@@ -1320,7 +1348,7 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
         }
         // On success the library fills the whole range; slice defensively if
         // fewer bytes were produced (napi buffers are uninitialized).
-        if (r == length) return out;
+        if (static_cast<uint64_t>(r) == length) return out;
         return Napi::Buffer<uint8_t>::Copy(env, out.Data(), static_cast<size_t>(r));
     }
 
@@ -1379,6 +1407,9 @@ class SeekableWrap : public Napi::ObjectWrap<SeekableWrap> {
             zxc_seekable_free(s_);
             s_ = nullptr;
         }
+        // The wrapper can outlive close() for long, and V8 does not see src_.
+        std::vector<uint8_t>().swap(src_);
+        read_at_ref_.Reset();
         return info.Env().Undefined();
     }
 };
@@ -1422,7 +1453,14 @@ static Napi::Value WriteSeekTable(const Napi::CallbackInfo& info) {
                 .ThrowAsJavaScriptException();
             return env.Undefined();
         }
-        sizes[i] = v.As<Napi::Number>().Uint32Value();
+        uint64_t size = 0;
+        if (!ExactUint64FromJs(env, v, "compSizes entry", &size)) return env.Undefined();
+        if (size > std::numeric_limits<uint32_t>::max()) {
+            Napi::RangeError::New(env, "compSizes entry must fit in 32 bits")
+                .ThrowAsJavaScriptException();
+            return env.Undefined();
+        }
+        sizes[i] = static_cast<uint32_t>(size);
     }
 
     size_t sz = zxc_seek_table_size(n);

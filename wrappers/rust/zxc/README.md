@@ -53,7 +53,7 @@ fn main() -> Result<(), zxc::Error> {
 
 - **Fast decompression**: Optimized for read-heavy workloads
 - **7 compression levels**: Trade off speed vs ratio
-- **Optional checksums**: Disabled by default for maximum performance, enable for data integrity
+- **Optional checksums**: Not written by default; verified by default when an archive carries them
 - **File streaming**: Multi-threaded compression/decompression for large files
 - **Zero-allocation API**: `compress_to` and `decompress_to` for buffer reuse
 - **Pure Rust API**: Safe, idiomatic interface over the C library
@@ -85,17 +85,26 @@ fn main() -> Result<(), zxc::Error> {
 }
 ```
 
-### Disable Checksum
+### Checksums
+
+Compression writes none unless asked. Decompression verifies them whenever the
+archive carries them, unless told not to. The block API is the exception: a bare
+block cannot say whether it carries one, so verification there is off unless
+requested, and both sides must agree.
 
 ```rust
-use zxc::{compress_with_options, decompress_with_options, CompressOptions, DecompressOptions, Level};
+use zxc::{compress_with_options, decompress, decompress_with_options, CompressOptions, DecompressOptions, Level};
 
 fn main() -> Result<(), zxc::Error> {
     let data = b"Hello, world!";
 
-    let opts = CompressOptions::with_level(Level::Fastest).without_checksum();
+    let opts = CompressOptions::with_level(Level::Fastest).with_checksum();
     let compressed = compress_with_options(data, &opts)?;
 
+    // Verified.
+    assert_eq!(&decompress(&compressed)?[..], &data[..]);
+
+    // Not verified.
     let decompressed = decompress_with_options(&compressed, &DecompressOptions::skip_checksum())?;
     assert_eq!(&decompressed[..], &data[..]);
     Ok(())

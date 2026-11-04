@@ -7,6 +7,8 @@ Copyright (c) Bertrand Lebonnois and contributors.
 Tests for pre-trained dictionary support.
 """
 
+import sys
+
 import pytest
 import zxc
 
@@ -196,3 +198,27 @@ class TestSeekableDict:
         s.close()
         with pytest.raises(ValueError):
             s.set_dict(trained_dict)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="__buffer__ needs 3.12")
+@pytest.mark.parametrize(
+    "train",
+    [
+        zxc.train_dict,
+        zxc.Dictionary.train,
+        lambda samples: zxc.train_dict_huf(samples, b"d" * 1000),
+    ],
+)
+def test_training_survives_a_sample_clearing_the_list(train):
+    class Evil:
+        def __init__(self, samples):
+            self.samples = samples
+
+        def __buffer__(self, flags):
+            self.samples.clear()
+            return memoryview(b"abc" * 100)
+
+    samples = []
+    samples.append(Evil(samples))
+    samples.extend((b"sample %d lorem ipsum " % i) * 30 for i in range(100))
+    assert train(samples)

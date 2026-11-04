@@ -35,6 +35,12 @@ func Compress(data []byte, opts ...Option) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	// A kept result must not pin the bound-sized array.
+	if n <= len(dst)/2 {
+		out := make([]byte, n)
+		copy(out, dst)
+		return out, nil
+	}
 	return dst[:n], nil
 }
 
@@ -82,8 +88,8 @@ func CompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 }
 
 // DecompressedSize returns the original uncompressed size the footers store,
-// summed over concatenated archives. Returns 0, ErrInvalidData if the data is
-// too small or invalid.
+// summed over concatenated archives, 0 for an empty archive. Returns 0,
+// ErrInvalidData if the data is too small or invalid.
 func DecompressedSize(data []byte) (uint64, error) {
 	if len(data) == 0 {
 		return 0, ErrInvalidData
@@ -94,10 +100,25 @@ func DecompressedSize(data []byte) (uint64, error) {
 		C.size_t(len(data)),
 	)
 
-	if size == 0 {
+	if size == 0 && !framesEmpty(data) {
 		return 0, ErrInvalidData
 	}
 	return uint64(size), nil
+}
+
+// framesEmpty reports whether data is a valid walk of frames, each declaring no
+// bytes: the size query answers 0 for those and for invalid input alike.
+func framesEmpty(data []byte) bool {
+	for n := len(data); n > 0; {
+		var fi C.zxc_frame_info_t
+		rc := C.zxc_get_last_frame_info(unsafe.Pointer(&data[0]), C.size_t(n), &fi,
+			C.size_t(unsafe.Sizeof(fi)))
+		if rc != C.ZXC_OK || fi.decompressed_size != 0 {
+			return false
+		}
+		n -= int(fi.compressed_size)
+	}
+	return true
 }
 
 // FrameInfo is what a frame's header and footer declare.
@@ -140,15 +161,18 @@ func GetFrameInfo(data []byte) (FrameInfo, error) {
 // Decompress decompresses ZXC-compressed data.
 //
 // The output size is read from the compressed data footer. For pre-allocated
-// buffers, use [DecompressTo].
+// buffers, use [DecompressTo]. Checksums the archive carries are verified, unless
+// [WithChecksum] is false.
 //
-// Options: [WithChecksum], [WithDict], [WithDictHuf], [WithDictionary].
+// Options: [WithChecksum], [WithDict], [WithDictHuf], [WithDictionary],
+// [WithMaxOutputSize].
 func Decompress(data []byte, opts ...Option) ([]byte, error) {
 	if len(data) == 0 {
 		return nil, ErrInvalidData
 	}
 
-	dctx, err := createDctx(applyOptions(opts))
+	o := applyOptions(opts)
+	dctx, err := createDctx(o)
 	if err != nil {
 		return nil, err
 	}
@@ -161,65 +185,50 @@ func Decompress(data []byte, opts ...Option) ([]byte, error) {
 
 	// The footer value is plausibility-checked in C (a forged size returns 0);
 	// only guard what Go's make() cannot represent.
+	if o.maxOutputSet && size > o.maxOutput {
+		return nil, ErrDstTooSmall
+	}
 	if size > math.MaxInt {
 		return nil, ErrInvalidData
 	}
 
-	if size == 0 {
-		// Ambiguous: a valid empty-payload archive, or input the C envelope
-		// rejected. Decoding into a zero-length buffer settles it. No
-		// destination was supplied, so DST_TOO_SMALL cannot be about the
-		// caller's buffer: blocks contradict the empty size the footer claims,
-		// which reads as invalid data.
-		var dummy [1]byte
-		written := C.zxc_decompress_dctx(
-			dctx,
-			unsafe.Pointer(&data[0]),
-			C.size_t(len(data)),
-			unsafe.Pointer(&dummy[0]),
-			C.size_t(0),
-		)
-		if written < 0 {
-			if int(written) == int(C.ZXC_ERROR_DST_TOO_SMALL) {
-				return nil, ErrInvalidData
-			}
-			return nil, errorFromCode(written)
-		}
-		if written != 0 {
-			return nil, ErrInvalidData
-		}
-		return []byte{}, nil
-	}
-
 	dst := make([]byte, size)
+	var dummy [1]byte
+	dstPtr := unsafe.Pointer(&dummy[0])
+	if size > 0 {
+		dstPtr = unsafe.Pointer(&dst[0])
+	}
 	written := C.zxc_decompress_dctx(
 		dctx,
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
-		unsafe.Pointer(&dst[0]),
+		dstPtr,
 		C.size_t(size),
 	)
 
 	if written < 0 {
+		// The caller supplied no buffer: blocks exceeding the size the footer
+		// claims (0 included, which is also what invalid input probes as) are
+		// invalid data.
+		if int(written) == int(C.ZXC_ERROR_DST_TOO_SMALL) {
+			return nil, ErrInvalidData
+		}
 		return nil, errorFromCode(written)
 	}
 	if uint64(written) != size {
 		return nil, ErrInvalidData
 	}
 
-	return dst[:int(written)], nil
+	return dst, nil
 }
 
-// DecompressTo decompresses data into a pre-allocated output buffer.
-// Returns the number of bytes written.
+// DecompressTo decompresses data into a pre-allocated output buffer, which an
+// empty archive lets be empty. Returns the number of bytes written.
 //
-// Options: same as [Decompress].
+// Options: same as [Decompress]; output bounds the size, not [WithMaxOutputSize].
 func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	if len(data) == 0 {
 		return 0, ErrInvalidData
-	}
-	if len(output) == 0 {
-		return 0, ErrDstTooSmall
 	}
 
 	dctx, err := createDctx(applyOptions(opts))
@@ -228,11 +237,16 @@ func DecompressTo(data []byte, output []byte, opts ...Option) (int, error) {
 	}
 	defer C.zxc_free_dctx(dctx)
 
+	var dummy [1]byte
+	dstPtr := unsafe.Pointer(&dummy[0])
+	if len(output) > 0 {
+		dstPtr = unsafe.Pointer(&output[0])
+	}
 	written := C.zxc_decompress_dctx(
 		dctx,
 		unsafe.Pointer(&data[0]),
 		C.size_t(len(data)),
-		unsafe.Pointer(&output[0]),
+		dstPtr,
 		C.size_t(len(output)),
 	)
 
