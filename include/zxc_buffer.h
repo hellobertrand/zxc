@@ -136,7 +136,7 @@ ZXC_EXPORT size_t zxc_compress_bound(const size_t input_size);
  *
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
- * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t:
+ * @return Bytes written to @p dst (> 0), or a negative @ref zxc_error_t code:
  *         @ref ZXC_ERROR_BAD_LEVEL for any other @p level,
  *         @ref ZXC_ERROR_DST_TOO_SMALL, ...
  */
@@ -564,8 +564,8 @@ ZXC_EXPORT int zxc_cctx_get_param(const zxc_cctx* cctx, zxc_cparam_t param, int6
  *
  * The context keeps its own copy of @p dict and @p dict_huf: the caller's
  * buffers are free once this returns. @p dict_huf, when non-NULL, is the
- * @ref ZXC_HUF_TABLE_SIZE-byte shared literal table (zxc_dict_huf()), used at
- * levels 6-7 and part of the archive's dict_id binding.
+ * shared literal table of @ref ZXC_HUF_TABLE_SIZE bytes (zxc_dict_huf()), used
+ * at levels 6-7 and part of the archive's dict_id binding.
  *
  * @param[in,out] cctx      Context to configure.
  * @param[in]     dict      Dictionary content, or NULL for none.
@@ -828,7 +828,7 @@ ZXC_EXPORT size_t zxc_static_cctx_workspace_size(const size_t block_size, const 
  * The workspace is carved for @p block_size and @p level, so
  * zxc_cctx_set_param() refuses another @ref ZXC_C_BLOCK_SIZE
  * (@ref ZXC_ERROR_BAD_BLOCK_SIZE) and a raise into @ref ZXC_LEVEL_DENSITY
- * when @p level was below it (@ref ZXC_ERROR_BAD_LEVEL: the optimal-parser
+ * when @p level was below it (@ref ZXC_ERROR_BAD_LEVEL, as the optimal-parser
  * scratch is absent). Lower levels, checksum and seek table are honoured
  * without re-partitioning. Dictionaries are rejected by zxc_cctx_set_dict():
  * @ref ZXC_ERROR_DICT_UNSUPPORTED.
