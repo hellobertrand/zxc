@@ -75,6 +75,8 @@
 
 <p class="note">Size is the compressed size as a percentage of <code>silesia.tar</code>. Speeds are single-threaded on Apple M3 with {{BENCH_TOOL}}. Blocks are 512&nbsp;KB by default; use <code>-B 256K</code> for streaming or memory-constrained targets.</p>
 
+<p><strong>Level 7 fills the gap between LZ4HC and Zstandard.</strong> LZ4HC decodes fast but stops at a lower ratio, and moving to Zstandard means a much lower decoding speed. Level 7 reaches 33.09&nbsp;%, better than <code>zstd -1</code> (34.53&nbsp;%), and decodes 2.2x to almost 3x faster than it, depending on the processor.</p>
+
 <h2 id="benchmarks">Benchmarks</h2>
 
 <p>ZXC is included in the two main open-source compression benchmark suites, <a href="https://github.com/inikep/lzbench">lzbench</a> and <a href="https://github.com/powturbo/TurboBench">TurboBench</a>, so the figures below can be reproduced with either tool alongside more than 70 other codecs. Benchmarks also run on every commit on x86_64 and ARM64 machines; see the <a href="https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml">latest results</a>.</p>

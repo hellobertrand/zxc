@@ -618,7 +618,7 @@ Peak decode memory drops from *compressed + decompressed* to *decompressed + abo
 *   **Interactive media and gaming (1 to 3)**: hard real-time budgets, texture streaming, asset loading; 35 % to 2.9x faster decode than LZ4.
 *   **Embedded and firmware (3 to 5)**: density on limited flash (kernel, initramfs) with instant-on boot.
 *   **Archival (5 and 6)**: better ratio than LZ4 and far faster retrieval than Zstandard. Level 6 beats LZ4-HC on both axes: 36.28 against 36.75 on silesia, and faster decode on every platform measured (+61 % on Apple Silicon, +28 % on Neoverse-V2, +22 % on Zen 5, +15 % on Zen 3).
-*   **Maximum density (7)**: deep parse (search depth 128), 11-bit codes and Huffman-coded tokens. 33.09 % on silesia, better than `zstd -1` (34.53 %), decoding at 2.2x to 3.0x its speed (5.8 GB/s on Apple M3). It fills the gap between the LZ4 family and Zstandard.
+*   **Maximum density (7)**: deep parse (search depth 128), 11-bit codes and Huffman-coded tokens. 33.09 % on silesia, better than `zstd -1` (34.53 %), decoding at 2.2x to 3.0x its speed (5.8 GB/s on Apple M3). It fills the gap between LZ4HC and Zstandard.
 *   **Small homogeneous payloads, any level**: a pre-trained dictionary (§5.7) restores the ratio that 4 KB to 128 KB blocks lose (API responses, RPC messages, key-value records, logs, small assets, seekable corpora). One dictionary, trained offline, serves millions of independently decodable payloads at no per-archive cost.
 
 ## 9. Conclusion
