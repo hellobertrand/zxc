@@ -169,7 +169,7 @@ Apple M3 (ARM64)
 *   **Levels 3–4 (Balanced, 3 is the default):** a better ratio than LZ4 at efficient compression speed.
 *   **Level 5 (Compact):** embedded and firmware: a better ratio than LZ4, much faster decode than Zstandard.
 *   **Level 6 (Density):** a better ratio *and* faster decode than LZ4HC on every measured platform; for archival, where compression time is amortized over many reads.
-*   **Level 7 (Ultra):** maximum density, past `zstd -1` while decoding more than twice as fast. Compression is the slowest tier.
+*   **Level 7 (Ultra):** fills the gap between LZ4HC and Zstandard. It is denser than `zstd -1` (33.09 % against 34.53 %) and decodes 2.2x to almost 3x faster. Compression is the slowest tier.
 
 ## Usage
 
