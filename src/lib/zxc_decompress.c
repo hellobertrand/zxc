@@ -600,6 +600,23 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
     } while (0)
 
 /**
+ * @brief Spreads four offset bytes into the 16-bit lanes of a u64.
+ *
+ * @param[in] x        The four bytes, in the low half.
+ * @param[in] use_pdep Whether PDEP is fast here; see @ref ZXC_PDEP_IS_FAST.
+ * @return The bytes in lanes 0 to 3.
+ */
+static ZXC_ALWAYS_INLINE uint64_t zxc_spl_spread_off8(uint64_t x, const int use_pdep) {
+#if defined(ZXC_USE_PDEP)
+    if (use_pdep) return _pdep_u64(x, 0x00FF00FF00FF00FFULL);
+#else
+    (void)use_pdep;
+#endif
+    x = (x | (x << 16)) & 0x0000FFFF0000FFFFULL;
+    return (x | (x << 8)) & 0x00FF00FF00FF00FFULL;
+}
+
+/**
  * @brief One full SPL 4x batch: token word, four offsets (1- or 2-byte form),
  *        four @ref DECODE_SPL_SEQ emissions, sequence-count update.
  *
@@ -613,10 +630,8 @@ static ZXC_NOINLINE void zxc_decode_copy_match_exact(uint8_t* d_ptr, const uint8
         t_ptr += sizeof(uint32_t);                                                                 \
         uint64_t offs;                                                                             \
         if (SPL_OFF8) {                                                                            \
-            uint64_t x = zxc_le32(o_ptr);                                                          \
+            offs = zxc_spl_spread_off8(zxc_le32(o_ptr), use_pdep);                                 \
             o_ptr += sizeof(uint32_t);                                                             \
-            x = (x | (x << 16)) & 0x0000FFFF0000FFFFULL;                                           \
-            offs = (x | (x << 8)) & 0x00FF00FF00FF00FFULL;                                         \
         } else {                                                                                   \
             offs = zxc_le64(o_ptr);                                                                \
             o_ptr += sizeof(uint64_t);                                                             \
@@ -989,6 +1004,7 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
         (spl_sz_lit > spl_margin_1x) ? l_end - spl_margin_1x : l_ptr;
 
     uint32_t n_seq = gh.n_sequences;
+    const int use_pdep = SPL_OFF8 && ZXC_PDEP_IS_FAST();
 
     // Offsets only need checking until the output is wider than the widest offset
     // the format can encode (256 for 1-byte offsets, 65536 for 2-byte); past that

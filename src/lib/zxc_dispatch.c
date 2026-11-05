@@ -188,6 +188,47 @@ static inline uint64_t zxc_xgetbv0(void) {
     return ((uint64_t)hi << 32) | lo;
 #endif
 }
+
+/**
+ * @brief Tells whether PDEP is fast, from CPUID leaf 0 EBX/EDX/ECX and leaf 1 EAX.
+ *
+ * AMD and Hygon microcode it before family 19h (Zen 3), which is every core
+ * from Excavator to Zen 2.
+ */
+static int zxc_cpuid_pdep_fast(const uint32_t ebx0, const uint32_t edx0, const uint32_t ecx0,
+                               const uint32_t eax1) {
+    const int amd = ebx0 == 0x68747541U && edx0 == 0x69746E65U && ecx0 == 0x444D4163U;
+    const int hygon = ebx0 == 0x6F677948U && edx0 == 0x6E65476EU && ecx0 == 0x656E6975U;
+    if (!amd && !hygon) return 1;
+    const uint32_t base = (eax1 >> 8) & 0xFU;
+    const uint32_t family = base == 0xFU ? base + ((eax1 >> 20) & 0xFFU) : base;
+    return family >= 0x19U;
+}
+
+/** @brief PDEP probe result: 0 until probed, then 1 if fast, 2 if slow. */
+static ZXC_ATOMIC int zxc_pdep_state = 0;
+
+/** @brief Caches the probe: CPUID traps to the hypervisor in a VM. */
+int zxc_pdep_is_fast(void) {
+#if ZXC_USE_C11_ATOMICS
+    int state = atomic_load_explicit(&zxc_pdep_state, memory_order_relaxed);
+#else
+    int state = zxc_pdep_state;
+#endif
+    if (UNLIKELY(state == 0)) {
+        uint32_t leaf0[4];
+        uint32_t leaf1[4];
+        zxc_cpuid(0, 0, leaf0);
+        zxc_cpuid(1, 0, leaf1);
+        state = zxc_cpuid_pdep_fast(leaf0[1], leaf0[3], leaf0[2], leaf1[0]) ? 1 : 2;
+#if ZXC_USE_C11_ATOMICS
+        atomic_store_explicit(&zxc_pdep_state, state, memory_order_relaxed);
+#else
+        zxc_pdep_state = state;
+#endif
+    }
+    return state == 1;
+}
 #endif /* x86-64 && !ZXC_ONLY_DEFAULT */
 
 /** @brief Function pointer type for the chunk decompressor. */
