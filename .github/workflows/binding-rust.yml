@@ -11,7 +11,7 @@ on:
       - 'bindings/rust/**'
       - '.github/workflows/binding-rust.yml'
   pull_request:
-    branches: [ main, candidate, 'release/**' ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'include/**'
       - 'bindings/rust/**'

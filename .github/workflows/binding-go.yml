@@ -11,7 +11,7 @@ on:
       - 'bindings/go/**'
       - '.github/workflows/binding-go.yml'
   pull_request:
-    branches: [ main, candidate, 'release/**' ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'include/**'
       - 'bindings/go/**'

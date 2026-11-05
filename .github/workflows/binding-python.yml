@@ -11,7 +11,7 @@ on:
       - 'bindings/python/**'
       - '.github/workflows/binding-python.yml'
   pull_request:
-    branches: [ main, candidate, 'release/**' ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'include/**'
       - 'bindings/python/**'

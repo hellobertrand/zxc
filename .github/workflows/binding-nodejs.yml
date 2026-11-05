@@ -11,7 +11,7 @@ on:
       - 'bindings/nodejs/**'
       - '.github/workflows/binding-nodejs.yml'
   pull_request:
-    branches: [ main, candidate, 'release/**' ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'include/**'
       - 'bindings/nodejs/**'

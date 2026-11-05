@@ -22,7 +22,7 @@ on:
       - 'src/lib/**'
       - '.github/workflows/kernel-windows.yml'
   pull_request:
-    branches: [ main, candidate, 'release/**' ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'contrib/windows-kernel/**'
       - 'include/**'

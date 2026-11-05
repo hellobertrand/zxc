@@ -16,7 +16,7 @@ on:
       - 'src/lib/**'
       - '.github/workflows/kernel-linux.yml'
   pull_request:
-    branches: [ main, candidate, 'release/**' ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'contrib/linux-kernel/**'
       - 'include/**'
