@@ -131,9 +131,30 @@ jobs:
             test -f "$f" || { echo "Missing $f"; exit 1; }
           done
 
+      # Same rule as binding-nodejs.yml: an older line never takes `latest`.
+      - name: Choose the dist-tag
+        id: dist-tag
+        working-directory: ./bindings/wasm
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          name=$(node -p "require('./package.json').name")
+          latest=$(npm view "$name" dist-tags.latest)
+          if [ "$(printf '%s\n' "$version" "$latest" | sort -V | tail -n 1)" = "$version" ]; then
+            tag=latest
+          else
+            tag="release-${version%.*}"
+          fi
+          echo "Publishing $name@$version as '$tag' (latest: $latest)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Publish to npm
         working-directory: ./bindings/wasm
-        run: npm publish --access public
+        env:
+          DIST_TAG: ${{ steps.dist-tag.outputs.tag }}
+        run: npm publish --access public --tag "$DIST_TAG"
 
       - name: Summary
         if: success()

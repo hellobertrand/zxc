@@ -190,8 +190,29 @@ jobs:
 
           echo "Version matches: $RELEASE_VERSION"
 
+      # npm moves `latest` to whatever it publishes: a patch on an older line
+      # (1.0.1 after 1.1.0) goes under its own dist-tag, release-1.0, instead.
+      - name: Choose the dist-tag
+        id: dist-tag
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          name=$(node -p "require('./package.json').name")
+          latest=$(npm view "$name" dist-tags.latest)
+          if [ "$(printf '%s\n' "$version" "$latest" | sort -V | tail -n 1)" = "$version" ]; then
+            tag=latest
+          else
+            tag="release-${version%.*}"
+          fi
+          echo "Publishing $name@$version as '$tag' (latest: $latest)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Publish to npm
-        run: npm publish --access public
+        env:
+          DIST_TAG: ${{ steps.dist-tag.outputs.tag }}
+        run: npm publish --access public --tag "$DIST_TAG"
 
       - name: Summary
         if: success()
