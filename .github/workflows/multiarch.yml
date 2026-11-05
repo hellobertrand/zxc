@@ -140,12 +140,39 @@ jobs:
             cross_prefix: s390x-linux-gnu
             cmake_processor: s390x
             qemu_binary: qemu-s390x
-          - name: riscv64
+          - name: riscv64 _default
+            tier: 2
+            cross_pkg: gcc-riscv64-linux-gnu
+            cross_prefix: riscv64-linux-gnu
+            cmake_processor: riscv64
+            cmake_c_flags: "-DZXC_ONLY_DEFAULT"
+            qemu_binary: qemu-riscv64
+            qemu_cpu: rv64
+            expect_variant: _default
+          - name: riscv64 _rv64fast
             tier: 2
             cross_pkg: gcc-riscv64-linux-gnu
             cross_prefix: riscv64-linux-gnu
             cmake_processor: riscv64
             qemu_binary: qemu-riscv64
+            qemu_cpu: rv64
+            expect_variant: _rv64fast
+          - name: riscv64 _rvv
+            tier: 2
+            cross_pkg: gcc-riscv64-linux-gnu
+            cross_prefix: riscv64-linux-gnu
+            cmake_processor: riscv64
+            qemu_binary: qemu-riscv64
+            qemu_cpu: "rv64,v=true,vlen=128,rvv_ta_all_1s=true,rvv_ma_all_1s=true"
+            expect_variant: _rvv
+          - name: riscv64 _rvv
+            tier: 2
+            cross_pkg: gcc-riscv64-linux-gnu
+            cross_prefix: riscv64-linux-gnu
+            cmake_processor: riscv64
+            qemu_binary: qemu-riscv64
+            qemu_cpu: "rv64,v=true,vlen=1024"
+            expect_variant: _rvv
           - name: loong64
             tier: 2
             cross_pkg: gcc-loongarch64-linux-gnu
@@ -291,6 +318,15 @@ jobs:
               "${RUN[@]}" ./$BUILD_DIR/zxc_test
               "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./tests/conformance
               "${RUN[@]}" ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
+
+              # Checks the dispatcher ran the expected variant.
+              if [ -n "${{ matrix.expect_variant }}" ]; then
+                  "${RUN[@]}" -d in_asm -D qemu_in_asm.log \
+                      ./$BUILD_DIR/zxc_conformance_test ./tests/conformance > /dev/null
+                  grep -q "IN: zxc_decompress_chunk_wrapper${{ matrix.expect_variant }}\$" qemu_in_asm.log
+                  grep -q "IN: zxc_compress_chunk_wrapper${{ matrix.expect_variant }}\$" qemu_in_asm.log
+                  rm -f qemu_in_asm.log
+              fi
 
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""

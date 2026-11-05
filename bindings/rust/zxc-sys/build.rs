@@ -14,6 +14,7 @@
 //! the x86-64 baseline, already active in `_default`).
 //! On 32-bit ARM: `_default` and `_neon32` (NEON is optional there; the
 //! dispatcher probes it at runtime).
+//! On riscv64 Linux: `_default`, `_rv64fast` and `_rvv`.
 //! Everywhere else (incl. AArch64, where NEON is baseline, and i686):
 //! `_default` only.
 
@@ -156,6 +157,35 @@ fn compile_variant(include_dir: &Path, src_lib: &Path, suffix: &str, flags: &[&s
     }
 }
 
+/// `(_rv64fast, _rvv)` flags, as in cmake/zxcVariants.cmake.
+fn riscv64_variant_flags() -> (Option<Vec<&'static str>>, Option<Vec<&'static str>>) {
+    let probe = cc::Build::new();
+    let compiler = probe.get_compiler();
+    let ok = |flags: &[&'static str]| {
+        flags
+            .iter()
+            .all(|f| probe.is_flag_supported(f).unwrap_or(false))
+            .then(|| flags.to_vec())
+    };
+    if compiler.is_like_clang() {
+        (
+            ok(&["-mno-strict-align"]),
+            ok(&["-march=rv64gcv", "-mno-scalar-strict-align"]),
+        )
+    } else if compiler.is_like_gnu() {
+        let fast = ok(&["-mtune=generic-ooo"]);
+        let mut rvv = fast
+            .as_ref()
+            .and_then(|_| ok(&["-march=rv64gcv", "-mtune=generic-ooo"]));
+        if let (Some(v), Some(_)) = (rvv.as_mut(), ok(&["-mvector-strict-align"])) {
+            v.push("-mvector-strict-align");
+        }
+        (fast, rvv)
+    } else {
+        (None, None)
+    }
+}
+
 fn main() {
     // Path to ZXC source files
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -223,6 +253,12 @@ fn main() {
     let is_x86_64 = target.contains("x86_64");
     let is_arm32 = (target.starts_with("arm") && !target.starts_with("arm64"))
         || target.starts_with("thumbv7");
+    let (rv64fast_flags, rvv_flags) = if target.starts_with("riscv64") && target.contains("linux") {
+        riscv64_variant_flags()
+    } else {
+        (None, None)
+    };
+    let rvv_flags = rv64fast_flags.as_ref().and(rvv_flags);
 
     // =========================================================================
     // Core library files (common to all architectures)
@@ -243,6 +279,12 @@ fn main() {
         .warnings(false)
         .flag_if_supported("-pthread");
     apply_feature_macros(&mut core_build);
+    if rv64fast_flags.is_some() {
+        core_build.define("ZXC_HAVE_RV64FAST_VARIANT", None);
+    }
+    if rvv_flags.is_some() {
+        core_build.define("ZXC_HAVE_RVV_VARIANT", None);
+    }
 
     core_build.compile("zxc_core");
 
@@ -300,6 +342,12 @@ fn main() {
             "_neon32",
             &["-march=armv7-a", "-mfpu=neon"],
         );
+    }
+    if let Some(flags) = &rv64fast_flags {
+        compile_variant(&include_dir, &src_lib, "_rv64fast", flags);
+    }
+    if let Some(flags) = &rvv_flags {
+        compile_variant(&include_dir, &src_lib, "_rvv", flags);
     }
 
     // PivCo tables: const data used only by the variant Huffman decoders, so it
