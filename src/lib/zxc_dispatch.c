@@ -9,7 +9,8 @@
  * @file zxc_dispatch.c
  * @brief Runtime CPU feature detection and SIMD dispatch layer.
  *
- * Detects AVX2/AVX512 (x86-64) and NEON (32-bit ARM) at runtime and routes
+ * Detects AVX2/AVX512 (x86-64), NEON (32-bit ARM) and fast misaligned access
+ * or V (RISC-V 64 Linux) at runtime and routes
  * compress/decompress calls to the best available implementation via
  * lazy-initialised function pointers. SSE2 on x86-64 and NEON on AArch64 are
  * baseline ISA guarantees, so the _default variant already covers those tiers.
@@ -22,8 +23,9 @@
 #include "zxc_internal.h"
 
 // ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
-// an AVX2/AVX512/NEON variant.
-#if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT)
+// an AVX2/AVX512/NEON/RVV variant. _rv64fast is scalar: it stays.
+#if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT) && \
+    !(defined(__riscv) && defined(ZXC_HAVE_RV64FAST_VARIANT))
 #define ZXC_ONLY_DEFAULT
 #endif
 
@@ -50,6 +52,49 @@
 #ifndef HWCAP_NEON
 #define HWCAP_NEON (1 << 12)
 #endif
+#endif
+
+// RISC-V 64 variants exist only if the build defines ZXC_HAVE_*_VARIANT.
+#if defined(__riscv) && (__riscv_xlen == 64) && defined(__linux__) && \
+    defined(ZXC_HAVE_RV64FAST_VARIANT) && !defined(ZXC_ONLY_DEFAULT)
+#define ZXC_RV64FAST_DISPATCH 1
+#else
+#define ZXC_RV64FAST_DISPATCH 0
+#endif
+#if ZXC_RV64FAST_DISPATCH && defined(ZXC_HAVE_RVV_VARIANT) && !defined(ZXC_DISABLE_SIMD)
+#define ZXC_RVV_DISPATCH 1
+#else
+#define ZXC_RVV_DISPATCH 0
+#endif
+
+#if ZXC_RV64FAST_DISPATCH
+// riscv_hwprobe UAPI, spelled out: syscall(2) is undeclared under strict POSIX.
+#define ZXC_NR_RISCV_HWPROBE 258L
+#define ZXC_RISCV_HWPROBE_KEY_IMA_EXT_0 4
+#define ZXC_RISCV_HWPROBE_IMA_V (1ULL << 2)
+#define ZXC_RISCV_HWPROBE_KEY_CPUPERF_0 5  // Before key 9 (Linux 6.11).
+#define ZXC_RISCV_HWPROBE_MISALIGNED_MASK 7ULL
+#define ZXC_RISCV_HWPROBE_MISALIGNED_FAST 3ULL
+#define ZXC_RISCV_HWPROBE_KEY_MISALIGNED_SCALAR_PERF 9
+#define ZXC_RISCV_HWPROBE_MISALIGNED_SCALAR_FAST 3ULL
+
+/** @brief Layout of the kernel's `struct riscv_hwprobe`. */
+typedef struct {
+    int64_t key;
+    uint64_t value;
+} zxc_riscv_hwprobe_t;
+
+/** @brief `riscv_hwprobe(pairs, count, 0, NULL, 0)`; 0 or -errno. */
+static inline long zxc_riscv_hwprobe(zxc_riscv_hwprobe_t* pairs, const size_t count) {
+    register long a0 __asm__("a0") = (long)pairs;
+    register long a1 __asm__("a1") = (long)count;
+    register long a2 __asm__("a2") = 0;
+    register long a3 __asm__("a3") = 0;
+    register long a4 __asm__("a4") = 0;
+    register long a7 __asm__("a7") = ZXC_NR_RISCV_HWPROBE;
+    __asm__ volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a7) : "memory");
+    return a0;
+}
 #endif
 
 // ============================================================================
@@ -108,6 +153,33 @@ int zxc_decompress_chunk_wrapper_safe_neon32(const zxc_cctx_t* RESTRICT ctx,
                                              uint8_t* RESTRICT dst, const size_t dst_cap,
                                              const uint64_t block_index);
 #endif
+#if ZXC_RV64FAST_DISPATCH
+int zxc_decompress_chunk_wrapper_rv64fast(const zxc_cctx_t* RESTRICT ctx,
+                                          const uint8_t* RESTRICT src, const size_t src_sz,
+                                          uint8_t* RESTRICT dst, const size_t dst_cap,
+                                          const uint64_t block_index);
+int zxc_decompress_chunk_wrapper_dict_rv64fast(const zxc_cctx_t* RESTRICT ctx,
+                                               const uint8_t* RESTRICT src, const size_t src_sz,
+                                               uint8_t* RESTRICT dst, const size_t dst_cap,
+                                               const uint64_t block_index);
+int zxc_decompress_chunk_wrapper_safe_rv64fast(const zxc_cctx_t* RESTRICT ctx,
+                                               const uint8_t* RESTRICT src, const size_t src_sz,
+                                               uint8_t* RESTRICT dst, const size_t dst_cap,
+                                               const uint64_t block_index);
+#endif
+#if ZXC_RVV_DISPATCH
+int zxc_decompress_chunk_wrapper_rvv(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                     const size_t src_sz, uint8_t* RESTRICT dst,
+                                     const size_t dst_cap, const uint64_t block_index);
+int zxc_decompress_chunk_wrapper_dict_rvv(const zxc_cctx_t* RESTRICT ctx,
+                                          const uint8_t* RESTRICT src, const size_t src_sz,
+                                          uint8_t* RESTRICT dst, const size_t dst_cap,
+                                          const uint64_t block_index);
+int zxc_decompress_chunk_wrapper_safe_rvv(const zxc_cctx_t* RESTRICT ctx,
+                                          const uint8_t* RESTRICT src, const size_t src_sz,
+                                          uint8_t* RESTRICT dst, const size_t dst_cap,
+                                          const uint64_t block_index);
+#endif
 #endif
 
 // Compression Prototypes
@@ -154,6 +226,16 @@ int zxc_compress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap, const uint64_t block_index);
+#endif
+#if ZXC_RV64FAST_DISPATCH
+int zxc_compress_chunk_wrapper_rv64fast(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                        const size_t src_sz, uint8_t* RESTRICT dst,
+                                        const size_t dst_cap, const uint64_t block_index);
+#endif
+#if ZXC_RVV_DISPATCH
+int zxc_compress_chunk_wrapper_rvv(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                   const size_t src_sz, uint8_t* RESTRICT dst, const size_t dst_cap,
+                                   const uint64_t block_index);
 #endif
 
 // ============================================================================
@@ -204,20 +286,23 @@ typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT
  * @brief Detected CPU SIMD capability level.
  */
 typedef enum {
-    ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
-    ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
-    ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
-    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available (dedicated variant on 32-bit ARM only;
-                          *          AArch64 baseline, served by _default there). */
-    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline,
-                          *          served by _default (no dedicated variant). */
+    ZXC_CPU_GENERIC = 0,  /**< @brief Scalar-only fallback.   */
+    ZXC_CPU_AVX2 = 1,     /**< @brief x86-64 AVX2 available.  */
+    ZXC_CPU_AVX512 = 2,   /**< @brief x86-64 AVX-512F+BW available. */
+    ZXC_CPU_NEON = 3,     /**< @brief ARM NEON available (dedicated variant on 32-bit ARM only;
+                           *          AArch64 baseline, served by _default there). */
+    ZXC_CPU_SSE2 = 4,     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline,
+                           *          served by _default (no dedicated variant). */
+    ZXC_CPU_RV64FAST = 5, /**< @brief RISC-V 64: fast misaligned scalar accesses, no V. */
+    ZXC_CPU_RVV = 6       /**< @brief RISC-V 64: V and fast misaligned scalar accesses. */
 } zxc_cpu_feature_t;
 
 /**
  * @brief Probes the running CPU for SIMD support.
  *
  * Uses CPUID on x86-64 (MSVC and GCC/Clang paths), `getauxval` on
- * 32-bit ARM Linux, and compile-time constants on AArch64.
+ * 32-bit ARM Linux, `riscv_hwprobe` on RISC-V 64 Linux, and compile-time
+ * constants on AArch64.
  *
  * @return The highest @ref zxc_cpu_feature_t level supported.
  */
@@ -285,6 +370,26 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     features = ZXC_CPU_NEON;
 #endif
 #endif
+
+#elif ZXC_RV64FAST_DISPATCH
+    // FAST only: some cores trap on misaligned accesses. V only, not VLEN.
+    zxc_riscv_hwprobe_t pairs[3];
+    pairs[0].key = ZXC_RISCV_HWPROBE_KEY_IMA_EXT_0;
+    pairs[1].key = ZXC_RISCV_HWPROBE_KEY_MISALIGNED_SCALAR_PERF;
+    pairs[2].key = ZXC_RISCV_HWPROBE_KEY_CPUPERF_0;
+    pairs[0].value = pairs[1].value = pairs[2].value = 0;
+    if (zxc_riscv_hwprobe(pairs, 3) == 0) {
+        int fast;
+        if (pairs[1].key == ZXC_RISCV_HWPROBE_KEY_MISALIGNED_SCALAR_PERF)
+            fast = pairs[1].value == ZXC_RISCV_HWPROBE_MISALIGNED_SCALAR_FAST;
+        else
+            fast = pairs[2].key == ZXC_RISCV_HWPROBE_KEY_CPUPERF_0 &&
+                   (pairs[2].value & ZXC_RISCV_HWPROBE_MISALIGNED_MASK) ==
+                       ZXC_RISCV_HWPROBE_MISALIGNED_FAST;
+        const int v = pairs[0].key == ZXC_RISCV_HWPROBE_KEY_IMA_EXT_0 &&
+                      (pairs[0].value & ZXC_RISCV_HWPROBE_IMA_V);
+        if (fast) features = v ? ZXC_CPU_RVV : ZXC_CPU_RV64FAST;
+    }
 #endif
 
     return features;
@@ -327,6 +432,12 @@ ZXC_VARIANT_SET(_avx512);
 #elif defined(__arm__) || defined(_M_ARM)
 ZXC_VARIANT_SET(_neon32);
 #endif
+#if ZXC_RV64FAST_DISPATCH
+ZXC_VARIANT_SET(_rv64fast);
+#endif
+#if ZXC_RVV_DISPATCH
+ZXC_VARIANT_SET(_rvv);
+#endif
 #endif
 #undef ZXC_VARIANT_SET
 
@@ -351,6 +462,11 @@ static const zxc_variant_set_t* zxc_select_variants(void) {
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) return &zxc_variants_neon32;
+#elif ZXC_RV64FAST_DISPATCH
+#if ZXC_RVV_DISPATCH
+    if (cpu == ZXC_CPU_RVV) return &zxc_variants_rvv;
+#endif
+    if (cpu == ZXC_CPU_RVV || cpu == ZXC_CPU_RV64FAST) return &zxc_variants_rv64fast;
 #else
     (void)cpu;
 #endif
@@ -406,6 +522,11 @@ static ZXC_COLD ZXC_NOINLINE zxc_decompress_func_t zxc_decompress_safe_resolve(v
     if (v == &zxc_variants_avx2) f = zxc_decompress_chunk_wrapper_safe_avx2;
 #elif defined(__arm__) || defined(_M_ARM)
     if (v == &zxc_variants_neon32) f = zxc_decompress_chunk_wrapper_safe_neon32;
+#elif ZXC_RV64FAST_DISPATCH
+#if ZXC_RVV_DISPATCH
+    if (v == &zxc_variants_rvv) f = zxc_decompress_chunk_wrapper_safe_rvv;
+#endif
+    if (v == &zxc_variants_rv64fast) f = zxc_decompress_chunk_wrapper_safe_rv64fast;
 #else
     (void)v;
 #endif
@@ -472,7 +593,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 // HUFFMAN TRAMPOLINES
 // ============================================================================
 // The Huffman codec is built per-variant (default / avx2 / avx512, plus neon32
-// on 32-bit ARM)
+// on 32-bit ARM and rv64fast / rvv on RISC-V 64)
 // alongside zxc_compress.c and zxc_decompress.c, so the LZ77 stages and the
 // Huffman stage in a given variant share the same ISA flags (e.g. -mbmi2 on
 // the AVX2/AVX512 variants). The compress/decompress variant TUs resolve

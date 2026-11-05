@@ -94,7 +94,7 @@ libzxc uses an **opt-in** export strategy:
 
 | Build type | How symbols are exposed |
 |-----------|------------------------|
-| **Shared library** | Default visibility is `hidden`.  Only functions annotated with `ZXC_EXPORT` are exported.  Internal FMV variants (`_default`, `_neon32`, `_avx2`, `_avx512`) are hidden. |
+| **Shared library** | Default visibility is `hidden`.  Only functions annotated with `ZXC_EXPORT` are exported.  Internal FMV variants (`_default`, `_neon32`, `_avx2`, `_avx512`, `_rv64fast`, `_rvv`) are hidden. |
 | **Static library** | Define `ZXC_STATIC_DEFINE` (set automatically by CMake, Meson and pkg-config) to disable import/export annotations. |
 
 ### Macros
@@ -2213,5 +2213,5 @@ The shared library exports **86 symbols** (verified with `nm -gU`):
 | 86 | `zxc_error_name` | Error | `zxc_error.h` |
 
 No internal symbols leak into the public ABI. FMV dispatch variants
-(`_default`, `_neon32`, `_avx2`, `_avx512`) are compiled with
+(`_default`, `_neon32`, `_avx2`, `_avx512`, `_rv64fast`, `_rvv`) are compiled with
 `-fvisibility=hidden` and are not exported.

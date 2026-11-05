@@ -120,6 +120,7 @@ variant_sources = ['src/lib/zxc_compress.c',
                    'src/lib/zxc_huffman.c']
 
 variant_sets = [['_default', []]]
+variant_dispatch_args = []
 
 if host_cpu == 'x86_64'
   # No _sse2 variant (SSE2 = x86-64 baseline, already active in _default).
@@ -134,6 +135,30 @@ elif host_cpu == 'arm'
   # 32-bit ARM only: NEON is optional there (runtime getauxval dispatch).
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
   variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon']]]
+elif host_cpu == 'riscv64' and host_machine.system() == 'linux'
+  # Mirrors cmake/zxcVariants.cmake: fast misaligned scalar accesses, then V.
+  rv64fast_args = []
+  rvv_args = []
+  if cc.get_id() == 'gcc' and cc.has_argument('-mtune=generic-ooo')
+    rv64fast_args = ['-mtune=generic-ooo']
+    rvv_args = ['-march=rv64gcv', '-mtune=generic-ooo']
+    if cc.has_argument('-mvector-strict-align')
+      rvv_args += ['-mvector-strict-align']
+    endif
+  elif cc.get_id() == 'clang'
+    if cc.has_argument('-mno-strict-align')
+      rv64fast_args = ['-mno-strict-align']
+    endif
+    rvv_args = ['-march=rv64gcv', '-mno-scalar-strict-align']
+  endif
+  if rv64fast_args.length() > 0
+    variant_sets += [['_rv64fast', rv64fast_args]]
+    variant_dispatch_args += ['-DZXC_HAVE_RV64FAST_VARIANT']
+    if cc.has_multi_arguments(rvv_args)
+      variant_sets += [['_rvv', rvv_args]]
+      variant_dispatch_args += ['-DZXC_HAVE_RVV_VARIANT']
+    endif
+  endif
 endif
 
 variant_objects = []
@@ -172,7 +197,7 @@ libzxc = library('zxc',
   name_prefix : 'lib',
   override_options : msvc_w4,
   objects : variant_objects,
-  c_args : lib_export_args + msvc_wd_args + lib_warning_args,
+  c_args : lib_export_args + msvc_wd_args + lib_warning_args + variant_dispatch_args,
   gnu_symbol_visibility : 'hidden',
   include_directories : libzxc_includes,
   dependencies : [thread_dep],
@@ -196,7 +221,7 @@ else
     libzxc_sources,
     override_options : msvc_w4,
     objects : variant_objects,
-    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_wd_args + lib_warning_args,
+    c_args : ['-DZXC_STATIC_DEFINE'] + msvc_wd_args + lib_warning_args + variant_dispatch_args,
     include_directories : libzxc_includes,
     dependencies : [thread_dep],
     build_by_default : false,
