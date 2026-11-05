@@ -284,7 +284,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0 --fast -17 | 1.19x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -9 | 0.94x | 77.20 |
-| lzav 5.20 -1 | 0.84x | 83.84 |
+| lzav 7.1 -1 | 0.84x | 82.42 |
 | snappy 1.3.1 | 0.67x | 100.53 |
 | zstd 1.5.7 --fast --1 | 0.54x | 86.16 |
 | zstd 1.5.7 -1 | 0.38x | 72.55 |
@@ -306,7 +306,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              | 0.786       | 8.4x                  |
 | lz4 1.10.0 --fast -17   | 0.660       | 7.0x                  |
 | lz4hc 1.10.0 -9         | 0.834       | 8.9x                  |
-| lzav 5.20 -1            | 0.931       | 9.9x                  |
+| lzav 7.1 -1             | 0.936       | 9.9x                  |
 | zstd 1.5.7 -1           | 2.063       | 21.9x                 |
 | zstd 1.5.7 --fast --1   | 1.460       | 15.5x                 |
 | zstd 1.5.7 -3           | 2.167       | 23.0x                 |
@@ -339,7 +339,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0 --fast -17 | 1.16x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -9 | 0.90x | 77.20 |
-| lzav 5.20 -1 | 0.69x | 83.84 |
+| lzav 7.1 -1 | 0.68x | 82.42 |
 | snappy 1.3.1 | 0.54x | 100.53 |
 | zstd 1.5.7 --fast --1 | 0.54x | 86.16 |
 | zstd 1.5.7 -1 | 0.39x | 72.55 |
@@ -361,7 +361,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              | 0.611       | 5.8x                  |
 | lz4 1.10.0 --fast -17   | 0.526       | 5.0x                  |
 | lz4hc 1.10.0 -9         | 0.676       | 6.5x                  |
-| lzav 5.20 -1            | 0.887       | 8.5x                  |
+| lzav 7.1 -1             | 0.902       | 8.6x                  |
 | zstd 1.5.7 -1           | 1.584       | 15.1x                 |
 | zstd 1.5.7 --fast --1   | 1.134       | 10.8x                 |
 | zstd 1.5.7 -3           | 1.707       | 16.3x                 |
@@ -394,7 +394,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0 --fast -17 | 1.05x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -9 | 0.97x | 77.20 |
-| lzav 5.20 -1 | 0.73x | 83.84 |
+| lzav 7.1 -1 | 0.72x | 82.42 |
 | snappy 1.3.1 | 0.48x | 100.63 |
 | zstd 1.5.7 --fast --1 | 0.48x | 86.16 |
 | zstd 1.5.7 -1 | 0.38x | 72.55 |
@@ -416,7 +416,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              | 0.414       | 5.6x                  |
 | lz4 1.10.0 --fast -17   | 0.395       | 5.3x                  |
 | lz4hc 1.10.0 -9         | 0.429       | 5.8x                  |
-| lzav 5.20 -1            | 0.570       | 7.6x                  |
+| lzav 7.1 -1             | 0.576       | 7.7x                  |
 | zstd 1.5.7 -1           | 1.101       | 14.8x                 |
 | zstd 1.5.7 --fast --1   | 0.855       | 11.5x                 |
 | zstd 1.5.7 -3           | 1.203       | 16.1x                 |
@@ -449,7 +449,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0 --fast -17 | 1.15x | 130.58 |
 | lz4 1.10.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.10.0 -9 | 0.96x | 77.20 |
-| lzav 5.20 -1 | 0.76x | 83.84 |
+| lzav 7.1 -1 | 0.78x | 82.42 |
 | snappy 1.3.1 | 0.47x | 100.63 |
 | zstd 1.5.7 --fast --1 | 0.46x | 86.16 |
 | zstd 1.5.7 -1 | 0.34x | 72.55 |
@@ -471,7 +471,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              | 0.570       | 6.2x                  |
 | lz4 1.10.0 --fast -17   | 0.494       | 5.4x                  |
 | lz4hc 1.10.0 -9         | 0.593       | 6.5x                  |
-| lzav 5.20 -1            | 0.749       | 8.2x                  |
+| lzav 7.1 -1             | 0.729       | 8.0x                  |
 | zstd 1.5.7 -1           | 1.653       | 18.1x                 |
 | zstd 1.5.7 --fast --1   | 1.242       | 13.6x                 |
 | zstd 1.5.7 -3           | 1.838       | 20.1x                 |
@@ -516,7 +516,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              |   872 MB/s |  5152 MB/s |   100880800 | 47.60 | 1 files|
 | lz4 1.10.0 --fast -17   |  1388 MB/s |  6140 MB/s |   131732802 | 62.15 | 1 files|
 | lz4hc 1.10.0 -9         |  51.5 MB/s |  4854 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.20 -1            |   758 MB/s |  4351 MB/s |    84577911 | 39.91 | 1 files|
+| lzav 7.1 -1             |   800 MB/s |  4328 MB/s |    83147688 | 39.23 | 1 files|
 | snappy 1.3.1            |   726 MB/s |  3427 MB/s |   101415443 | 47.85 | 1 files|
 | zstd 1.5.7 --fast --1   |   799 MB/s |  2774 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   709 MB/s |  1963 MB/s |    73193704 | 34.53 | 1 files|
@@ -539,7 +539,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              |   729 MB/s |  4252 MB/s |   100880800 | 47.60 | 1 files|
 | lz4 1.10.0 --fast -17   |  1274 MB/s |  4946 MB/s |   131732802 | 62.15 | 1 files|
 | lz4hc 1.10.0 -9         |  44.2 MB/s |  3844 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.20 -1            |   656 MB/s |  2930 MB/s |    84577911 | 39.91 | 1 files|
+| lzav 7.1 -1             |   593 MB/s |  2882 MB/s |    83147688 | 39.23 | 1 files|
 | snappy 1.3.1            |   567 MB/s |  2291 MB/s |   101415443 | 47.85 | 1 files|
 | zstd 1.5.7 --fast --1   |   604 MB/s |  2292 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   523 MB/s |  1641 MB/s |    73193704 | 34.53 | 1 files|
@@ -562,7 +562,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              |   768 MB/s |  5067 MB/s |   100880800 | 47.60 | 1 files|
 | lz4 1.10.0 --fast -17   |  1291 MB/s |  5314 MB/s |   131732802 | 62.15 | 1 files|
 | lz4hc 1.10.0 -9         |  45.4 MB/s |  4893 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.20 -1            |   696 MB/s |  3685 MB/s |    84577911 | 39.91 | 1 files|
+| lzav 7.1 -1             |   686 MB/s |  3644 MB/s |    83147688 | 39.23 | 1 files|
 | snappy 1.3.1            |   566 MB/s |  2434 MB/s |   101512076 | 47.89 | 1 files|
 | zstd 1.5.7 --fast --1   |   667 MB/s |  2457 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   606 MB/s |  1908 MB/s |    73193704 | 34.53 | 1 files|
@@ -585,7 +585,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | lz4 1.10.0              |   637 MB/s |  3859 MB/s |   100880800 | 47.60 | 1 files|
 | lz4 1.10.0 --fast -17   |  1105 MB/s |  4450 MB/s |   131732802 | 62.15 | 1 files|
 | lz4hc 1.10.0 -9         |  37.0 MB/s |  3708 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 5.20 -1            |   493 MB/s |  2938 MB/s |    84577911 | 39.91 | 1 files|
+| lzav 7.1 -1             |   477 MB/s |  3016 MB/s |    83147688 | 39.23 | 1 files|
 | snappy 1.3.1            |   505 MB/s |  1825 MB/s |   101512076 | 47.89 | 1 files|
 | zstd 1.5.7 --fast --1   |   483 MB/s |  1771 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   443 MB/s |  1331 MB/s |    73193704 | 34.53 | 1 files|
