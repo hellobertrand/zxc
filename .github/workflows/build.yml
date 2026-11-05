@@ -18,6 +18,47 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
 
 jobs:
+  # vX.Y.0 must be on main and vX.Y.Z (Z > 0) on release/X.Y (see CONTRIBUTING.md),
+  # checked on the tag push and again before the release assets are uploaded.
+  tag-placement:
+    name: Check the tag's branch
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-slim
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check that the tag is reachable from its branch
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          if [[ ! "$tag" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)(-.+)?$ ]]; then
+            echo "::error::$tag is not a vX.Y.Z tag"
+            exit 1
+          fi
+          line="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+          if [ "${BASH_REMATCH[3]}" = 0 ]; then
+            branch=main
+          else
+            branch="release/$line"
+          fi
+          # ^{commit}: GITHUB_SHA may name the tag object of an annotated tag.
+          commit=$(git rev-parse "refs/tags/$tag^{commit}")
+          if ! git rev-parse --verify --quiet "refs/remotes/origin/$branch" > /dev/null; then
+            echo "::error::$tag belongs on $branch, which does not exist: create it from v$line.0 first"
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor "$commit" "origin/$branch"; then
+            echo "::error::$tag points to ${commit:0:10}, which is not on $branch: tag a commit of $branch instead"
+            exit 1
+          fi
+          echo "$tag (${commit:0:10}) is on $branch"
+
   build-test-unix:
     name: Build ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
@@ -312,7 +353,7 @@ jobs:
 
   release:
     name: Upload the release assets
-    needs: [build-test-unix, build-test-windows, source-tarball, sbom]
+    needs: [tag-placement, build-test-unix, build-test-windows, source-tarball, sbom]
     outputs:
       digests: ${{ steps.sums.outputs.digests }}
     runs-on: ubuntu-latest
