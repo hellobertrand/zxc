@@ -189,7 +189,8 @@ git push origin vX.Y.Z
 `-x` records the original commit (`(cherry picked from commit ...)`), which keeps
 backports traceable. When publishing the GitHub release for a patch on an older
 line (that is, when a newer minor already exists), untick **Set as the latest
-release**.
+release**. If it stays ticked, the `Build & Release` workflow marks the newest
+version as latest again once the release is published.
 
 ## Reporting Issues
 
