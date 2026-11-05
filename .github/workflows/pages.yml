@@ -36,6 +36,8 @@ jobs:
     if: github.event_name != 'release' || (startsWith(github.event.release.tag_name, 'v') && !github.event.release.prerelease)
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      deploy: ${{ steps.ref.outputs.deploy }}
     steps:
       - name: Checkout site sources
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -54,18 +56,24 @@ jobs:
           INPUT_REF: ${{ inputs.docs_ref }}
           REPO: ${{ github.repository }}
         run: |
+          # A failed lookup stops here: guessing could deploy an older line's docs.
+          released="$(gh api --paginate "repos/$REPO/releases" \
+            --jq '.[] | select((.draft or .prerelease) | not) | .tag_name')"
           newest="$( { [ "$EVENT" = "release" ] && printf '%s\n' "$RELEASE_TAG"
-            gh api --paginate "repos/$REPO/releases" \
-              --jq '.[] | select((.draft or .prerelease) | not) | .tag_name'; } \
+            printf '%s\n' "$released"; } \
             | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)" || true
+          deploy=true
           if [ "$EVENT" != "release" ] && [ -n "$INPUT_REF" ]; then
             ref="$INPUT_REF"
           else
             ref="$newest"
+            # A patch on an older line (v1.0.1 after v1.1.0) leaves the site alone.
             if [ "$EVENT" = "release" ] && [ "$RELEASE_TAG" != "$newest" ]; then
-              echo "Release $RELEASE_TAG is older than $newest: keeping the $newest docs"
+              echo "Release $RELEASE_TAG is older than $newest: the site is not redeployed"
+              deploy=false
             fi
           fi
+          echo "deploy=$deploy" >> "$GITHUB_OUTPUT"
           if [ -z "$ref" ]; then
             echo "::error::No published v* release to build the docs from"; exit 1
           fi
@@ -120,7 +128,9 @@ jobs:
   deploy:
     name: Deploy to Cloudflare
     needs: build
-    if: (github.event_name != 'pull_request' && github.ref == 'refs/heads/main') || github.event_name == 'release'
+    if: >-
+      needs.build.outputs.deploy == 'true' &&
+      ((github.event_name != 'pull_request' && github.ref == 'refs/heads/main') || github.event_name == 'release')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     # The Cloudflare secrets live in this environment, restricted to main and v* tags.
