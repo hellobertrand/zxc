@@ -2,12 +2,23 @@
 
 This directory contains CI/CD workflows for the ZXC compression library.
 
+## Maintenance branches
+
+`release/X.Y` branches carry the patch releases of a published line (see [CONTRIBUTING.md](../CONTRIBUTING.md#branches-and-releases)). Wherever a trigger below says "push to main" or "pull requests", the same holds for `release/**`: pushes to a maintenance branch and pull requests against it run the same checks as `main`. Two workflows stay on `main` only:
+
+- `pages.yml`: the site is built from `main` and the newest release, so a maintenance branch has nothing to deploy.
+- `scorecard.yml`: Scorecard only publishes results for the default branch.
+
+A patch on an older line (`v1.0.1` published after `v1.1.0`) changes nothing for the newest one: the site is not redeployed, npm publishes it under the `release-1.0` dist-tag instead of `latest`, and `build.yml` marks `v1.1.0` as the latest GitHub release again. PyPI, crates.io and the Go module proxy always resolve the highest version, whatever the publication order.
+
 ## Core Workflows
 
 ### build.yml - Build & Release
-**Triggers:** Push to main, tags, pull requests, manual dispatch
+**Triggers:** Push to main or `release/**`, `v*` tags, pull requests, release published, manual dispatch
 
-Builds and tests ZXC across multiple platforms (Linux x86_64/ARM64, macOS ARM64, Windows x64). Generates release artifacts and uploads binaries when tags are pushed.
+Builds and tests ZXC across multiple platforms (Linux x86_64/ARM64, macOS ARM64, Windows x64). On a published release, uploads the signed archives and their provenance, then dispatches every binding's publish job at the tag.
+
+On a `v*` tag, `tag-placement` checks that `vX.Y.0` is reachable from `main` and `vX.Y.Z` (Z > 0) from `release/X.Y`; the asset upload depends on it. `latest-release` keeps the newest published version marked as the latest release.
 
 ### multiarch.yml - Multi-Architecture Build
 **Triggers:** Push to main, pull requests, manual dispatch
@@ -33,6 +44,11 @@ Tests the codebase against a wide range of compilers (various versions of GCC an
 **Triggers:** Push to main (src changes), pull requests, manual dispatch
 
 Runs performance benchmarks using LZbench on Ubuntu and macOS. Integrates ZXC into the LZbench framework and tests compression/decompression performance against the Silesia corpus.
+
+### pages.yml - Website
+**Triggers:** Push to main and pull requests (`site/` changes), release published, manual dispatch
+
+Builds libzxc.org from `site/` on `main` and the docs of the newest published release, then deploys it to Cloudflare from `main` or a release tag. A release that is not the newest one (a patch on an older line) does not redeploy the site.
 
 ## Quality & Security
 
@@ -100,31 +116,31 @@ Automatically checks for and updates third-party dependencies (like `rapidhash.h
 ### changelog.yml - CHANGELOG
 **Triggers:** Push to `bump/**` or `release/**` branches, manual dispatch
 
-Regenerates [`CHANGELOG`](../../CHANGELOG) with [`git-cliff`](https://git-cliff.org/), grouping all commits under their respective tags. On `bump/X.Y.Z` and `release/X.Y.Z` branches (a `v` prefix is accepted) the version tag is auto-detected from the branch name; manual dispatch accepts an explicit `tag` input (empty = `Unreleased`). The generated file is uploaded as a workflow artifact, it is **not** committed back to the repo. Configuration lives in [`cliff.toml`](../../cliff.toml).
+Regenerates [`CHANGELOG`](../../CHANGELOG) with [`git-cliff`](https://git-cliff.org/), grouping all commits under their respective tags. On a `bump/vX.Y.Z` branch, cut from `main` or from `release/X.Y`, the version tag is taken from the branch name (the `v` is optional). A maintenance branch `release/X.Y` names no patch number, so its newest section is `Unreleased`, as on a manual dispatch. Only tags reachable from the branch count: a `v1.0.1` section holds the fixes cherry-picked onto `release/1.0`, and the CHANGELOG on `main` lists no patch release. The generated file is uploaded as a workflow artifact, it is **not** committed back to the repo. Configuration lives in [`cliff.toml`](../../cliff.toml).
 
 ## Language Bindings
 
 ### binding-rust.yml - Binding Rust
-**Triggers:** Release published, manual dispatch
+**Triggers:** Push to main or `release/**`, pull requests (binding changes), manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
 Tests and publishes Rust crates to crates.io via trusted publishing. Verifies the version matches the release tag, runs tests across platforms, and publishes `zxc-compress-sys` (FFI bindings) followed by `zxc-compress` (safe wrapper).
 
 ### binding-python.yml - Binding Python
-**Triggers:** Release published, manual dispatch
+**Triggers:** Push to main or `release/**`, pull requests (binding changes), manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
 Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), macOS (ARM64, Intel), and Windows (AMD64, ARM64). Tests wheels against Python 3.12-3.14, then publishes to PyPI via trusted publishing.
 
 ### binding-wasm.yml - Binding WASM
-**Triggers:** Release published, publish on main, manual dispatch
+**Triggers:** Push to main or `release/**`, manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
-Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts. On tags, publishes the `zxc-wasm` package to npm via trusted publishing.
+Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts. On tags, publishes the `zxc-wasm` package to npm via trusted publishing, under the `latest` dist-tag, or `release-X.Y` for a patch on an older line.
 
 ### binding-nodejs.yml - Binding Node.js
-**Triggers:** Release published, manual dispatch
+**Triggers:** Push to main or `release/**`, pull requests (binding changes), manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
-Builds and publishes the Node.js package to npm via trusted publishing. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed.
+Builds and publishes the Node.js package to npm via trusted publishing. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed. A patch on an older line goes under the `release-X.Y` dist-tag, so `latest` stays on the newest line.
 
 ### binding-go.yml - Binding Go
-**Triggers:** Release published, manual dispatch
+**Triggers:** Push to main or `release/**`, pull requests (binding changes), manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
 Runs comprehensive tests for the Go bindings across various platforms and architectures to ensure the Go package is stable and functional.
