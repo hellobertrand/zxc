@@ -21,7 +21,8 @@ jobs:
   build-tier1:
     name: "Tier 1: ${{ matrix.name }}"
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ matrix.runner == 'ubuntu-24.04-riscv' && 20 || 10 }}
+    continue-on-error: ${{ matrix.runner == 'ubuntu-24.04-riscv' }}
     strategy:
       fail-fast: false
       matrix:
@@ -35,6 +36,8 @@ jobs:
           - { name: "x86_64 (ubuntu 26.04)", runner: ubuntu-26.04, os: linux }
           - { name: "i386 (ubuntu 26.04)", runner: ubuntu-26.04, os: linux, install_32bit_x86: true, arch_flags: "-m32" }
           - { name: "arm64 (ubuntu 26.04)", runner: ubuntu-26.04-arm, os: linux }
+          # RISE runner: TH1520 (C910, RVV 0.7.1), kernel without riscv_hwprobe => _default.
+          - { name: "riscv64 (ubuntu 24.04, RISE)", runner: ubuntu-24.04-riscv, os: linux, install_gcc14: true }
           - { name: "x86_64 (windows 2022)", runner: windows-2022, os: windows, cmake_arch: x64 }
           - { name: "i386 (windows 2022)", runner: windows-2022, os: windows, cmake_arch: Win32 }
           - { name: "x86_64 (windows 2025)", runner: windows-2025, os: windows, cmake_arch: x64 }
@@ -58,6 +61,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y gcc-multilib g++-multilib
+
+      - name: Install GCC 14 (riscv64)
+        if: matrix.install_gcc14
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake gcc-14 g++-14
+          echo "CC=gcc-14" >> "$GITHUB_ENV"
+          echo "CXX=g++-14" >> "$GITHUB_ENV"
+          uname -r
+          grep -m1 '^isa' /proc/cpuinfo || true
 
       - name: Configure, Build & Test (Static & Shared)
         shell: bash
