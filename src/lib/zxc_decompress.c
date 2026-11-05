@@ -121,7 +121,7 @@ static const uint8_t zxc_overlap_strides32[32] = {32, 32, 32, 30, 32, 30, 30, 28
 /**
  * @brief Copies an @p ml-byte run of period @p off (2..31) with 32-byte stores.
  *
- * Builds the run's first 32 bytes in a register pair, then stores them
+ * Builds the run's first 32 bytes in registers, then stores them
  * repeatedly. Nothing is re-shuffled: advancing by a multiple of @p off keeps
  * the pattern in phase.
  *
@@ -174,6 +174,16 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
         vst1_u8(dst + copied + 8, p1);
         vst1_u8(dst + copied + 16, p2);
         vst1_u8(dst + copied + 24, p3);
+        copied += stride;
+    } while (copied < ml);
+
+#elif defined(ZXC_USE_AVX512) && defined(__AVX512VBMI__) && defined(__AVX512VL__)
+    // vpermb indexes all 32 bytes, so the table needs no emulation.
+    const __m256i pat =
+        _mm256_permutexvar_epi8(_mm256_load_si256((const __m256i*)zxc_overlap_masks32[off]),
+                                _mm256_loadu_si256((const __m256i*)(dst - off)));
+    do {
+        _mm256_storeu_si256((__m256i*)(dst + copied), pat);
         copied += stride;
     } while (copied < ml);
 
