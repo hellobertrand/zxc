@@ -102,11 +102,94 @@ clang-format -i src/lib/*.c include/*.h
 
 ## Submitting Changes
 
-1. Fork and create a feature branch
+1. Fork and create a short-lived topic branch from `main` (`feat/...`, `fix/...`, `perf/...`, `docs/...`)
 2. Add tests for new functionality
 3. Ensure CI passes (build, tests, benchmarks)
 4. Sign your commits with `-s`
 5. Open a PR to `main`
+
+Always target `main`, including for bug fixes. Backporting a fix to a maintenance
+branch is done by the maintainers after it has landed on `main` (see below).
+Only open a PR against a `release/*` branch when a maintainer asks for it.
+
+## Branches and Releases
+
+### Branches
+
+| Branch | Purpose |
+|---|---|
+| `main` | Default branch. All development lands here; it becomes the next minor release. |
+| `release/X.Y` | Maintenance branch for the `X.Y` line, created from the `vX.Y.0` tag. Receives fixes only, never features. |
+| `bump/vX.Y.Z` | Short-lived branch preparing a release (version bump, CHANGELOG). Merged by PR, then deleted. |
+| `feat/*`, `fix/*`, `perf/*`, `docs/*`... | Short-lived topic branches, merged into `main` by PR. |
+
+`main` and `release/*` are protected: CI must pass, history is never rewritten,
+and tags are never moved or deleted. Downstream projects (ClickHouse, distribution
+packages, forks) pin exact commits and tags, so every published commit must stay
+reachable.
+
+### Versioning and compatibility
+
+ZXC follows [Semantic Versioning](https://semver.org/) for its public API and
+CLI. From 1.0.0 onwards, the compressed format is stable within a major version:
+data written by any `1.x` release must decompress with every later `1.x` release.
+
+- **Patch** (`1.0.1`): bug fixes and security fixes only. No new API, no change
+  to the compressed output that would affect existing readers.
+- **Minor** (`1.1.0`): new features and API additions, backward compatible.
+- **Major** (`2.0.0`): breaking changes to the API or the format. These are not
+  merged into `main` until a 2.0 is planned.
+
+### Where changes go
+
+| Change | Lands on | Then |
+|---|---|---|
+| Feature | `main` | Released in the next minor version |
+| Bug fix | `main` | Backported to the supported `release/X.Y` branch if it affects that line |
+| Security fix | `main` (or privately, see [SECURITY.md](SECURITY.md)) | Backported, then released as a patch |
+| Breaking change | Not merged until a 2.0 is planned | |
+
+Fixes always land on `main` first, so that no fix is lost in a later release.
+In the rare case where a fix cannot apply to `main` (the affected code no longer
+exists there), it is made directly on the `release/X.Y` branch and the PR says why.
+
+### Supported versions
+
+Only the latest minor release line receives bug fixes. The previous line may
+receive security fixes at the maintainers' discretion. See
+[SECURITY.md](SECURITY.md) for the current list.
+
+### Release process (maintainers)
+
+**Minor or major release (`vX.Y.0`), from `main`:**
+
+```bash
+git switch -c bump/vX.Y.0 main
+# bump versions, regenerate CHANGELOG, open a PR to main and merge it
+git switch main && git pull
+git tag -s vX.Y.0 -m "vX.Y.0"
+git push origin vX.Y.0
+git branch release/X.Y vX.Y.0
+git push origin release/X.Y
+```
+
+Then publish the GitHub release from the tag.
+
+**Patch release (`vX.Y.Z`), from `release/X.Y`:**
+
+```bash
+git switch -c bump/vX.Y.Z origin/release/X.Y
+git cherry-pick -x -s <sha-on-main>...   # one per fix, in order
+# bump versions, regenerate CHANGELOG, open a PR to release/X.Y and merge it
+git switch release/X.Y && git pull
+git tag -s vX.Y.Z -m "vX.Y.Z"
+git push origin vX.Y.Z
+```
+
+`-x` records the original commit (`(cherry picked from commit ...)`), which keeps
+backports traceable. When publishing the GitHub release for a patch on an older
+line (that is, when a newer minor already exists), untick **Set as the latest
+release**.
 
 ## Reporting Issues
 
