@@ -12,7 +12,7 @@ on:
           - check
           - regenerate
   pull_request:
-    branches: [ main, candidate ]
+    branches: [ main, candidate, 'release/**' ]
     paths:
       - 'src/lib/**'
       - 'include/**'
@@ -20,7 +20,7 @@ on:
       - 'docs/abi/**'
       - '.github/workflows/abi-check.yml'
   push:
-    branches: [ main ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'src/lib/**'
       - 'include/**'

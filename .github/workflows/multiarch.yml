@@ -3,9 +3,9 @@ name: Multi-Architecture Build
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, 'release/**' ]
   pull_request:
-    branches: [ main, candidate ]
+    branches: [ main, candidate, 'release/**' ]
 
 permissions:
   contents: read
@@ -235,6 +235,8 @@ jobs:
           fi
           apt-get install -y cmake build-essential ${{ matrix.cross_pkg }} qemu-user
 
+      # Saved from main only: the default branch's caches are readable from every
+      # branch, release/* included, so saving elsewhere would only duplicate them.
       - name: Save apt cache
         if: github.ref == 'refs/heads/main' && steps.apt-cache.outputs.cache-hit != 'true'
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0

@@ -16,7 +16,7 @@ on:
         required: true
         default: '7200'
   pull_request:
-    branches: [ main, candidate ]
+    branches: [ main, candidate, 'release/**' ]
     paths:
       - 'src/**'
       - 'include/**'
