@@ -22,7 +22,7 @@ The ZXC format is fully specified in [FORMAT.md](docs/FORMAT.md) and guarded by 
 | :--- | ---: | ---: | ---: | ---: |
 | Apple M3 | **2.41x** | **2.14x** | **1.61x** | **2.95x** |
 | Axion (Neoverse-V2) | **1.92x** | **1.54x** | **1.28x** | **2.16x** |
-| EPYC 9B45 (Zen 5) | **2.20x** | **1.64x** | **1.22x** | **2.47x** |
+| EPYC 9B45 (Zen 5) | **2.21x** | **1.64x** | **1.22x** | **2.47x** |
 | EPYC 7B13 (Zen 3) | **1.82x** | **1.35x** | **1.15x** | **2.35x** |
 
 ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.65 % vs 47.60 %, 36.28 % vs
@@ -97,8 +97,8 @@ Apple M3 (ARM64)
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 1.0.0 -1** | 868 MB/s | **11701 MB/s** | **61.76 %** |
-| **zxc 1.0.0 -2** | 583 MB/s | **10439 MB/s** | **53.86 %** |
+| **zxc 1.0.0 -1** | 875 MB/s | **11760 MB/s** | **61.76 %** |
+| **zxc 1.0.0 -2** | 588 MB/s | **10477 MB/s** | **53.86 %** |
 | **zxc 1.0.0 -3** | 254 MB/s | **8288 MB/s** | **46.65 %** |
 | **zxc 1.0.0 -4** | 185 MB/s | **7461 MB/s** | **43.43 %** |
 | **zxc 1.0.0 -5** | 111 MB/s | **6960 MB/s** | **40.83 %** |

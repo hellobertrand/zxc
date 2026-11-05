@@ -384,8 +384,8 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 1.0.0 -1** | **2.31x** | **129.75** |
-| **zxc 1.0.0 -2** | **2.06x** | **113.16** |
+| **zxc 1.0.0 -1** | **2.32x** | **129.75** |
+| **zxc 1.0.0 -2** | **2.07x** | **113.16** |
 | **zxc 1.0.0 -3** | **1.64x** | **98.01** |
 | **zxc 1.0.0 -4** | **1.47x** | **91.25** |
 | **zxc 1.0.0 -5** | **1.37x** | **85.79** |
@@ -407,7 +407,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.075       | 1.00x (baseline)      |
 | **zxc 1.0.0 -1**       | **0.179**   | **2.4x**              |
-| **zxc 1.0.0 -2**       | **0.201**   | **2.7x**              |
+| **zxc 1.0.0 -2**       | **0.200**   | **2.7x**              |
 | **zxc 1.0.0 -3**       | **0.253**   | **3.4x**              |
 | **zxc 1.0.0 -4**       | **0.281**   | **3.8x**              |
 | **zxc 1.0.0 -5**       | **0.302**   | **4.0x**              |
@@ -415,13 +415,13 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | **zxc 1.0.0 -7**       | **0.446**   | **6.0x**              |
 | lz4 1.10.0              | 0.414       | 5.6x                  |
 | lz4 1.10.0 --fast -17   | 0.395       | 5.3x                  |
-| lz4hc 1.10.0 -9         | 0.429       | 5.7x                  |
+| lz4hc 1.10.0 -9         | 0.429       | 5.8x                  |
 | lzav 5.20 -1            | 0.570       | 7.6x                  |
-| zstd 1.5.7 -1           | 1.101       | 14.7x                 |
-| zstd 1.5.7 --fast --1   | 0.855       | 11.4x                 |
+| zstd 1.5.7 -1           | 1.101       | 14.8x                 |
+| zstd 1.5.7 --fast --1   | 0.855       | 11.5x                 |
 | zstd 1.5.7 -3           | 1.203       | 16.1x                 |
 | snappy 1.3.1            | 0.863       | 11.6x                 |
-| zlib 1.3.2 -1           | 5.344       | 71.6x                 |
+| zlib 1.3.2 -1           | 5.344       | 71.7x                 |
 
 **Throughput over a link**
 
@@ -432,7 +432,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | 3 GB/s | **2.32x** (`zxc -5`) | 1.69x (`lz4`) | 0.82x (`zstd --fast --1`) |
 | 7 GB/s (NVMe) | **1.62x** (`zxc -1`) | 0.76x (`lz4 --fast -17`) | 0.35x (`zstd --fast --1`) |
 
-*Reading: on AMD EPYC 9B45, the ratio of `zstd -3` leads below 577 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.56 GB/s, then the faster levels in turn, up to 11.7 GB/s, where one decoding thread falls behind the link and compression stops paying (5.31 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
+*Reading: on AMD EPYC 9B45, the ratio of `zstd -3` leads below 577 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.56 GB/s, then the faster levels in turn, up to 11.8 GB/s, where one decoding thread falls behind the link and compression stops paying (5.31 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
 
 
 ### 7.4 Production Server Summary (x86_64 / AMD EPYC 7B13, Zen 3)
@@ -551,9 +551,9 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 27758 MB/s | 28125 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 1.0.0 -1**           |   868 MB/s | **11701 MB/s** |   130896288 | **61.76** | 1 files|
-| **zxc 1.0.0 -2**           |   583 MB/s | **10439 MB/s** |   114152506 | **53.86** | 1 files|
+| memcpy                  | 28118 MB/s | 28172 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 1.0.0 -1**           |   875 MB/s | **11760 MB/s** |   130896288 | **61.76** | 1 files|
+| **zxc 1.0.0 -2**           |   588 MB/s | **10477 MB/s** |   114152506 | **53.86** | 1 files|
 | **zxc 1.0.0 -3**           |   254 MB/s |  **8288 MB/s** |    98875304 | **46.65** | 1 files|
 | **zxc 1.0.0 -4**           |   185 MB/s |  **7461 MB/s** |    92052403 | **43.43** | 1 files|
 | **zxc 1.0.0 -5**           |   111 MB/s |  **6960 MB/s** |    86544351 | **40.83** | 1 files|
