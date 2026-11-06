@@ -66,7 +66,7 @@ Apple M3 (ARM64)
 | zstd 1.5.7 --fast --1 | 799 MB/s | 2774 MB/s | 41.01 % |
 | zstd 1.5.7 -1 | 709 MB/s | 1963 MB/s | 34.53 % |
 | zstd 1.5.7 -3 | 438 MB/s | 1869 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 167 MB/s | 451 MB/s | 36.45 % |
+| zlib 1.4 -1 | 165 MB/s | 452 MB/s | 36.45 % |
 
 <details>
 <summary>Google Axion (Neoverse-V2, ARM64)</summary>
@@ -88,7 +88,7 @@ Apple M3 (ARM64)
 | zstd 1.5.7 --fast --1 | 604 MB/s | 2292 MB/s | 41.01 % |
 | zstd 1.5.7 -1 | 523 MB/s | 1641 MB/s | 34.53 % |
 | zstd 1.5.7 -3 | 326 MB/s | 1523 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 115 MB/s | 389 MB/s | 36.45 % |
+| zlib 1.4 -1 | 114 MB/s | 389 MB/s | 36.45 % |
 
 </details>
 
@@ -112,7 +112,7 @@ Apple M3 (ARM64)
 | zstd 1.5.7 --fast --1 | 667 MB/s | 2457 MB/s | 41.01 % |
 | zstd 1.5.7 -1 | 606 MB/s | 1908 MB/s | 34.53 % |
 | zstd 1.5.7 -3 | 370 MB/s | 1745 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 134 MB/s | 393 MB/s | 36.45 % |
+| zlib 1.4 -1 | 135 MB/s | 393 MB/s | 36.45 % |
 
 </details>
 
@@ -136,7 +136,7 @@ Apple M3 (ARM64)
 | zstd 1.5.7 --fast --1 | 483 MB/s | 1771 MB/s | 41.01 % |
 | zstd 1.5.7 -1 | 443 MB/s | 1331 MB/s | 34.53 % |
 | zstd 1.5.7 -3 | 232 MB/s | 1197 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 106 MB/s | 357 MB/s | 36.45 % |
+| zlib 1.4 -1 | 106 MB/s | 355 MB/s | 36.45 % |
 
 </details>
 

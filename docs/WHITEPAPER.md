@@ -289,7 +289,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1 | 0.54x | 86.16 |
 | zstd 1.5.7 -1 | 0.38x | 72.55 |
 | zstd 1.5.7 -3 | 0.36x | 65.56 |
-| zlib 1.3.2 -1 | 0.09x | 76.58 |
+| zlib 1.4 -1 | 0.09x | 76.58 |
 
 **Decompression Efficiency (Cycles per Byte @ 4.05 GHz)**
 
@@ -311,7 +311,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   | 1.460       | 15.5x                 |
 | zstd 1.5.7 -3           | 2.167       | 23.0x                 |
 | snappy 1.3.1            | 1.182       | 12.6x                 |
-| zlib 1.3.2 -1           | 8.980       | 95.4x                 |
+| zlib 1.4 -1             | 8.960       | 95.2x                 |
 
 **Throughput over a link**
 
@@ -344,7 +344,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1 | 0.54x | 86.16 |
 | zstd 1.5.7 -1 | 0.39x | 72.55 |
 | zstd 1.5.7 -3 | 0.36x | 65.56 |
-| zlib 1.3.2 -1 | 0.09x | 76.58 |
+| zlib 1.4 -1 | 0.09x | 76.58 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.6 GHz)**
 
@@ -366,7 +366,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   | 1.134       | 10.8x                 |
 | zstd 1.5.7 -3           | 1.707       | 16.3x                 |
 | snappy 1.3.1            | 1.135       | 10.8x                 |
-| zlib 1.3.2 -1           | 6.684       | 63.9x                 |
+| zlib 1.4 -1             | 6.684       | 63.9x                 |
 
 **Throughput over a link**
 
@@ -399,7 +399,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1 | 0.48x | 86.16 |
 | zstd 1.5.7 -1 | 0.38x | 72.55 |
 | zstd 1.5.7 -3 | 0.34x | 65.56 |
-| zlib 1.3.2 -1 | 0.08x | 76.58 |
+| zlib 1.4 -1 | 0.08x | 76.58 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.1 GHz)**
 
@@ -421,7 +421,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   | 0.855       | 11.5x                 |
 | zstd 1.5.7 -3           | 1.203       | 16.1x                 |
 | snappy 1.3.1            | 0.863       | 11.6x                 |
-| zlib 1.3.2 -1           | 5.344       | 71.7x                 |
+| zlib 1.4 -1             | 5.344       | 71.7x                 |
 
 **Throughput over a link**
 
@@ -454,7 +454,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1 | 0.46x | 86.16 |
 | zstd 1.5.7 -1 | 0.34x | 72.55 |
 | zstd 1.5.7 -3 | 0.31x | 65.56 |
-| zlib 1.3.2 -1 | 0.09x | 76.58 |
+| zlib 1.4 -1 | 0.09x | 76.58 |
 
 **Decompression Efficiency (Cycles per Byte @ 2.2 GHz)**
 
@@ -476,7 +476,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   | 1.242       | 13.6x                 |
 | zstd 1.5.7 -3           | 1.838       | 20.1x                 |
 | snappy 1.3.1            | 1.205       | 13.2x                 |
-| zlib 1.3.2 -1           | 6.162       | 67.4x                 |
+| zlib 1.4 -1             | 6.197       | 67.8x                 |
 
 **Throughput over a link**
 
@@ -521,7 +521,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   |   799 MB/s |  2774 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   709 MB/s |  1963 MB/s |    73193704 | 34.53 | 1 files|
 | zstd 1.5.7 -3           |   438 MB/s |  1869 MB/s |    66133500 | 31.20 | 1 files|
-| zlib 1.3.2 -1           |   167 MB/s |   451 MB/s |    77259029 | 36.45 | 1 files|
+| zlib 1.4 -1             |   165 MB/s |   452 MB/s |    77259029 | 36.45 | 1 files|
 
 
 #### 7.5.2 ARM64 Architecture (Google Axion Neoverse-V2)
@@ -544,7 +544,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   |   604 MB/s |  2292 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   523 MB/s |  1641 MB/s |    73193704 | 34.53 | 1 files|
 | zstd 1.5.7 -3           |   326 MB/s |  1523 MB/s |    66133500 | 31.20 | 1 files|
-| zlib 1.3.2 -1           |   115 MB/s |   389 MB/s |    77259029 | 36.45 | 1 files|
+| zlib 1.4 -1             |   114 MB/s |   389 MB/s |    77259029 | 36.45 | 1 files|
 
 
 #### 7.5.3 x86_64 Architecture (AMD EPYC 9B45)
@@ -567,7 +567,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   |   667 MB/s |  2457 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   606 MB/s |  1908 MB/s |    73193704 | 34.53 | 1 files|
 | zstd 1.5.7 -3           |   370 MB/s |  1745 MB/s |    66133500 | 31.20 | 1 files|
-| zlib 1.3.2 -1           |   134 MB/s |   393 MB/s |    77259029 | 36.45 | 1 files|
+| zlib 1.4 -1             |   135 MB/s |   393 MB/s |    77259029 | 36.45 | 1 files|
 
 
 #### 7.5.4 x86_64 Architecture (AMD EPYC 7B13, Zen 3)
@@ -590,7 +590,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | zstd 1.5.7 --fast --1   |   483 MB/s |  1771 MB/s |    86916294 | 41.01 | 1 files|
 | zstd 1.5.7 -1           |   443 MB/s |  1331 MB/s |    73193704 | 34.53 | 1 files|
 | zstd 1.5.7 -3           |   232 MB/s |  1197 MB/s |    66133500 | 31.20 | 1 files|
-| zlib 1.3.2 -1           |   106 MB/s |   357 MB/s |    77259029 | 36.45 | 1 files|
+| zlib 1.4 -1             |   106 MB/s |   355 MB/s |    77259029 | 36.45 | 1 files|
 
 
 ### 7.6 Memory Usage per Compression Context
