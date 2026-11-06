@@ -20,9 +20,9 @@ name: Test Vector Stability
 on:
   workflow_dispatch:
   push:
-    branches: [ main, candidate ]
+    branches: [ main, 'release/**' ]
   pull_request:
-    branches: [ main, candidate ]
+    branches: [ main, 'release/**' ]
 
 permissions:
   contents: read

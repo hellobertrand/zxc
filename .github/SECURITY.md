@@ -1,5 +1,19 @@
 # Security Policy
 
+## Supported Versions
+
+Only the latest minor release line receives bug fixes. The previous line may
+receive security fixes at the maintainers' discretion. Fixes reach older lines
+as patch releases from their `release/X.Y` branch (see
+[CONTRIBUTING.md](CONTRIBUTING.md#branches-and-releases)).
+
+| Version | Status |
+|---|---|
+| 1.0.x | Bug and security fixes |
+| < 1.0 | Not supported |
+
+This table is updated with each minor release.
+
 ## Reporting a Vulnerability
 
 **Please do not report security vulnerabilities through public GitHub issues.**

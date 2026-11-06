@@ -3,9 +3,9 @@ name: Code Quality
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, 'release/**' ]
   pull_request:
-    branches: [ main, candidate ]
+    branches: [ main, 'release/**' ]
 
 permissions:
   contents: read

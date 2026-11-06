@@ -8,7 +8,7 @@ name: Binding WASM
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: [ main, 'release/**' ]
     paths:
       - 'src/**'
       - 'include/**'
@@ -131,9 +131,40 @@ jobs:
             test -f "$f" || { echo "Missing $f"; exit 1; }
           done
 
+      # Same rule as binding-nodejs.yml: an older line never takes `latest`.
+      - name: Choose the dist-tag
+        id: dist-tag
+        working-directory: ./bindings/wasm
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${RELEASE_TAG#v}"
+          name=$(node -p "require('./package.json').name")
+          latest=""
+          if [[ "$version" == *-* ]]; then
+            # npm refuses a prerelease without --tag; `next` keeps it off `latest`.
+            tag=next
+          else
+            # E404: never published, so this version becomes `latest`.
+            if ! latest=$(npm view "$name" dist-tags.latest 2> "$RUNNER_TEMP/npm-view.err"); then
+              grep -q E404 "$RUNNER_TEMP/npm-view.err" || { cat "$RUNNER_TEMP/npm-view.err"; exit 1; }
+              latest=""
+            fi
+            if [ -z "$latest" ] || [ "$(printf '%s\n' "$version" "$latest" | sort -V | tail -n 1)" = "$version" ]; then
+              tag=latest
+            else
+              tag="release-${version%.*}"
+            fi
+          fi
+          echo "Publishing $name@$version as '$tag' (latest: $latest)"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
       - name: Publish to npm
         working-directory: ./bindings/wasm
-        run: npm publish --access public
+        env:
+          DIST_TAG: ${{ steps.dist-tag.outputs.tag }}
+        run: npm publish --access public --tag "$DIST_TAG"
 
       - name: Summary
         if: success()
