@@ -317,7 +317,7 @@ Community-maintained bindings:
 
 | Language | Package Manager | Install Command | Repository | Author |
 | -------- | --------------- | --------------- | ---------- | ------ |
-| **Go** (native decoder, no cgo) | pkg.go.dev | `go get github.com/chmike/zxc-go` | <https://github.com/chmike/zxc-go> | [@chmike](https://github.com/chmike) |
+| **Go** (native, no cgo) | pkg.go.dev | `go get github.com/chmike/zxc-go` | <https://github.com/chmike/zxc-go> | [@chmike](https://github.com/chmike) |
 | **Nim** | nimble | `nimble install zxc` | <https://github.com/openpeeps/zxc-nim> | [@georgelemon](https://github.com/georgelemon) |
 | **Free Pascal** | Build from source | Clone the repository | <https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor> | [@Xelitan](https://github.com/Xelitan) |
 
