@@ -203,9 +203,9 @@ static uint32_t zxc_dict_hash(const uint8_t* p) {
  * @brief Segment descriptor for dictionary training, scored by coverage.
  */
 typedef struct {
-    uint32_t offset; /**< Offset of the segment in the corpus. */
-    uint16_t length; /**< Length of the segment. */
+    size_t offset;   /**< Offset of the segment in the corpus. */
     uint32_t score;  /**< Summed k-gram frequency (coverage) of the segment. */
+    uint16_t length; /**< Length of the segment. */
 } zxc_dict_seg_t;
 
 /**
@@ -258,6 +258,22 @@ static void zxc_dict_sort_segs_desc(zxc_dict_seg_t* RESTRICT a, const size_t n) 
 }
 
 /**
+ * @brief Sums the sample sizes, refusing a NULL sample of nonzero size and a
+ *        sum that wraps @c size_t.
+ */
+static int zxc_dict_corpus_size(const void* const* samples, const size_t* sample_sizes,
+                                const size_t n_samples, size_t* total) {
+    size_t sum = 0;
+    for (size_t i = 0; i < n_samples; i++) {
+        if (UNLIKELY(sample_sizes[i] > 0 && !samples[i])) return ZXC_ERROR_NULL_INPUT;
+        if (UNLIKELY(sample_sizes[i] > SIZE_MAX - sum)) return ZXC_ERROR_OVERFLOW;
+        sum += sample_sizes[i];
+    }
+    *total = sum;
+    return ZXC_OK;
+}
+
+/**
  * @brief Trains a raw dictionary from sample buffers by k-gram coverage.
  *
  * Public API; full contract in @c zxc_dict.h, algorithm in the note above.
@@ -272,8 +288,9 @@ int64_t zxc_dict_train_content(const void* const* RESTRICT samples,
     if (UNLIKELY(dict_capacity > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
     // Step 1: concatenate samples
-    size_t corpus_size = 0;
-    for (size_t i = 0; i < n_samples; i++) corpus_size += sample_sizes[i];
+    size_t corpus_size;
+    const int src = zxc_dict_corpus_size(samples, sample_sizes, n_samples, &corpus_size);
+    if (UNLIKELY(src != ZXC_OK)) return src;
     if (UNLIKELY(corpus_size < ZXC_DICT_KGRAM_LEN)) return ZXC_ERROR_SRC_TOO_SMALL;
 
     int64_t rc;
@@ -338,7 +355,7 @@ int64_t zxc_dict_train_content(const void* const* RESTRICT samples,
             end += ZXC_DICT_KGRAM_LEN;
         }
 
-        segs[n_segs].offset = (uint32_t)i;
+        segs[n_segs].offset = i;
         segs[n_segs].length = (uint16_t)(end - i);
         segs[n_segs].score = coverage;
         n_segs++;
@@ -381,7 +398,7 @@ int64_t zxc_dict_train_content(const void* const* RESTRICT samples,
             freq[zxc_dict_hash(corpus + p)] = 0;
 
         // Record the pick (n_sel <= i, so this never clobbers an unread entry).
-        segs[n_sel].offset = (uint32_t)seg_off;
+        segs[n_sel].offset = seg_off;
         segs[n_sel].length = (uint16_t)copy;
         n_sel++;
         total += copy;
@@ -446,6 +463,10 @@ int zxc_dict_train_huf(const void* const* RESTRICT samples, const size_t* RESTRI
         return ZXC_ERROR_NULL_INPUT;
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
 
+    size_t corpus_total;
+    const int src = zxc_dict_corpus_size(samples, sample_sizes, n_samples, &corpus_total);
+    if (UNLIKELY(src != ZXC_OK)) return src;
+
     const size_t eff_chunk = zxc_block_size_ceil(dict_size + ZXC_DICT_HUF_TRAIN_BLOCK);
 
     zxc_cctx_t cctx;
@@ -470,19 +491,16 @@ int zxc_dict_train_huf(const void* const* RESTRICT samples, const size_t* RESTRI
 
     // Slice stride: process every slice while the corpus fits the budget,
     // else 1 slice out of `stride` spread evenly across all samples.
-    size_t corpus_total = 0;
-    for (size_t s = 0; s < n_samples; s++) corpus_total += sample_sizes[s];
-    const size_t stride =
-        (corpus_total > ZXC_DICT_HUF_SAMPLE_BUDGET)
-            ? (corpus_total + ZXC_DICT_HUF_SAMPLE_BUDGET - 1) / ZXC_DICT_HUF_SAMPLE_BUDGET
-            : 1;
+    const size_t stride = (corpus_total > ZXC_DICT_HUF_SAMPLE_BUDGET)
+                              ? (corpus_total - 1) / ZXC_DICT_HUF_SAMPLE_BUDGET + 1
+                              : 1;
 
     int rc = ZXC_OK;
     size_t slice_idx = 0;
     for (size_t s = 0; s < n_samples && rc == ZXC_OK; s++) {
         const uint8_t* sample = (const uint8_t*)samples[s];
         const size_t sample_size = sample_sizes[s];
-        if (!sample || sample_size == 0) continue;
+        if (sample_size == 0) continue;
 
         for (size_t off = 0; off < sample_size; off += ZXC_DICT_HUF_TRAIN_BLOCK, slice_idx++) {
             if (slice_idx % stride != 0) continue;
@@ -557,10 +575,8 @@ int64_t zxc_dict_train(const void* const* RESTRICT samples, const size_t* RESTRI
     const int64_t content_size =
         zxc_dict_train_content(samples, sample_sizes, n_samples, content, ZXC_DICT_SIZE_MAX);
     if (UNLIKELY(content_size <= 0)) {
-        // LCOV_EXCL_START
         out = (content_size < 0) ? content_size : ZXC_ERROR_SRC_TOO_SMALL;
         goto done;
-        // LCOV_EXCL_STOP
     }
 
     {

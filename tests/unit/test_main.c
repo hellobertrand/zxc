@@ -182,6 +182,8 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_dict_seekable_roundtrip),
     TEST_CASE(test_dict_train_roundtrip),
     TEST_CASE(test_dict_train_no_frequent_patterns),
+    TEST_CASE(test_dict_train_size_overflow),
+    TEST_CASE(test_dict_huf_train_over_budget),
     TEST_CASE(test_dict_seekable_mt_roundtrip),
     TEST_CASE(test_dict_stream_dict_id_checks),
     TEST_CASE(test_dict_seekable_dict_id_checks),

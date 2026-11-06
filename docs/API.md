@@ -1930,6 +1930,9 @@ archive built with a `.zxd` and opened with its content alone is rejected up
 front with `ZXC_ERROR_DICT_MISMATCH` — at any level. `zxc_dict_load()` returns
 both parts in one call, so the safe habit is to always pass both.
 
+**Training samples.** `samples[i]` may be NULL only if its size is 0 (else
+`ZXC_ERROR_NULL_INPUT`); a wrapped size sum is `ZXC_ERROR_OVERFLOW`.
+
 ### `zxc_dict_train`
 
 ```c
