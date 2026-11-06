@@ -10,8 +10,7 @@ as patch releases from their `release/X.Y` branch (see
 | Version | Status |
 |---|---|
 | 1.0.x | Bug and security fixes |
-| 0.15.x | Security fixes at the maintainers' discretion |
-| < 0.15 | Not supported |
+| < 1.0 | Not supported |
 
 This table is updated with each minor release.
 

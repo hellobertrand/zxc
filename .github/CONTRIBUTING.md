@@ -166,8 +166,8 @@ receive security fixes at the maintainers' discretion. See
 ```bash
 git switch -c bump/vX.Y.0 main
 # bump versions, regenerate CHANGELOG, open a PR to main and merge it
-git switch main && git pull
-git tag -s vX.Y.0 -m "vX.Y.0"
+git fetch origin
+git tag -s vX.Y.0 -m "vX.Y.0" <merge-commit>   # the bump PR's, on main
 git push origin vX.Y.0
 git branch release/X.Y vX.Y.0
 git push origin release/X.Y
@@ -179,10 +179,10 @@ Then publish the GitHub release from the tag.
 
 ```bash
 git switch -c bump/vX.Y.Z origin/release/X.Y
-git cherry-pick -x -s <sha-on-main>...   # one per fix, in order
+git cherry-pick -x -s <sha-on-main> [<sha-on-main> ...]   # oldest first
 # bump versions, regenerate CHANGELOG, open a PR to release/X.Y and merge it
-git switch release/X.Y && git pull
-git tag -s vX.Y.Z -m "vX.Y.Z"
+git fetch origin
+git tag -s vX.Y.Z -m "vX.Y.Z" <merge-commit>   # the bump PR's, on release/X.Y
 git push origin vX.Y.Z
 ```
 
