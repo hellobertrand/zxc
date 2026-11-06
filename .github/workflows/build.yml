@@ -31,6 +31,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
+          filter: blob:none   # only the commit graph is needed
           persist-credentials: false
 
       - name: Check that the tag is reachable from its branch
@@ -451,7 +452,8 @@ jobs:
   # (v1.0.1 after v1.1.0) hands the badge back to the newest version.
   latest-release:
     name: Keep the newest version as latest
-    if: github.event_name == 'release'
+    needs: tag-placement
+    if: github.event_name == 'release' && !github.event.release.prerelease
     runs-on: ubuntu-slim
     permissions:
       contents: write
@@ -462,10 +464,14 @@ jobs:
       - name: Mark the newest release as latest
         run: |
           set -euo pipefail
-          newest=$(gh api --paginate "repos/$GH_REPO/releases" \
-              --jq '.[] | select((.draft or .prerelease) | not) | .tag_name' \
-            | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
-          if [ "$newest" = "$GITHUB_REF_NAME" ]; then
+          released=$(gh api --paginate "repos/$GH_REPO/releases" \
+              --jq '.[] | select((.draft or .prerelease) | not) | .tag_name')
+          # This release counts too: the list may not include it yet.
+          newest=$(printf '%s\n' "$GITHUB_REF_NAME" "$released" \
+            | { grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true; } | sort -V | tail -n 1)
+          if [ -z "$newest" ]; then
+            echo "No published vX.Y.Z release: nothing to mark"
+          elif [ "$newest" = "$GITHUB_REF_NAME" ]; then
             echo "$GITHUB_REF_NAME is the newest release"
           else
             echo "$GITHUB_REF_NAME is older than $newest: $newest stays the latest release"

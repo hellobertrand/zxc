@@ -133,12 +133,12 @@ Builds platform-specific wheels using `cibuildwheel` for Linux (x86_64, ARM64), 
 ### binding-wasm.yml - Binding WASM
 **Triggers:** Push to main or `release/**`, manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
-Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts. On tags, publishes the `zxc-wasm` package to npm via trusted publishing, under the `latest` dist-tag, or `release-X.Y` for a patch on an older line.
+Builds the WebAssembly target using Emscripten SDK. Compiles the library with SIMD disabled (scalar codepath) and no threading, then runs a Node.js roundtrip test suite covering all compression levels, reusable contexts, and error handling. Uploads `zxc.js` + `zxc.wasm` as build artifacts. On tags, publishes the `zxc-wasm` package to npm via trusted publishing, under the `latest` dist-tag, `release-X.Y` for a patch on an older line, or `next` for a prerelease.
 
 ### binding-nodejs.yml - Binding Node.js
 **Triggers:** Push to main or `release/**`, pull requests (binding changes), manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish
 
-Builds and publishes the Node.js package to npm via trusted publishing. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed. A patch on an older line goes under the `release-X.Y` dist-tag, so `latest` stays on the newest line.
+Builds and publishes the Node.js package to npm via trusted publishing. Handles the compilation of native bindings and ensures the package is correctly versioned and distributed. A patch on an older line goes under the `release-X.Y` dist-tag and a prerelease under `next`, so `latest` stays on the newest stable version.
 
 ### binding-go.yml - Binding Go
 **Triggers:** Push to main or `release/**`, pull requests (binding changes), manual dispatch; on a published release, `build.yml` dispatches it at the tag to publish

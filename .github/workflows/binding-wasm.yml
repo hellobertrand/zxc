@@ -141,11 +141,21 @@ jobs:
           set -euo pipefail
           version="${RELEASE_TAG#v}"
           name=$(node -p "require('./package.json').name")
-          latest=$(npm view "$name" dist-tags.latest)
-          if [ "$(printf '%s\n' "$version" "$latest" | sort -V | tail -n 1)" = "$version" ]; then
-            tag=latest
+          latest=""
+          if [[ "$version" == *-* ]]; then
+            # npm refuses a prerelease without --tag; `next` keeps it off `latest`.
+            tag=next
           else
-            tag="release-${version%.*}"
+            # E404: never published, so this version becomes `latest`.
+            if ! latest=$(npm view "$name" dist-tags.latest 2> "$RUNNER_TEMP/npm-view.err"); then
+              grep -q E404 "$RUNNER_TEMP/npm-view.err" || { cat "$RUNNER_TEMP/npm-view.err"; exit 1; }
+              latest=""
+            fi
+            if [ -z "$latest" ] || [ "$(printf '%s\n' "$version" "$latest" | sort -V | tail -n 1)" = "$version" ]; then
+              tag=latest
+            else
+              tag="release-${version%.*}"
+            fi
           fi
           echo "Publishing $name@$version as '$tag' (latest: $latest)"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
