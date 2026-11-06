@@ -82,7 +82,10 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash_tag(const uint32_t val4) {
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_epoch_pos(const uint32_t head, const uint32_t offset_mask,
                                                 const uint32_t epoch_mark) {
-    return ((head & ~offset_mask) == epoch_mark) ? (head & offset_mask) : 0;
+    // epoch_mark has no position bits: the XOR is the position when the epochs
+    // agree, above offset_mask otherwise. No ~offset_mask to keep live.
+    const uint32_t pos = head ^ epoch_mark;
+    return (pos <= offset_mask) ? pos : 0;
 }
 
 /**
@@ -605,11 +608,11 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
         match_idx = zxc_epoch_pos(hash_table[h], offset_mask, epoch_mark);
     }
 
-    // skip_head still drives the chain walk on level >= 3 (advances past the
-    // mismatched head without comparing). On level <= 2 it is always 0 here:
-    // either match_idx == 0 (filter-skip) or stored_tag == cur_tag.
+    // skip_head drives the chain walk on level >= 3 (advances past the
+    // mismatched head without comparing). On level <= 2 it is always 0, which
+    // the compiler cannot see: saying so frees registers in the PAK loop.
     // cppcheck-suppress bitwiseOnBoolean
-    const int skip_head = (match_idx != 0) & (stored_tag != cur_tag);
+    const int skip_head = (level > ZXC_LEVEL_FAST) & (match_idx != 0) & (stored_tag != cur_tag);
 
     // Split table writes
     hash_table[h] = epoch_mark | cur_pos;
