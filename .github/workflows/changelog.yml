@@ -28,8 +28,6 @@ jobs:
       - name: Determine version tag
         id: ver
         shell: bash
-        # bump/vX.Y.Z names the version, whether cut from main or from release/X.Y.
-        # A maintenance branch (release/X.Y) names none: its section is "Unreleased".
         run: |
           if [[ "${GITHUB_REF}" =~ ^refs/heads/(bump|release)/v?([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
             DETECTED="v${BASH_REMATCH[2]}"
