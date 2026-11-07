@@ -4,6 +4,7 @@ api: Add zxc_version_codename() (#560)
 api: Move settings from option structs to context parameters (#546)
 api: Cleans up public API, soversion 6 (#545)
 api: Reject non-zero reserved header fields (#547)
+fix: Reject wrapped corpus sizes in dictionary training (#590)
 fix: Bindings - verify checksums by default on decode (#580)
 fix: Wrapper Go - release native resources of handles dropped without Close (#533)
 fix: Correct decompression tail pad to 2084 (#564)
@@ -46,6 +47,7 @@ doc: Swap Go binding to zxc-go
 doc: Add hyperlinks to contributors in README
 doc: Rewrite and condense WHITEPAPER.md for clarity
 doc: Adds website with automated Cloudflare deployment (#512)
+misc: Adds release/X.Y maintenance branch workflow (#589)
 misc: Reorganize tests into subdirectories (#548)
 misc: Standardizes unsigned integer literal suffixes (#531)
 misc: Add scalar fallback fuzzing targets (#537)
