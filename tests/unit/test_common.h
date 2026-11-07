@@ -351,6 +351,8 @@ int test_dict_safe_loop_backref(void);
 int test_dict_seekable_roundtrip(void);
 int test_dict_train_roundtrip(void);
 int test_dict_train_no_frequent_patterns(void);
+int test_dict_train_size_overflow(void);
+int test_dict_huf_train_over_budget(void);
 int test_dict_seekable_mt_roundtrip(void);
 int test_dict_stream_dict_id_checks(void);
 int test_dict_seekable_dict_id_checks(void);

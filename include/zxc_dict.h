@@ -144,8 +144,8 @@ ZXC_EXPORT uint32_t zxc_dict_read_id(const void* buf, size_t buf_size);
  * samples. The content can go straight to zxc_cctx_set_dict(), or
  * through zxc_dict_save().
  *
- * @param[in]  samples        Array of pointers to sample buffers.
- * @param[in]  sample_sizes   Array of sample sizes in bytes.
+ * @param[in]  samples        Array of pointers to sample buffers (NULL if size 0).
+ * @param[in]  sample_sizes   Sample sizes in bytes; a wrapped sum is @ref ZXC_ERROR_OVERFLOW.
  * @param[in]  n_samples      Number of samples.
  * @param[out] dict_buf       Output buffer for trained dictionary content.
  * @param[in]  dict_capacity  Capacity of @p dict_buf (max ZXC_DICT_SIZE_MAX).
@@ -170,8 +170,8 @@ ZXC_EXPORT int64_t zxc_dict_train_content(const void* const* samples, const size
  * @ref ZXC_ERROR_DICT_MISMATCH.
  *
  * @param[in]  samples         Array of pointers to sample buffers (typically
- *                             the same corpus used for zxc_dict_train_content()).
- * @param[in]  sample_sizes    Array of sample sizes in bytes.
+ *                             the same corpus used for zxc_dict_train_content()); NULL if size 0.
+ * @param[in]  sample_sizes    Sample sizes in bytes; a wrapped sum is @ref ZXC_ERROR_OVERFLOW.
  * @param[in]  n_samples       Number of samples.
  * @param[in]  dict            Trained dictionary content.
  * @param[in]  dict_size       Dictionary content size in bytes.
@@ -193,8 +193,8 @@ ZXC_EXPORT int zxc_dict_train_huf(const void* const* samples, const size_t* samp
  * cover: content-only dictionaries, retraining just the table, externally
  * sourced content.
  *
- * @param[in]  samples       Array of pointers to sample buffers.
- * @param[in]  sample_sizes  Array of sample sizes in bytes.
+ * @param[in]  samples       Array of pointers to sample buffers (NULL if size 0).
+ * @param[in]  sample_sizes  Sample sizes in bytes; a wrapped sum is @ref ZXC_ERROR_OVERFLOW.
  * @param[in]  n_samples     Number of samples.
  * @param[out] zxd_buf       Output buffer for the `.zxd` file.
  * @param[in]  zxd_capacity  Capacity of @p zxd_buf.

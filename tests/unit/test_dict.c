@@ -851,6 +851,71 @@ int test_dict_train_no_frequent_patterns(void) {
     return 1;
 }
 
+int test_dict_train_size_overflow(void) {
+    printf("=== TEST: Dict - train refuses wrapped corpus sizes and NULL samples ===\n");
+
+    /* Refused before any sample byte is read. */
+    uint8_t a[64], dict[64], huf[ZXC_HUF_TABLE_SIZE];
+    memset(a, 'a', sizeof(a));
+    memset(dict, 'd', sizeof(dict));
+    const void* ptrs[2] = {a, a};
+    const size_t wrap[2] = {SIZE_MAX - 8, 64};
+
+    if (zxc_dict_train_content(ptrs, wrap, 2, dict, sizeof(dict)) != ZXC_ERROR_OVERFLOW) {
+        printf("  [FAIL] content: wrapped sum not refused\n");
+        return 0;
+    }
+    if (zxc_dict_train_huf(ptrs, wrap, 2, dict, sizeof(dict), huf) != ZXC_ERROR_OVERFLOW) {
+        printf("  [FAIL] huf: wrapped sum not refused\n");
+        return 0;
+    }
+
+    const void* null_ptrs[2] = {a, NULL};
+    const size_t sizes[2] = {sizeof(a), 16};
+    if (zxc_dict_train_content(null_ptrs, sizes, 2, dict, sizeof(dict)) != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] content: NULL sample not refused\n");
+        return 0;
+    }
+    if (zxc_dict_train_huf(null_ptrs, sizes, 2, dict, sizeof(dict), huf) != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] huf: NULL sample not refused\n");
+        return 0;
+    }
+
+    uint8_t zxd[64];
+    if (zxc_dict_train(ptrs, wrap, 2, zxd, sizeof(zxd)) != ZXC_ERROR_OVERFLOW ||
+        zxc_dict_train(null_ptrs, sizes, 2, zxd, sizeof(zxd)) != ZXC_ERROR_NULL_INPUT) {
+        printf("  [FAIL] zxc_dict_train: error not forwarded\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
+int test_dict_huf_train_over_budget(void) {
+    printf("=== TEST: Dict - Huffman training sub-samples past its budget ===\n");
+
+    /* One buffer aliased past ZXC_DICT_HUF_SAMPLE_BUDGET (8 MiB): stride 2. */
+    static uint8_t buf[64 << 10];
+    for (size_t i = 0; i < sizeof(buf); i++)
+        buf[i] = (uint8_t)("the quick brown fox "[i % 20] + (i / 997) % 7);
+    enum { N = 129 };
+    const void* ptrs[N];
+    size_t sizes[N];
+    for (size_t i = 0; i < N; i++) {
+        ptrs[i] = buf;
+        sizes[i] = sizeof(buf);
+    }
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    if (zxc_dict_train_huf(ptrs, sizes, N, buf, 64, huf) != ZXC_OK) {
+        printf("  [FAIL] over-budget corpus not trained\n");
+        return 0;
+    }
+
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_dict_seekable_roundtrip(void) {
     printf("=== TEST: Dict - seekable API roundtrip ===\n");
 
