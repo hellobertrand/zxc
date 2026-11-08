@@ -142,7 +142,7 @@ libzxc.so.{SOVERSION}                   # its soname, the name binaries load
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **6** |
-| `VERSION` | Tracks the library release. | **1.0.0** |
+| `VERSION` | File version: `SOVERSION.MINOR.PATCH`, with MINOR and PATCH taken from the release number (1.0.0). | **6.0.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
