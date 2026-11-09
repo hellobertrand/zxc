@@ -623,6 +623,11 @@ async function build() {
   if (existsSync(path.join(REPO, "docs/images"))) {
     await cp(path.join(REPO, "docs/images"), path.join(OUT, "docs/images"), { recursive: true });
   }
+  // The landing page comes from this checkout, not REPO_ROOT (the release tag), so its
+  // figures must too: a chart added after the release would otherwise be missing.
+  const FIGURES = path.join(SITE, "..", "docs/images");
+  if (!existsSync(FIGURES)) throw new Error(`Landing page figures not found in ${FIGURES}`);
+  await cp(FIGURES, path.join(OUT, "assets/figures"), { recursive: true });
 
   // Landing page
   const landing = (await readFile(path.join(SRC, "index.html"), "utf8"))

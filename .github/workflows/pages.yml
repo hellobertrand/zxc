@@ -7,11 +7,13 @@ on:
     branches: [ main ]
     paths:
       - 'site/**'
+      - 'docs/images/**'
       - '.github/workflows/pages.yml'
   pull_request:
     branches: [ main ]
     paths:
       - 'site/**'
+      - 'docs/images/**'
       - '.github/workflows/pages.yml'
   release:
     types: [ published ]
@@ -48,6 +50,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             site
+            docs/images
 
       - name: Resolve documentation ref
         id: ref
