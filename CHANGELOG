@@ -4,6 +4,8 @@ api: Add zxc_version_codename() (#560)
 api: Move settings from option structs to context parameters (#546)
 api: Cleans up public API, soversion 6 (#545)
 api: Reject non-zero reserved header fields (#547)
+fix: Harden invalid-length handling (#598)
+fix: Bound decoded size to chunk_size (#597)
 fix: Reject wrapped corpus sizes in dictionary training (#590)
 fix: Bindings - verify checksums by default on decode (#580)
 fix: Wrapper Go - release native resources of handles dropped without Close (#533)
@@ -39,6 +41,7 @@ build: Bump vitest from 5.0.2 to 5.0.3 in /wrappers/nodejs (#520)
 build: Update lzbench source to original upstream repository
 build: Add x86_64 APX tier and Clang 23 support (#556)
 portability: Windows kernel-mode library for drivers (zxc_km.lib) (#513)
+doc: Add AI tool usage policy (#596)
 doc: Add 1.0.0 upgrade section to MIGRATION
 doc: Condense and refine README and API documentation (#540)
 doc: Replace effective throughput metric with link throughput chart (#530)
@@ -47,6 +50,7 @@ doc: Swap Go binding to zxc-go
 doc: Add hyperlinks to contributors in README
 doc: Rewrite and condense WHITEPAPER.md for clarity
 doc: Adds website with automated Cloudflare deployment (#512)
+misc: Raise go directive to 1.22, test 1.22 and stable (#594)
 misc: Adds release/X.Y maintenance branch workflow (#589)
 misc: Reorganize tests into subdirectories (#548)
 misc: Standardizes unsigned integer literal suffixes (#531)
