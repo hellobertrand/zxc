@@ -1019,7 +1019,6 @@ typedef struct {
     uint32_t block_sizes;   /* OR of every block size, each a power of 2 */
     uint32_t* dict_ids;     /* distinct dictionary ids in file order, 0 for none */
     size_t num_dict_ids;
-    size_t cap_dict_ids;
     uint64_t dsize;  /* their decompressed sizes, summed */
     uint64_t digest; /* the last frame's digest, when it has one */
 } cli_container_t;
@@ -1031,10 +1030,19 @@ typedef struct {
  *
  * @return @ref ZXC_OK, or the library's verdict on the first frame that fails.
  */
+static int zxc_cmp_u64(const void* a, const void* b) {
+    const uint64_t x = *(const uint64_t*)a;
+    const uint64_t y = *(const uint64_t*)b;
+    return (x > y) - (x < y);
+}
+
 static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
     memset(c, 0, sizeof(*c));
     uint64_t end = file_size;
     int rc = ZXC_OK;
+    uint64_t* keys = NULL;
+    size_t num = 0;
+    size_t cap = 0;
     do {
         zxc_frame_info_t fi;
         rc = zxc_stream_get_last_frame_info(f, end, &fi, sizeof(fi));
@@ -1048,35 +1056,40 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
         }
         c->dsize += fi.decompressed_size;
         c->block_sizes |= (uint32_t)fi.block_size;
-        // File order of first appearance: walking back, a repeat moves to the end,
-        // and the list is reversed below.
-        size_t k = 0;
-        while (k < c->num_dict_ids && c->dict_ids[k] != fi.dict_id) k++;
-        if (k < c->num_dict_ids) {
-            memmove(c->dict_ids + k, c->dict_ids + k + 1,
-                    (c->num_dict_ids - k - 1) * sizeof(uint32_t));
-            c->dict_ids[c->num_dict_ids - 1] = fi.dict_id;
-        } else {
-            if (c->num_dict_ids == c->cap_dict_ids) {
-                const size_t cap = c->cap_dict_ids ? 2 * c->cap_dict_ids : 4;
-                uint32_t* const grown = (uint32_t*)realloc(c->dict_ids, cap * sizeof(uint32_t));
+        // Per run of one id: id << 32 | rank, rising as the walk goes back
+        if (num == 0 || (uint32_t)(keys[num - 1] >> 32) != fi.dict_id) {
+            if (num == cap) {
+                cap = cap ? 2 * cap : 4;
+                uint64_t* const grown = (uint64_t*)realloc(keys, cap * sizeof(uint64_t));
                 if (!grown) {
                     rc = ZXC_ERROR_MEMORY;
                     break;
                 }
-                c->dict_ids = grown;
-                c->cap_dict_ids = cap;
+                keys = grown;
             }
-            c->dict_ids[c->num_dict_ids++] = fi.dict_id;
+            keys[num] = (uint64_t)fi.dict_id << 32 | (uint32_t)num;
+            num++;
         }
         c->first = fi;  // the first frame's, once the walk is done
         end -= fi.compressed_size;
     } while (end > 0);
-    for (size_t i = 0; i < c->num_dict_ids / 2; i++) {
-        const uint32_t t = c->dict_ids[i];
-        c->dict_ids[i] = c->dict_ids[c->num_dict_ids - 1 - i];
-        c->dict_ids[c->num_dict_ids - 1 - i] = t;
+    // Highest rank per id, then by falling rank: file order
+    if (rc == ZXC_OK) {
+        qsort(keys, num, sizeof(uint64_t), zxc_cmp_u64);
+        size_t n = 0;
+        for (size_t i = 0; i < num; i++)
+            if (i + 1 == num || (keys[i] ^ keys[i + 1]) >> 32)
+                keys[n++] = ~keys[i] << 32 | keys[i] >> 32;
+        qsort(keys, n, sizeof(uint64_t), zxc_cmp_u64);
+        c->dict_ids = (uint32_t*)malloc(n * sizeof(uint32_t));
+        if (c->dict_ids) {
+            for (size_t i = 0; i < n; i++) c->dict_ids[i] = (uint32_t)keys[i];
+            c->num_dict_ids = n;
+        } else {
+            rc = ZXC_ERROR_MEMORY;
+        }
     }
+    free(keys);
     if (fseeko(f, 0, SEEK_SET) != 0 && rc == ZXC_OK) rc = ZXC_ERROR_IO;
     return rc;
 }
