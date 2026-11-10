@@ -452,6 +452,8 @@ static int cli_dctx(zxc_dctx** out, int threads, int checksum, const void* dict,
 }
 // --no-preserve clears it
 static int g_preserve = 1;
+// -r: entries go by name in the directory walked
+static int g_walking = 0;
 
 /* Enables printf-style format/argument checking by the compiler on GCC/Clang
  * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
@@ -684,11 +686,21 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
     FindClose(hFind);
 #else
-    DIR* const dir = opendir(dir_path);
-    if (!dir) {
+    const int nested = g_walking;
+    const int back = open(".", O_RDONLY | O_DIRECTORY);
+    const int fd = nested ? open(zxc_base_name(dir_path), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
+                          : open(dir_path, O_RDONLY | O_DIRECTORY);
+    DIR* const dir = (fd != -1) ? fdopendir(fd) : NULL;
+    if (back == -1 || !dir || fchdir(fd) != 0) {
         zxc_log("Error opening directory '%s': %s\n", dir_path, strerror(errno));
+        if (dir)
+            closedir(dir);
+        else if (fd != -1)
+            close(fd);
+        if (back != -1) close(back);
         return 1;
     }
+    g_walking = 1;
 
     for (;;) {
         errno = 0;  // readdir signals an error only through errno
@@ -713,7 +725,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
         // lstat: links stay out of the walk.
         struct stat st;
-        if (lstat(full_path, &st) == 0) {
+        if (lstat(entry->d_name, &st) == 0) {
             if (S_ISLNK(st.st_mode)) {
                 zxc_log("Warning: '%s' is a link, ignored\n", full_path);
             } else if (S_ISDIR(st.st_mode)) {
@@ -732,6 +744,12 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         free(full_path);
     }
     closedir(dir);
+    g_walking = nested;
+    if (fchdir(back) != 0) {
+        zxc_log("Error leaving directory '%s': %s\n", dir_path, strerror(errno));
+        exit(1);
+    }
+    close(back);
 #endif
     return overall_ret;
 }
@@ -1587,7 +1605,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     zxc_file_attrs_t in_attrs = {0};
 
     if (in_path && strcmp(in_path, "-") != 0) {
-        if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
+        if (g_walking) {
+            snprintf(resolved_in_path, sizeof(resolved_in_path), "%s", zxc_base_name(in_path));
+        } else if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) !=
+                   0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
             if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
@@ -1654,7 +1675,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // Open output file if not writing to stdout
     if (!use_stdout && mode != MODE_INTEGRITY) {
-        if (zxc_validate_output_path(out_path, resolved_out_path, sizeof(resolved_out_path)) != 0) {
+        if (g_walking) {
+            snprintf(resolved_out_path, sizeof(resolved_out_path), "%s", zxc_base_name(out_path));
+        } else if (zxc_validate_output_path(out_path, resolved_out_path,
+                                            sizeof(resolved_out_path)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
             return 1;
@@ -1877,7 +1901,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                     remove_input ? "; input kept" : "");
         else if (remove_input)
             // The name given: through a symlink the target stays
-            unlink(in_path);
+            unlink(g_walking ? resolved_in_path : in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
             const int err_code = (int)bytes;
