@@ -167,6 +167,7 @@ int test_block_api_boundary_sizes(void);
 int test_block_api_tiny_capacity(void);
 int test_block_api_direct_decode(void);
 int test_block_api_large_block_varint(void);
+int test_block_api_invalid_varint(void);
 int test_decompress_block_safe(void);
 int test_decompress_block_bound(void);
 
@@ -301,6 +302,7 @@ int test_seekable_with_checksum(void);
 int test_seekable_corrupted_block_checksum(void);
 int test_seekable_swapped_blocks_caught(void);
 int test_seekable_range_reports_short_reads(void);
+int test_seekable_invalid_varint_code(void);
 int test_seekable_work_buf_tail_pad(void);
 
 /* Seekable (multi-threaded) */

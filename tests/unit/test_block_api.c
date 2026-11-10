@@ -970,3 +970,132 @@ int test_block_api_direct_decode(void) {
     if (ok) printf("PASS\n\n");
     return ok;
 }
+
+/* Byte offset in @p blk of the first or last escaped LL or ML varint, 0 if the
+ * block has none or is not the RAW-section shape the walk assumes. */
+static size_t find_escaped_varint(const uint8_t* blk, const size_t n, const int want_ml,
+                                  const int last) {
+    const uint8_t* const pay = blk + ZXC_BLOCK_HEADER_SIZE;
+    const uint32_t n_seq = zxc_le32(pay);
+    const uint32_t n_lit = zxc_le32(pay + 4);
+    const int pak = blk[0] == ZXC_BLOCK_PAK;
+    size_t seq, extras;
+    if (pak) {
+        seq = ZXC_BLOCK_HEADER_SIZE + ZXC_PAK_HEADER_BINARY_SIZE + (size_t)n_lit;
+        extras = seq + (size_t)n_seq * 4;
+    } else {
+        if (blk[0] != ZXC_BLOCK_SPL || pay[8] != 0 || pay[9] != 0) return 0;
+        seq = ZXC_BLOCK_HEADER_SIZE + ZXC_SPL_HEADER_BINARY_SIZE + (size_t)n_lit;
+        extras = seq + n_seq + (size_t)n_seq * (pay[11] ? 1U : 2U);
+    }
+    size_t found = 0;
+    for (uint32_t i = 0; i < n_seq && extras < n; i++) {
+        int esc[2];
+        if (pak) {
+            const uint32_t v = zxc_le32(blk + seq + (size_t)i * 4);
+            esc[0] = (v >> ZXC_SEQ_LL_SHIFT) == ZXC_SEQ_LL_MASK;
+            esc[1] = ((v >> ZXC_SEQ_ML_SHIFT) & ZXC_SEQ_ML_MASK) == ZXC_SEQ_ML_MASK;
+        } else {
+            esc[0] = (blk[seq + i] >> ZXC_TOKEN_LIT_BITS) == ZXC_TOKEN_LL_MASK;
+            esc[1] = (blk[seq + i] & ZXC_TOKEN_ML_MASK) == ZXC_TOKEN_ML_MASK;
+        }
+        for (int f = 0; f < 2 && extras < n; f++) {
+            if (!esc[f]) continue;
+            if (f == want_ml && (last || !found)) found = extras;
+            extras += blk[extras] < 0x80 ? 1U : blk[extras] < 0xC0 ? 2U : 3U;
+        }
+    }
+    return found;
+}
+
+/* Every way a varint can be invalid, on both length fields of both block
+ * types: the block API must report ZXC_ERROR_OVERFLOW, strict variant included. */
+int test_block_api_invalid_varint(void) {
+    printf("=== TEST: Block API - invalid varints are rejected ===\n");
+
+    /* 300 fresh bytes then the same 300 again: every sequence escapes LL and ML. */
+    enum { SEG = 300, SRC = 16 * 2 * SEG };
+    static uint8_t src[SRC];
+    uint32_t rng = 0xC0DEC0DEU;
+    for (size_t i = 0; i < SRC; i++) {
+        rng = rng * 1103515245U + 12345U;
+        src[i] = (i / SEG) & 1 ? src[i - SEG] : (uint8_t)(rng >> 16);
+    }
+
+    static const struct {
+        const char* name;
+        int first_byte; /* written over the varint's first byte, -1 to keep it */
+        int keep;       /* payload cut this many bytes into the varint, -1 for no cut */
+    } modes[] = {
+        {"4-byte prefix", 0xE0, -1},
+        {"cut before", -1, 0},
+        {"2-byte cut after 1", 0x80, 1},
+        {"3-byte cut after 2", 0xC0, 2},
+    };
+
+    const size_t bound = (size_t)zxc_compress_block_bound(SRC);
+    const size_t cap = zxc_decompress_block_bound(SRC);
+    uint8_t* good = malloc(bound);
+    uint8_t* bad = malloc(bound);
+    uint8_t* out = malloc(cap);
+    zxc_cctx* cctx = zxc_create_cctx();
+    zxc_dctx* dctx = zxc_create_dctx();
+    const int ready = good && bad && out && cctx && dctx;
+    int failures = !ready;
+
+    for (int level = 1; ready && level <= 3; level += 2) { /* 1: PAK, 3: SPL */
+        if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) != ZXC_OK ||
+            zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 0) != ZXC_OK) {
+            failures++;
+            break;
+        }
+        const int64_t csize = zxc_compress_block(cctx, src, SRC, good, bound);
+        if (csize <= 0 || zxc_decompress_block(dctx, good, (size_t)csize, out, cap) != SRC ||
+            memcmp(out, src, SRC) != 0) {
+            printf("  [FAIL] level %d: control round-trip\n", level);
+            failures++;
+            continue;
+        }
+        for (int ml = 0; ml < 2; ml++) {
+            for (size_t m = 0; m < sizeof modes / sizeof modes[0]; m++) {
+                const int cut = modes[m].keep >= 0;
+                const size_t at = find_escaped_varint(good, (size_t)csize, ml, cut);
+                if (!at) {
+                    printf("  [FAIL] level %d: no escaped %s to forge\n", level, ml ? "ML" : "LL");
+                    failures++;
+                    continue;
+                }
+                memcpy(bad, good, (size_t)csize);
+                size_t n = (size_t)csize;
+                if (modes[m].first_byte >= 0) bad[at] = (uint8_t)modes[m].first_byte;
+                if (cut) {
+                    zxc_block_header_t bh;
+                    n = at + (size_t)modes[m].keep;
+                    if (zxc_read_block_header(bad, (size_t)csize, &bh) != ZXC_OK) {
+                        failures++;
+                        continue;
+                    }
+                    bh.comp_size = (uint32_t)(n - ZXC_BLOCK_HEADER_SIZE);
+                    zxc_write_block_header(bad, ZXC_BLOCK_HEADER_SIZE, &bh);
+                }
+                const int64_t r = zxc_decompress_block(dctx, bad, n, out, cap);
+                const int64_t rs = zxc_decompress_block_safe(dctx, bad, n, out, SRC);
+                if (r != ZXC_ERROR_OVERFLOW || rs != ZXC_ERROR_OVERFLOW) {
+                    printf("  [FAIL] %s %s, %s: block %lld, safe %lld, want OVERFLOW\n",
+                           level == 1 ? "PAK" : "SPL", ml ? "ML" : "LL", modes[m].name,
+                           (long long)r, (long long)rs);
+                    failures++;
+                }
+            }
+        }
+    }
+
+    free(good);
+    free(bad);
+    free(out);
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(dctx);
+    if (failures) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

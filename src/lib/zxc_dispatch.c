@@ -1924,8 +1924,10 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
         return zxc_static_decompress_block(dctx, (const uint8_t*)src, src_size, (uint8_t*)dst,
                                            dst_capacity, checksum_enabled, 0);
 
-    // Carved for dst_capacity: the context holds any block dst can hold.
-    const size_t block_size = zxc_block_size_ceil(dst_capacity);
+    // Carved for the block dst can hold. The tail pad must not round the carve
+    // up to 4 MiB: its buffers would then outgrow ZXC_VARINT_INVALID.
+    const size_t block_size =
+        zxc_block_size_ceil(dst_capacity < ZXC_BLOCK_SIZE_MAX ? dst_capacity : ZXC_BLOCK_SIZE_MAX);
     const int rc = zxc_dctx_prepare(dctx, block_size, dict_size, checksum_enabled);
     if (UNLIKELY(rc != ZXC_OK)) return rc;  // LCOV_EXCL_LINE
 
