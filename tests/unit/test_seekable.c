@@ -1643,6 +1643,80 @@ int test_seekable_range_reports_short_reads(void) {
     return ok;
 }
 
+/* A block that asks for more than its own size is corrupt on every path: in
+ * place, aside, and through the workers. */
+int test_seekable_invalid_varint_code(void) {
+    printf("=== TEST: Seekable - an invalid varint is CORRUPT_DATA on every path ===\n");
+
+    const size_t BLK = 4096;
+    const size_t SRC_SIZE = 4 * BLK;
+    uint8_t src[4 * 4096];
+    uint32_t rng = 0x51C0FFEEU;
+    for (size_t i = 0; i < 256; i++) {
+        rng = rng * 1103515245U + 12345U;
+        src[i] = (uint8_t)(rng >> 16);
+    }
+    for (size_t i = 256; i < SRC_SIZE; i++) src[i] = src[i - 256]; /* long matches */
+
+    const size_t dst_cap = zxc_compress_bound(SRC_SIZE) + 1024;
+    uint8_t* dst = malloc(dst_cap);
+    uint8_t* out = malloc(SRC_SIZE);
+    int ok = 0;
+    do {
+        if (!dst || !out) break;
+        const int64_t csize = test_compress_cfg(src, SRC_SIZE, dst, dst_cap, 3, BLK, 0, 1);
+        if (csize <= 0) {
+            printf("  [FAIL] compress -> %lld\n", (long long)csize);
+            break;
+        }
+
+        /* Block 0: SPL with RAW sections, so the extras sit at a known offset. */
+        uint8_t* const pay = dst + ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE;
+        const uint32_t comp = zxc_le32(dst + ZXC_FILE_HEADER_SIZE + 3);
+        const uint32_t n_seq = zxc_le32(pay);
+        const uint32_t n_lit = zxc_le32(pay + 4);
+        const size_t tok = ZXC_SPL_HEADER_BINARY_SIZE + (size_t)n_lit;
+        const size_t extras = tok + n_seq + (size_t)n_seq * (pay[11] ? 1U : 2U);
+        int escaped = 0;
+        if (dst[ZXC_FILE_HEADER_SIZE] == ZXC_BLOCK_SPL && pay[8] == 0 && pay[9] == 0 &&
+            extras < comp) {
+            for (uint32_t i = 0; i < n_seq; i++)
+                escaped |= (pay[tok + i] >> 4) == 15U || (pay[tok + i] & 15U) == 15U;
+        }
+        if (!escaped) {
+            printf("  [FAIL] block 0 has no escaped length to forge\n");
+            break;
+        }
+        pay[extras] = 0xE0; /* out of spec */
+
+        zxc_seekable* s = zxc_seekable_open(dst, (size_t)csize);
+        if (!s) {
+            printf("  [FAIL] open\n");
+            break;
+        }
+        const int64_t got[] = {
+            zxc_seekable_decompress_range(s, out, SRC_SIZE, 0, SRC_SIZE), /* in place */
+            zxc_seekable_decompress_range(s, out, BLK, 0, BLK),           /* aside */
+            zxc_seekable_decompress_range(s, out, 100, 1, 100),           /* aside, skip */
+            zxc_seekable_decompress_range_mt(s, out, SRC_SIZE, 0, SRC_SIZE, 4),
+            zxc_seekable_decompress_range_mt(s, out, 100, 1, 100, 4),
+        };
+        zxc_seekable_free(s);
+        ok = 1;
+        for (size_t i = 0; i < sizeof got / sizeof got[0]; i++) {
+            if (got[i] != ZXC_ERROR_CORRUPT_DATA) {
+                printf("  [FAIL] read %zu -> %lld, want CORRUPT_DATA\n", i, (long long)got[i]);
+                ok = 0;
+            }
+        }
+    } while (0);
+
+    free(dst);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* A range read sees only its blocks: the position-seeded checksum must refuse a moved one. */
 int test_seekable_swapped_blocks_caught(void) {
     printf("=== TEST: Seekable - a swapped block fails its checksum ===\n");

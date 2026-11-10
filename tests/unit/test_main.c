@@ -239,6 +239,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_seekable_corrupted_block_checksum),
     TEST_CASE(test_seekable_swapped_blocks_caught),
     TEST_CASE(test_seekable_range_reports_short_reads),
+    TEST_CASE(test_seekable_invalid_varint_code),
     TEST_CASE(test_seekable_work_buf_tail_pad),
 };
 

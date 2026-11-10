@@ -507,6 +507,13 @@ static int zxc_seek_use_dict(const zxc_seekable* s, zxc_cctx_t* ctx, const zxc_s
     return ZXC_OK;
 }
 
+// A block decodes into a capacity of its own, never the caller's: running out
+// of it is corruption.
+static int zxc_seek_decode_error(const int res) {
+    return (res == ZXC_ERROR_DST_TOO_SMALL || res == ZXC_ERROR_OVERFLOW) ? ZXC_ERROR_CORRUPT_DATA
+                                                                         : res;
+}
+
 /**
  * @brief Fetches a compressed block from the memory buffer or reader.
  *
@@ -648,12 +655,7 @@ int64_t zxc_seekable_decompress_range(zxc_seekable* s, void* dst, const size_t d
             const size_t dec_cap = direct ? (size_t)dec_sz + ZXC_DECOMPRESS_TAIL_PAD : work_sz;
             const int dec_res =
                 zxc_decompress_chunk_wrapper(&s->dctx, blk, (size_t)read_res, dec_dst, dec_cap, lb);
-            // In place, the capacity is the block's own: running out of it is corruption.
-            if (UNLIKELY(dec_res < 0))
-                return direct &&
-                               (dec_res == ZXC_ERROR_DST_TOO_SMALL || dec_res == ZXC_ERROR_OVERFLOW)
-                           ? ZXC_ERROR_CORRUPT_DATA
-                           : dec_res;
+            if (UNLIKELY(dec_res < 0)) return zxc_seek_decode_error(dec_res);
             if (UNLIKELY((uint32_t)dec_res != dec_sz)) return ZXC_ERROR_CORRUPT_DATA;
 
             if (!direct) ZXC_MEMCPY(out, aside + skip, copy);
@@ -750,7 +752,7 @@ static int zxc_seek_mt_job(const zxc_seek_mt_shared_t* sh, zxc_seek_mt_job_t* jo
     const int dec_res = zxc_decompress_chunk_wrapper(
         dctx, blk, (size_t)read_res, dec_dst, (size_t)job->block_size + ZXC_DECOMPRESS_TAIL_PAD,
         job->block_idx);
-    if (UNLIKELY(dec_res < 0)) return job->result = dec_res;
+    if (UNLIKELY(dec_res < 0)) return job->result = zxc_seek_decode_error(dec_res);
     if (UNLIKELY((uint32_t)dec_res != job->decomp_sz)) return job->result = ZXC_ERROR_CORRUPT_DATA;
 
     ZXC_MEMCPY(sh->dst_base + job->dst_off, dec_dst + job->skip, job->copy_len);
