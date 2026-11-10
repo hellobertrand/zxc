@@ -923,6 +923,8 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
             l_end = p_curr;
         }
     } else if (gh.enc_lit == ZXC_SECTION_ENCODING_RAW) {
+        if (UNLIKELY(lit_stream_size > (size_t)(src + src_size - p_curr)))
+            return ZXC_ERROR_CORRUPT_DATA;
         l_ptr = p_curr;
         l_end = p_curr + lit_stream_size;
     } else {
