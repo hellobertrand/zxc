@@ -10,7 +10,7 @@ Unreleased
 {% endif -%}
 {% for group, commits in commits | group_by(attribute="group") -%}
 {% for commit in commits -%}
-{{ group | split(pat="-") | last }}: {{ commit.message | split(pat="\n") | first | trim }}
+{{ group | split(pat="-") | last }}: {{ commit.message | split(pat="\n") | first | replace_regex(from="^(feat|fix|perf|docs?|build|ci|chore|refactor|test|api|cli|port|portability|misc|style)(\\([^)]+\\))?!?:\\s*", to="") | trim | upper_first }}
 {% endfor -%}
 {% endfor %}
 
@@ -23,44 +23,37 @@ conventional_commits = false
 filter_unconventional = false
 split_commits = false
 
-# Strip conventional-commit prefixes from the displayed message
-# (the category prefix is re-added by the template via the parser group).
-commit_preprocessors = [
-  { pattern = '^(feat|fix|perf|docs?|build|ci|chore|refactor|test|api|cli|port|portability|misc|style)(\([^)]+\))?!?:\s*', replace = '' },
-]
-
 # Order matters: the first matching rule wins.
 # Skip rules first, then specific categories, then a catch-all.
 commit_parsers = [
   # ---- Skip noise ----
-  { message = "^[Bb]ump (to )?v?[0-9]",                                                                              skip = true },
+  { message = "^(\\w+(\\([^)]+\\))?!?:\\s*)?[Bb]ump (to )?v?[0-9]",                                                   skip = true },
   { message = "^chore\\(release\\)",                                                                                  skip = true },
   { message = "^docs\\(changelog\\)",                                                                                 skip = true },
   { message = "(?i)\\.ds_store",                                                                                      skip = true },
   { message = "^[Mm]erge ",                                                                                           skip = true },
 
-  # ---- Categories ----
-  { message = "^feat",                                                                                                group = "01-api" },
-  { message = "^api[:(]",                                                                                             group = "01-api" },
+  # ---- Categories: the title's type and scope decide ----
+  { message = "^\\w+\\((cli|man)\\)",                                                                                 group = "04-cli" },
+  { message = "^\\w+\\((site|docs?|readme)\\)",                                                                       group = "07-doc" },
+  { message = "^(feat|api)[(:!]",                                                                                     group = "01-api" },
+  { message = "^refactor\\(api\\)",                                                                                   group = "01-api" },
+  { message = "^fix[(:!]",                                                                                            group = "02-fix" },
+  { message = "^perf[(:!]",                                                                                           group = "03-perf" },
+  { message = "^cli[(:!]",                                                                                            group = "04-cli" },
+  { message = "^(build|ci|chore)[(:!]",                                                                               group = "05-build" },
+  { message = "^port(ability)?[(:!]",                                                                                 group = "06-portability" },
+  { message = "^docs?[(:!]",                                                                                          group = "07-doc" },
+  { message = "^(refactor|test|style|misc)[(:!]",                                                                     group = "08-misc" },
+
+  # ---- Titles without a type: keywords ----
   { message = "(?i)\\bapi\\b",                                                                                        group = "01-api" },
-
-  { message = "^fix",                                                                                                 group = "02-fix" },
   { message = "^[Ff]ix(es|ed)? ",                                                                                     group = "02-fix" },
-
-  { message = "^perf",                                                                                                group = "03-perf" },
   { message = "^[Oo]ptimi[sz]e",                                                                                      group = "03-perf" },
   { message = "(?i)speed[- ]?up|faster|throughput",                                                                   group = "03-perf" },
-
-  { message = "^cli[:(]",                                                                                             group = "04-cli" },
   { message = "(?i)\\bcli\\b",                                                                                        group = "04-cli" },
-
-  { message = "^build",                                                                                               group = "05-build" },
-  { message = "^ci[:(]",                                                                                              group = "05-build" },
   { message = "(?i)workflow|makefile|cmake|wrapper",                                                                  group = "05-build" },
-
   { message = "(?i)portability|android|windows|linux|macos|emscripten|wasm|freebsd|qnx",                              group = "06-portability" },
-
-  { message = "^docs?",                                                                                               group = "07-doc" },
   { message = "(?i)readme|whitepaper|documentation|benchmark.*(graph|figure|chart)|refresh.*benchmark|update.*docs?", group = "07-doc" },
 
   # ---- Catch-all ----
