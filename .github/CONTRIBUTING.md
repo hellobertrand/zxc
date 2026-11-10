@@ -112,6 +112,21 @@ Always target `main`, including for bug fixes. Backporting a fix to a maintenanc
 branch is done by the maintainers after it has landed on `main` (see below).
 Only open a PR against a `release/*` branch when a maintainer asks for it.
 
+## Use of AI Tools
+
+AI-assisted contributions are welcome, under the same rules as any other:
+
+- **You are the author.** Review, understand and test everything you submit,
+  and be ready to explain it during review.
+- **The DCO still applies.** Do not submit generated code that may reproduce
+  third-party code under an incompatible license.
+- **Verify claims.** Benchmark numbers and technical statements must be
+  checked, not copied from model output.
+- **Disclose significant use** briefly in the PR description. Routine help
+  (autocompletion, rewording) does not need to be mentioned.
+
+Unreviewed, low-effort AI-generated PRs or issues may be closed without detailed review.
+
 ## Branches and Releases
 
 ### Branches
