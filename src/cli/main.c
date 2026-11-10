@@ -784,7 +784,7 @@ static void print_help(const char* app) {
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file {default}\n"
         "  --rm              Remove input file once its output is written; ignored\n"
-        "                    with -c, -o, an OUTPUT-FILE, -t or -l\n"
+        "                    with -c, -o, an OUTPUT-FILE, a device, -t or -l\n"
         "  --no-preserve     Do not copy the input's mode, times and group (owner as\n"
         "                    root) to the output\n"
         "  -f, --force       Force overwrite; when decompressing to stdout, copy\n"
@@ -1894,7 +1894,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
         const int remove_input = !use_stdin && !use_stdout && !keep_input && !out_path_override &&
-                                 mode != MODE_INTEGRITY;
+                                 mode != MODE_INTEGRITY && !output.special;
         // The input is the only copy of what could not be carried over
         if (attrs_lost)
             zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", out_path, in_path,
