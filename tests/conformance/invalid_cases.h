@@ -77,7 +77,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"bad_footer_digest", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
     {"spl_forged_offset", ZXC_ERROR_BAD_OFFSET, .generated = 1},
     {"spl_output_overflow", ZXC_ERROR_OVERFLOW, .generated = 1},
-    {"varint_too_long", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
+    {"varint_too_long", ZXC_ERROR_OVERFLOW, .generated = 1},
     {"dict_id_mismatch", ZXC_ERROR_DICT_MISMATCH, "dict_http.zxd", 0, .generated = 1},
 };
 #define INVALID_EXPECT_COUNT (sizeof INVALID_EXPECT / sizeof INVALID_EXPECT[0])

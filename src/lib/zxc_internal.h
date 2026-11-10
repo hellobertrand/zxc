@@ -582,6 +582,8 @@ static_assert(ZXC_SEQ_LL_BITS + ZXC_SEQ_ML_BITS + ZXC_SEQ_OFF_BITS == 32,
  * the encoder refuses to emit values above this bound. Together they bound the
  * varint surface to exactly the format-defined block size limit. */
 #define ZXC_MAX_VARINT_VALUE ((uint32_t)(ZXC_BLOCK_SIZE_MAX - 1U))
+/** @brief A truncated or out-of-spec varint: a length no output holds. */
+#define ZXC_VARINT_INVALID (2U * ZXC_BLOCK_SIZE_MAX)
 /** @name Varint reach: the first value each encoded length cannot hold (7, 14, 21 bits).
  *  @{ */
 #define ZXC_VARINT_1B_LIMIT (1U << 7)
@@ -611,11 +613,12 @@ static_assert(ZXC_LZ_WINDOW_SIZE <= (1U << ZXC_SEQ_OFF_BITS),
  *
  * @param[in,out] ptr Pointer to a pointer to the current position in the stream.
  * @param[in] end Pointer to the end of the readable stream (for bounds checking).
- * @return The decoded 32-bit integer, or 0 if reading would overflow bounds (safe default).
+ * @return The decoded 32-bit integer, or @ref ZXC_VARINT_INVALID if the encoding is
+ *         truncated or out of spec.
  */
 static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uint8_t* end) {
     const uint8_t* p = *ptr;
-    if (UNLIKELY(p >= end)) return 0;
+    if (UNLIKELY(p >= end)) return ZXC_VARINT_INVALID;
 
     const uint32_t b0 = p[0];
 
@@ -629,7 +632,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     if (LIKELY(b0 < 0xC0)) {
         if (UNLIKELY(p + 1 >= end)) {
             *ptr = end;
-            return 0;
+            return ZXC_VARINT_INVALID;
         }
         *ptr = p + 2;
         return (b0 & 0x3F) | ((uint32_t)p[1] << 6);
@@ -641,7 +644,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
     if (LIKELY(b0 < 0xE0)) {
         if (UNLIKELY(p + 2 >= end)) {
             *ptr = end;
-            return 0;
+            return ZXC_VARINT_INVALID;
         }
         *ptr = p + 3;
         return (b0 & 0x1F) | ((uint32_t)p[1] << 5) | ((uint32_t)p[2] << 13);
@@ -649,7 +652,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_read_varint(const uint8_t** ptr, const uin
 
     // extra encoding: out-of-spec for the current format, reject.
     *ptr = end;
-    return 0;
+    return ZXC_VARINT_INVALID;
 }
 
 /** @brief Maximum decoded output of one sequence with inline ll/ml, used by the
@@ -680,6 +683,8 @@ static_assert(ZXC_DECOMPRESS_TAIL_PAD == 2084,
               "ZXC_DECOMPRESS_TAIL_PAD feeds the public bounds: change it on purpose only");
 static_assert(4 * ZXC_SPL_MAX_INLINE_OUT_PER_SEQ + ZXC_PAD_SIZE + 4 <= ZXC_DECOMPRESS_TAIL_PAD,
               "ZXC_DECOMPRESS_TAIL_PAD must also hold the SPL 4x loop margin");
+static_assert(ZXC_VARINT_INVALID > ZXC_BLOCK_SIZE_MAX + ZXC_DECOMPRESS_TAIL_PAD,
+              "an invalid varint must exceed every output capacity");
 static_assert(ZXC_DICT_SIZE_MAX <= ZXC_LZ_MAX_DIST, "a dictionary must stay within offset reach");
 
 /** @brief Match distance floor the encoder holds to at levels 1 to 5, sized to

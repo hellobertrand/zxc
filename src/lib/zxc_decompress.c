@@ -1047,9 +1047,6 @@ static ZXC_ALWAYS_INLINE int zxc_decode_block_spl_impl(const zxc_cctx_t* RESTRIC
         }
     }
 
-    // Validate vbyte reads didn't overflow
-    if (UNLIKELY(e_ptr > e_end)) return ZXC_ERROR_CORRUPT_DATA;
-
     // --- Remaining 1 sequence (Fast Path) ---
     while (n_seq > 0 && d_ptr < d_end_safe && l_ptr < l_end_safe_1x) {
         // Save pointers before reading (in case we need to fall back to Safe Path)
