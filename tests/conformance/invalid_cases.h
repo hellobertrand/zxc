@@ -47,6 +47,7 @@ static const invalid_expect_t INVALID_EXPECT[] = {
     {"all_0xff_garbage", .expected = ZXC_ERROR_BAD_MAGIC},
     {"bad_block_checksum", ZXC_ERROR_BAD_CHECKSUM, .generated = 1},
     {"bad_block_size_field", ZXC_ERROR_BAD_BLOCK_SIZE, .generated = 1},
+    {"block_exceeds_block_size", ZXC_ERROR_BAD_BLOCK_SIZE, .generated = 1},
     {"bad_block_type", ZXC_ERROR_BAD_BLOCK_TYPE, .generated = 1},
     {"bad_checksum_algo", ZXC_ERROR_BAD_HEADER, .generated = 1},
     {"bad_enc_lit", ZXC_ERROR_CORRUPT_DATA, .generated = 1},
@@ -162,10 +163,10 @@ static int spl_layout(const uint8_t* d, size_t n, spl_layout_t* L) {
     return 0;
 }
 
-/* The four well-formed archives every vector is patched from. Built once. */
+/* The five well-formed archives every vector is patched from. Built once. */
 typedef struct {
-    uint8_t *plain, *chk, *pak, *seek;
-    size_t n_plain, n_chk, n_pak, n_seek;
+    uint8_t *plain, *chk, *pak, *seek, *wide;
+    size_t n_plain, n_chk, n_pak, n_seek, n_wide;
     int state; /* 0 unbuilt, 1 ready, -1 failed (do not retry, do not leak) */
 } invalid_bases_t;
 
@@ -200,9 +201,19 @@ static int invalid_bases(invalid_bases_t* b) {
     b->n_chk = build_base(text, text_n, &chk, &b->chk);
     b->n_pak = build_base(text, text_n, &pak, &b->pak);
     b->n_seek = build_base(text, text_n, &seek, &b->seek);
+
+    /* One 8 KB block holding three texts: past 4 KB, within the decoder's margin. */
+    recipe_t wide = plain;
+    wide.block_size = 8192;
+    uint8_t* const text3 = (uint8_t*)malloc(3 * text_n);
+    if (text3) {
+        for (size_t i = 0; i < 3; i++) memcpy(text3 + i * text_n, text, text_n);
+        b->n_wide = build_base(text3, 3 * text_n, &wide, &b->wide);
+        free(text3);
+    }
     free(text);
 
-    if (!b->n_plain || !b->n_chk || !b->n_pak || !b->n_seek) {
+    if (!b->n_plain || !b->n_chk || !b->n_pak || !b->n_seek || !b->n_wide) {
         invalid_bases_free(b);
         b->state = -1;
         return 0;
@@ -214,6 +225,14 @@ static int invalid_bases(invalid_bases_t* b) {
     if (b->plain[BLK0] != ZXC_BLOCK_SPL || b->chk[BLK0] != ZXC_BLOCK_SPL) {
         fprintf(stderr, "  block 0 is type %u/%u, expected SPL - vectors would test nothing\n",
                 b->plain[BLK0], b->chk[BLK0]);
+        invalid_bases_free(b);
+        b->state = -1;
+        return 0;
+    }
+    /* Past 4 KB compressed, block_exceeds_block_size would be refused on its
+     * payload size, with the same code, and stop testing the decoded size. */
+    if (zxc_le32(b->wide + BLK0 + 3) > 4096) {
+        fprintf(stderr, "  wide block 0 compresses past 4 KB - vector would test nothing\n");
         invalid_bases_free(b);
         b->state = -1;
         return 0;
@@ -242,6 +261,9 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
                !strcmp(name, "sek_reserved_set") || !strcmp(name, "sek_flags_set")) {
         n = b->n_seek;
         src = b->seek;
+    } else if (!strcmp(name, "block_exceeds_block_size")) {
+        n = b->n_wide;
+        src = b->wide;
     }
 
     if (n < ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE + ZXC_FILE_FOOTER_MIN_SIZE) {
@@ -258,6 +280,9 @@ static int build_invalid(invalid_bases_t* b, const char* name, uint8_t** out, si
     /* --- File-header defects (checksum re-signed, except where it IS the defect) */
     if (!strcmp(name, "bad_block_size_field")) {
         d[5] = 31; /* block-size code outside [12,21] */
+        zxc_file_header_sign(d);
+    } else if (!strcmp(name, "block_exceeds_block_size")) {
+        d[5] = 12; /* 4 KB declared, the block decodes more */
         zxc_file_header_sign(d);
     } else if (!strcmp(name, "bad_checksum_algo")) {
         d[6] = (uint8_t)((d[6] & 0xF0U) | 0x0FU); /* checksum algorithm id != 0 */
@@ -466,6 +491,7 @@ static void invalid_bases_free(invalid_bases_t* b) {
     free(b->chk);
     free(b->pak);
     free(b->seek);
+    free(b->wide);
     memset(b, 0, sizeof *b);
 }
 

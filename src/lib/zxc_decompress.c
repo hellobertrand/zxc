@@ -1638,6 +1638,10 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
             return ZXC_ERROR_BAD_BLOCK_TYPE;
     }
 
+    // dst_cap includes the wild-copy margin: bound the block itself
+    if (UNLIKELY(decoded_sz > 0 && (size_t)decoded_sz > ctx->chunk_size))
+        return ZXC_ERROR_BAD_BLOCK_SIZE;
+
     if (has_checksum && LIKELY(decoded_sz >= 0)) {
         const uint32_t stored = zxc_le32(data + comp_sz);
         if (UNLIKELY(stored !=
