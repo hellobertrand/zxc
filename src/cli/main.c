@@ -1579,7 +1579,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
         f_in = fopen(resolved_in_path, "rb");
         if (!f_in) {
-            zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
+            zxc_log("Error open input %s: %s\n", in_path, strerror(errno));
             if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
         }
@@ -1657,9 +1657,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         // Private while written if the input's mode is restored at the end
         if (zxc_output_open(&output, resolved_out_path, force, in_attrs.valid) != 0) {
             if (errno == EEXIST && !force)
-                zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
+                zxc_log("Output exists. Use -f to overwrite '%s'.\n", out_path);
             else
-                zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
+                zxc_log("Error creating output %s: %s\n", out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
             return 1;
         }
@@ -1802,14 +1802,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     free(b2);
 
     if (bytes >= 0 && write_error) {
-        zxc_log("Error: %s: write failed: %s\n", created_out_file ? resolved_out_path : "<stdout>",
+        zxc_log("Error: %s: write failed: %s\n", created_out_file ? out_path : "<stdout>",
                 strerror(errno));
         if (created_out_file) zxc_output_discard(&output);
         return 1;
     }
 
     if (bytes >= 0 && created_out_file && zxc_output_commit(&output) != 0) {
-        zxc_log("Error: cannot replace %s: %s\n", resolved_out_path, strerror(errno));
+        zxc_log("Error: cannot replace %s: %s\n", out_path, strerror(errno));
         zxc_output_discard(&output);
         return 1;
     }
@@ -1857,8 +1857,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                  mode != MODE_INTEGRITY;
         // The input is the only copy of what could not be carried over
         if (attrs_lost)
-            zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", resolved_out_path,
-                    resolved_in_path, remove_input ? "; input kept" : "");
+            zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", out_path, in_path,
+                    remove_input ? "; input kept" : "");
         else if (remove_input)
             // The name given: through a symlink the target stays
             unlink(in_path);
