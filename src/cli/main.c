@@ -1313,9 +1313,9 @@ static void zxc_install_signal_cleanup(void) {}
 static void zxc_set_partial_output(const char* path) { (void)path; }
 #endif
 
-static FILE* zxc_stream_from_fd(const int fd) {
+static FILE* zxc_stream_from_fd(const int fd, const char* mode) {
     if (fd == -1) return NULL;
-    FILE* const f = fdopen(fd, "wb");
+    FILE* const f = fdopen(fd, mode);
     if (!f) {
         const int err = errno;  // close() may clobber it
         close(fd);
@@ -1333,7 +1333,7 @@ static FILE* zxc_open_new(const char* path, const int owner_only) {
     const int fd = open(path, O_CREAT | O_EXCL | O_WRONLY,
                         owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 #endif
-    FILE* const f = zxc_stream_from_fd(fd);
+    FILE* const f = zxc_stream_from_fd(fd, "wb");
     if (!f && fd != -1) {
         const int err = errno;  // unlink() may clobber it
         unlink(path);
@@ -1354,7 +1354,23 @@ static FILE* zxc_open_special(const char* path) {
         errno = EEXIST;
         return NULL;
     }
-    return zxc_stream_from_fd(fd);
+    return zxc_stream_from_fd(fd, "wb");
+#endif
+}
+
+static FILE* zxc_open_input(const char* path) {
+#ifdef _WIN32
+    return fopen(path, "rb");
+#else
+    // O_NONBLOCK: a FIFO must not hang
+    const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY);
+    struct stat opened;
+    if (fd != -1 && (fstat(fd, &opened) != 0 || !S_ISREG(opened.st_mode))) {
+        close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+    return zxc_stream_from_fd(fd, "rb");
 #endif
 }
 
@@ -1577,7 +1593,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             return 1;
         }
 
-        f_in = fopen(resolved_in_path, "rb");
+        f_in = zxc_open_input(resolved_in_path);
         if (!f_in) {
             zxc_log("Error open input %s: %s\n", in_path, strerror(errno));
             if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
@@ -1701,7 +1717,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // The frame walks seek once per frame: on f_in each would refill its 1 MB buffer.
     FILE* const f_walk = (!use_stdin && mode != MODE_COMPRESS && !pass_through)
-                             ? fopen(resolved_in_path, "rb")
+                             ? zxc_open_input(resolved_in_path)
                              : NULL;
     FILE* const f_meta = f_walk ? f_walk : f_in;
 
