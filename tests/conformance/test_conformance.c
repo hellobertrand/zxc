@@ -270,6 +270,31 @@ static const invalid_expect_t* expect_for(const char* zxc_path) {
     return NULL;
 }
 
+/* The block API sizes its buffers from the capacity: a defect the frame decoder
+ * rejects must not slip through a larger one. */
+static int check_block_api(const char* zxc_path, const uint8_t* comp, const size_t comp_sz,
+                           const int want) {
+    const size_t caps[] = {ZXC_BLOCK_SIZE_MIN, ZXC_BLOCK_SIZE_MAX, ZXC_BLOCK_SIZE_MAX + 1,
+                           (size_t)zxc_decompress_block_bound(ZXC_BLOCK_SIZE_MAX)};
+    const size_t max_cap = caps[sizeof caps / sizeof caps[0] - 1];
+    if (comp_sz < BLK0 + ZXC_BLOCK_HEADER_SIZE) return 0;
+    const size_t blk_sz = ZXC_BLOCK_HEADER_SIZE + zxc_le32(comp + BLK0 + 3);
+    uint8_t* const out = malloc(max_cap);
+    zxc_dctx* const dctx = zxc_create_dctx();
+    int ok = out && dctx && blk_sz <= comp_sz - BLK0;
+    for (size_t i = 0; ok && i < sizeof caps / sizeof caps[0]; i++) {
+        const int64_t got = zxc_decompress_block(dctx, comp + BLK0, blk_sz, out, caps[i]);
+        if (got != want) {
+            fprintf(stderr, "FAIL: %s  block API, capacity %zu: got %lld, expected %s\n", zxc_path,
+                    caps[i], (long long)got, zxc_error_name(want));
+            ok = 0;
+        }
+    }
+    zxc_free_dctx(dctx);
+    free(out);
+    return ok;
+}
+
 static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
     size_t comp_sz = 0;
     uint8_t* comp = vio_read_file(zxc_path, &comp_sz);
@@ -376,6 +401,7 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
             }
         }
         free(output);
+        if (ok && exp->block_api) ok = check_block_api(zxc_path, comp, comp_sz, exp->expected);
     } else {
         fprintf(stderr, "FAIL: %s  out of memory\n", zxc_path);
         ok = 0;
