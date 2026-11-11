@@ -278,7 +278,7 @@ packages: [Language Bindings](#language-bindings).
 
 ### From a release archive
 
-Prebuilt binaries for Linux and Windows (x86_64 and ARM64) and macOS (ARM64) are on the
+Prebuilt binaries for Linux, Windows and macOS (x86_64 and ARM64) are on the
 [Releases page](https://github.com/hellobertrand/zxc/releases), with a signed checksum manifest
 and build attestations: [verification steps](docs/INSTALL.md#release-archives).
 
