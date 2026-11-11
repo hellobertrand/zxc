@@ -80,7 +80,11 @@ jobs:
           - name: macOS arm64
             os: macos-26
             platform: macos-arm64
-            cmake_flags: "-DZXC_NATIVE_ARCH=OFF"
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0"
+          - name: macOS x86_64
+            os: macos-26-intel
+            platform: macos-x86_64
+            cmake_flags: "-DZXC_NATIVE_ARCH=OFF -DCMAKE_OSX_DEPLOYMENT_TARGET=15.0"
 
 
     steps:
