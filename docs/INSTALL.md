@@ -8,7 +8,9 @@ Vendoring into a libc-less target (a kernel module, a firmware) has its own tree
 ## Release archives
 
 Pick the archive for your platform on the [Releases page](https://github.com/hellobertrand/zxc/releases)
-— `zxc-<version>-linux-{x86_64,arm64}.tar.gz`, `zxc-<version>-macos-arm64.tar.gz`, or `zxc-<version>-windows-{x86_64,arm64}.zip`.
+— `zxc-<version>-linux-{x86_64,arm64}.tar.gz`, `zxc-<version>-macos-{arm64,x86_64}.tar.gz`, or `zxc-<version>-windows-{x86_64,arm64}.zip`.
+Both macOS archives need macOS 15.0 or later; on earlier versions,
+[build from source](#building-from-source-cmake).
 x86_64 builds dispatch AVX2/AVX-512 at runtime; ARM64 builds carry NEON. `zxc-<version>.tar.gz` is
 the canonical source, reproducible with
 `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`; `zxc-<version>.tar.zxc`
