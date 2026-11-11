@@ -5,31 +5,56 @@ updates:
     directory: /
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "ci"
   - package-ecosystem: pip
     directory: /bindings/python
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "binding: python"
   - package-ecosystem: pip
     directory: /.github/requirements
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "ci"
+      - "build"
   - package-ecosystem: cargo
     directory: /bindings/rust
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "binding: rust"
   - package-ecosystem: npm
     directory: /bindings/nodejs
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "binding: nodejs"
   - package-ecosystem: gomod
     directory: /bindings/go
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "binding: go"
   - package-ecosystem: docker
     directory: /.clusterfuzzlite
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "fuzzing"
   - package-ecosystem: npm
     directory: /site
     schedule:
       interval: monthly
+    labels:
+      - "dependencies"
+      - "website"
