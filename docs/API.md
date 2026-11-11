@@ -1,6 +1,6 @@
 # ZXC API & ABI Reference
 
-**Library version**: 0.15.0
+**Library version**: 1.0.0
 **SOVERSION**: 6  
 **License**: BSD-3-Clause
 
@@ -135,13 +135,14 @@ the right one:
 libzxc follows the shared-library versioning convention:
 
 ```
-libzxc.so.{SOVERSION}.{MAJOR}.{MINOR}.{PATCH}
+libzxc.so.{SOVERSION}.{MINOR}.{PATCH}   # the file
+libzxc.so.{SOVERSION}                   # its soname, the name binaries load
 ```
 
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **6** |
-| `VERSION` | Tracks the library release. | **0.15.0** |
+| `VERSION` | File version: `SOVERSION.MINOR.PATCH`, with MINOR and PATCH taken from the release number (1.0.0). | **6.0.0** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
@@ -150,8 +151,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.0.15.0` |
-| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.0.15.0.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.6.0.0` |
+| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.6.0.0.dylib` |
 | Windows | `libzxc.dll` + `zxc.lib` (MSVC import, built from the shipped `libzxc.def`) or `libzxc.dll.a` (MinGW import) |
 
 ---
@@ -176,11 +177,11 @@ No dependency on OpenSSL, zlib, or any other compression library.
 Defined in `zxc_constants.h`:
 
 ```c
-#define ZXC_VERSION_MAJOR     0
-#define ZXC_VERSION_MINOR     15
+#define ZXC_VERSION_MAJOR     1
+#define ZXC_VERSION_MINOR     0
 #define ZXC_VERSION_PATCH     0
 #define ZXC_VERSION_CODENAME  "Hydrogen"
-#define ZXC_LIB_VERSION_STR   "0.15.0"
+#define ZXC_LIB_VERSION_STR   "1.0.0"
 #define ZXC_VERSION_NUMBER    (ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH)
 ```
 
@@ -392,7 +393,7 @@ equivalent to `ZXC_LEVEL_DEFAULT`).
 ZXC_EXPORT const char* zxc_version_string(void);
 ```
 
-Returns the library version as a null-terminated string (e.g. `"0.15.0"`).
+Returns the library version as a null-terminated string (e.g. `"1.0.0"`).
 The returned pointer is a compile-time constant and must not be freed.
 
 #### `zxc_version_number`
@@ -402,7 +403,7 @@ ZXC_EXPORT unsigned zxc_version_number(void);
 ```
 
 Returns the version of the loaded library as one integer,
-`MAJOR * 10000 + MINOR * 100 + PATCH` (e.g. `1500` for 0.15.0). The header
+`MAJOR * 10000 + MINOR * 100 + PATCH` (e.g. `10000` for 1.0.0). The header
 defines the same packing as `ZXC_VERSION_NUMBER`; comparing the two detects a
 runtime library older than the one the program was compiled against.
 

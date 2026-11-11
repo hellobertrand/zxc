@@ -2,7 +2,7 @@
 
 <h1>ZXC: Lossless compression library for ultra-fast decode</h1>
 
-<p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. At every compression level ZXC decodes faster than LZ4, and produces output of equal or smaller size.</p>
+<p>ZXC is a lossless data compression library written in C, distributed as <strong>libzxc</strong>. It is designed for data that is compressed once and read many times: firmware images, game assets, application bundles, and content delivered to many devices. The encoder spends extra time up front so that decompression runs at several gigabytes per second on ARM and x86. Levels 1 to 6 decode faster than the LZ4 mode of matching ratio, at equal or smaller size.</p>
 
 <p>ZXC is free software, released under the <a href="https://opensource.org/license/bsd-3-clause">BSD 3-Clause License</a>. It has no dependencies, and official bindings exist for Rust, Python, Node.js and Go.</p>
 
@@ -73,35 +73,37 @@
 
 {{LEVELS_TABLE}}
 
-<p class="note">Size is the compressed size as a percentage of <code>silesia.tar</code>. Speeds are single-threaded on Apple M2 with {{BENCH_TOOL}}. Blocks are 512&nbsp;KB by default; use <code>-B 256K</code> for streaming or memory-constrained targets.</p>
+<p class="note">Size is the compressed size as a percentage of <code>silesia.tar</code>. Speeds are single-threaded on Apple M3 with {{BENCH_TOOL}}. Blocks are 512&nbsp;KB by default; use <code>-B 256K</code> for streaming or memory-constrained targets.</p>
+
+<p><strong>Level 7 fills the gap between LZ4HC and Zstandard.</strong> LZ4HC decodes fast but stops at a lower ratio, and moving to Zstandard means a much lower decoding speed. Level 7 reaches 33.09&nbsp;%, better than <code>zstd -1</code> (34.53&nbsp;%), and decodes 2.2x to almost 3x faster than it, depending on the processor.</p>
 
 <h2 id="benchmarks">Benchmarks</h2>
 
 <p>ZXC is included in the two main open-source compression benchmark suites, <a href="https://github.com/inikep/lzbench">lzbench</a> and <a href="https://github.com/powturbo/TurboBench">TurboBench</a>, so the figures below can be reproduced with either tool alongside more than 70 other codecs. Benchmarks also run on every commit on x86_64 and ARM64 machines; see the <a href="https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml">latest results</a>.</p>
 
 <figure class="pareto">
-  <a href="/docs/images/bench-pareto-decompression.svg"><img src="/docs/images/bench-pareto-decompression.svg" width="960" height="846" alt="Compression ratio against decompression speed for ZXC, LZ4, Zstandard, LZAV, Snappy and zlib, with the Pareto frontier, one panel per processor: Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. Every ZXC level sits on the frontier." loading="lazy"></a>
+  <a href="/assets/figures/bench-pareto-decompression.svg"><img src="/assets/figures/bench-pareto-decompression.svg" width="960" height="846" alt="Compression ratio against decompression speed for ZXC, LZ4, Zstandard, LZAV, Snappy and zlib, with the Pareto frontier, one panel per processor: Apple M3, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. Every ZXC level sits on the frontier." loading="lazy"></a>
   <figcaption>Figure 2. Compression ratio of <code>silesia.tar</code> against single-threaded decompression speed (logarithmic scale), on two ARM64 and two x86_64 processors; up and to the right is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
 <p>The decoder's speed is paid for at compression time, and on this axis LZ4 and Zstandard are ahead. Levels 1 and 2 still compress at several hundred MB/s; levels 6 and 7 run at about 10&nbsp;MB/s, slower than <code>lz4hc -9</code>, and are meant for data that is compressed once and read many times.</p>
 
 <figure class="pareto">
-  <a href="/docs/images/bench-pareto-compression.svg"><img src="/docs/images/bench-pareto-compression.svg" width="960" height="846" alt="Compression ratio against compression speed, on a logarithmic scale, for ZXC, LZ4, Zstandard, LZAV, Snappy and zlib, with the Pareto frontier, one panel per processor: Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
+  <a href="/assets/figures/bench-pareto-compression.svg"><img src="/assets/figures/bench-pareto-compression.svg" width="960" height="846" alt="Compression ratio against compression speed, on a logarithmic scale, for ZXC, LZ4, Zstandard, LZAV, Snappy and zlib, with the Pareto frontier, one panel per processor: Apple M3, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
   <figcaption>Figure 3. Compression ratio of <code>silesia.tar</code> against single-threaded compression speed (logarithmic scale), on the same four processors; up and to the right is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
 <p>Raw decode speed leaves out half of the picture. When the data comes from a disk, a network or another core, the link limits how fast it arrives. With transfer and decoding overlapped, a reader gets min(decode speed, bandwidth / ratio) of original data per second. Below 0.4 to 0.6&nbsp;GB/s the ratio decides, and Zstandard is ahead. From there until one decoding thread can no longer keep up with the link, a ZXC level delivers the most data, and no LZ4 level is ever ahead of it.</p>
 
 <figure class="pareto">
-  <a href="/docs/images/bench-link-throughput.svg"><img src="/docs/images/bench-link-throughput.svg" width="960" height="776" alt="Speed-up over sending the data uncompressed as a function of link bandwidth, for the best level of ZXC, LZ4 and Zstandard, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. Zstandard leads below about 0.5 GB/s, ZXC above, and the LZ4 curve never rises above the ZXC curve." loading="lazy"></a>
+  <a href="/assets/figures/bench-link-throughput.svg"><img src="/assets/figures/bench-link-throughput.svg" width="960" height="776" alt="Speed-up over sending the data uncompressed as a function of link bandwidth, for the best level of ZXC, LZ4 and Zstandard, on Apple M3, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13. Zstandard leads below about 0.5 GB/s, ZXC above, and the LZ4 curve never rises above the ZXC curve." loading="lazy"></a>
   <figcaption>Figure 4. Speed-up over sending <code>silesia.tar</code> uncompressed, against link bandwidth (logarithmic scale), with each codec at its best level for the link and one decoding thread, on the same four processors; higher is better, and 1&times; is the uncompressed transfer. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
 <p>Dividing the clock frequency by the decompression speed gives the cost of each decompressed byte in processor cycles, which compares processors running at different frequencies. ZXC spends less than one cycle per byte at every level.</p>
 
 <figure class="pareto">
-  <a href="/docs/images/bench-cycles.svg"><img src="/docs/images/bench-cycles.svg" width="960" height="608" alt="Processor cycles per decompressed byte for every ZXC level and for memcpy, LZ4, LZ4HC, LZAV, Snappy and Zstandard, on Apple M2, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
+  <a href="/assets/figures/bench-cycles.svg"><img src="/assets/figures/bench-cycles.svg" width="960" height="608" alt="Processor cycles per decompressed byte for every ZXC level and for memcpy, LZ4, LZ4HC, LZAV, Snappy and Zstandard, on Apple M3, Google Axion, AMD EPYC 9B45 and AMD EPYC 7B13." loading="lazy"></a>
   <figcaption>Figure 5. Processor cycles per decompressed byte (clock frequency / decompression speed), on the same four processors; lower is better. From the <a href="/docs/whitepaper/">whitepaper</a>.</figcaption>
 </figure>
 
@@ -203,7 +205,7 @@ zxc_free_dctx(d);</code></pre>
 <table>
   <thead><tr><th scope="col">Language</th><th scope="col">Installation</th><th scope="col">Project</th></tr></thead>
   <tbody>
-    <tr><td>Go (native decoder, no cgo)</td><td><code>go get github.com/chmike/zxc-go</code></td><td><a href="https://github.com/chmike/zxc-go">zxc-go</a></td></tr>
+    <tr><td>Go (native, no cgo)</td><td><code>go get github.com/chmike/zxc-go</code></td><td><a href="https://github.com/chmike/zxc-go">zxc-go</a></td></tr>
     <tr><td>Nim</td><td><code>nimble install zxc</code></td><td><a href="https://github.com/openpeeps/zxc-nim">zxc-nim</a></td></tr>
     <tr><td>Free Pascal</td><td>build from source</td><td><a href="https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor">Free Pascal port</a></td></tr>
   </tbody>

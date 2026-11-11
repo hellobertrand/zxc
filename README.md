@@ -8,7 +8,7 @@
 
 <!-- [![Latest release](https://img.shields.io/github/v/release/hellobertrand/zxc)](https://github.com/hellobertrand/zxc/releases/latest) -->
 
-ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.4x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio. Level -7, the densest, compresses better than `zstd -1` while decoding up to 2.8x faster.
+ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.1x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio. Level -7, the densest, compresses better than `zstd -1` while decoding up to 3.0x faster.
 
 ZXC also provides seekable archives for O(1) random access, in-place decompression, and dictionary compression for small data.
 
@@ -20,22 +20,22 @@ The ZXC format is fully specified in [FORMAT.md](docs/FORMAT.md) and guarded by 
 
 | Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
 | :--- | ---: | ---: | ---: | ---: |
-| Apple M2 | **2.41x** | **2.03x** | **1.52x** | **2.80x** |
-| Axion (Neoverse-V2) | **1.93x** | **1.54x** | **1.29x** | **2.17x** |
-| EPYC 9B45 (Zen 5) | **2.19x** | **1.65x** | **1.24x** | **2.49x** |
-| EPYC 7B13 (Zen 3) | **1.82x** | **1.35x** | **1.15x** | **2.38x** |
+| Apple M3 | **2.07x** | **1.88x** | **1.41x** | **2.95x** |
+| Axion (Neoverse-V2) | **1.82x** | **1.51x** | **1.26x** | **2.16x** |
+| EPYC 9B45 (Zen 5) | **1.91x** | **1.53x** | **1.15x** | **2.49x** |
+| EPYC 7B13 (Zen 3) | **1.65x** | **1.28x** | **1.09x** | **2.36x** |
 
-ZXC also compresses smaller in each pairing: 61.76 % vs 62.15 %, 46.65 % vs 47.60 %, 36.28 % vs
+ZXC also compresses smaller in each pairing: 61.76 % vs 61.90 %, 46.65 % vs 47.32 %, 36.28 % vs
 36.75 % and 33.09 % vs 34.53 % of the original size.
 
 <p align="center">
   <a href="docs/images/bench-bars.svg">
-    <img src="docs/images/bench-bars.svg" alt="Decompression speed of ZXC levels -1, -3, -6 and -7 next to lz4 --fast, lz4, lz4hc -9 and zstd -1 on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3: ZXC is faster at a smaller size in every pair" width="100%">
+    <img src="docs/images/bench-bars.svg" alt="Decompression speed of ZXC levels -1, -3, -6 and -7 next to lz4 --fast, lz4, lz4hc -9 and zstd -1 on Apple M3, Google Axion, AMD Zen 5 and AMD Zen 3: ZXC is faster at a smaller size in every pair" width="100%">
   </a>
 </p>
 
 Measured with lzbench 2.4.1 (by [@inikep](https://github.com/inikep)), `MOREFLAGS="-march=native"`:
-Apple M2 (Clang 21, macOS 26), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45 / Zen 5
+Apple M3 (Clang 21, macOS 27), Google Axion / Neoverse-V2 (GCC 14, GCP C4A), AMD EPYC 9B45 / Zen 5
 (GCP C4D) and AMD EPYC 7B13 / Zen 3 (GCP C2D), x86 with SMT disabled. Re-run on every commit
 ([latest logs](https://github.com/hellobertrand/zxc/actions/workflows/benchmark.yml)). TurboBench
 carries ZXC alongside 70+ other codecs. Cycles per byte and memory:
@@ -43,52 +43,52 @@ carries ZXC alongside 70+ other codecs. Cycles per byte and memory:
 
 ### Every level, on every CPU
 
-![Decompression speed vs compressed size: ZXC is faster than the LZ4 family and zstd -1 at an equal or smaller size on Apple M2, Google Axion, AMD Zen 5 and AMD Zen 3](docs/images/bench-scatter.svg)
+![Decompression speed vs compressed size: ZXC is faster than the LZ4 family and zstd -1 at an equal or smaller size on Apple M3, Google Axion, AMD Zen 5 and AMD Zen 3](docs/images/bench-scatter.svg)
 
 ### All codecs
 
-Apple M2 (ARM64)
+Apple M3 (ARM64)
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** | 886 MB/s | **13513 MB/s** | **61.76 %** |
-| **zxc 0.15.0 -2** | 588 MB/s | **11320 MB/s** | **53.86 %** |
-| **zxc 0.15.0 -3** | 267 MB/s | **9707 MB/s** | **46.65 %** |
-| **zxc 0.15.0 -4** | 194 MB/s | **8790 MB/s** | **43.43 %** |
-| **zxc 0.15.0 -5** | 114 MB/s | **8118 MB/s** | **40.83 %** |
-| **zxc 0.15.0 -6** | 14.5 MB/s | **6884 MB/s** | **36.28 %** |
-| **zxc 0.15.0 -7** | 9.71 MB/s | **5054 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1347 MB/s | 5609 MB/s | 62.15 % |
-| lz4 1.10.0 | 814 MB/s | 4774 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 48.4 MB/s | 4522 MB/s | 36.75 % |
-| lzav 5.17 -1 | 686 MB/s | 3876 MB/s | 39.91 % |
-| snappy 1.3.1 | 661 MB/s | 3258 MB/s | 47.85 % |
-| zstd 1.5.7 --fast --1 | 723 MB/s | 2538 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 645 MB/s | 1803 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 375 MB/s | 1680 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 135 MB/s | 378 MB/s | 36.45 % |
+| **zxc 1.0.0 -1** | 982 MB/s | **14684 MB/s** | **61.76 %** |
+| **zxc 1.0.0 -2** | 653 MB/s | **12477 MB/s** | **53.86 %** |
+| **zxc 1.0.0 -3** | 289 MB/s | **11043 MB/s** | **46.65 %** |
+| **zxc 1.0.0 -4** | 211 MB/s | **10003 MB/s** | **43.43 %** |
+| **zxc 1.0.0 -5** | 127 MB/s | **9232 MB/s** | **40.83 %** |
+| **zxc 1.0.0 -6** | 16.5 MB/s | **7819 MB/s** | **36.28 %** |
+| **zxc 1.0.0 -7** | 11.2 MB/s | **5789 MB/s** | **33.09 %** |
+| lz4 1.11.0 --fast -17 | 1532 MB/s | 7085 MB/s | 61.90 % |
+| lz4 1.11.0 | 883 MB/s | 5859 MB/s | 47.32 % |
+| lz4hc 1.11.0 -9 | 51.8 MB/s | 5535 MB/s | 36.75 % |
+| lzav 7.1 -1 | 776 MB/s | 4264 MB/s | 39.23 % |
+| snappy 1.3.1 | 723 MB/s | 3432 MB/s | 47.85 % |
+| zstd 1.5.7 --fast --1 | 801 MB/s | 2763 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 710 MB/s | 1964 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 440 MB/s | 1868 MB/s | 31.20 % |
+| zlib 1.4 -1 | 167 MB/s | 450 MB/s | 36.45 % |
 
 <details>
 <summary>Google Axion (Neoverse-V2, ARM64)</summary>
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** | 885 MB/s | **9564 MB/s** | **61.76 %** |
-| **zxc 0.15.0 -2** | 593 MB/s | **7895 MB/s** | **53.86 %** |
-| **zxc 0.15.0 -3** | 256 MB/s | **6571 MB/s** | **46.65 %** |
-| **zxc 0.15.0 -4** | 186 MB/s | **6105 MB/s** | **43.43 %** |
-| **zxc 0.15.0 -5** | 109 MB/s | **5683 MB/s** | **40.83 %** |
-| **zxc 0.15.0 -6** | 13.5 MB/s | **4950 MB/s** | **36.28 %** |
-| **zxc 0.15.0 -7** | 8.82 MB/s | **3563 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1278 MB/s | 4954 MB/s | 62.15 % |
-| lz4 1.10.0 | 730 MB/s | 4258 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 43.2 MB/s | 3850 MB/s | 36.75 % |
-| lzav 5.17 -1 | 576 MB/s | 2949 MB/s | 39.91 % |
-| snappy 1.3.1 | 566 MB/s | 2295 MB/s | 47.85 % |
-| zstd 1.5.7 --fast --1 | 302 MB/s | 2291 MB/s | 41.01 % |
+| **zxc 1.0.0 -1** | 883 MB/s | **9394 MB/s** | **61.76 %** |
+| **zxc 1.0.0 -2** | 592 MB/s | **7764 MB/s** | **53.86 %** |
+| **zxc 1.0.0 -3** | 256 MB/s | **6489 MB/s** | **46.65 %** |
+| **zxc 1.0.0 -4** | 185 MB/s | **6043 MB/s** | **43.43 %** |
+| **zxc 1.0.0 -5** | 109 MB/s | **5614 MB/s** | **40.83 %** |
+| **zxc 1.0.0 -6** | 13.4 MB/s | **4891 MB/s** | **36.28 %** |
+| **zxc 1.0.0 -7** | 8.76 MB/s | **3539 MB/s** | **33.09 %** |
+| lz4 1.11.0 --fast -17 | 1305 MB/s | 5158 MB/s | 61.90 % |
+| lz4 1.11.0 | 748 MB/s | 4305 MB/s | 47.32 % |
+| lz4hc 1.11.0 -9 | 42.6 MB/s | 3875 MB/s | 36.75 % |
+| lzav 7.1 -1 | 642 MB/s | 2925 MB/s | 39.23 % |
+| snappy 1.3.1 | 567 MB/s | 2292 MB/s | 47.85 % |
+| zstd 1.5.7 --fast --1 | 603 MB/s | 2284 MB/s | 41.01 % |
 | zstd 1.5.7 -1 | 523 MB/s | 1642 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 329 MB/s | 1525 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 115 MB/s | 389 MB/s | 36.45 % |
+| zstd 1.5.7 -3 | 325 MB/s | 1522 MB/s | 31.20 % |
+| zlib 1.4 -1 | 115 MB/s | 389 MB/s | 36.45 % |
 
 </details>
 
@@ -97,22 +97,22 @@ Apple M2 (ARM64)
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** | 868 MB/s | **11609 MB/s** | **61.76 %** |
-| **zxc 0.15.0 -2** | 585 MB/s | **10332 MB/s** | **53.86 %** |
-| **zxc 0.15.0 -3** | 253 MB/s | **8335 MB/s** | **46.65 %** |
-| **zxc 0.15.0 -4** | 183 MB/s | **7508 MB/s** | **43.43 %** |
-| **zxc 0.15.0 -5** | 110 MB/s | **7014 MB/s** | **40.83 %** |
-| **zxc 0.15.0 -6** | 15.3 MB/s | **6045 MB/s** | **36.28 %** |
-| **zxc 0.15.0 -7** | 10.2 MB/s | **4724 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1284 MB/s | 5305 MB/s | 62.15 % |
-| lz4 1.10.0 | 766 MB/s | 5052 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 45.4 MB/s | 4861 MB/s | 36.75 % |
-| lzav 5.17 -1 | 699 MB/s | 3603 MB/s | 39.91 % |
-| snappy 1.3.1 | 564 MB/s | 2420 MB/s | 47.89 % |
-| zstd 1.5.7 --fast --1 | 664 MB/s | 2451 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 606 MB/s | 1898 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 369 MB/s | 1733 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 134 MB/s | 392 MB/s | 36.45 % |
+| **zxc 1.0.0 -1** | 873 MB/s | **11639 MB/s** | **61.76 %** |
+| **zxc 1.0.0 -2** | 588 MB/s | **10363 MB/s** | **53.86 %** |
+| **zxc 1.0.0 -3** | 253 MB/s | **8352 MB/s** | **46.65 %** |
+| **zxc 1.0.0 -4** | 184 MB/s | **7535 MB/s** | **43.43 %** |
+| **zxc 1.0.0 -5** | 110 MB/s | **7038 MB/s** | **40.83 %** |
+| **zxc 1.0.0 -6** | 15.3 MB/s | **6051 MB/s** | **36.28 %** |
+| **zxc 1.0.0 -7** | 10.2 MB/s | **4702 MB/s** | **33.09 %** |
+| lz4 1.11.0 --fast -17 | 1321 MB/s | 6100 MB/s | 61.90 % |
+| lz4 1.11.0 | 800 MB/s | 5445 MB/s | 47.32 % |
+| lz4hc 1.11.0 -9 | 42.8 MB/s | 5274 MB/s | 36.75 % |
+| lzav 7.1 -1 | 724 MB/s | 3687 MB/s | 39.23 % |
+| snappy 1.3.1 | 564 MB/s | 2356 MB/s | 47.89 % |
+| zstd 1.5.7 --fast --1 | 662 MB/s | 2429 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 605 MB/s | 1885 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 369 MB/s | 1724 MB/s | 31.20 % |
+| zlib 1.4 -1 | 135 MB/s | 394 MB/s | 36.45 % |
 
 </details>
 
@@ -121,22 +121,22 @@ Apple M2 (ARM64)
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 0.15.0 -1** | 724 MB/s | **8155 MB/s** | **61.76 %** |
-| **zxc 0.15.0 -2** | 481 MB/s | **6807 MB/s** | **53.86 %** |
-| **zxc 0.15.0 -3** | 214 MB/s | **5252 MB/s** | **46.65 %** |
-| **zxc 0.15.0 -4** | 157 MB/s | **4952 MB/s** | **43.43 %** |
-| **zxc 0.15.0 -5** | 93.3 MB/s | **4779 MB/s** | **40.83 %** |
-| **zxc 0.15.0 -6** | 11.9 MB/s | **4290 MB/s** | **36.28 %** |
-| **zxc 0.15.0 -7** | 7.97 MB/s | **3188 MB/s** | **33.09 %** |
-| lz4 1.10.0 --fast -17 | 1108 MB/s | 4485 MB/s | 62.15 % |
-| lz4 1.10.0 | 638 MB/s | 3883 MB/s | 47.60 % |
-| lz4hc 1.10.0 -9 | 37.1 MB/s | 3731 MB/s | 36.75 % |
-| lzav 5.17 -1 | 459 MB/s | 2955 MB/s | 39.91 % |
-| snappy 1.3.1 | 507 MB/s | 1837 MB/s | 47.89 % |
-| zstd 1.5.7 --fast --1 | 486 MB/s | 1784 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 444 MB/s | 1339 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 232 MB/s | 1178 MB/s | 31.20 % |
-| zlib 1.3.2 -1 | 106 MB/s | 358 MB/s | 36.45 % |
+| **zxc 1.0.0 -1** | 733 MB/s | **8175 MB/s** | **61.76 %** |
+| **zxc 1.0.0 -2** | 485 MB/s | **6796 MB/s** | **53.86 %** |
+| **zxc 1.0.0 -3** | 215 MB/s | **5255 MB/s** | **46.65 %** |
+| **zxc 1.0.0 -4** | 159 MB/s | **4959 MB/s** | **43.43 %** |
+| **zxc 1.0.0 -5** | 93.6 MB/s | **4788 MB/s** | **40.83 %** |
+| **zxc 1.0.0 -6** | 11.9 MB/s | **4303 MB/s** | **36.28 %** |
+| **zxc 1.0.0 -7** | 8.02 MB/s | **3153 MB/s** | **33.09 %** |
+| lz4 1.11.0 --fast -17 | 1153 MB/s | 4968 MB/s | 61.90 % |
+| lz4 1.11.0 | 675 MB/s | 4115 MB/s | 47.32 % |
+| lz4hc 1.11.0 -9 | 35.2 MB/s | 3944 MB/s | 36.75 % |
+| lzav 7.1 -1 | 509 MB/s | 3027 MB/s | 39.23 % |
+| snappy 1.3.1 | 508 MB/s | 1838 MB/s | 47.89 % |
+| zstd 1.5.7 --fast --1 | 486 MB/s | 1779 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 442 MB/s | 1337 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 233 MB/s | 1207 MB/s | 31.20 % |
+| zlib 1.4 -1 | 106 MB/s | 355 MB/s | 36.45 % |
 
 </details>
 
@@ -149,8 +149,8 @@ Apple M2 (ARM64)
 > Data compressed once is read many times over a link: disk, network, another core. With transfer and decoding overlapped, a reader gets `min(decode speed, bandwidth ÷ ratio)` of original data per second. The chart divides that by the bandwidth, so 1x is sending the data uncompressed, and draws each codec at its best level for the link. Compression time is left out, as it is paid once.
 >
 > - **Below 0.4–0.6 GB/s the ratio decides**, and `zstd -3` is ahead.
-> - **From there on, a ZXC level delivers the most data**: -7 up to 1.1–1.7 GB/s, then the faster levels in turn. No LZ4 or LZ4HC level is ever above the ZXC curve.
-> - **Compression stops paying** once one decoding thread is slower than the link: past 8.2–13.5 GB/s for `zxc -1`, 4.5–5.6 GB/s for LZ4.
+> - **From there on, a ZXC level delivers the most data**: -7 up to 1.0–1.9 GB/s, then the faster levels in turn. No LZ4 or LZ4HC level is ever above the ZXC curve.
+> - **Compression stops paying** once one decoding thread is slower than the link: past 8.2–14.7 GB/s for `zxc -1`, 5.0–7.1 GB/s for LZ4.
 
 ## Features
 
@@ -169,7 +169,7 @@ Apple M2 (ARM64)
 *   **Levels 3–4 (Balanced, 3 is the default):** a better ratio than LZ4 at efficient compression speed.
 *   **Level 5 (Compact):** embedded and firmware: a better ratio than LZ4, much faster decode than Zstandard.
 *   **Level 6 (Density):** a better ratio *and* faster decode than LZ4HC on every measured platform; for archival, where compression time is amortized over many reads.
-*   **Level 7 (Ultra):** maximum density, past `zstd -1` while decoding more than twice as fast. Compression is the slowest tier.
+*   **Level 7 (Ultra):** fills the gap between LZ4HC and Zstandard. It is denser than `zstd -1` (33.09 % against 34.53 %) and decodes 2.2x to almost 3x faster. Compression is the slowest tier.
 
 ## Usage
 
@@ -317,7 +317,7 @@ Community-maintained bindings:
 
 | Language | Package Manager | Install Command | Repository | Author |
 | -------- | --------------- | --------------- | ---------- | ------ |
-| **Go** (native decoder, no cgo) | pkg.go.dev | `go get github.com/chmike/zxc-go` | <https://github.com/chmike/zxc-go> | [@chmike](https://github.com/chmike) |
+| **Go** (native, no cgo) | pkg.go.dev | `go get github.com/chmike/zxc-go` | <https://github.com/chmike/zxc-go> | [@chmike](https://github.com/chmike) |
 | **Nim** | nimble | `nimble install zxc` | <https://github.com/openpeeps/zxc-nim> | [@georgelemon](https://github.com/georgelemon) |
 | **Free Pascal** | Build from source | Clone the repository | <https://github.com/Xelitan/Free-Pascal-port-of-ZXC-compressor-decompressor> | [@Xelitan](https://github.com/Xelitan) |
 
