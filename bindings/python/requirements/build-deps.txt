@@ -11,9 +11,9 @@ pathspec==1.1.1 \
     --hash=sha256:17db5ecd524104a120e173814c90367a96a98d07c45b2e10c2f3919fff91bf5a \
     --hash=sha256:a00ce642f577bf7f473932318056212bc4f8bfdf53128c78bbd5af0b9b20b189
     # via scikit-build-core
-scikit-build-core==1.1.1 \
-    --hash=sha256:6f6d6cf600e2e9639fd258ecd11cfc19bd189354b968916a519c6793e7e26237 \
-    --hash=sha256:e347a59193c878ac56a363e57506938652a6dd8c965790cb1cbc6bc7e8d5abad
+scikit-build-core==1.1.2 \
+    --hash=sha256:7893709119c5ab1be75cd10442383132c9433b9f104dacef5185949efbea7974 \
+    --hash=sha256:7f4f959a467692db50bdd1ea7ce1507f2c7972e6023b753ee302d169bc4cec85
     # via -r requirements/build-deps.in
 setuptools==84.2.1 \
     --hash=sha256:3ff8b3b5492a0aa66960f4419365a86b84e013070d4313e4d4a6894f5d64d6bc \
