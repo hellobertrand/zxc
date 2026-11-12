@@ -63,13 +63,21 @@ informative:
         asciiFullname: Marcin Zukowski
     date: 2026
   ZXC-WP:
-    title: "The ZXC Compressor: design and implementation notes"
-    target: https://github.com/hellobertrand/zxc/blob/main/docs/WHITEPAPER.md
+    title: "ZXC: High-Performance Asymmetric Lossless Compression"
+    target: https://github.com/hellobertrand/zxc/blob/v1.0.0/docs/WHITEPAPER.md
     author:
       -
         ins: B. Lebonnois
         name: Bertrand Lebonnois
-    date: false
+    date: 2026-11
+  ZXC-IMPL:
+    title: "ZXC reference implementation, version 1.0.0"
+    target: https://github.com/hellobertrand/zxc/releases/tag/v1.0.0
+    author:
+      -
+        ins: B. Lebonnois
+        name: Bertrand Lebonnois
+    date: 2026-11
 
 --- abstract
 
@@ -79,8 +87,8 @@ of independently decodable blocks, optionally indexed by a seek table,
 so any block can be decompressed without reading the blocks before it.
 
 This document describes the format, registers the "application/zxc"
-media type, and specifies wire-format version 9, intended for
-publication as version 1.0 of the ZXC specification.
+media type, and specifies wire-format version 9, the format frozen
+by version 1.0.0 of the reference implementation.
 
 --- middle
 
@@ -154,7 +162,9 @@ Conforming decoder:
 : An implementation that, given a syntactically valid ZXC stream
   produced by a conforming encoder at the same major version,
   reproduces the original input bytes exactly and detects every
-  error condition listed in {{error-handling}}.
+  error condition listed in {{error-handling}}; the two checksum
+  comparisons apply to a decoder that verifies checksums
+  ({{minimum-conforming-decoder}}).
 
 # Overall Structure of a ZXC File {#overall-structure}
 
@@ -204,9 +214,8 @@ After each File Footer, a decoder reads the next 4 bytes:
   corrupt data.
 
 An empty input is truncated, and a bad Magic at offset 0 is a bad magic.
-A single-frame file is the frame layout alone, so a decoder that does not
-support concatenation rejects a concatenated file (bytes after the
-footer) rather than misreading it.
+A single-frame file is the frame layout alone. Support for concatenated
+frames is REQUIRED ({{minimum-conforming-decoder}}).
 
 Each File Footer stores its frame's Compressed Frame Size, so a reader
 MAY also walk the frames back from the end of the input without decoding
@@ -255,7 +264,8 @@ Flags (u8):
   ({{sek-block}}) sits between the EOF block and the File Footer, and
   when clear the footer follows the EOF block directly. Bits 0..3 encode
   the checksum algorithm identifier; value 0 denotes a 32-bit folding of
-  the RapidHash function {{RAPIDHASH}}, and other values are RESERVED.
+  the RapidHash function {{RAPIDHASH}}; other values are RESERVED and a
+  decoder MUST reject them.
   Bit 4 is RESERVED; encoders MUST set it to zero and decoders MUST
   reject a header in which it is set.
 
@@ -516,6 +526,44 @@ then ML + 5.
 
 Otherwise, the actual match length is ML + 5.
 
+Within a sequence the LL varint, when present, precedes the ML varint
+in the Extras stream.
+
+## Sequence Execution {#sequence-execution}
+
+A SPL or PAK block decodes to the bytes produced by the following
+procedure. The decoded Literals section (Literal Count bytes) is read
+through a cursor that starts at its first byte, and the output starts
+empty.
+
+For each of the Sequence Count sequences, in stream order:
+
+1. Obtain LL, the match length and the match offset, including any
+   overflow varints.
+2. Copy LL bytes from the literal cursor to the output and advance the
+   cursor by LL.
+3. Copy match-length bytes to the output, one byte at a time, each
+   taken offset bytes before the current end of the output. The offset
+   MAY be smaller than the match length: the copy then repeats the bytes
+   it has just written.
+
+After the last sequence, the bytes left between the literal cursor and
+the end of the Literals section are copied to the output. These trailing
+literals belong to no sequence; a block whose Sequence Count is 0
+decodes to its literals alone.
+
+The decoded size of the block is not stored: it is the number of bytes
+this procedure produces. A decoder MUST reject as corrupt data:
+
+- a sequence whose LL exceeds the literals left after the cursor;
+- an output that would exceed the block size ({{file-header}});
+- a match offset greater than the number of bytes the block has produced
+  so far, plus the length of the dictionary content when a dictionary is
+  attached ({{dictionary}}). With a dictionary, an offset that reaches
+  before the start of the block's output designates dictionary bytes,
+  the last dictionary byte sitting immediately before the first output
+  byte.
+
 ## RLE Literal Section {#rle-literal-section}
 
 When Literal Encoding = 1, the Literals section is a sequence of runs,
@@ -729,6 +777,10 @@ stream and add it to ML. The actual match length is then ML + 5.
 
 Otherwise, the actual match length is ML + 5.
 
+Within a sequence the LL varint, when present, precedes the ML varint
+in the Extras stream. The sequences are then executed as in
+{{sequence-execution}}, trailing literals included.
+
 # SEK Block (Type 254) {#sek-block}
 
 The SEK block records where every data block starts and how long it is
@@ -833,7 +885,8 @@ index within its frame.
 The File Header states what follows the EOF block, so a sequential
 decoder never guesses from those bytes. Guessing would be unreliable:
 the footer opens with the Archive Digest or Source Size, and about one
-value in 65536 parses as a valid SEK block header.
+digest in 2^32 has the type, zero bytes and checksum of a SEK block
+header.
 
 With HAS_SEEK_TABLE = 1, a decoder reads the SEK block header and MUST
 reject it unless it is, byte for byte, the one header the frame admits:
@@ -1009,8 +1062,8 @@ When the File Header has HAS_CHECKSUM = 1:
 - The checksum input is the block's decompressed bytes, excluding any
   dictionary prefix ({{dictionary}}). For a RAW block these are its
   payload bytes.
-- The seed is the block's zero-based position among the file's data
-  blocks, as a 64-bit value. A block encoded on its own, outside any
+- The seed is the block's zero-based position among its frame's data
+  blocks, as a 64-bit value ({{concatenated-frames}}). A block encoded on its own, outside any
   file, uses seed 0.
 - The algorithm identifier 0 denotes fold32 ({{fold32}}) of RapidHash
   {{RAPIDHASH}} computed over that input with that seed.
@@ -1028,8 +1081,8 @@ secret; the seed is 0 unless a seed is stated explicitly. Other
 versions of the function produce different digests and are not
 interoperable.
 
-The seed binds a block to its position: a block moved elsewhere in the
-file fails its own check, including under a range read through the seek
+The seed binds a block to its position: a block moved elsewhere in its
+frame fails its own check, including under a range read through the seek
 table, which sees only the blocks it touches.
 
 A decoder therefore verifies a block after decoding it, and a corrupted
@@ -1131,9 +1184,10 @@ extension ({{zxd-format}}), referenced from a ZXC archive by a
 32-bit identifier stored in the File Header
 ({{dictionary-header-encoding}}). Dictionary support is purely
 additive: an archive compressed without a dictionary is bit-identical
-to one produced by an encoder that has no dictionary support, and a
-decoder that does not recognise the HAS_DICTIONARY flag is governed
-by {{compatibility-rules}}.
+to one produced by an encoder that has no dictionary support. A
+decoder without dictionary support MUST reject an archive that sets
+HAS_DICTIONARY, as it would a missing dictionary
+({{error-handling}}).
 
 ## Mechanism
 
@@ -1410,29 +1464,33 @@ A minimum conforming decoder for Format Version 9 MUST support:
 
 Because level-7 archives encode both literals and tokens with the
 Huffman/PivCo layout, support for {{huffman-literal-section}} is
-REQUIRED. Per-block checksum verification ({{per-block-checksum}}) is
-RECOMMENDED but not REQUIRED.
+REQUIRED. Dictionary support ({{dictionary}}) is OPTIONAL. Verification
+of the per-block checksums ({{per-block-checksum}}) and of the Archive
+Digest ({{archive-digest}}) is RECOMMENDED but not REQUIRED; a decoder
+that does not verify them still reads and skips those bytes.
 
 # Error Handling {#error-handling}
 
 ## Error Classes
 
 A conforming decoder MUST detect and handle the following error
-conditions. The recommended behaviour for each is specified below;
-all errors in the table are fatal by default.
+conditions, the two marked "if verifying" only when it verifies
+checksums ({{minimum-conforming-decoder}}). The recommended behaviour
+for each is specified below; all errors in the table are fatal by
+default.
 
 | Error                                  | Detection point             | Required behaviour                              |
 |----------------------------------------|-----------------------------|-------------------------------------------------|
 | Bad magic                              | File header offset 0x00     | Reject immediately. Not a ZXC file.             |
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
 | File header checksum mismatch          | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
-| File header reserved bit or byte set   | File header offsets 0x06-0x0D | Reject. Flags bit 4, or a byte of 0x07..0x0D outside the Dictionary ID ({{file-header}}). |
+| File header reserved bit or byte set   | File header offsets 0x06-0x0D | Reject. Flags bit 4, a non-zero checksum algorithm identifier, or a byte of 0x07..0x0D outside the Dictionary ID ({{file-header}}). |
 | Invalid chunk size code                | File header offset 0x05     | Reject. Code outside the valid range \[12..21\].  |
 | Block header checksum mismatch         | Block header offset 0x07    | Reject block. Stream is corrupt.                |
 | Block Flags or Reserved non-zero       | Block header offsets 0x01-0x02 | Reject. No flag is defined and the reserved byte has no meaning in this version ({{block-header-semantics}}, {{compatibility-rules}}). |
 | Unknown block type                     | Block header offset 0x00    | Reject. Type not defined for this version.      |
 | Block payload truncated                | During payload read         | Reject. Unexpected end of stream.               |
-| Block checksum mismatch                | Trailing checksum, after decoding | Reject block. Wrong decoded bytes: corrupt payload, wrong dictionary, or block out of place. |
+| Block checksum mismatch                | Trailing checksum, after decoding | Reject block (if verifying). Wrong decoded bytes: corrupt payload, wrong dictionary, or block out of place. |
 | EOF block header not in its one form   | EOF block header            | Reject. Non-zero Compressed Payload Size, Block Flags or Reserved ({{eof-block}}). |
 | Data block payload above the block size | Block header offset 0x03    | Reject. A data block never compresses past its own content. |
 | Block loop ends without an EOF block   | End of the block loop       | Reject. A forged size can step over the EOF marker.         |
@@ -1442,10 +1500,10 @@ all errors in the table are fatal by default.
 | Footer mismatch                        | File footer, after the digest | Reject. Sizes or Size Lengths are not the ones the frame implies: wrong output size, wrong frame size, a non-minimal length or a reserved bit set ({{file-footer}}). |
 | Archive Digest mismatch                | File footer, first 8 bytes  | Reject (if verifying). Blocks reordered, dropped, or altered ({{archive-digest}}). |
 | Bytes after a footer that open no frame | After the File Footer      | Reject. Not the Magic, or 1 to 3 trailing bytes ({{concatenated-frames}}). |
-| Decompressed output exceeds chunk size | During LZ decode            | Reject. Corrupt or malicious payload.           |
-| Match offset out of bounds             | During LZ copy              | Reject. Offset references data before output.   |
+| Decompressed output exceeds block size | During LZ decode            | Reject. Corrupt or malicious payload ({{sequence-execution}}). |
+| Match offset out of bounds             | During LZ copy              | Reject. Offset reaches before the block's output and its dictionary prefix ({{sequence-execution}}). |
 | Varint exceeds L_MAX (3 bytes)         | Extras stream               | Reject. See {{varint-cap}}. Overflow or corrupt extras data.   |
-| Dictionary required but not supplied   | File header offset 0x06     | Reject. HAS_DICTIONARY set; see {{dictionary-header-encoding}}. |
+| Dictionary required but not supplied   | File header offset 0x06     | Reject. HAS_DICTIONARY set and no dictionary, or no dictionary support; see {{dictionary-header-encoding}}. |
 | Dictionary ID mismatch                 | File header offset 0x07     | Reject. Supplied dictionary does not match the Dictionary ID.  |
 
 ## Severity Levels
@@ -1503,9 +1561,10 @@ Source Size) before allocating large output buffers.
 ## Memory Safety in LZ Decoding
 
 The LZ decoders for SPL and PAK MUST validate that every match
-reference stays strictly within the bounds of the currently
-produced output. A negative offset or an offset greater than the
-number of bytes already produced MUST be rejected as corrupt data.
+reference stays within the bytes the block has already produced,
+extended by the dictionary content when a dictionary is attached. An
+offset reaching further back MUST be rejected as corrupt data
+({{sequence-execution}}).
 
 ## Integer Overflow
 
@@ -1637,22 +1696,12 @@ pre-trained dictionary file ({{zxd-format}}) uses .zxd. Both are tooling
 conventions: a file of either kind is identified by its magic word
 rather than by its name ({{dictionary-naming}}).
 
-## Block Type Registry
+## Registries
 
-This document requests the creation of a "ZXC Block Types" registry
-with the following initial assignments:
-
-| Value      | Mnemonic   | Reference        |
-|-----------:|------------|------------------|
-| 0          | RAW        | {{raw-block}}    |
-| 1          | SPL        | {{spl-block}}    |
-| 2          | PAK        | {{pak-block}}    |
-| 3..253     | Unassigned | -                |
-| 254        | SEK        | {{sek-block}}    |
-| 255        | EOF        | {{eof-block}}    |
-
-The registration policy for new Block Type values is Specification
-Required {{!RFC8126}}.
+This document creates no registry. The Block Type values of
+{{block-container}} are fixed per Format Version, and assigning a new
+one is a version bump ({{versioning}}), made by a revision of this
+specification.
 
 --- back
 
@@ -1858,6 +1907,9 @@ document.
 # Reference Implementation
 {:numbered="false"}
 
-A reference implementation of an encoder and decoder for the format
-defined by this document is available; see {{ZXC-WP}} for design
-notes.
+The reference implementation of an encoder and decoder for the format
+defined by this document is version 1.0.0 of the ZXC library
+{{ZXC-IMPL}}, which freezes Format Version 9. Its source tree carries
+conformance vectors, valid and invalid, and golden archives against
+which an independent implementation can be checked. See {{ZXC-WP}} for
+design notes.
