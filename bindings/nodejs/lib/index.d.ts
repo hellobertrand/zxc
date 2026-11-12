@@ -195,9 +195,17 @@ export function dictId(content: Buffer): number;
 
 /**
  * Returns the dictionary ID referenced by a `.zxc` archive header, or 0 if the
- * archive does not require a dictionary.
+ * archive does not require a dictionary. 0 is also a valid ID:
+ * {@link requiresDict} tells them apart.
  */
 export function getDictId(archive: Buffer): number;
+
+/**
+ * Tells whether a `.zxc` archive requires a dictionary, from its header flag
+ * alone: a required dictionary may have ID 0. Only the first 16 bytes are
+ * read. Throws on an invalid header.
+ */
+export function requiresDict(archive: Buffer): boolean;
 
 /**
  * Returns the dictionary ID stored in a `.zxd` dictionary file, or 0 if the

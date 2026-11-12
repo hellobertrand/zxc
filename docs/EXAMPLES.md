@@ -637,7 +637,8 @@ int main(void) {
     if (csize < 0) { fprintf(stderr, "compress failed\n"); return 1; }
 
     /* The archive header now carries HAS_DICTIONARY + dict_id; a decoder reads
-     * which dictionary it needs with zxc_get_dict_id(comp, csize). */
+     * whether it needs one with zxc_requires_dict(comp, csize), then which with
+     * zxc_get_dict_id(comp, csize). ID 0 is valid, so test the first. */
 
     /* 4. Decompress WITH the same dictionary (content + table). The simple
      *    zxc_decompress() takes no dictionary: use a configured dctx. */
@@ -700,8 +701,8 @@ Decoding a dictionary archive enforces that the right dictionary is supplied:
 Because the `dict_id` binds the **(content, table)** pair, decoding an
 archive that was compressed with a table requires passing that same table as
 `dict_huf` — omitting it (or supplying a different one) fails the id check with
-`ZXC_ERROR_DICT_MISMATCH`. So a decoder reads `zxc_get_dict_id()` first, fetches
-the matching `.zxd`, and attaches its loaded `content` + `zxc_dict_huf()` table
+`ZXC_ERROR_DICT_MISMATCH`. So a decoder reads `zxc_requires_dict()` first, then
+`zxc_get_dict_id()` (0 is a valid ID), fetches the matching `.zxd`, and attaches its loaded `content` + `zxc_dict_huf()` table
 with `zxc_dctx_set_dict()`. See `docs/FORMAT.md` §12 for the on-disk
 dictionary format and §3.1 for the header fields.
 

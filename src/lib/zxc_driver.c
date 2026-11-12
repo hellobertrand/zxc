@@ -1180,7 +1180,8 @@ static int zxc_stream_read_exact(zxc_stream_ctx_t* ctx, FILE* f, void* dst, cons
  * @param[in]  ctx          Started engine, or NULL before the first frame.
  * @param[in]  f_in         The input stream, just past the magic word.
  * @param[in]  magic        The magic word's 4 bytes.
- * @param[in]  dict_id      Id of the caller's dictionary, 0 without one.
+ * @param[in]  has_dict     Whether the caller holds a dictionary.
+ * @param[in]  dict_id      Its id, read when @p has_dict.
  * @param[out] chunk        The frame's block size.
  * @param[out] has_checksum Whether the frame carries checksums.
  * @param[out] has_seek     Whether it ends with a seek table.
@@ -1497,7 +1498,7 @@ int zxc_stream_get_last_frame_info(FILE* f_in, const uint64_t end, zxc_frame_inf
     } else {
         const zxc_scan_src_t src = {zxc_file_scan_read, NULL, f_in, end};
         uint64_t start = 0;
-        rc = zxc_scan_frame(&src, end, &start, &got, NULL);
+        rc = zxc_scan_frame(&src, end, &start, &got, NULL, NULL);
     }
     fseeko(f_in, saved, SEEK_SET);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);

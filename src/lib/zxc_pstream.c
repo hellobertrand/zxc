@@ -267,7 +267,7 @@ zxc_cstream* zxc_cstream_create(const zxc_cctx* cfg) {
     if (cfg) cs->opts = *zxc_cctx_params(cfg);
 
     // Push streams take no dictionary yet (deferred until a need arises): the
-    // header id stays 0, so a dictionary here would produce archives that
+    // header never flags one, so a dictionary here would produce archives that
     // decode wrong elsewhere.
     if (UNLIKELY(cs->opts.dict || cs->opts.dict_size || cs->opts.dict_huf)) {
         ZXC_FREE(cs);

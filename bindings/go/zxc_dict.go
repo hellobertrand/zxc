@@ -158,12 +158,26 @@ func DictID(content []byte) uint32 {
 
 // GetDictID returns the dictionary ID recorded in a compressed .zxc archive
 // header, or 0 if the archive was not compressed with a dictionary (or is too
-// small / invalid).
+// small / invalid). 0 is also a valid ID: RequiresDict tells them apart.
 func GetDictID(archive []byte) uint32 {
 	if len(archive) == 0 {
 		return 0
 	}
 	return uint32(C.zxc_get_dict_id(unsafe.Pointer(&archive[0]), C.size_t(len(archive))))
+}
+
+// RequiresDict reports whether a compressed .zxc archive needs a dictionary,
+// from its header flag alone: a required dictionary may have ID 0. Only the
+// first 16 bytes are read. It returns an error for an invalid header.
+func RequiresDict(archive []byte) (bool, error) {
+	if len(archive) == 0 {
+		return false, ErrSrcTooSmall
+	}
+	rc := C.zxc_requires_dict(unsafe.Pointer(&archive[0]), C.size_t(len(archive)))
+	if rc < 0 {
+		return false, errorFromCode(C.int64_t(rc))
+	}
+	return rc != 0, nil
 }
 
 // DictGetID returns the dictionary ID stored in a serialized .zxd file buffer,

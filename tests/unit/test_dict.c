@@ -1632,14 +1632,22 @@ int test_dict_id_zero(void) {
     const int64_t full = (int64_t)sizeof(src);
     int ok = 1;
 
-    // Buffer API.
+    // Header queries: only the flag tells ID 0 from none.
     const int64_t n = dctx_make_archive(3, 0, src, sizeof(src), dict, nz, NULL, comp, sizeof(comp));
-    zxc_frame_info_t fi;
-    memset(&fi, 0, sizeof(fi));
-    if (n <= 0 || zxc_get_frame_info(comp, (size_t)n, &fi, sizeof(fi)) != ZXC_OK ||
-        !fi.has_dictionary || fi.dict_id != 0) {
-        printf("  [FAIL] archive: size %lld, has_dictionary %u, id %u\n", (long long)n,
-               fi.has_dictionary, fi.dict_id);
+    uint8_t plain[4096];
+    const int64_t np =
+        dctx_make_archive(3, 0, src, sizeof(src), NULL, 0, NULL, plain, sizeof(plain));
+    uint8_t bad[ZXC_FILE_HEADER_SIZE];
+    memcpy(bad, comp, sizeof(bad));
+    bad[14] ^= 1;  // header checksum
+    const int q_dict = n > 0 ? zxc_requires_dict(comp, ZXC_FILE_HEADER_SIZE) : -1;
+    const int q_plain = np > 0 ? zxc_requires_dict(plain, (size_t)np) : -1;
+    if (n <= 0 || np <= 0 || q_dict != 1 || zxc_get_dict_id(comp, (size_t)n) != 0 || q_plain != 0 ||
+        zxc_requires_dict(NULL, 16) != ZXC_ERROR_NULL_INPUT ||
+        zxc_requires_dict(comp, ZXC_FILE_HEADER_SIZE - 1) != ZXC_ERROR_SRC_TOO_SMALL ||
+        zxc_requires_dict(bad, sizeof(bad)) != ZXC_ERROR_BAD_HEADER) {
+        printf("  [FAIL] header query: sizes %lld/%lld, dict %d, plain %d\n", (long long)n,
+               (long long)np, q_dict, q_plain);
         ok = 0;
     } else {
         zxc_dctx* dctx = zxc_create_dctx();
@@ -1652,7 +1660,69 @@ int test_dict_id_zero(void) {
             !dctx_run_steps(dctx, steps, sizeof(steps) / sizeof(steps[0]), src, sizeof(src), dec))
             ok = 0;
         zxc_free_dctx(dctx);
+
+        // A static context has no room for a dictionary, ID 0 included.
+        zxc_frame_info_t fi;
+        const int fr = zxc_get_frame_info(comp, (size_t)n, &fi, sizeof(fi));
+        const size_t ws_sz = fr == ZXC_OK ? zxc_static_dctx_workspace_size(fi.block_size) : 0;
+        void* ws = ws_sz ? malloc(ws_sz) : NULL;
+        zxc_dctx* sd = ws ? zxc_init_static_dctx(ws, ws_sz, fi.block_size) : NULL;
+        const int64_t rsd = sd ? zxc_decompress_dctx(sd, comp, (size_t)n, dec, sizeof(dec)) : -1;
+        if (rsd != ZXC_ERROR_DICT_UNSUPPORTED) {
+            printf("  [FAIL] static dctx: %lld\n", (long long)rsd);
+            ok = 0;
+        }
+        free(ws);
+
+        // Push streams take no dictionary: the flag alone refuses the archive.
+        int64_t rp = ZXC_ERROR_MEMORY;
+        zxc_dstream* const ds = zxc_dstream_create(NULL);
+        if (ds) {
+            zxc_inbuf_t in = {comp, (size_t)n, 0};
+            zxc_outbuf_t ob = {dec, sizeof(dec), 0};
+            rp = zxc_dstream_decompress(ds, &ob, &in);
+            zxc_dstream_free(ds);
+        }
+        if (rp != ZXC_ERROR_DICT_REQUIRED) {
+            printf("  [FAIL] push stream: %lld\n", (long long)rp);
+            ok = 0;
+        }
     }
+
+    // FILE* API: the stream writer flags the dictionary, the reader requires it.
+    FILE* f_src = test_tmpfile();
+    FILE* f_comp = test_tmpfile();
+    FILE* f_dec = test_tmpfile();
+    fwrite(src, 1, sizeof(src), f_src);
+    fseek(f_src, 0, SEEK_SET);
+    zxc_cctx* cctx = zxc_create_cctx();
+    int64_t cs = cctx ? zxc_cctx_set_dict(cctx, dict, nz, NULL) : -1;
+    if (cs == ZXC_OK) cs = zxc_stream_compress(f_src, f_comp, cctx);
+    zxc_free_cctx(cctx);
+    uint8_t h[ZXC_FILE_HEADER_SIZE];
+    const int got_h =
+        cs > 0 && fseek(f_comp, 0, SEEK_SET) == 0 && fread(h, 1, sizeof(h), f_comp) == sizeof(h);
+    int64_t r_none = -1;
+    int64_t r_dict = -1;
+    zxc_dctx* sdctx = zxc_create_dctx();
+    if (got_h && sdctx && fseek(f_comp, 0, SEEK_SET) == 0)
+        r_none = zxc_stream_decompress(f_comp, f_dec, sdctx);
+    if (got_h && sdctx && zxc_dctx_set_dict(sdctx, dict, nz, NULL) == ZXC_OK &&
+        fseek(f_comp, 0, SEEK_SET) == 0 && fseek(f_dec, 0, SEEK_SET) == 0)
+        r_dict = zxc_stream_decompress(f_comp, f_dec, sdctx);
+    zxc_free_dctx(sdctx);
+    const int same = r_dict == full && fseek(f_dec, 0, SEEK_SET) == 0 &&
+                     fread(dec, 1, sizeof(dec), f_dec) == sizeof(dec) &&
+                     memcmp(src, dec, sizeof(src)) == 0;
+    if (!got_h || zxc_requires_dict(h, sizeof(h)) != 1 || r_none != ZXC_ERROR_DICT_REQUIRED ||
+        !same) {
+        printf("  [FAIL] FILE*: compress %lld, no dict %lld, dict %lld\n", (long long)cs,
+               (long long)r_none, (long long)r_dict);
+        ok = 0;
+    }
+    fclose(f_src);
+    fclose(f_comp);
+    fclose(f_dec);
 
     // Seekable API.
     const int64_t ns =

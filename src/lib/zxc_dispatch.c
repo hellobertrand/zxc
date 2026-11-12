@@ -866,6 +866,21 @@ uint32_t zxc_get_dict_id(const void* src, const size_t src_size) {
 }
 
 /**
+ * @brief Tells whether an archive requires a dictionary, from its header.
+ *
+ * Public API; see @c zxc_buffer.h.
+ */
+// cppcheck-suppress unusedFunction
+int zxc_requires_dict(const void* src, const size_t src_size) {
+    if (UNLIKELY(!src)) return ZXC_ERROR_NULL_INPUT;
+    size_t chunk = 0;  // asked for so the block size code is checked too
+    int has_dict = 0;
+    const int rc =
+        zxc_read_file_header((const uint8_t*)src, src_size, &chunk, NULL, &has_dict, NULL, NULL);
+    return rc != ZXC_OK ? rc : has_dict;
+}
+
+/**
  * @brief Reads a frame's header and footer, without decoding.
  *
  * Public API; see @c zxc_buffer.h.
@@ -892,7 +907,7 @@ int zxc_get_last_frame_info(const void* src, const size_t src_size, zxc_frame_in
     const zxc_scan_src_t scan = zxc_scan_src_mem((const uint8_t*)src, src_size);
     zxc_frame_info_t got;
     uint64_t start = 0;
-    const int rc = zxc_scan_frame(&scan, src_size, &start, &got, NULL);
+    const int rc = zxc_scan_frame(&scan, src_size, &start, &got, NULL, NULL);
     if (rc == ZXC_OK) zxc_frame_info_copy(info, info_size, &got);
     return rc;
 }

@@ -1016,6 +1016,7 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
 /** @brief What a walk of a container finds. */
 typedef struct {
     zxc_frame_info_t first; /* the first frame */
+    int first_has_dict;     /* it needs a dictionary, whose id may be 0 */
     uint64_t frames;        /* ZXC frames */
     uint64_t checksummed;   /* frames carrying checksums */
     uint64_t seekable;      /* frames carrying a seek table */
@@ -1074,7 +1075,18 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
         }
         c->dsize += fi.decompressed_size;
         c->block_sizes |= (uint32_t)fi.block_size;
-        const uint64_t dict = fi.has_dictionary ? CLI_DICT_FLAG | fi.dict_id : 0;
+        uint8_t h[ZXC_FILE_HEADER_SIZE];
+        if (fseeko(f, (int64_t)(end - fi.compressed_size), SEEK_SET) != 0 ||
+            fread(h, 1, sizeof(h), f) != sizeof(h)) {
+            rc = ZXC_ERROR_IO;
+            break;
+        }
+        const int needs_dict = zxc_requires_dict(h, sizeof(h));
+        if (needs_dict < 0) {
+            rc = needs_dict;
+            break;
+        }
+        const uint64_t dict = needs_dict ? CLI_DICT_FLAG | fi.dict_id : 0;
         // One entry per run of frames sharing a dictionary, deduplicated after the walk.
         if (num == 0 || runs[num - 1].dict != dict) {
             if (num == cap) {
@@ -1092,6 +1104,7 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
             num++;
         }
         c->first = fi;  // the first frame's, once the walk is done
+        c->first_has_dict = needs_dict;
         end -= fi.compressed_size;
     } while (end > 0);
     // Each dictionary keeps its highest rank, its first frame in the file.
@@ -1210,7 +1223,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
         snprintf(digest_json, sizeof(digest_json), "\"%s\"", digest_str);
     }
     const uint32_t dict_id = cont.first.dict_id;
-    const int has_dict = cont.first.has_dictionary;
+    const int has_dict = cont.first_has_dict;
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;

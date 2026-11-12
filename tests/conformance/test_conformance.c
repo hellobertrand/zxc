@@ -178,13 +178,13 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
         return 0;
     }
 
-    /* Auto-detect dictionary: if the archive has a dict_id, find the .zxd */
+    /* Auto-detect dictionary: if the archive needs one, whatever its id, find the .zxd */
     const void* dict = NULL;
     size_t dict_size = 0;
     const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
-    uint32_t did = zxc_get_dict_id(comp, comp_sz);
-    if (did != 0) {
+    const uint32_t did = zxc_get_dict_id(comp, comp_sz);
+    if (zxc_requires_dict(comp, comp_sz) == 1) {
         dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size, &dict_huf);
         if (!dict_buf) {
             fprintf(stderr, "FAIL: %s  requires dict 0x%08X but no matching .zxd found\n", zxc_path,

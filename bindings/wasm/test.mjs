@@ -775,6 +775,16 @@ async function main() {
       idContent === idArchive,
       `dictId == getDictId(archive) (${idContent} == ${idArchive})`,
     );
+    let shortThrew = false;
+    try {
+      zxc.requiresDict(compressed.subarray(0, 8));
+    } catch {
+      shortThrew = true;
+    }
+    assert(
+      zxc.requiresDict(compressed) === true && shortThrew,
+      "requiresDict: true for a dict archive, throws on a short header",
+    );
 
     // trainDictHuf -> dictSave -> dictGetId / dictLoad / dictHuf roundtrip.
     const huf = zxc.trainDictHuf(samples, dict);
@@ -1278,6 +1288,7 @@ async function main() {
       dictHuf: () => zxc.dictHuf(zxd),
       dictId: () => zxc.dictId(dict),
       getDictId: () => zxc.getDictId(arcDict),
+      requiresDict: () => zxc.requiresDict(arcDict),
       dictGetId: () => zxc.dictGetId(zxd),
     };
 

@@ -181,7 +181,8 @@ static int zxc_seek_parse_frame(zxc_seek_source_t* src, const uint64_t end, zxc_
     zxc_frame_info_t fi;
     uint64_t start = 0;
     size_t footer_len = 0;
-    if (UNLIKELY(zxc_scan_frame(&scan, end, &start, &fi, &footer_len) != ZXC_OK ||
+    int has_dict = 0;
+    if (UNLIKELY(zxc_scan_frame(&scan, end, &start, &fi, &footer_len, &has_dict) != ZXC_OK ||
                  !fi.has_seek_table))
         return 0;
     const uint64_t frame = end - start;
@@ -215,7 +216,7 @@ static int zxc_seek_parse_frame(zxc_seek_source_t* src, const uint64_t end, zxc_
     f->block_size = block_size;
     f->has_checksums = fi.has_checksum;
     f->dict_id = fi.dict_id;
-    f->has_dict = fi.has_dictionary;
+    f->has_dict = has_dict;
     return 1;
 }
 

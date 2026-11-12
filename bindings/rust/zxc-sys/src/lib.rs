@@ -430,11 +430,20 @@ unsafe extern "C" {
     /// Returns the dictionary ID a ZXC compressed buffer requires.
     ///
     /// Reads the file header without decompressing. Returns 0 if the file
-    /// does not require a dictionary or the buffer is invalid.
+    /// does not require a dictionary or the buffer is invalid; 0 is also a
+    /// valid ID, see [`zxc_requires_dict`].
     ///
     /// # Safety
     /// - `src` must be a valid pointer to `src_size` bytes.
     pub fn zxc_get_dict_id(src: *const c_void, src_size: usize) -> u32;
+
+    /// Tells whether an archive requires a dictionary, from its header.
+    ///
+    /// Returns 1 or 0, or a negative error code for an invalid header.
+    ///
+    /// # Safety
+    /// - `src` must be a valid pointer to `src_size` bytes.
+    pub fn zxc_requires_dict(src: *const c_void, src_size: usize) -> c_int;
 }
 
 // =============================================================================

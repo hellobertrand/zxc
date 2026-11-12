@@ -162,6 +162,7 @@ static PyObject* pyzxc_version_codename(PyObject* self, PyObject* args);
 static PyObject* pyzxc_train_dict(PyObject* self, PyObject* args, PyObject* kwargs);
 static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_get_dict_id(PyObject* self, PyObject* arg);
+static PyObject* pyzxc_requires_dict(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_dict_get_id(PyObject* self, PyObject* arg);
 static PyObject* pyzxc_dict_save(PyObject* self, PyObject* args);
 static PyObject* pyzxc_train_dict_huf(PyObject* self, PyObject* args, PyObject* kwargs);
@@ -254,6 +255,7 @@ static PyMethodDef zxc_methods[] = {
     {"pyzxc_train_dict", (PyCFunction)pyzxc_train_dict, METH_VARARGS | METH_KEYWORDS, NULL},
     {"pyzxc_dict_id", (PyCFunction)pyzxc_dict_id, METH_O, NULL},
     {"pyzxc_get_dict_id", (PyCFunction)pyzxc_get_dict_id, METH_O, NULL},
+    {"pyzxc_requires_dict", (PyCFunction)pyzxc_requires_dict, METH_O, NULL},
     {"pyzxc_dict_get_id", (PyCFunction)pyzxc_dict_get_id, METH_O, NULL},
     {"pyzxc_dict_save", (PyCFunction)pyzxc_dict_save, METH_VARARGS, NULL},
     {"pyzxc_train_dict_huf", (PyCFunction)pyzxc_train_dict_huf, METH_VARARGS | METH_KEYWORDS, NULL},
@@ -1002,7 +1004,7 @@ static PyObject* pyzxc_dict_id(PyObject* self, PyObject* arg) {
     return PyLong_FromUnsignedLong(id);
 }
 
-/* Dictionary ID required by a .zxc archive (0 if none). */
+/* Dictionary ID required by a .zxc archive (0 if none, or ID 0: see requires_dict). */
 static PyObject* pyzxc_get_dict_id(PyObject* self, PyObject* arg) {
     (void)self;
     Py_buffer view;
@@ -1010,6 +1012,18 @@ static PyObject* pyzxc_get_dict_id(PyObject* self, PyObject* arg) {
     uint32_t id = zxc_get_dict_id(view.buf, (size_t)view.len);
     PyBuffer_Release(&view);
     return PyLong_FromUnsignedLong(id);
+}
+
+/* Whether an archive needs a dictionary, from its header flag; RuntimeError
+ * with the zxc error name on an invalid header. */
+static PyObject* pyzxc_requires_dict(PyObject* self, PyObject* arg) {
+    (void)self;
+    Py_buffer view;
+    if (PyObject_GetBuffer(arg, &view, PyBUF_SIMPLE) < 0) return NULL;
+    const int rc = zxc_requires_dict(view.buf, (size_t)view.len);
+    PyBuffer_Release(&view);
+    if (rc < 0) Py_Return_Err(PyExc_RuntimeError, zxc_error_name(rc));
+    return PyBool_FromLong(rc);
 }
 
 /* Dictionary ID stored in a .zxd file (0 if not a valid .zxd). */
