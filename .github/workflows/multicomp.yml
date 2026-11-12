@@ -91,7 +91,7 @@ jobs:
   # GCC 9–16 on Ubuntu
   # ===========================================================================
   gcc:
-    name: "GCC ${{ matrix.version }}"
+    name: "GCC ${{ matrix.version }}${{ matrix.label }}"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     strategy:
@@ -109,6 +109,10 @@ jobs:
           # Ubuntu 26.04 preinstalls GCC 13, 14, 15; GCC 16 lives in universe.
           - { os: ubuntu-26.04, version: 15 }
           - { os: ubuntu-26.04, version: 16, needs_install: true }
+          # C11 is the documented floor.
+          - { os: ubuntu-22.04, version: 9, needs_install: true, c_std: 11, label: " (c11)" }
+          # GCC 15+ defaults to C23.
+          - { os: ubuntu-26.04, version: 16, needs_install: true, c_std: 23, label: " (c23)" }
 
     steps:
       - name: Checkout Repository
@@ -124,7 +128,7 @@ jobs:
         shell: bash
         run: |
           for LIB_TYPE in "STATIC" "SHARED"; do
-              echo ">>> Starting Build: GCC ${{ matrix.version }} – $LIB_TYPE"
+              echo ">>> Starting Build: GCC ${{ matrix.version }}${{ matrix.label }} – $LIB_TYPE"
               BUILD_DIR="build_${LIB_TYPE}"
 
               SHARED_FLAG="OFF"
@@ -134,8 +138,8 @@ jobs:
                   -DCMAKE_BUILD_TYPE=Release \
                   -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
                   -DCMAKE_C_COMPILER=gcc-${{ matrix.version }} \
-                  -DCMAKE_CXX_COMPILER=g++-${{ matrix.version }} \
-                  -DCMAKE_C_STANDARD=17 \
+                  -DCMAKE_C_STANDARD=${{ matrix.c_std || 17 }} \
+                  -DCMAKE_C_EXTENSIONS=${{ matrix.c_ext || 'OFF' }} \
                   -DZXC_NATIVE_ARCH=OFF \
                   -DBUILD_SHARED_LIBS=$SHARED_FLAG
 
