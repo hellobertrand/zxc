@@ -32,8 +32,8 @@ author:
 
 normative:
   RAPIDHASH:
-    title: "RapidHash: a fast, high-quality non-cryptographic hash function"
-    target: https://github.com/Nicoshev/rapidhash
+    title: "rapidhash V3"
+    target: https://github.com/Nicoshev/rapidhash/tree/rapidhash_v3
     author:
       -
         ins: N. De Carli
@@ -160,7 +160,7 @@ Sequence:
 
 Conforming decoder:
 : An implementation that, given a syntactically valid ZXC stream
-  produced by a conforming encoder at the same major version,
+  produced by a conforming encoder for the same Format Version,
   reproduces the original input bytes exactly and detects every
   error condition listed in {{error-handling}}; the two checksum
   comparisons apply to a decoder that verifies checksums
@@ -343,6 +343,20 @@ Header Checksum (u8):
 : The 8-bit header checksum of {{header-checksums}}, computed over
   the 8-byte block header with byte 0x07 treated as zero.
 
+## Decoded Block Sizes {#decoded-block-sizes}
+
+An encoder MUST cut the source into blocks of exactly the block size,
+the last one alone being allowed to be shorter, and MUST NOT emit a data
+block that decodes to zero bytes: an empty source has no data block.
+The seek table depends on this rule ({{sek-layout}}), which is how the
+number of blocks follows from Source Size.
+
+A decoder MUST reject a block that decodes to more than the block size.
+It is not required to reject a short or empty block ahead of the last
+one when it reads the frame sequentially; with HAS_SEEK_TABLE = 1 such
+a frame fails the SEK block check, the table no longer matching the
+block count.
+
 ## Physical Block Layout
 
 ~~~
@@ -414,7 +428,7 @@ Literal Encoding:
   ({{shared-huffman-literal-section}}).
 
 Token Encoding:
-: 0 = RAW tokens, 2 = Huffman tokens (level 7 only).
+: 0 = RAW tokens, 2 = Huffman tokens.
 
 Match-Length Encoding:
 : RESERVED; match lengths share the token byte.
@@ -495,10 +509,10 @@ Literals:
 Tokens:
 : One byte per sequence, formed as (LL << 4) | ML. The high nibble is LL
   (literal length) and the low nibble is ML (match length minus the
-  minimum match of 5). When Token Encoding = 0 (all levels <= 6), the
+  minimum match of 5). When Token Encoding = 0, the
   Sequence Count token bytes are stored verbatim and the Tokens
   section's compressed size equals Sequence Count. When Token
-  Encoding = 2 (level 7 only), the token bytes are Huffman-coded over
+  Encoding = 2, the token bytes are Huffman-coded over
   the token alphabet using the {{huffman-literal-section}} layout,
   including the inline 128-byte code-length header; the section's
   compressed size is the encoded payload size, and the decoder expands
@@ -602,9 +616,9 @@ by tree level rather than by symbol.
 
 ### Canonical Code
 
-Codes are length-limited at L = 11 bits. Levels <= 6 never emit a
-code longer than 8 bits; level 7 (ULTRA) MAY emit codes up to 11
-bits. Symbols are ordered by (code_len, symbol) and assigned
+Codes are length-limited at L = 11 bits, and a decoder MUST support
+every length up to 11. The reference encoder emits codes longer than 8
+bits only at its highest level. Symbols are ordered by (code_len, symbol) and assigned
 consecutive code values in that order, starting at zero and
 left-shifting by one whenever the length increases, the standard
 canonical construction. The code tree is the binary trie of these
@@ -663,6 +677,10 @@ A conforming decoder MUST enforce the following constraints:
 A violation of any of the above MUST be reported as a corrupt-data
 error.
 
+An encoder MUST NOT use Literal Encoding 2 or 3 when Literal Count is
+0. A decoder that meets one has no symbol to decode and MAY skip the
+section without applying the checks above.
+
 ### Encoder Selection Policy
 
 Choosing among the literal encodings is an encoder policy, not a
@@ -702,7 +720,7 @@ decoder MUST reject a Literal Encoding = 3 section when no dictionary
 table is attached ({{error-handling}}); the archive's Dictionary ID
 guarantees a matching table whenever the dictionary check has passed.
 
-The level-7 token section reuses the {{huffman-literal-section}}
+The Huffman-coded token section reuses the {{huffman-literal-section}}
 layout (Token Encoding = 2, including the inline 128-byte code-length
 header) over the token byte alphabet.
 
@@ -978,8 +996,13 @@ A conforming decoder:
 
 A conforming encoder:
 
+- MUST emit each value in its shortest form: 1 byte below 2^7, 2 bytes
+  below 2^14, 3 bytes otherwise.
 - MUST NOT emit a varint encoding longer than 3 bytes.
 - MUST NOT emit a value greater than (2^21 - 1).
+
+A decoder is not required to reject a value written on more bytes than
+it needs: the 2- and 3-byte forms decode whatever value they carry.
 
 Future format versions MAY raise L_MAX (and correspondingly the
 per-block size limit) without breaking the encoding scheme; the
@@ -1076,8 +1099,10 @@ fold32(h) = (h XOR (h >> 32)) AND 0xFFFFFFFF
 {: #fold32}
 
 Wherever this document refers to RapidHash, implementations MUST use
-RapidHash version 3 {{RAPIDHASH}} with the function's default
-secret; the seed is 0 unless a seed is stated explicitly. Other
+the full rapidhash function of version 3 {{RAPIDHASH}}, as published
+under the tag rapidhash_v3 (rapidhash_withSeed in its C header), with
+the function's default secret; the seed is 0 unless a seed is stated
+explicitly. The Micro and Nano variants of version 3 and the other
 versions of the function produce different digests and are not
 interoperable.
 
@@ -1236,6 +1261,13 @@ content alone:
 Dictionary ID = fold32(rapidhash(content))
 ~~~
 
+The Dictionary ID 0 is reserved: it denotes the absence of a
+dictionary. A dictionary whose identifier computes to 0, one chance in
+2^32, cannot be referenced by an archive; an encoder MUST NOT compress
+against it, and a trainer MUST NOT produce it, for instance by altering
+the content until the identifier differs. An encoder MUST NOT set
+HAS_DICTIONARY with a Dictionary ID of 0.
+
 Blocks compressed against a dictionary contain match offsets that
 reference dictionary content, so decoding them without the dictionary
 produces incorrect output.
@@ -1297,7 +1329,7 @@ Dictionary ID (u32):
   with fold32 of the RapidHash of the Dictionary Content, so that
   each byte is hashed exactly once. It MUST equal the Dictionary ID
   stored in the File Header of any ZXC archive compressed with this
-  dictionary.
+  dictionary. The value 0 is reserved ({{dictionary-header-encoding}}).
 
 Reserved:
 : 2 bytes. Encoders MUST set these to zero; a loader MUST reject a
@@ -1462,7 +1494,7 @@ A minimum conforming decoder for Format Version 9 MUST support:
 - File footer validation: sizes, lengths and Size Lengths ({{file-footer}}).
 - Concatenated frames ({{concatenated-frames}}).
 
-Because level-7 archives encode both literals and tokens with the
+Because an archive can encode both literals and tokens with the
 Huffman/PivCo layout, support for {{huffman-literal-section}} is
 REQUIRED. Dictionary support ({{dictionary}}) is OPTIONAL. Verification
 of the per-block checksums ({{per-block-checksum}}) and of the Archive
@@ -1525,9 +1557,8 @@ When a fatal error occurs mid-stream, a conforming decoder SHOULD:
 2. Report the specific error condition.
 3. Not return partially decompressed data as a valid result.
 
-Buffer-mode decoders MUST return a negative error code. Stream-mode
-decoders MUST signal the error to the caller and cease writing to
-the output sink.
+A decoder MUST signal the error to its caller and cease writing to
+the output.
 
 ## Decoder Hardening Recommendations
 
@@ -1606,12 +1637,11 @@ this document MAY assign meaning to any RESERVED field.
 
 ## Side Channels
 
-The parallel-decode design of the Huffman literal section
-({{huffman-literal-section}}) does not introduce data-dependent
-secret memory access beyond what is intrinsic to canonical Huffman
-decoding. Implementers processing secrets through a ZXC decoder
-SHOULD perform their own side-channel analysis and consider
-constant-time alternatives where required.
+Decoding time and memory access patterns depend on the compressed
+data, as with any LZ77 and Huffman decoder, and the compressed size
+depends on the content. Implementers processing secrets through a ZXC
+encoder or decoder SHOULD perform their own side-channel analysis and
+consider constant-time alternatives where required.
 
 # IANA Considerations
 
@@ -1687,7 +1717,7 @@ Change controller:
 : Bertrand Lebonnois
 
 Provisional registration:
-: Yes
+: No
 
 ## File Extension
 
