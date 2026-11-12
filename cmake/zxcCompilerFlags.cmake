@@ -8,9 +8,18 @@
 # =============================================================================
 # C Standard
 # =============================================================================
-set(CMAKE_C_STANDARD 17)
+# Only -D overrides, not a parent project's variable.
+if(DEFINED CACHE{CMAKE_C_STANDARD})
+    set(CMAKE_C_STANDARD "$CACHE{CMAKE_C_STANDARD}")
+else()
+    set(CMAKE_C_STANDARD 17)
+endif()
 set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+if(DEFINED CACHE{CMAKE_C_EXTENSIONS})
+    set(CMAKE_C_EXTENSIONS "$CACHE{CMAKE_C_EXTENSIONS}")
+else()
+    set(CMAKE_C_EXTENSIONS OFF)
+endif()
 
 # The code needs POSIX.1-2008 plus realpath, which musl gates behind
 # _XOPEN_SOURCE. Linux stops short of _GNU_SOURCE: it makes glibc >= 2.38
