@@ -10,7 +10,7 @@
 
 Software delivery pipelines such as mobile gaming, embedded systems and firmware over-the-air updates produce data once, on x86 build servers, and consume it millions of times on energy-constrained ARM devices.
 
-LZ4 and its peers are symmetric: they spend as little on compression as on decompression, which wastes the one-time encoding budget. ZXC is an asymmetric lossless codec: a slow encoder shapes the stream so that the decoder runs as fast as the hardware allows. At its default level it decodes 1.5x to 1.9x faster than LZ4 on ARM and 1.28x to 1.53x on x86, with smaller output (46.65 % against 47.32 % on Silesia).
+LZ4 and its peers are symmetric: they spend as little on compression as on decompression, which wastes the one-time encoding budget. ZXC is an asymmetric lossless codec: a slow encoder shapes the stream so that the decoder runs as fast as the hardware allows. At its default level it decodes 1.5x to 2.2x faster than LZ4 on ARM and 1.28x to 1.53x on x86, with smaller output (46.65 % against 47.32 % on Silesia).
 
 ## 2. The Efficiency Gap
 
@@ -274,44 +274,44 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 
 | Compressor | Decompression Speed (Ratio vs LZ4) | Compressed Size (Index LZ4=100) (Lower is Better) |
 | :--- | :--- | :--- |
-| **zxc 1.0.0 -1** | **2.51x** | **130.51** |
-| **zxc 1.0.0 -2** | **2.13x** | **113.81** |
-| **zxc 1.0.0 -3** | **1.88x** | **98.58** |
-| **zxc 1.0.0 -4** | **1.71x** | **91.78** |
-| **zxc 1.0.0 -5** | **1.58x** | **86.29** |
-| **zxc 1.0.0 -6** | **1.33x** | **76.67** |
-| **zxc 1.0.0 -7** | **0.99x** | **69.92** |
-| lz4 1.11.0 --fast -17 | 1.21x | 130.81 |
+| **zxc 1.0.0 -1** | **2.97x** | **130.51** |
+| **zxc 1.0.0 -2** | **2.52x** | **113.81** |
+| **zxc 1.0.0 -3** | **2.23x** | **98.58** |
+| **zxc 1.0.0 -4** | **2.02x** | **91.78** |
+| **zxc 1.0.0 -5** | **1.87x** | **86.29** |
+| **zxc 1.0.0 -6** | **1.58x** | **76.67** |
+| **zxc 1.0.0 -7** | **1.17x** | **69.92** |
+| lz4 1.11.0 --fast -17 | 1.26x | 130.81 |
 | lz4 1.11.0 (Ref) | 1.00x | 100.00 |
 | lz4hc 1.11.0 -9 | 0.94x | 77.65 |
-| lzav 7.1 -1 | 0.73x | 82.90 |
-| snappy 1.3.1 | 0.59x | 101.11 |
-| zstd 1.5.7 --fast --1 | 0.47x | 86.66 |
-| zstd 1.5.7 -1 | 0.34x | 72.98 |
-| zstd 1.5.7 -3 | 0.32x | 65.94 |
-| zlib 1.4 -1 | 0.08x | 77.03 |
+| lzav 7.1 -1 | 0.86x | 82.90 |
+| snappy 1.3.1 | 0.69x | 101.11 |
+| zstd 1.5.7 --fast --1 | 0.56x | 86.66 |
+| zstd 1.5.7 -1 | 0.40x | 72.98 |
+| zstd 1.5.7 -3 | 0.38x | 65.94 |
+| zlib 1.4 -1 | 0.09x | 77.03 |
 
 **Decompression Efficiency (Cycles per Byte @ 4.05 GHz)**
 
 | Compressor              | Cycles/Byte | Performance vs memcpy (*) |
 | ----------------------- | ----------- | --------------------- |
 | memcpy                  | 0.095       | 1.00x (baseline)      |
-| **zxc 1.0.0 -1**       | **0.276**   | **2.9x**              |
-| **zxc 1.0.0 -2**       | **0.325**   | **3.4x**              |
-| **zxc 1.0.0 -3**       | **0.367**   | **3.9x**              |
-| **zxc 1.0.0 -4**       | **0.405**   | **4.3x**              |
-| **zxc 1.0.0 -5**       | **0.439**   | **4.6x**              |
-| **zxc 1.0.0 -6**       | **0.518**   | **5.5x**              |
-| **zxc 1.0.0 -7**       | **0.700**   | **7.4x**              |
-| lz4 1.11.0              | 0.691       | 7.3x                  |
-| lz4 1.11.0 --fast -17   | 0.572       | 6.0x                  |
-| lz4hc 1.11.0 -9         | 0.732       | 7.7x                  |
-| lzav 7.1 -1             | 0.950       | 10.0x                 |
-| zstd 1.5.7 -1           | 2.062       | 21.8x                 |
-| zstd 1.5.7 --fast --1   | 1.466       | 15.5x                 |
-| zstd 1.5.7 -3           | 2.168       | 22.9x                 |
-| snappy 1.3.1            | 1.180       | 12.5x                 |
-| zlib 1.4 -1             | 9.000       | 95.0x                 |
+| **zxc 1.0.0 -1**       | **0.277**   | **2.9x**              |
+| **zxc 1.0.0 -2**       | **0.326**   | **3.4x**              |
+| **zxc 1.0.0 -3**       | **0.368**   | **3.9x**              |
+| **zxc 1.0.0 -4**       | **0.406**   | **4.3x**              |
+| **zxc 1.0.0 -5**       | **0.440**   | **4.6x**              |
+| **zxc 1.0.0 -6**       | **0.521**   | **5.5x**              |
+| **zxc 1.0.0 -7**       | **0.702**   | **7.4x**              |
+| lz4 1.11.0              | 0.820       | 8.7x                  |
+| lz4 1.11.0 --fast -17   | 0.649       | 6.8x                  |
+| lz4hc 1.11.0 -9         | 0.875       | 9.2x                  |
+| lzav 7.1 -1             | 0.949       | 10.0x                 |
+| zstd 1.5.7 -1           | 2.055       | 21.7x                 |
+| zstd 1.5.7 --fast --1   | 1.458       | 15.4x                 |
+| zstd 1.5.7 -3           | 2.158       | 22.8x                 |
+| snappy 1.3.1            | 1.182       | 12.5x                 |
+| zlib 1.4 -1             | 9.020       | 95.1x                 |
 
 **Throughput over a link**
 
@@ -319,10 +319,10 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | :--- | ---: | ---: | ---: |
 | 125 MB/s (1 GbE) | 3.02x (`zxc -7`) | 2.72x (`lz4hc -9`) | **3.21x** (`zstd -3`) |
 | 1.25 GB/s (10 GbE) | **3.02x** (`zxc -7`) | 2.72x (`lz4hc -9`) | 2.21x (`zstd --fast --1`) |
-| 3 GB/s | **2.61x** (`zxc -6`) | 1.95x (`lz4`) | 0.92x (`zstd --fast --1`) |
-| 7 GB/s (NVMe) | **1.78x** (`zxc -2`) | 1.01x (`lz4 --fast -17`) | 0.39x (`zstd --fast --1`) |
+| 3 GB/s | **2.59x** (`zxc -6`) | 1.65x (`lz4`) | 0.93x (`zstd --fast --1`) |
+| 7 GB/s (NVMe) | **1.77x** (`zxc -2`) | 0.89x (`lz4 --fast -17`) | 0.40x (`zstd --fast --1`) |
 
-*Reading: on Apple M3, the ratio of `zstd -3` leads below 618 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.92 GB/s, then the faster levels in turn, up to 14.7 GB/s, where one decoding thread falls behind the link and compression stops paying (7.08 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
+*Reading: on Apple M3, the ratio of `zstd -3` leads below 621 MB/s. Above that a ZXC level delivers the most data: -7 up to 1.91 GB/s, then the faster levels in turn, up to 14.6 GB/s, where one decoding thread falls behind the link and compression stops paying (6.24 GB/s for LZ4). No LZ4 or LZ4HC level is ahead of the best ZXC level at any bandwidth.*
 
 
 ### 7.2 Cloud Server Summary (ARM64 / Google Axion Neoverse-V2)
@@ -505,23 +505,23 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 
 | Compressor name         | Compression| Decompress.| Compr. size | Ratio | Filename |
 | ---------------         | -----------| -----------| ----------- | ----- | -------- |
-| memcpy                  | 42771 MB/s | 42739 MB/s |   211947520 |100.00 | 1 files|
-| **zxc 1.0.0 -1**           |   982 MB/s | **14684 MB/s** |   130896288 | **61.76** | 1 files|
-| **zxc 1.0.0 -2**           |   653 MB/s | **12477 MB/s** |   114152506 | **53.86** | 1 files|
-| **zxc 1.0.0 -3**           |   289 MB/s | **11043 MB/s** |    98875304 | **46.65** | 1 files|
-| **zxc 1.0.0 -4**           |   211 MB/s | **10003 MB/s** |    92052403 | **43.43** | 1 files|
-| **zxc 1.0.0 -5**           |   127 MB/s |  **9232 MB/s** |    86544351 | **40.83** | 1 files|
-| **zxc 1.0.0 -6**           |  16.5 MB/s |  **7819 MB/s** |    76900560 | **36.28** | 1 files|
-| **zxc 1.0.0 -7**           |  11.2 MB/s |  **5789 MB/s** |    70129881 | **33.09** | 1 files|
-| lz4 1.11.0              |   883 MB/s |  5859 MB/s |   100297438 | 47.32 | 1 files|
-| lz4 1.11.0 --fast -17   |  1532 MB/s |  7085 MB/s |   131194546 | 61.90 | 1 files|
-| lz4hc 1.11.0 -9         |  51.8 MB/s |  5535 MB/s |    77884448 | 36.75 | 1 files|
-| lzav 7.1 -1             |   776 MB/s |  4264 MB/s |    83147688 | 39.23 | 1 files|
-| snappy 1.3.1            |   723 MB/s |  3432 MB/s |   101415443 | 47.85 | 1 files|
-| zstd 1.5.7 --fast --1   |   801 MB/s |  2763 MB/s |    86916294 | 41.01 | 1 files|
-| zstd 1.5.7 -1           |   710 MB/s |  1964 MB/s |    73193704 | 34.53 | 1 files|
-| zstd 1.5.7 -3           |   440 MB/s |  1868 MB/s |    66133500 | 31.20 | 1 files|
-| zlib 1.4 -1             |   167 MB/s |   450 MB/s |    77259029 | 36.45 | 1 files|
+| memcpy                  | 42707 MB/s | 42720 MB/s |   211947520 |100.00 | 1 files|
+| **zxc 1.0.0 -1**           |   982 MB/s | **14646 MB/s** |   130896288 | **61.76** | 1 files|
+| **zxc 1.0.0 -2**           |   652 MB/s | **12422 MB/s** |   114152506 | **53.86** | 1 files|
+| **zxc 1.0.0 -3**           |   290 MB/s | **11006 MB/s** |    98875304 | **46.65** | 1 files|
+| **zxc 1.0.0 -4**           |   211 MB/s |  **9974 MB/s** |    92052403 | **43.43** | 1 files|
+| **zxc 1.0.0 -5**           |   127 MB/s |  **9210 MB/s** |    86544351 | **40.83** | 1 files|
+| **zxc 1.0.0 -6**           |  16.6 MB/s |  **7780 MB/s** |    76900560 | **36.28** | 1 files|
+| **zxc 1.0.0 -7**           |  11.2 MB/s |  **5773 MB/s** |    70129881 | **33.09** | 1 files|
+| lz4 1.11.0              |   873 MB/s |  4937 MB/s |   100297438 | 47.32 | 1 files|
+| lz4 1.11.0 --fast -17   |  1468 MB/s |  6237 MB/s |   131194546 | 61.90 | 1 files|
+| lz4hc 1.11.0 -9         |  51.4 MB/s |  4629 MB/s |    77884448 | 36.75 | 1 files|
+| lzav 7.1 -1             |   773 MB/s |  4268 MB/s |    83147688 | 39.23 | 1 files|
+| snappy 1.3.1            |   722 MB/s |  3427 MB/s |   101415443 | 47.85 | 1 files|
+| zstd 1.5.7 --fast --1   |   808 MB/s |  2778 MB/s |    86916294 | 41.01 | 1 files|
+| zstd 1.5.7 -1           |   714 MB/s |  1971 MB/s |    73193704 | 34.53 | 1 files|
+| zstd 1.5.7 -3           |   441 MB/s |  1877 MB/s |    66133500 | 31.20 | 1 files|
+| zlib 1.4 -1             |   165 MB/s |   449 MB/s |    77259029 | 36.45 | 1 files|
 
 
 #### 7.5.2 ARM64 Architecture (Google Axion Neoverse-V2)
@@ -615,10 +615,10 @@ Peak decode memory drops from *compressed + decompressed* to *decompressed + abo
 
 ## 8. Choosing a Level
 
-*   **Interactive media and gaming (1 to 3)**: hard real-time budgets, texture streaming, asset loading; 28 % to 2.5x faster decode than LZ4.
+*   **Interactive media and gaming (1 to 3)**: hard real-time budgets, texture streaming, asset loading; 28 % to 3.0x faster decode than LZ4.
 *   **Embedded and firmware (3 to 5)**: density on limited flash (kernel, initramfs) with instant-on boot.
-*   **Archival (5 and 6)**: better ratio than LZ4 and far faster retrieval than Zstandard. Level 6 beats LZ4-HC on both axes: 36.28 against 36.75 on silesia, and faster decode on every platform measured (+41 % on Apple Silicon, +26 % on Neoverse-V2, +15 % on Zen 5, +9 % on Zen 3).
-*   **Maximum density (7)**: deep parse (search depth 128), 11-bit codes and Huffman-coded tokens. 33.09 % on silesia, better than `zstd -1` (34.53 %), decoding at 2.2x to 3.0x its speed (5.8 GB/s on Apple M3). It fills the gap between LZ4HC and Zstandard.
+*   **Archival (5 and 6)**: better ratio than LZ4 and far faster retrieval than Zstandard. Level 6 beats LZ4-HC on both axes: 36.28 against 36.75 on silesia, and faster decode on every platform measured (+68 % on Apple Silicon, +26 % on Neoverse-V2, +15 % on Zen 5, +9 % on Zen 3).
+*   **Maximum density (7)**: deep parse (search depth 128), 11-bit codes and Huffman-coded tokens. 33.09 % on silesia, better than `zstd -1` (34.53 %), decoding at 2.2x to 2.9x its speed (5.8 GB/s on Apple M3). It fills the gap between LZ4HC and Zstandard.
 *   **Small homogeneous payloads, any level**: a pre-trained dictionary (§5.7) restores the ratio that 4 KB to 128 KB blocks lose (API responses, RPC messages, key-value records, logs, small assets, seekable corpora). One dictionary, trained offline, serves millions of independently decodable payloads at no per-archive cost.
 
 ## 9. Conclusion

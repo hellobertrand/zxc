@@ -8,7 +8,7 @@
 
 <!-- [![Latest release](https://img.shields.io/github/v/release/hellobertrand/zxc)](https://github.com/hellobertrand/zxc/releases/latest) -->
 
-ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.1x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio. Level -7, the densest, compresses better than `zstd -1` while decoding up to 3.0x faster.
+ZXC is a fast lossless compression algorithm, targeting write-once, read-many workloads: data compressed once at build time, then decompressed on every device that reads it. It features an extremely fast decoder, with speeds of multiple GB/s per core: levels -1 to -6 decode 1.1x to 2.3x faster than LZ4 (`lz4 --fast`, `lz4` or `lz4hc`, whichever matches the ratio) at an equal or better compression ratio. Level -7, the densest, compresses better than `zstd -1` while decoding up to 2.9x faster.
 
 ZXC also provides seekable archives for O(1) random access, in-place decompression, and dictionary compression for small data.
 
@@ -20,7 +20,7 @@ The ZXC format is fully specified in [FORMAT.md](docs/FORMAT.md) and guarded by 
 
 | Machine | `-1` vs `lz4 --fast` | `-3` vs `lz4` | `-6` vs `lz4hc -9` | `-7` vs `zstd -1` |
 | :--- | ---: | ---: | ---: | ---: |
-| Apple M3 | **2.07x** | **1.88x** | **1.41x** | **2.95x** |
+| Apple M3 | **2.35x** | **2.23x** | **1.68x** | **2.93x** |
 | Axion (Neoverse-V2) | **1.82x** | **1.51x** | **1.26x** | **2.16x** |
 | EPYC 9B45 (Zen 5) | **1.91x** | **1.53x** | **1.15x** | **2.49x** |
 | EPYC 7B13 (Zen 3) | **1.65x** | **1.28x** | **1.09x** | **2.36x** |
@@ -51,22 +51,22 @@ Apple M3 (ARM64)
 
 | Codec | Compression | Decompression | Ratio |
 | :--- | ---: | ---: | ---: |
-| **zxc 1.0.0 -1** | 982 MB/s | **14684 MB/s** | **61.76 %** |
-| **zxc 1.0.0 -2** | 653 MB/s | **12477 MB/s** | **53.86 %** |
-| **zxc 1.0.0 -3** | 289 MB/s | **11043 MB/s** | **46.65 %** |
-| **zxc 1.0.0 -4** | 211 MB/s | **10003 MB/s** | **43.43 %** |
-| **zxc 1.0.0 -5** | 127 MB/s | **9232 MB/s** | **40.83 %** |
-| **zxc 1.0.0 -6** | 16.5 MB/s | **7819 MB/s** | **36.28 %** |
-| **zxc 1.0.0 -7** | 11.2 MB/s | **5789 MB/s** | **33.09 %** |
-| lz4 1.11.0 --fast -17 | 1532 MB/s | 7085 MB/s | 61.90 % |
-| lz4 1.11.0 | 883 MB/s | 5859 MB/s | 47.32 % |
-| lz4hc 1.11.0 -9 | 51.8 MB/s | 5535 MB/s | 36.75 % |
-| lzav 7.1 -1 | 776 MB/s | 4264 MB/s | 39.23 % |
-| snappy 1.3.1 | 723 MB/s | 3432 MB/s | 47.85 % |
-| zstd 1.5.7 --fast --1 | 801 MB/s | 2763 MB/s | 41.01 % |
-| zstd 1.5.7 -1 | 710 MB/s | 1964 MB/s | 34.53 % |
-| zstd 1.5.7 -3 | 440 MB/s | 1868 MB/s | 31.20 % |
-| zlib 1.4 -1 | 167 MB/s | 450 MB/s | 36.45 % |
+| **zxc 1.0.0 -1** | 982 MB/s | **14646 MB/s** | **61.76 %** |
+| **zxc 1.0.0 -2** | 652 MB/s | **12422 MB/s** | **53.86 %** |
+| **zxc 1.0.0 -3** | 290 MB/s | **11006 MB/s** | **46.65 %** |
+| **zxc 1.0.0 -4** | 211 MB/s | **9974 MB/s** | **43.43 %** |
+| **zxc 1.0.0 -5** | 127 MB/s | **9210 MB/s** | **40.83 %** |
+| **zxc 1.0.0 -6** | 16.6 MB/s | **7780 MB/s** | **36.28 %** |
+| **zxc 1.0.0 -7** | 11.2 MB/s | **5773 MB/s** | **33.09 %** |
+| lz4 1.11.0 --fast -17 | 1468 MB/s | 6237 MB/s | 61.90 % |
+| lz4 1.11.0 | 873 MB/s | 4937 MB/s | 47.32 % |
+| lz4hc 1.11.0 -9 | 51.4 MB/s | 4629 MB/s | 36.75 % |
+| lzav 7.1 -1 | 773 MB/s | 4268 MB/s | 39.23 % |
+| snappy 1.3.1 | 722 MB/s | 3427 MB/s | 47.85 % |
+| zstd 1.5.7 --fast --1 | 808 MB/s | 2778 MB/s | 41.01 % |
+| zstd 1.5.7 -1 | 714 MB/s | 1971 MB/s | 34.53 % |
+| zstd 1.5.7 -3 | 441 MB/s | 1877 MB/s | 31.20 % |
+| zlib 1.4 -1 | 165 MB/s | 449 MB/s | 36.45 % |
 
 <details>
 <summary>Google Axion (Neoverse-V2, ARM64)</summary>
@@ -150,7 +150,7 @@ Apple M3 (ARM64)
 >
 > - **Below 0.4–0.6 GB/s the ratio decides**, and `zstd -3` is ahead.
 > - **From there on, a ZXC level delivers the most data**: -7 up to 1.0–1.9 GB/s, then the faster levels in turn. No LZ4 or LZ4HC level is ever above the ZXC curve.
-> - **Compression stops paying** once one decoding thread is slower than the link: past 8.2–14.7 GB/s for `zxc -1`, 5.0–7.1 GB/s for LZ4.
+> - **Compression stops paying** once one decoding thread is slower than the link: past 8.2–14.6 GB/s for `zxc -1`, 5.0–6.2 GB/s for LZ4.
 
 ## Features
 
