@@ -1604,6 +1604,87 @@ int test_dict_dctx_roundtrip(void) {
     return ok;
 }
 
+// A dictionary that hashes to 0 gets id 1: 0 means "no dictionary" in a header.
+int test_dict_id_never_zero(void) {
+    printf("=== TEST: Dict - id 0 remaps to 1 ===\n");
+
+    // Found by search: both hash to 0, the second with this table.
+    static const char k_zero[] = "zxc-dict-id-zero-182690797";
+    static const char k_zero_huf[] = "zxc-dict-id-zero-3707268039";
+    const size_t nz = sizeof(k_zero) - 1;
+    const size_t nh = sizeof(k_zero_huf) - 1;
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    memset(huf, 0x88, sizeof(huf));
+
+    if (zxc_checksum(k_zero, nz, 0, ZXC_CHECKSUM_RAPIDHASH) != 0 ||
+        zxc_checksum(huf, sizeof(huf), zxc_checksum(k_zero_huf, nh, 0, ZXC_CHECKSUM_RAPIDHASH),
+                     ZXC_CHECKSUM_RAPIDHASH) != 0) {
+        printf("  [FAIL] test vectors no longer hash to 0\n");
+        return 0;
+    }
+    int ok = 1;
+    if (zxc_dict_compute_id(k_zero, nz, NULL) != 1 ||
+        zxc_dict_compute_id(k_zero_huf, nh, huf) != 1) {
+        printf("  [FAIL] compute_id: expected 1\n");
+        ok = 0;
+    }
+
+    // The archive flags the dictionary and decodes only with it.
+    uint8_t src[2048];
+    gen_dict_friendly_data(src, sizeof(src), (const uint8_t*)k_zero, nz);
+    uint8_t comp[4096];
+    uint8_t dec[sizeof(src)];
+    const int64_t n =
+        dctx_make_archive(3, 0, src, sizeof(src), (const uint8_t*)k_zero, nz, NULL, comp,
+                          sizeof(comp));
+    zxc_dctx* dctx = zxc_create_dctx();
+    if (n <= 0 || !dctx || zxc_get_dict_id(comp, (size_t)n) != 1) {
+        printf("  [FAIL] archive: size %lld, header id %u\n", (long long)n,
+               n > 0 ? zxc_get_dict_id(comp, (size_t)n) : 0);
+        ok = 0;
+    } else {
+        const dctx_step_t steps[] = {
+            {"no dict -> DICT_REQUIRED", comp, n, NULL, 0, NULL, ZXC_ERROR_DICT_REQUIRED},
+            {"right dict", comp, n, (const uint8_t*)k_zero, nz, NULL, (int64_t)sizeof(src)},
+        };
+        if (!dctx_run_steps(dctx, steps, sizeof(steps) / sizeof(steps[0]), src, sizeof(src), dec))
+            ok = 0;
+    }
+    zxc_free_dctx(dctx);
+
+    // .zxd round trip.
+    uint8_t zxd[ZXC_DICT_HEADER_SIZE + sizeof(k_zero_huf) + ZXC_HUF_TABLE_SIZE];
+    const int64_t written = zxc_dict_save(k_zero_huf, nh, huf, zxd, sizeof(zxd));
+    const void* content = NULL;
+    size_t content_size = 0;
+    uint32_t id = 0;
+    if (written <= 0 || zxc_dict_read_id(zxd, (size_t)written) != 1 ||
+        zxc_dict_load(zxd, (size_t)written, &content, &content_size, NULL, &id) != ZXC_OK ||
+        id != 1 || content_size != nh) {
+        printf("  [FAIL] .zxd round trip: written %lld, id %u\n", (long long)written, id);
+        ok = 0;
+    }
+
+    // A header flagging id 0 names no dictionary.
+    uint8_t hdr[ZXC_FILE_HEADER_SIZE];
+    if (zxc_write_file_header(hdr, sizeof(hdr), 1U << 18, 0, 1, 0) != ZXC_FILE_HEADER_SIZE) {
+        printf("  [FAIL] write_file_header\n");
+        return 0;
+    }
+    zxc_store_le32(hdr + 7, 0);
+    zxc_store_le16(hdr + 14, 0);
+    zxc_store_le16(hdr + 14, zxc_hash16(hdr));
+    const int rc = zxc_read_file_header(hdr, sizeof(hdr), NULL, NULL, NULL, NULL);
+    if (rc != ZXC_ERROR_BAD_HEADER) {
+        printf("  [FAIL] read_file_header: expected BAD_HEADER, got %s\n", zxc_error_name(rc));
+        ok = 0;
+    }
+
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_dict_static_dctx_rejected(void) {
     printf("=== TEST: Dict - static dctx rejects dictionaries explicitly ===\n");
     const size_t dict_size = sizeof(k_dctx_dict) - 1;

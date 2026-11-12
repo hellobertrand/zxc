@@ -29,9 +29,10 @@
 uint32_t zxc_dict_compute_id(const void* RESTRICT dict, const size_t dict_size,
                              const void* RESTRICT huf_lengths) {
     if (UNLIKELY(!dict || dict_size == 0)) return 0;
-    const uint32_t base = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
-    if (!huf_lengths) return base;
-    return zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, base, ZXC_CHECKSUM_RAPIDHASH);
+    uint32_t id = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
+    if (huf_lengths)
+        id = zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, id, ZXC_CHECKSUM_RAPIDHASH);
+    return id ? id : 1;  // 0 means "no dictionary"
 }
 
 // -------------------------------------------------------------------------

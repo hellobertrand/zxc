@@ -515,6 +515,9 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     uint8_t rsv = 0;
     for (size_t i = (src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 11 : 7; i < 14; i++) rsv |= src[i];
     if (UNLIKELY(rsv != 0)) return ZXC_ERROR_BAD_HEADER;
+    // No dictionary has id 0.
+    if (UNLIKELY((src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) && zxc_le32(src + 7) == 0))
+        return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
         const uint8_t code = src[5];
