@@ -1010,6 +1010,9 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
     return 0;
 }
 
+// Marks a frame that needs a dictionary: its id may be 0.
+#define CLI_DICT_FLAG (1ULL << 32)
+
 /** @brief What a walk of a container finds. */
 typedef struct {
     zxc_frame_info_t first; /* the first frame */
@@ -1017,11 +1020,32 @@ typedef struct {
     uint64_t checksummed;   /* frames carrying checksums */
     uint64_t seekable;      /* frames carrying a seek table */
     uint32_t block_sizes;   /* OR of every block size, each a power of 2 */
-    uint32_t* dict_ids;     /* distinct dictionary ids in file order, 0 for none */
+    uint64_t* dict_ids;     /* distinct dictionaries in file order: id, bit 32 set; 0 for none */
     size_t num_dict_ids;
     uint64_t dsize;  /* their decompressed sizes, summed */
     uint64_t digest; /* the last frame's digest, when it has one */
 } cli_container_t;
+
+/** @brief A run of frames sharing one dictionary, numbered as the walk meets them. */
+typedef struct {
+    uint64_t dict; /* id with CLI_DICT_FLAG, or 0 for none */
+    uint64_t rank;
+} cli_dict_run_t;
+
+static int cli_cmp_u64(const uint64_t x, const uint64_t y) { return (x > y) - (x < y); }
+
+// By dictionary, then by rank.
+static int cli_cmp_run_dict(const void* a, const void* b) {
+    const cli_dict_run_t* const x = (const cli_dict_run_t*)a;
+    const cli_dict_run_t* const y = (const cli_dict_run_t*)b;
+    const int d = cli_cmp_u64(x->dict, y->dict);
+    return d ? d : cli_cmp_u64(x->rank, y->rank);
+}
+
+// By falling rank: the walk goes back, so this is file order.
+static int cli_cmp_run_rank(const void* a, const void* b) {
+    return cli_cmp_u64(((const cli_dict_run_t*)b)->rank, ((const cli_dict_run_t*)a)->rank);
+}
 
 /**
  * @brief Walks the frames concatenated in @p f, from the last back to the first,
@@ -1030,17 +1054,11 @@ typedef struct {
  *
  * @return @ref ZXC_OK, or the library's verdict on the first frame that fails.
  */
-static int zxc_cmp_u64(const void* a, const void* b) {
-    const uint64_t x = *(const uint64_t*)a;
-    const uint64_t y = *(const uint64_t*)b;
-    return (x > y) - (x < y);
-}
-
 static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
     memset(c, 0, sizeof(*c));
     uint64_t end = file_size;
     int rc = ZXC_OK;
-    uint64_t* keys = NULL;
+    cli_dict_run_t* runs = NULL;
     size_t num = 0;
     size_t cap = 0;
     do {
@@ -1056,40 +1074,42 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
         }
         c->dsize += fi.decompressed_size;
         c->block_sizes |= (uint32_t)fi.block_size;
-        // Per run of one id: id << 32 | rank, rising as the walk goes back
-        if (num == 0 || (uint32_t)(keys[num - 1] >> 32) != fi.dict_id) {
+        const uint64_t dict = fi.has_dictionary ? CLI_DICT_FLAG | fi.dict_id : 0;
+        // One entry per run of frames sharing a dictionary, deduplicated after the walk.
+        if (num == 0 || runs[num - 1].dict != dict) {
             if (num == cap) {
                 cap = cap ? 2 * cap : 4;
-                uint64_t* const grown = (uint64_t*)realloc(keys, cap * sizeof(uint64_t));
+                cli_dict_run_t* const grown =
+                    (cli_dict_run_t*)realloc(runs, cap * sizeof(cli_dict_run_t));
                 if (!grown) {
                     rc = ZXC_ERROR_MEMORY;
                     break;
                 }
-                keys = grown;
+                runs = grown;
             }
-            keys[num] = (uint64_t)fi.dict_id << 32 | (uint32_t)num;
+            runs[num].dict = dict;
+            runs[num].rank = num;
             num++;
         }
         c->first = fi;  // the first frame's, once the walk is done
         end -= fi.compressed_size;
     } while (end > 0);
-    // Highest rank per id, then by falling rank: file order
+    // Each dictionary keeps its highest rank, its first frame in the file.
     if (rc == ZXC_OK) {
-        qsort(keys, num, sizeof(uint64_t), zxc_cmp_u64);
+        qsort(runs, num, sizeof(cli_dict_run_t), cli_cmp_run_dict);
         size_t n = 0;
         for (size_t i = 0; i < num; i++)
-            if (i + 1 == num || (keys[i] ^ keys[i + 1]) >> 32)
-                keys[n++] = ~keys[i] << 32 | keys[i] >> 32;
-        qsort(keys, n, sizeof(uint64_t), zxc_cmp_u64);
-        c->dict_ids = (uint32_t*)malloc(n * sizeof(uint32_t));
+            if (i + 1 == num || runs[i].dict != runs[i + 1].dict) runs[n++] = runs[i];
+        qsort(runs, n, sizeof(cli_dict_run_t), cli_cmp_run_rank);
+        c->dict_ids = (uint64_t*)malloc(n * sizeof(uint64_t));
         if (c->dict_ids) {
-            for (size_t i = 0; i < n; i++) c->dict_ids[i] = (uint32_t)keys[i];
+            for (size_t i = 0; i < n; i++) c->dict_ids[i] = runs[i].dict;
             c->num_dict_ids = n;
         } else {
             rc = ZXC_ERROR_MEMORY;
         }
     }
-    free(keys);
+    free(runs);
     if (fseeko(f, 0, SEEK_SET) != 0 && rc == ZXC_OK) rc = ZXC_ERROR_IO;
     return rc;
 }
@@ -1108,10 +1128,10 @@ static void cli_print_block_sizes(const cli_container_t* c, const int json) {
 static void cli_print_dict_ids(const cli_container_t* c, const int json) {
     if (json && c->num_dict_ids > 1) printf("[");
     for (size_t i = 0; i < c->num_dict_ids; i++) {
-        const uint32_t id = c->dict_ids[i];
+        const uint64_t dict = c->dict_ids[i];
         if (i) printf(", ");
-        if (id)
-            printf(json ? "\"0x%08X\"" : "0x%08X", id);
+        if (dict)
+            printf(json ? "\"0x%08X\"" : "0x%08X", (uint32_t)dict);
         else
             printf(json ? "null" : "none");
     }
@@ -1147,7 +1167,8 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
         uint8_t probe[ZXC_DICT_HEADER_SIZE];
         if (fseeko(f, 0, SEEK_SET) == 0 &&
             fread(probe, 1, ZXC_DICT_HEADER_SIZE, f) == ZXC_DICT_HEADER_SIZE &&
-            zxc_dict_read_id(probe, ZXC_DICT_HEADER_SIZE) != 0) {
+            ((uint32_t)probe[0] | (uint32_t)probe[1] << 8 | (uint32_t)probe[2] << 16 |
+             (uint32_t)probe[3] << 24) == ZXC_DICT_MAGIC) {
             uint8_t* dbuf = (uint8_t*)malloc((size_t)file_size);
             int r = 1;
             if (dbuf && fseeko(f, 0, SEEK_SET) == 0 &&
