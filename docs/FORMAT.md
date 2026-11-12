@@ -1266,7 +1266,8 @@ dictionary. A dictionary whose identifier computes to 0, one chance in
 2^32, cannot be referenced by an archive; an encoder MUST NOT compress
 against it, and a trainer MUST NOT produce it, for instance by altering
 the content until the identifier differs. An encoder MUST NOT set
-HAS_DICTIONARY with a Dictionary ID of 0.
+HAS_DICTIONARY with a Dictionary ID of 0, and a decoder MUST reject a
+File Header that does ({{error-handling}}).
 
 Blocks compressed against a dictionary contain match offsets that
 reference dictionary content, so decoding them without the dictionary
@@ -1517,6 +1518,7 @@ default.
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
 | File header checksum mismatch          | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
 | File header reserved bit or byte set   | File header offsets 0x06-0x0D | Reject. Flags bit 4, a non-zero checksum algorithm identifier, or a byte of 0x07..0x0D outside the Dictionary ID ({{file-header}}). |
+| Dictionary ID 0 with HAS_DICTIONARY    | File header offset 0x07     | Reject. The value 0 is reserved; see {{dictionary-header-encoding}}. |
 | Invalid chunk size code                | File header offset 0x05     | Reject. Code outside the valid range \[12..21\].  |
 | Block header checksum mismatch         | Block header offset 0x07    | Reject block. Stream is corrupt.                |
 | Block Flags or Reserved non-zero       | Block header offsets 0x01-0x02 | Reject. No flag is defined and the reserved byte has no meaning in this version ({{block-header-semantics}}, {{compatibility-rules}}). |
