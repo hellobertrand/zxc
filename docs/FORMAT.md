@@ -1261,13 +1261,11 @@ content alone:
 Dictionary ID = fold32(rapidhash(content))
 ~~~
 
-The Dictionary ID 0 is reserved: it denotes the absence of a
-dictionary. A dictionary whose identifier computes to 0, one chance in
-2^32, cannot be referenced by an archive; an encoder MUST NOT compress
-against it, and a trainer MUST NOT produce it, for instance by altering
-the content until the identifier differs. An encoder MUST NOT set
-HAS_DICTIONARY with a Dictionary ID of 0, and a decoder MUST reject a
-File Header that does ({{error-handling}}).
+The HAS_DICTIONARY flag alone tells whether an archive requires a
+dictionary. Every 32-bit value is a valid Dictionary ID, 0 included:
+a decoder MUST NOT read a Dictionary ID of 0 as the absence of a
+dictionary, and an encoder that compresses against a dictionary MUST
+set HAS_DICTIONARY whatever the identifier.
 
 Blocks compressed against a dictionary contain match offsets that
 reference dictionary content, so decoding them without the dictionary
@@ -1330,7 +1328,8 @@ Dictionary ID (u32):
   with fold32 of the RapidHash of the Dictionary Content, so that
   each byte is hashed exactly once. It MUST equal the Dictionary ID
   stored in the File Header of any ZXC archive compressed with this
-  dictionary. The value 0 is reserved ({{dictionary-header-encoding}}).
+  dictionary. Every value is valid, 0 included
+  ({{dictionary-header-encoding}}).
 
 Reserved:
 : 2 bytes. Encoders MUST set these to zero; a loader MUST reject a
@@ -1518,7 +1517,6 @@ default.
 | Unsupported version                    | File header offset 0x04     | Reject immediately.                             |
 | File header checksum mismatch          | File header offset 0x0E     | Reject. Header is corrupt or truncated.         |
 | File header reserved bit or byte set   | File header offsets 0x06-0x0D | Reject. Flags bit 4, a non-zero checksum algorithm identifier, or a byte of 0x07..0x0D outside the Dictionary ID ({{file-header}}). |
-| Dictionary ID 0 with HAS_DICTIONARY    | File header offset 0x07     | Reject. The value 0 is reserved; see {{dictionary-header-encoding}}. |
 | Invalid chunk size code                | File header offset 0x05     | Reject. Code outside the valid range \[12..21\].  |
 | Block header checksum mismatch         | Block header offset 0x07    | Reject block. Stream is corrupt.                |
 | Block Flags or Reserved non-zero       | Block header offsets 0x01-0x02 | Reject. No flag is defined and the reserved byte has no meaning in this version ({{block-header-semantics}}, {{compatibility-rules}}). |
