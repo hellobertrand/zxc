@@ -1665,6 +1665,28 @@ int test_dict_id_never_zero(void) {
         ok = 0;
     }
 
+    // A file storing the unmapped hash, 0, still loads, as id 1.
+    if (written > 0) {
+        zxc_store_le32(zxd + 8, 0);
+        zxc_store_le16(zxd + 14, 0);
+        zxc_store_le16(zxd + 14, zxc_hash16(zxd));
+        id = 0;
+        if (zxc_dict_load(zxd, (size_t)written, &content, &content_size, NULL, &id) != ZXC_OK ||
+            id != 1 || zxc_dict_read_id(zxd, (size_t)written) != 1) {
+            printf("  [FAIL] .zxd with stored id 0: id %u\n", id);
+            ok = 0;
+        }
+        // Any other stored id is still a mismatch.
+        zxc_store_le32(zxd + 8, 2);
+        zxc_store_le16(zxd + 14, 0);
+        zxc_store_le16(zxd + 14, zxc_hash16(zxd));
+        if (zxc_dict_load(zxd, (size_t)written, &content, &content_size, NULL, NULL) !=
+            ZXC_ERROR_BAD_CHECKSUM) {
+            printf("  [FAIL] stored id 2 accepted\n");
+            ok = 0;
+        }
+    }
+
     // A header flagging id 0 names no dictionary.
     uint8_t hdr[ZXC_FILE_HEADER_SIZE];
     if (zxc_write_file_header(hdr, sizeof(hdr), 1U << 18, 0, 1, 0) != ZXC_FILE_HEADER_SIZE) {

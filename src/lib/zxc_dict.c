@@ -19,6 +19,14 @@
 //  Dictionary ID
 // -------------------------------------------------------------------------
 
+// Unmapped id hash; 0 is possible.
+static uint32_t zxc_dict_id_hash(const void* RESTRICT dict, const size_t dict_size,
+                                 const void* RESTRICT huf_lengths) {
+    uint32_t h = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
+    if (huf_lengths) h = zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, h, ZXC_CHECKSUM_RAPIDHASH);
+    return h;
+}
+
 /**
  * @brief Computes the dictionary identifier for @p dict (and optional table).
  *
@@ -29,10 +37,8 @@
 uint32_t zxc_dict_compute_id(const void* RESTRICT dict, const size_t dict_size,
                              const void* RESTRICT huf_lengths) {
     if (UNLIKELY(!dict || dict_size == 0)) return 0;
-    uint32_t id = zxc_checksum(dict, dict_size, 0, ZXC_CHECKSUM_RAPIDHASH);
-    if (huf_lengths)
-        id = zxc_checksum(huf_lengths, ZXC_HUF_TABLE_SIZE, id, ZXC_CHECKSUM_RAPIDHASH);
-    return id ? id : 1;  // 0 means "no dictionary"
+    const uint32_t h = zxc_dict_id_hash(dict, dict_size, huf_lengths);
+    return h ? h : 1;  // 0 means "no dictionary"
 }
 
 // -------------------------------------------------------------------------
@@ -59,7 +65,8 @@ uint32_t zxc_dict_read_id(const void* buf, const size_t buf_size) {
     if (UNLIKELY(!buf || buf_size < ZXC_DICT_HEADER_SIZE)) return 0;
     const uint8_t* p = (const uint8_t*)buf;
     if (UNLIKELY(zxc_le32(p) != ZXC_DICT_MAGIC)) return 0;
-    return zxc_le32(p + 8);
+    const uint32_t id = zxc_le32(p + 8);
+    return id ? id : 1;  // as zxc_dict_load() reports it
 }
 
 /**
@@ -141,8 +148,11 @@ int zxc_dict_load(const void* RESTRICT buf, const size_t buf_size,
     const uint8_t* huf = content + content_size;
 
     // Verify dict_id matches the (content, table) pair.
-    const uint32_t id = zxc_dict_compute_id(content, content_size, huf);
-    if (UNLIKELY(zxc_le32(src + 8) != id)) return ZXC_ERROR_BAD_CHECKSUM;
+    // A stored id of 0 is accepted for a hash of 0, and reported as 1.
+    const uint32_t h = zxc_dict_id_hash(content, content_size, huf);
+    const uint32_t id = h ? h : 1;
+    const uint32_t stored = zxc_le32(src + 8);
+    if (UNLIKELY(stored != id && stored != h)) return ZXC_ERROR_BAD_CHECKSUM;
 
     *content_out = content;
     *content_size_out = content_size;
