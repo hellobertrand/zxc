@@ -1604,6 +1604,95 @@ int test_dict_dctx_roundtrip(void) {
     return ok;
 }
 
+// A dictionary whose id is 0 is an ordinary one: the header flag tells it is needed.
+int test_dict_id_zero(void) {
+    printf("=== TEST: Dict - id 0 is a valid dictionary id ===\n");
+
+    // Found by search: both hash to 0, the second with this table.
+    static const char k_zero[] = "zxc-dict-id-zero-182690797";
+    static const char k_zero_huf[] = "zxc-dict-id-zero-3707268039";
+    const uint8_t* const dict = (const uint8_t*)k_zero;
+    const size_t nz = sizeof(k_zero) - 1;
+    const size_t nh = sizeof(k_zero_huf) - 1;
+    uint8_t huf[ZXC_HUF_TABLE_SIZE];
+    memset(huf, 0x88, sizeof(huf));
+    if (zxc_dict_compute_id(k_zero, nz, NULL) != 0 ||
+        zxc_dict_compute_id(k_zero_huf, nh, huf) != 0) {
+        printf("  [FAIL] test vectors no longer hash to 0\n");
+        return 0;
+    }
+
+    uint8_t src[2048];
+    gen_dict_friendly_data(src, sizeof(src), dict, nz);
+    uint8_t wrong[sizeof(k_zero)];
+    memcpy(wrong, k_zero, sizeof(wrong));
+    wrong[3] ^= 0x55;
+    uint8_t comp[4096];
+    uint8_t dec[sizeof(src)];
+    const int64_t full = (int64_t)sizeof(src);
+    int ok = 1;
+
+    // Buffer API.
+    const int64_t n = dctx_make_archive(3, 0, src, sizeof(src), dict, nz, NULL, comp, sizeof(comp));
+    zxc_frame_info_t fi;
+    memset(&fi, 0, sizeof(fi));
+    if (n <= 0 || zxc_get_frame_info(comp, (size_t)n, &fi, sizeof(fi)) != ZXC_OK ||
+        !fi.has_dictionary || fi.dict_id != 0) {
+        printf("  [FAIL] archive: size %lld, has_dictionary %u, id %u\n", (long long)n,
+               fi.has_dictionary, fi.dict_id);
+        ok = 0;
+    } else {
+        zxc_dctx* dctx = zxc_create_dctx();
+        const dctx_step_t steps[] = {
+            {"no dict -> DICT_REQUIRED", comp, n, NULL, 0, NULL, ZXC_ERROR_DICT_REQUIRED},
+            {"wrong dict -> DICT_MISMATCH", comp, n, wrong, nz, NULL, ZXC_ERROR_DICT_MISMATCH},
+            {"right dict", comp, n, dict, nz, NULL, full},
+        };
+        if (!dctx ||
+            !dctx_run_steps(dctx, steps, sizeof(steps) / sizeof(steps[0]), src, sizeof(src), dec))
+            ok = 0;
+        zxc_free_dctx(dctx);
+    }
+
+    // Seekable API.
+    const int64_t ns =
+        ctx_compress(3, 0, 1, 1, dict, nz, NULL, src, sizeof(src), comp, sizeof(comp));
+    zxc_seekable* s = ns > 0 ? zxc_seekable_open(comp, (size_t)ns) : NULL;
+    if (!s) {
+        printf("  [FAIL] seekable open: size %lld\n", (long long)ns);
+        ok = 0;
+    } else {
+        const int64_t r0 = zxc_seekable_decompress_range(s, dec, sizeof(dec), 0, sizeof(src));
+        const int rw = zxc_seekable_set_dict(s, wrong, nz, NULL);
+        const int rs = zxc_seekable_set_dict(s, dict, nz, NULL);
+        const int64_t r1 = zxc_seekable_decompress_range(s, dec, sizeof(dec), 0, sizeof(src));
+        if (r0 != ZXC_ERROR_DICT_REQUIRED || rw != ZXC_ERROR_DICT_MISMATCH || rs != ZXC_OK ||
+            r1 != full || memcmp(src, dec, sizeof(src)) != 0) {
+            printf("  [FAIL] seekable: no dict %lld, wrong %d, set %d, range %lld\n", (long long)r0,
+                   rw, rs, (long long)r1);
+            ok = 0;
+        }
+        zxc_seekable_free(s);
+    }
+
+    // .zxd round trip.
+    uint8_t zxd[ZXC_DICT_HEADER_SIZE + sizeof(k_zero_huf) + ZXC_HUF_TABLE_SIZE];
+    const int64_t written = zxc_dict_save(k_zero_huf, nh, huf, zxd, sizeof(zxd));
+    const void* content = NULL;
+    size_t content_size = 0;
+    uint32_t id = 1;
+    if (written <= 0 ||
+        zxc_dict_load(zxd, (size_t)written, &content, &content_size, NULL, &id) != ZXC_OK ||
+        id != 0 || content_size != nh) {
+        printf("  [FAIL] .zxd round trip: written %lld, id %u\n", (long long)written, id);
+        ok = 0;
+    }
+
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}
+
 int test_dict_static_dctx_rejected(void) {
     printf("=== TEST: Dict - static dctx rejects dictionaries explicitly ===\n");
     const size_t dict_size = sizeof(k_dctx_dict) - 1;

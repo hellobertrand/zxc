@@ -2196,14 +2196,16 @@ typedef struct {
  * @param[in]  dst_capacity  Total capacity of @p dst in bytes.
  * @param[in]  chunk_size    Block size to encode in the header.
  * @param[in]  has_checksum  Non-zero if the checksum bit must be set.
- * @param[in]  dict_id       Dictionary ID (0 = no dictionary).
+ * @param[in]  has_dict      Non-zero if the archive needs a dictionary.
+ * @param[in]  dict_id       Dictionary ID, stored when @p has_dict.
  * @param[in]  has_seek      Non-zero if the archive will carry a SEK block.
  *
  * @return Number of bytes written (@c ZXC_FILE_HEADER_SIZE) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum, const uint32_t dict_id, const int has_seek);
+                          const int has_checksum, const int has_dict, const uint32_t dict_id,
+                          const int has_seek);
 
 /**
  * @brief Validates and reads the ZXC file header from @p src.
@@ -2217,6 +2219,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *                               block size. May be @c NULL.
  * @param[out] out_has_checksum  Optional pointer that receives the checksum
  *                               flag. May be @c NULL.
+ * @param[out] out_has_dict      Optional pointer that receives the dictionary
+ *                               flag. May be @c NULL.
  * @param[out] out_dict_id       Optional pointer that receives the dictionary
  *                               ID (0 if none). May be @c NULL.
  * @param[out] out_has_seek      Optional pointer that receives the seek-table
@@ -2227,14 +2231,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *         @c ZXC_ERROR_BAD_VERSION).
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
-                         int* out_has_checksum, uint32_t* out_dict_id, int* out_has_seek);
+                         int* out_has_checksum, int* out_has_dict, uint32_t* out_dict_id,
+                         int* out_has_seek);
 
 /** @brief The verdict on @p n bytes too short for a frame: the header speaks first,
  *  then @ref ZXC_ERROR_SRC_TOO_SMALL. */
 static inline int zxc_short_input_verdict(const uint8_t* p, const size_t n) {
     size_t chunk = 0;
     const int rc = zxc_read_file_header(p, n < ZXC_FILE_HEADER_SIZE ? n : ZXC_FILE_HEADER_SIZE,
-                                        &chunk, NULL, NULL, NULL);
+                                        &chunk, NULL, NULL, NULL, NULL);
     return rc != ZXC_OK ? rc : ZXC_ERROR_SRC_TOO_SMALL;
 }
 

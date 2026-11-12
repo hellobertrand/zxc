@@ -344,7 +344,7 @@ int test_buffer_error_codes(void) {
         uint8_t arc[ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE];
         const zxc_block_header_t eof = {
             .block_type = ZXC_BLOCK_EOF, .block_flags = 0, .reserved = 0, .comp_size = 0};
-        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, 4096, 1, 0, 0) < 0 ||
+        if (zxc_write_file_header(arc, ZXC_FILE_HEADER_SIZE, 4096, 1, 0, 0, 0) < 0 ||
             zxc_write_block_header(arc + ZXC_FILE_HEADER_SIZE, ZXC_BLOCK_HEADER_SIZE, &eof) < 0) {
             printf("  [FAIL] fixture headers\n");
             return 0;
@@ -1370,6 +1370,7 @@ static int frame_info_padding_zero(const zxc_frame_info_t* x) {
     e.format_version = x->format_version;
     e.has_checksum = x->has_checksum;
     e.has_seek_table = x->has_seek_table;
+    e.has_dictionary = x->has_dictionary;
     return memcmp(&e, x, sizeof(e)) == 0;
 }
 
@@ -1378,7 +1379,7 @@ static int frame_info_same(const zxc_frame_info_t* a, const zxc_frame_info_t* b)
            a->compressed_size == b->compressed_size && a->digest == b->digest &&
            a->block_size == b->block_size && a->dict_id == b->dict_id &&
            a->format_version == b->format_version && a->has_checksum == b->has_checksum &&
-           a->has_seek_table == b->has_seek_table;
+           a->has_seek_table == b->has_seek_table && a->has_dictionary == b->has_dictionary;
 }
 
 int test_frame_info(void) {
@@ -1423,7 +1424,7 @@ int test_frame_info(void) {
             a.decompressed_size != N || a.compressed_size != (uint64_t)n || a.digest != digest ||
             a.block_size != 8192 || a.dict_id != did || (v == 2 && did == 0) ||
             a.format_version != ZXC_FILE_FORMAT_VERSION || a.has_checksum != (v >= 1) ||
-            a.has_seek_table != (v >= 1)) {
+            a.has_seek_table != (v >= 1) || a.has_dictionary != (v == 2)) {
             printf("  [FAIL] variant %d: buffer %d, FILE* %d, position %ld\n", v, ra, rb, pos);
             ok = 0;
         }

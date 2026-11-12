@@ -1189,6 +1189,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
         snprintf(digest_json, sizeof(digest_json), "\"%s\"", digest_str);
     }
     const uint32_t dict_id = cont.first.dict_id;
+    const int has_dict = cont.first.has_dictionary;
 
     // Calculate ratio (uncompressed / compressed, e.g., 2.5 means 2.5x compression)
     const double ratio = (file_size > 0) ? ((double)uncompressed_size / (double)file_size) : 0.0;
@@ -1203,11 +1204,11 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
 
     if (mixed_dict)
         snprintf(dict_id_str, sizeof(dict_id_str), "mixed");
-    else if (dict_id)
+    else if (has_dict)
         snprintf(dict_id_str, sizeof(dict_id_str), "0x%08X", dict_id);
     else
         snprintf(dict_id_str, sizeof(dict_id_str), "-");
-    const int show_dict = dict_id || mixed_dict;
+    const int show_dict = has_dict || mixed_dict;
 
     if (json_output) {
         printf(

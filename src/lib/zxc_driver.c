@@ -1187,9 +1187,10 @@ static int zxc_stream_read_exact(zxc_stream_ctx_t* ctx, FILE* f, void* dst, cons
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
  */
 static int zxc_stream_read_frame_header(zxc_stream_ctx_t* ctx, FILE* f_in, const uint8_t* magic,
-                                        const uint32_t dict_id, size_t* chunk, int* has_checksum,
-                                        int* has_seek) {
+                                        const int has_dict, const uint32_t dict_id, size_t* chunk,
+                                        int* has_checksum, int* has_seek) {
     uint8_t h[ZXC_FILE_HEADER_SIZE];
+    int header_has_dict = 0;
     uint32_t header_dict_id = 0;
     ZXC_MEMCPY(h, magic, sizeof(uint32_t));
     const int rrc =
@@ -1198,10 +1199,10 @@ static int zxc_stream_read_frame_header(zxc_stream_ctx_t* ctx, FILE* f_in, const
     if (UNLIKELY(rrc != ZXC_OK)) return rrc == 1 ? ZXC_ERROR_SRC_TOO_SMALL : rrc;
 
     const int hrc = zxc_read_file_header(h, ZXC_FILE_HEADER_SIZE, chunk, has_checksum,
-                                         &header_dict_id, has_seek);
+                                         &header_has_dict, &header_dict_id, has_seek);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
-    if (header_dict_id != 0) {
-        if (UNLIKELY(dict_id == 0)) return ZXC_ERROR_DICT_REQUIRED;
+    if (header_has_dict) {
+        if (UNLIKELY(!has_dict)) return ZXC_ERROR_DICT_REQUIRED;
         if (UNLIKELY(dict_id != header_dict_id)) return ZXC_ERROR_DICT_MISMATCH;
     }
     return ZXC_OK;
@@ -1311,7 +1312,8 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_cctx* cfg) {
     if (f_out) {
         uint8_t h[ZXC_FILE_HEADER_SIZE];
         zxc_write_file_header(h, ZXC_FILE_HEADER_SIZE, block_size, checksum_enabled,
-                              zxc_dict_compute_id(dict, dict_size, dict_huf), seekable);
+                              dict && dict_size > 0, zxc_dict_compute_id(dict, dict_size, dict_huf),
+                              seekable);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
             ctx->io_error = 1;
     }
@@ -1370,8 +1372,8 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_dctx* cfg) {
         size_t chunk = 0;
         int has_checksum = 0;
         int has_seek = 0;
-        rc = zxc_stream_read_frame_header(running ? &e.ctx : NULL, f_in, magic, dict_id, &chunk,
-                                          &has_checksum, &has_seek);
+        rc = zxc_stream_read_frame_header(running ? &e.ctx : NULL, f_in, magic, dict_size > 0,
+                                          dict_id, &chunk, &has_checksum, &has_seek);
         if (UNLIKELY(rc != ZXC_OK)) break;
 
         // The workers are set up for one block size and checksum flag.

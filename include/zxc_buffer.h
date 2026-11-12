@@ -245,6 +245,7 @@ ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.
  * @return Dictionary ID, or 0 if no dictionary is required or the buffer is invalid.
+ *         0 is also a valid ID: zxc_frame_info_t::has_dictionary tells them apart.
  */
 ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
 
@@ -260,10 +261,11 @@ typedef struct {
     uint64_t compressed_size;   /**< Compressed bytes of the frame, footer included. */
     uint64_t digest;            /**< Archive digest; 0 when @c has_checksum is 0. */
     size_t block_size;          /**< Block size, 4 KB to 2 MB. */
-    uint32_t dict_id;           /**< Dictionary the frame needs; 0 for none. */
+    uint32_t dict_id;           /**< Dictionary the frame needs; see @c has_dictionary. */
     uint8_t format_version;     /**< Format version of the frame. */
     uint8_t has_checksum;       /**< 1 when blocks carry checksums and the footer a digest. */
     uint8_t has_seek_table;     /**< 1 when a seek table precedes the footer. */
+    uint8_t has_dictionary;     /**< 1 when the frame needs a dictionary; @c dict_id may be 0. */
 } zxc_frame_info_t;
 
 /**

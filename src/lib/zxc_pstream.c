@@ -323,7 +323,7 @@ zxc_cstream* zxc_cstream_create(const zxc_cctx* cfg) {
  */
 static int cs_stage_file_header(zxc_cstream* cs) {
     const int w = zxc_write_file_header(cs->pending, cs->pending_cap, cs->block_size,
-                                        cs->opts.checksum_enabled, 0, 0);
+                                        cs->opts.checksum_enabled, 0, 0, 0);
     if (UNLIKELY(w < 0)) return w;  // LCOV_EXCL_LINE
     cs->pending_len = (size_t)w;
     cs->pending_pos = 0;
@@ -886,12 +886,12 @@ static int ds_handle_need_file_header(zxc_dstream* ds, zxc_inbuf_t* in) {
     size_t bs = 0;
     int has_csum = 0;
     int has_seek = 0;
-    uint32_t dict_id = 0;
-    const int rc =
-        zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum, &dict_id, &has_seek);
+    int has_dict = 0;
+    const int rc = zxc_read_file_header(ds->scratch, ds->scratch_used, &bs, &has_csum, &has_dict,
+                                        NULL, &has_seek);
     if (UNLIKELY(rc != ZXC_OK)) return ds_set_error(ds, rc);  // LCOV_EXCL_LINE
     // Push streams take no dictionary yet, so an archive requiring one is refused.
-    if (UNLIKELY(dict_id != 0)) return ds_set_error(ds, ZXC_ERROR_DICT_REQUIRED);
+    if (UNLIKELY(has_dict)) return ds_set_error(ds, ZXC_ERROR_DICT_REQUIRED);
     ds->block_size = bs;
     ds->file_has_checksum = has_csum;
     ds->file_has_seek = has_seek;

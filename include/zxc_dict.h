@@ -73,7 +73,8 @@ extern "C" {
  * @param[in] dict_size   Size in bytes.
  * @param[in] huf_lengths Shared literal Huffman table (@ref ZXC_HUF_TABLE_SIZE
  *                        bytes), or NULL for a content-only ID.
- * @return 32-bit dictionary ID. Returns 0 if @p dict is NULL or @p dict_size is 0.
+ * @return 32-bit dictionary ID; 0 is a valid one. Returns 0 if @p dict is NULL
+ *         or @p dict_size is 0.
  */
 ZXC_EXPORT uint32_t zxc_dict_compute_id(const void* dict, size_t dict_size,
                                         const void* huf_lengths);

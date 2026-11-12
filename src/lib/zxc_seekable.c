@@ -62,7 +62,8 @@ typedef struct {
     uint64_t eof_off;      /* EOF block header, relative to base like the anchors */
     uint64_t entry_max;    /* largest legal block on disk: header + block_size + checksum */
     uint32_t block_size;   /* a power of 2 in [4 KB, 2 MB] */
-    uint32_t dict_id;      /* 0 for none */
+    uint32_t dict_id;      /* meaningful when has_dict */
+    int has_dict;
     int has_checksums;
 } zxc_seek_frame_t;
 
@@ -214,6 +215,7 @@ static int zxc_seek_parse_frame(zxc_seek_source_t* src, const uint64_t end, zxc_
     f->block_size = block_size;
     f->has_checksums = fi.has_checksum;
     f->dict_id = fi.dict_id;
+    f->has_dict = fi.has_dictionary;
     return 1;
 }
 
@@ -494,9 +496,9 @@ uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint64_
 static int zxc_seek_use_dict(const zxc_seekable* s, zxc_cctx_t* ctx, const zxc_seek_dict_t** held,
                              const zxc_seek_frame_t* f) {
     const zxc_seek_dict_t* d = NULL;
-    for (size_t i = 0; f->dict_id && i < s->num_dicts && !d; i++)
+    for (size_t i = 0; f->has_dict && i < s->num_dicts && !d; i++)
         if (s->dicts[i].id == f->dict_id) d = &s->dicts[i];
-    if (UNLIKELY(f->dict_id && !d)) return ZXC_ERROR_DICT_REQUIRED;
+    if (UNLIKELY(f->has_dict && !d)) return ZXC_ERROR_DICT_REQUIRED;
     if (d != *held) {
         if (d) ZXC_MEMCPY(ctx->dict_buffer, d->data, d->size);
         if (UNLIKELY(zxc_cctx_attach_dict_huf(ctx, d && d->has_huf ? d->huf : NULL) != ZXC_OK))
@@ -1017,8 +1019,8 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     int used = 0;
     int any = 0;
     for (size_t i = 0; i < s->num_frames && !used; i++) {
-        used = s->frames[i].dict_id == id;
-        any |= s->frames[i].dict_id != 0;
+        used = s->frames[i].has_dict && s->frames[i].dict_id == id;
+        any |= s->frames[i].has_dict;
     }
     // No frame needs a dictionary: ignore it, as before. Otherwise one must use it.
     if (!any) return ZXC_OK;
