@@ -149,6 +149,7 @@ function dictId(content) {
 
 /**
  * Returns the dictionary ID referenced by a `.zxc` archive, or 0 if none.
+ * 0 is also a valid ID: {@link requiresDict} tells them apart.
  * @param {Buffer} archive
  * @returns {number}
  */
@@ -160,7 +161,22 @@ function getDictId(archive) {
 }
 
 /**
+ * Tells whether a `.zxc` archive requires a dictionary, from its header flag
+ * alone: a required dictionary may have ID 0. Only the first 16 bytes are read.
+ * @param {Buffer} archive
+ * @returns {boolean}
+ * @throws {Error} On an invalid header.
+ */
+function requiresDict(archive) {
+  if (!Buffer.isBuffer(archive)) {
+    throw new TypeError("archive must be a Buffer");
+  }
+  return native.requiresDict(archive);
+}
+
+/**
  * Returns the dictionary ID stored in a `.zxd` dictionary file, or 0 if invalid.
+ * 0 is also a valid ID: {@link dictLoad} tells them apart.
  * @param {Buffer} zxd
  * @returns {number}
  */
@@ -728,6 +744,7 @@ module.exports = {
   trainDict,
   dictId,
   getDictId,
+  requiresDict,
   dictGetId,
   dictSave,
   dictLoad,

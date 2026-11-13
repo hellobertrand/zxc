@@ -357,6 +357,7 @@ int test_dict_train_size_overflow(void);
 int test_dict_huf_train_over_budget(void);
 int test_dict_seekable_mt_roundtrip(void);
 int test_dict_stream_dict_id_checks(void);
+int test_dict_id_zero(void);
 int test_dict_seekable_dict_id_checks(void);
 int test_dict_dctx_roundtrip(void);
 int test_dict_static_dctx_rejected(void);

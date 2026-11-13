@@ -107,6 +107,10 @@ class TestDictId:
         cid = zxc.dict_id(trained_dict)
         assert cid != 0
         assert zxc.get_dict_id(arch) == cid
+        assert zxc.requires_dict(arch) is True
+        assert zxc.requires_dict(zxc.compress(payload)) is False
+        with pytest.raises(RuntimeError):
+            zxc.requires_dict(arch[:8])
         # The .zxd id binds (content, table): non-zero and distinct from the
         # content-only id.
         assert zxc.dict_get_id(zxd) != 0

@@ -2196,14 +2196,16 @@ typedef struct {
  * @param[in]  dst_capacity  Total capacity of @p dst in bytes.
  * @param[in]  chunk_size    Block size to encode in the header.
  * @param[in]  has_checksum  Non-zero if the checksum bit must be set.
- * @param[in]  dict_id       Dictionary ID (0 = no dictionary).
+ * @param[in]  has_dict      Non-zero if the archive needs a dictionary.
+ * @param[in]  dict_id       Dictionary ID, stored when @p has_dict.
  * @param[in]  has_seek      Non-zero if the archive will carry a SEK block.
  *
  * @return Number of bytes written (@c ZXC_FILE_HEADER_SIZE) on success,
  *         or @c ZXC_ERROR_DST_TOO_SMALL if @p dst_capacity is insufficient.
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum, const uint32_t dict_id, const int has_seek);
+                          const int has_checksum, const int has_dict, const uint32_t dict_id,
+                          const int has_seek);
 
 /**
  * @brief Validates and reads the ZXC file header from @p src.
@@ -2217,8 +2219,10 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *                               block size. May be @c NULL.
  * @param[out] out_has_checksum  Optional pointer that receives the checksum
  *                               flag. May be @c NULL.
+ * @param[out] out_has_dict      Optional pointer that receives the dictionary
+ *                               flag. May be @c NULL.
  * @param[out] out_dict_id       Optional pointer that receives the dictionary
- *                               ID (0 if none). May be @c NULL.
+ *                               ID, 0 when the flag is clear. May be @c NULL.
  * @param[out] out_has_seek      Optional pointer that receives the seek-table
  *                               flag. May be @c NULL.
  *
@@ -2227,14 +2231,15 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  *         @c ZXC_ERROR_BAD_VERSION).
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size, size_t* out_block_size,
-                         int* out_has_checksum, uint32_t* out_dict_id, int* out_has_seek);
+                         int* out_has_checksum, int* out_has_dict, uint32_t* out_dict_id,
+                         int* out_has_seek);
 
 /** @brief The verdict on @p n bytes too short for a frame: the header speaks first,
  *  then @ref ZXC_ERROR_SRC_TOO_SMALL. */
 static inline int zxc_short_input_verdict(const uint8_t* p, const size_t n) {
     size_t chunk = 0;
     const int rc = zxc_read_file_header(p, n < ZXC_FILE_HEADER_SIZE ? n : ZXC_FILE_HEADER_SIZE,
-                                        &chunk, NULL, NULL, NULL);
+                                        &chunk, NULL, NULL, NULL, NULL);
     return rc != ZXC_OK ? rc : ZXC_ERROR_SRC_TOO_SMALL;
 }
 
@@ -2265,10 +2270,9 @@ static ZXC_ALWAYS_INLINE zxc_scan_src_t zxc_scan_src_mem(const uint8_t* data, co
 
 /** @brief What @ref zxc_scan_container learns about a container. */
 typedef struct {
-    uint64_t dsize;         /**< Sum of the stored decompressed sizes. */
-    uint64_t frames;        /**< ZXC frames. */
-    uint32_t first_dict_id; /**< Dictionary id of the first frame, 0 without one. */
-    int uses_dict;          /**< A frame bound to a dictionary. */
+    uint64_t dsize;  /**< Sum of the stored decompressed sizes. */
+    uint64_t frames; /**< ZXC frames. */
+    int uses_dict;   /**< A frame bound to a dictionary. */
 } zxc_container_info_t;
 
 /**
@@ -2292,10 +2296,11 @@ int zxc_container_next(const zxc_scan_src_t* src, uint64_t pos);
  * @param[out] start Offset of the frame's header.
  * @param[out] info  Its header and footer, checked like zxc_get_frame_info().
  * @param[out] footer_len Footer bytes, digest included; may be NULL.
+ * @param[out] has_dict   The header's dictionary flag; may be NULL.
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
  */
 int zxc_scan_frame(const zxc_scan_src_t* src, uint64_t end, uint64_t* start, zxc_frame_info_t* info,
-                   size_t* footer_len);
+                   size_t* footer_len, int* has_dict);
 
 /**
  * @brief The frame that must span all of @p src: zxc_get_frame_info() and its
@@ -2465,10 +2470,11 @@ static inline size_t zxc_frame_tail_len(const uint64_t total) {
  * @param[in]  total      Bytes of the whole input.
  * @param[out] info       Filled on success.
  * @param[out] footer_len Footer bytes, digest included; may be NULL.
+ * @param[out] has_dict   The header's dictionary flag; may be NULL.
  * @return @ref ZXC_OK, or a negative @ref zxc_error_t.
  */
 int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, size_t tail_len, uint64_t total,
-                        zxc_frame_info_t* info, size_t* footer_len);
+                        zxc_frame_info_t* info, size_t* footer_len, int* has_dict);
 
 /** @brief Copies the fields of @p got that fit the caller's @p info_size bytes. */
 static ZXC_ALWAYS_INLINE void zxc_frame_info_copy(zxc_frame_info_t* info, const size_t info_size,

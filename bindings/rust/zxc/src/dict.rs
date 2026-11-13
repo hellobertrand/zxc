@@ -108,14 +108,33 @@ pub fn dict_id(content: &[u8]) -> u32 {
 /// Returns the dictionary ID a ZXC `.zxc` archive requires.
 ///
 /// Returns 0 if the archive was produced without a dictionary, or if the
-/// buffer is not a valid archive.
+/// buffer is not a valid archive. 0 is also a valid ID: [`requires_dict`]
+/// tells them apart.
 pub fn get_dict_id(archive: &[u8]) -> u32 {
     unsafe { zxc_sys::zxc_get_dict_id(archive.as_ptr() as *const c_void, archive.len()) }
 }
 
+/// Tells whether a ZXC archive requires a dictionary, from its header.
+///
+/// The header flag alone decides: a required dictionary may have ID 0. Only
+/// the first 16 bytes are read.
+///
+/// # Errors
+///
+/// Returns an error if the header is invalid.
+pub fn requires_dict(archive: &[u8]) -> Result<bool> {
+    let rc =
+        unsafe { zxc_sys::zxc_requires_dict(archive.as_ptr() as *const c_void, archive.len()) };
+    if rc < 0 {
+        return Err(error_from_code(rc as i64));
+    }
+    Ok(rc != 0)
+}
+
 /// Returns the dictionary ID stored in a `.zxd` file buffer.
 ///
-/// Returns 0 if the buffer is not a valid `.zxd` file.
+/// Returns 0 if the buffer is not a valid `.zxd` file. 0 is also a valid ID:
+/// [`dict_load`] tells them apart.
 pub fn dict_get_id(zxd: &[u8]) -> u32 {
     unsafe { zxc_sys::zxc_dict_read_id(zxd.as_ptr() as *const c_void, zxd.len()) }
 }
@@ -324,7 +343,8 @@ impl Dictionary {
 mod tests {
     use super::*;
     use crate::{
-        CompressOptions, DecompressOptions, compress_with_options, decompress_with_options,
+        CompressOptions, DecompressOptions, Level, compress, compress_with_options,
+        decompress_with_options,
     };
 
     fn sample_corpus() -> Vec<Vec<u8>> {
@@ -395,6 +415,9 @@ mod tests {
 
         assert_ne!(id_content, 0, "dict id must be non-zero");
         assert_eq!(id_content, id_archive, "content id == archive id");
+        assert!(requires_dict(&archive).unwrap());
+        assert!(!requires_dict(&compress(&sample, Level::Default, None).unwrap()).unwrap());
+        assert!(requires_dict(&archive[..8]).is_err());
 
         /* The .zxd id binds (content, table): it differs from the content id. */
         let corpus = sample_corpus();

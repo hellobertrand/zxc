@@ -47,6 +47,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
         "_zxc_dict_train"
         "_zxc_dict_compute_id"
         "_zxc_get_dict_id"
+        "_zxc_requires_dict"
         "_zxc_dict_read_id"
         "_zxc_dict_save"
         "_zxc_dict_save_bound"

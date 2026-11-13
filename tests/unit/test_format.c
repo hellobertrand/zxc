@@ -1326,7 +1326,7 @@ static int chunk_code_verdict(uint8_t code, size_t* bs) {
     hdr[15] = (uint8_t)(sum >> 8);
     int has_checksum = -1;
     *bs = 0;
-    return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL, NULL);
+    return zxc_read_file_header(hdr, sizeof(hdr), bs, &has_checksum, NULL, NULL, NULL);
 }
 
 int test_chunk_size_code(void) {
@@ -1558,13 +1558,13 @@ int test_file_header_reserved(void) {
     for (int dict = 0; dict <= 1; dict++) {
         const uint32_t dict_id = dict ? 0x12345678U : 0;
         uint8_t hdr[ZXC_FILE_HEADER_SIZE];
-        if (zxc_write_file_header(hdr, sizeof(hdr), 1U << 18, 1, dict_id, 0) !=
+        if (zxc_write_file_header(hdr, sizeof(hdr), 1U << 18, 1, dict, dict_id, 0) !=
             ZXC_FILE_HEADER_SIZE) {
             printf("  [FAIL] dict %d: header not written\n", dict);
             return 0;
         }
         uint32_t got_id = 0;
-        if (zxc_read_file_header(hdr, sizeof(hdr), NULL, NULL, &got_id, NULL) != ZXC_OK ||
+        if (zxc_read_file_header(hdr, sizeof(hdr), NULL, NULL, NULL, &got_id, NULL) != ZXC_OK ||
             got_id != dict_id) {
             printf("  [FAIL] dict %d: valid header refused\n", dict);
             return 0;
@@ -1573,7 +1573,7 @@ int test_file_header_reserved(void) {
         memcpy(odd, hdr, sizeof(odd));
         odd[6] |= ZXC_FILE_FLAG_RESERVED;
         zxc_file_header_sign(odd);
-        if (zxc_read_file_header(odd, sizeof(odd), NULL, NULL, NULL, NULL) !=
+        if (zxc_read_file_header(odd, sizeof(odd), NULL, NULL, NULL, NULL, NULL) !=
             ZXC_ERROR_BAD_HEADER) {
             printf("  [FAIL] dict %d: reserved flag bit accepted\n", dict);
             return 0;
@@ -1582,7 +1582,7 @@ int test_file_header_reserved(void) {
             memcpy(odd, hdr, sizeof(odd));
             odd[at] = 0x01;
             zxc_file_header_sign(odd);
-            if (zxc_read_file_header(odd, sizeof(odd), NULL, NULL, NULL, NULL) !=
+            if (zxc_read_file_header(odd, sizeof(odd), NULL, NULL, NULL, NULL, NULL) !=
                 ZXC_ERROR_BAD_HEADER) {
                 printf("  [FAIL] dict %d: reserved byte %d set was accepted\n", dict, at);
                 return 0;

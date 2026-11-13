@@ -464,7 +464,8 @@ int zxc_cctx_attach_dict_huf(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT l
  * Reserved (7) | Checksum-16 (2).
  */
 int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, const size_t chunk_size,
-                          const int has_checksum, const uint32_t dict_id, const int has_seek) {
+                          const int has_checksum, const int has_dict, const uint32_t dict_id,
+                          const int has_seek) {
     if (UNLIKELY(dst_capacity < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_DST_TOO_SMALL;
 
     zxc_store_le32(dst, ZXC_MAGIC_WORD);
@@ -474,13 +475,13 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
     dst[5] = (uint8_t)zxc_log2_u32((uint32_t)chunk_size);
 
     uint8_t flags = has_checksum ? (ZXC_FILE_FLAG_HAS_CHECKSUM | ZXC_CHECKSUM_RAPIDHASH) : 0;
-    if (dict_id != 0) flags |= ZXC_FILE_FLAG_HAS_DICTIONARY;
+    if (has_dict) flags |= ZXC_FILE_FLAG_HAS_DICTIONARY;
     if (has_seek) flags |= ZXC_FILE_FLAG_HAS_SEEK_TABLE;
     dst[6] = flags;
 
     // Bytes 7-13: Reserved / Dictionary ID
     ZXC_MEMSET(dst + 7, 0, 7);
-    if (dict_id != 0) zxc_store_le32(dst + 7, dict_id);
+    if (has_dict) zxc_store_le32(dst + 7, dict_id);
 
     // Bytes 14-15: Header Checksum (16-bit)
     zxc_file_header_sign(dst);
@@ -495,7 +496,8 @@ int zxc_write_file_header(uint8_t* RESTRICT dst, const size_t dst_capacity, cons
  */
 int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
                          size_t* RESTRICT out_block_size, int* RESTRICT out_has_checksum,
-                         uint32_t* RESTRICT out_dict_id, int* RESTRICT out_has_seek) {
+                         int* RESTRICT out_has_dict, uint32_t* RESTRICT out_dict_id,
+                         int* RESTRICT out_has_seek) {
     if (UNLIKELY(src_size < ZXC_FILE_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
     if (UNLIKELY(zxc_le32(src) != ZXC_MAGIC_WORD)) return ZXC_ERROR_BAD_MAGIC;
     if (UNLIKELY(src[4] != ZXC_FILE_FORMAT_VERSION)) return ZXC_ERROR_BAD_VERSION;
@@ -513,7 +515,8 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
     // Reserved: flag bit 4, bytes 7-13 minus the dict_id (7-10).
     if (UNLIKELY(src[6] & ZXC_FILE_FLAG_RESERVED)) return ZXC_ERROR_BAD_HEADER;
     uint8_t rsv = 0;
-    for (size_t i = (src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 11 : 7; i < 14; i++) rsv |= src[i];
+    const int has_dict = (src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? 1 : 0;
+    for (size_t i = has_dict ? 11 : 7; i < 14; i++) rsv |= src[i];
     if (UNLIKELY(rsv != 0)) return ZXC_ERROR_BAD_HEADER;
 
     if (out_block_size) {
@@ -524,7 +527,9 @@ int zxc_read_file_header(const uint8_t* RESTRICT src, const size_t src_size,
         *out_block_size = (size_t)1U << code;
     }
     if (out_has_checksum) *out_has_checksum = (src[6] & ZXC_FILE_FLAG_HAS_CHECKSUM) ? 1 : 0;
-    if (out_dict_id) *out_dict_id = (src[6] & ZXC_FILE_FLAG_HAS_DICTIONARY) ? zxc_le32(src + 7) : 0;
+    // The flag alone tells whether a dictionary is needed: its id may be 0.
+    if (out_has_dict) *out_has_dict = has_dict;
+    if (out_dict_id) *out_dict_id = has_dict ? zxc_le32(src + 7) : 0;
     if (out_has_seek) *out_has_seek = (src[6] & ZXC_FILE_FLAG_HAS_SEEK_TABLE) ? 1 : 0;
 
     return ZXC_OK;
@@ -552,7 +557,7 @@ int zxc_container_next(const zxc_scan_src_t* src, const uint64_t pos) {
 }
 
 int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* start,
-                   zxc_frame_info_t* info, size_t* footer_len) {
+                   zxc_frame_info_t* info, size_t* footer_len, int* has_dict) {
     uint8_t h[ZXC_FILE_HEADER_SIZE];
     int rc;
     // Too short for a frame: what is left starts the input, its header speaks first.
@@ -575,7 +580,7 @@ int zxc_scan_frame(const zxc_scan_src_t* src, const uint64_t end, uint64_t* star
     rc = zxc_scan_read(src, at, h, sizeof(h));
     if (UNLIKELY(rc != ZXC_OK)) return rc;
     const size_t tl = zxc_frame_tail_len(frame);
-    rc = zxc_read_frame_info(h, tail + sizeof(tail) - tl, tl, frame, info, footer_len);
+    rc = zxc_read_frame_info(h, tail + sizeof(tail) - tl, tl, frame, info, footer_len, has_dict);
     // Past the first frame, a wrong magic word is a broken container.
     if (UNLIKELY(rc == ZXC_ERROR_BAD_MAGIC && at != 0)) return ZXC_ERROR_CORRUPT_DATA;
     if (UNLIKELY(rc != ZXC_OK)) return rc;
@@ -591,7 +596,7 @@ int zxc_scan_whole_frame(const zxc_scan_src_t* src, zxc_frame_info_t* info, size
     rc = zxc_short_input_verdict(h, n);  // the header speaks first
     if (UNLIKELY(rc != ZXC_ERROR_SRC_TOO_SMALL || src->size < ZXC_FRAME_MIN_SIZE)) return rc;
     uint64_t start = 0;
-    rc = zxc_scan_frame(src, src->size, &start, info, footer_len);
+    rc = zxc_scan_frame(src, src->size, &start, info, footer_len, NULL);
     return rc == ZXC_OK && start != 0 ? ZXC_ERROR_CORRUPT_DATA : rc;
 }
 
@@ -603,22 +608,22 @@ int zxc_scan_container(const zxc_scan_src_t* src, const size_t req_chunk,
     const size_t n = src->size < sizeof(h) ? (size_t)src->size : sizeof(h);
     size_t chunk = 0;
     int hrc = zxc_scan_read(src, 0, h, n);
-    if (hrc == ZXC_OK) hrc = zxc_read_file_header(h, n, &chunk, NULL, NULL, NULL);
+    if (hrc == ZXC_OK) hrc = zxc_read_file_header(h, n, &chunk, NULL, NULL, NULL, NULL);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     uint64_t end = src->size;
     do {
         zxc_frame_info_t fi;
         uint64_t start = 0;
-        const int rc = zxc_scan_frame(src, end, &start, &fi, NULL);
+        int has_dict = 0;
+        const int rc = zxc_scan_frame(src, end, &start, &fi, NULL, &has_dict);
         if (UNLIKELY(rc != ZXC_OK)) return rc;
         if (UNLIKELY(req_chunk && fi.block_size != req_chunk)) return ZXC_ERROR_BAD_BLOCK_SIZE;
         if (UNLIKELY(fi.decompressed_size > UINT64_MAX - info->dsize))
             return ZXC_ERROR_CORRUPT_DATA;
         info->dsize += fi.decompressed_size;
         info->frames++;
-        info->first_dict_id = fi.dict_id;  // walking back, the last one seen is first
-        if (fi.dict_id) info->uses_dict = 1;
+        info->uses_dict |= has_dict;
         end = start;
     } while (end > 0);
     return ZXC_OK;
@@ -631,12 +636,15 @@ int zxc_scan_container(const zxc_scan_src_t* src, const size_t req_chunk,
  * @p total bytes and whose size the blocks could hold.
  */
 int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, const size_t tail_len,
-                        const uint64_t total, zxc_frame_info_t* info, size_t* footer_len) {
+                        const uint64_t total, zxc_frame_info_t* info, size_t* footer_len,
+                        int* has_dict) {
     size_t chunk = 0;
     int cs = 0;
     int seek = 0;
+    int hd = 0;
     uint32_t did = 0;
-    const int hrc = zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &chunk, &cs, &did, &seek);
+    const int hrc =
+        zxc_read_file_header(header, ZXC_FILE_HEADER_SIZE, &chunk, &cs, &hd, &did, &seek);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
 
     uint64_t stored = 0;
@@ -660,6 +668,7 @@ int zxc_read_frame_info(const uint8_t* header, const uint8_t* tail, const size_t
     info->has_checksum = (uint8_t)cs;
     info->has_seek_table = (uint8_t)seek;
     if (footer_len) *footer_len = flen;
+    if (has_dict) *has_dict = hd;
     return ZXC_OK;
 }
 
