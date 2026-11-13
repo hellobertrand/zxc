@@ -12,8 +12,9 @@
  *
  *   zxc_invalid_gen [<output-dir>]    # defaults to tests/conformance/v<current>/invalid
  *
- * After a format bump the corpus moves to a new tests/conformance/v<N>/: create it,
- * generate into it, then write its FORMAT_VERSION and vectors.sha256.
+ * After a format bump a new corpus goes in tests/conformance/v<N>/, beside the
+ * older ones it never replaces: create it, generate into it, then write its
+ * FORMAT_VERSION and vectors.sha256.
  */
 
 #include <stdio.h>

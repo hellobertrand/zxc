@@ -581,38 +581,44 @@ static int test_invalid_recipe(const char* invalid_dir, invalid_bases_t* bases, 
     return ok;
 }
 
-/* ---------- main --------------------------------------------------------- */
+/* ---------- per-version corpus ------------------------------------------- */
 
-int main(int argc, char** argv) {
-    /* One frozen corpus per format version, <root>/v<N>/. Composing it from the
-     * constant means a bump looks for a corpus that does not exist yet, rather
-     * than testing vectors this decoder could not decode anyway (Sec 10.3). */
-    const char* root = "tests/conformance";
-    if (argc > 1) root = argv[1];
+/* Oldest format a decoder must still read: v9 is frozen as of 1.0 (FORMAT.md
+ * Sec 10.3), so a version-N build decodes every corpus from v9 to vN. */
+#define CONFORMANCE_OLDEST_VERSION 9U
 
+typedef struct {
+    int passed, failed, total;
+} tally_t;
+
+static void tally(tally_t* t, const int ok) {
+    t->total++;
+    if (ok)
+        t->passed++;
+    else
+        t->failed++;
+}
+
+/* Decodes the valid vectors of <root>/v<version>/ and checks the invalid ones are
+ * rejected. Recipes describe what the current encoder writes, so only the current
+ * corpus is held to them. Returns 0 when a directory is missing. */
+static int test_corpus(const char* root, const unsigned version, tally_t* t) {
+    const int current = version == (unsigned)ZXC_FILE_FORMAT_VERSION;
     char valid_dir[512], invalid_dir[512];
-    snprintf(valid_dir, sizeof valid_dir, "%s/v%u/valid", root, (unsigned)ZXC_FILE_FORMAT_VERSION);
-    snprintf(invalid_dir, sizeof invalid_dir, "%s/v%u/invalid", root,
-             (unsigned)ZXC_FILE_FORMAT_VERSION);
-
-    int passed = 0, failed = 0, total = 0;
+    snprintf(valid_dir, sizeof valid_dir, "%s/v%u/valid", root, version);
+    snprintf(invalid_dir, sizeof invalid_dir, "%s/v%u/invalid", root, version);
 
     {
         char vpath[1024];
-        snprintf(vpath, sizeof vpath, "%s/v%u/FORMAT_VERSION", root,
-                 (unsigned)ZXC_FILE_FORMAT_VERSION);
+        snprintf(vpath, sizeof vpath, "%s/v%u/FORMAT_VERSION", root, version);
         size_t vn = 0;
         uint8_t* vbuf = vio_read_file(vpath, &vn);
         const long declared = vbuf ? strtol((const char*)vbuf, NULL, 10) : -1;
         free(vbuf);
-        total++;
-        if (declared != (long)ZXC_FILE_FORMAT_VERSION) {
+        if (declared != (long)version)
             fprintf(stderr, "FAIL: %s declares version %ld, expected %u\n", vpath, declared,
-                    (unsigned)ZXC_FILE_FORMAT_VERSION);
-            failed++;
-        } else {
-            passed++;
-        }
+                    version);
+        tally(t, declared == (long)version);
     }
 
     /* --- Valid vectors --- */
@@ -621,7 +627,7 @@ int main(int argc, char** argv) {
         name_list_t zxc_files = {0};
         if (list_zxc_files(valid_dir, &zxc_files) < 0) {
             fprintf(stderr, "Cannot open %s\n", valid_dir);
-            return 1;
+            return 0;
         }
 
         for (size_t i = 0; i < zxc_files.count; i++) {
@@ -634,21 +640,18 @@ int main(int argc, char** argv) {
 
             snprintf(exp_path, sizeof exp_path, "%s/%s.expected", valid_dir, stem);
 
-            total++;
+            int ok = 0;
             /* Checked before the .expected lookup, so a stray archive cannot
              * slip past by simply not having one. */
-            if (!valid_case_for(stem)) {
+            if (current && !valid_case_for(stem)) {
                 fprintf(stderr, "FAIL: %s  has no entry in VALID_CASES\n", stem);
-                failed++;
             } else if (!file_exists(exp_path)) {
                 fprintf(stderr, "FAIL: %s  has no .expected file\n", stem);
-                failed++;
             } else if (test_valid_vector(zxc_path, exp_path)) {
                 printf("  PASS: %s\n", stem);
-                passed++;
-            } else {
-                failed++;
+                ok = 1;
             }
+            tally(t, ok);
         }
 
         name_list_free(&zxc_files);
@@ -660,7 +663,7 @@ int main(int argc, char** argv) {
         name_list_t zxc_files = {0};
         if (list_zxc_files(invalid_dir, &zxc_files) < 0) {
             fprintf(stderr, "Cannot open %s\n", invalid_dir);
-            return 1;
+            return 0;
         }
 
         for (size_t i = 0; i < zxc_files.count; i++) {
@@ -671,28 +674,22 @@ int main(int argc, char** argv) {
             snprintf(stem, sizeof stem, "%s", zxc_files.names[i]);
             stem[strlen(stem) - 4] = '\0';
 
-            total++;
-            if (test_invalid_vector(zxc_path, valid_dir)) {
-                printf("  PASS: %s  (correctly rejected)\n", stem);
-                passed++;
-            } else {
-                failed++;
-            }
+            const int ok = test_invalid_vector(zxc_path, valid_dir);
+            if (ok) printf("  PASS: %s  (correctly rejected)\n", stem);
+            tally(t, ok);
         }
 
         name_list_free(&zxc_files);
     }
 
+    if (!current) return 1;
+
     /* --- Valid vector recipes --- */
     printf("\n=== Valid vector recipes (%s) ===\n", valid_dir);
     for (size_t i = 0; i < VALID_CASE_COUNT; i++) {
-        total++;
-        if (test_recipe(valid_dir, &VALID_CASES[i])) {
-            printf("  PASS: %s\n", VALID_CASES[i].name);
-            passed++;
-        } else {
-            failed++;
-        }
+        const int ok = test_recipe(valid_dir, &VALID_CASES[i]);
+        if (ok) printf("  PASS: %s\n", VALID_CASES[i].name);
+        tally(t, ok);
     }
 
     /* --- Invalid vector recipes --- */
@@ -701,13 +698,9 @@ int main(int argc, char** argv) {
         invalid_bases_t bases = {0};
         for (size_t i = 0; i < INVALID_EXPECT_COUNT; i++) {
             if (!INVALID_EXPECT[i].generated) continue;
-            total++;
-            if (test_invalid_recipe(invalid_dir, &bases, INVALID_EXPECT[i].name)) {
-                printf("  PASS: %s\n", INVALID_EXPECT[i].name);
-                passed++;
-            } else {
-                failed++;
-            }
+            const int ok = test_invalid_recipe(invalid_dir, &bases, INVALID_EXPECT[i].name);
+            if (ok) printf("  PASS: %s\n", INVALID_EXPECT[i].name);
+            tally(t, ok);
         }
         invalid_bases_free(&bases);
     }
@@ -716,21 +709,32 @@ int main(int argc, char** argv) {
     for (size_t i = 0; i < INVALID_EXPECT_COUNT; i++) {
         char p[1024];
         snprintf(p, sizeof p, "%s/%s.zxc", invalid_dir, INVALID_EXPECT[i].name);
-        total++;
-        if (file_exists(p)) {
-            passed++;
-        } else {
+        const int ok = file_exists(p);
+        if (!ok)
             fprintf(stderr, "FAIL: %s declared in INVALID_EXPECT but the vector is missing\n",
                     INVALID_EXPECT[i].name);
-            failed++;
-        }
+        tally(t, ok);
+    }
+    return 1;
+}
+
+/* ---------- main --------------------------------------------------------- */
+
+int main(int argc, char** argv) {
+    const char* root = "tests/conformance";
+    if (argc > 1) root = argv[1];
+
+    tally_t t = {0};
+    for (unsigned v = CONFORMANCE_OLDEST_VERSION; v <= (unsigned)ZXC_FILE_FORMAT_VERSION; v++) {
+        if (v > CONFORMANCE_OLDEST_VERSION) printf("\n");
+        if (!test_corpus(root, v, &t)) return 1;
     }
 
     /* --- Summary --- */
     printf("\n=== Summary ===\n");
-    printf("Total: %d  Passed: %d  Failed: %d\n", total, passed, failed);
+    printf("Total: %d  Passed: %d  Failed: %d\n", t.total, t.passed, t.failed);
 
-    if (failed > 0) {
+    if (t.failed > 0) {
         printf("CONFORMANCE TESTS FAILED.\n");
         return 1;
     }

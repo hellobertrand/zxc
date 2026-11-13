@@ -123,5 +123,6 @@ cmake --build build --target zxc_valid_gen zxc_invalid_gen
 ```
 
 The `.expected` plaintexts and the `.zxd` dictionaries are inputs, never
-rewritten. After a format bump the corpus moves to a new `tests/conformance/v<N>/`:
-create it, generate into it, then write its `FORMAT_VERSION` and manifest.
+rewritten. After a format bump a new corpus goes in `tests/conformance/v<N>/`, beside
+the older ones, which stay (from `v9/` on): create it, generate into it, then write its
+`FORMAT_VERSION` and manifest.
