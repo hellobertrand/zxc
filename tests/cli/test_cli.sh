@@ -1747,6 +1747,22 @@ else
     log_fail "--rm removed the archive under -t or -l"
 fi
 
+# 29.3 --rm keeps the input when the output is a device
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] --rm to a device: POSIX only" ;;
+    *)
+        echo "kept" > "$TEST_DIR/rm_dev.txt"
+        ln -s /dev/null "$TEST_DIR/rm_dev.txt.zxc"
+        "$ZXC_BIN" -f --rm "$TEST_DIR/rm_dev.txt"
+        if [[ -f "$TEST_DIR/rm_dev.txt" && -L "$TEST_DIR/rm_dev.txt.zxc" ]]; then
+            log_pass "--rm keeps the input when the output is a device"
+        else
+            log_fail "--rm removed the input after writing it to a device"
+        fi
+        rm -f "$TEST_DIR/rm_dev.txt" "$TEST_DIR/rm_dev.txt.zxc"
+        ;;
+esac
+
 # 30. Long Options and Option Parsing
 echo "Testing Long Options and Parsing..."
 

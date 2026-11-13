@@ -452,6 +452,8 @@ static int cli_dctx(zxc_dctx** out, int threads, int checksum, const void* dict,
 }
 // --no-preserve clears it
 static int g_preserve = 1;
+// -r: entries go by name in the directory walked
+static int g_walking = 0;
 
 /* Enables printf-style format/argument checking by the compiler on GCC/Clang
  * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
@@ -684,11 +686,21 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
     FindClose(hFind);
 #else
-    DIR* const dir = opendir(dir_path);
-    if (!dir) {
+    const int nested = g_walking;
+    const int back = open(".", O_RDONLY | O_DIRECTORY);
+    const int fd =
+        open(nested ? zxc_base_name(dir_path) : dir_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
+    DIR* const dir = (fd != -1) ? fdopendir(fd) : NULL;
+    if (back == -1 || !dir || fchdir(fd) != 0) {
         zxc_log("Error opening directory '%s': %s\n", dir_path, strerror(errno));
+        if (dir)
+            closedir(dir);
+        else if (fd != -1)
+            close(fd);
+        if (back != -1) close(back);
         return 1;
     }
+    g_walking = 1;
 
     for (;;) {
         errno = 0;  // readdir signals an error only through errno
@@ -713,7 +725,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
         // lstat: links stay out of the walk.
         struct stat st;
-        if (lstat(full_path, &st) == 0) {
+        if (lstat(entry->d_name, &st) == 0) {
             if (S_ISLNK(st.st_mode)) {
                 zxc_log("Warning: '%s' is a link, ignored\n", full_path);
             } else if (S_ISDIR(st.st_mode)) {
@@ -732,6 +744,12 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         free(full_path);
     }
     closedir(dir);
+    g_walking = nested;
+    if (fchdir(back) != 0) {
+        zxc_log("Error leaving directory '%s': %s\n", dir_path, strerror(errno));
+        exit(1);
+    }
+    close(back);
 #endif
     return overall_ret;
 }
@@ -766,7 +784,7 @@ static void print_help(const char* app) {
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file {default}\n"
         "  --rm              Remove input file once its output is written; ignored\n"
-        "                    with -c, -o, an OUTPUT-FILE, -t or -l\n"
+        "                    with -c, -o, an OUTPUT-FILE, a device, -t or -l\n"
         "  --no-preserve     Do not copy the input's mode, times and group (owner as\n"
         "                    root) to the output\n"
         "  -f, --force       Force overwrite; when decompressing to stdout, copy\n"
@@ -1001,7 +1019,6 @@ typedef struct {
     uint32_t block_sizes;   /* OR of every block size, each a power of 2 */
     uint32_t* dict_ids;     /* distinct dictionary ids in file order, 0 for none */
     size_t num_dict_ids;
-    size_t cap_dict_ids;
     uint64_t dsize;  /* their decompressed sizes, summed */
     uint64_t digest; /* the last frame's digest, when it has one */
 } cli_container_t;
@@ -1013,10 +1030,19 @@ typedef struct {
  *
  * @return @ref ZXC_OK, or the library's verdict on the first frame that fails.
  */
+static int zxc_cmp_u64(const void* a, const void* b) {
+    const uint64_t x = *(const uint64_t*)a;
+    const uint64_t y = *(const uint64_t*)b;
+    return (x > y) - (x < y);
+}
+
 static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
     memset(c, 0, sizeof(*c));
     uint64_t end = file_size;
     int rc = ZXC_OK;
+    uint64_t* keys = NULL;
+    size_t num = 0;
+    size_t cap = 0;
     do {
         zxc_frame_info_t fi;
         rc = zxc_stream_get_last_frame_info(f, end, &fi, sizeof(fi));
@@ -1030,35 +1056,40 @@ static int zxc_cli_walk(FILE* f, const uint64_t file_size, cli_container_t* c) {
         }
         c->dsize += fi.decompressed_size;
         c->block_sizes |= (uint32_t)fi.block_size;
-        // File order of first appearance: walking back, a repeat moves to the end,
-        // and the list is reversed below.
-        size_t k = 0;
-        while (k < c->num_dict_ids && c->dict_ids[k] != fi.dict_id) k++;
-        if (k < c->num_dict_ids) {
-            memmove(c->dict_ids + k, c->dict_ids + k + 1,
-                    (c->num_dict_ids - k - 1) * sizeof(uint32_t));
-            c->dict_ids[c->num_dict_ids - 1] = fi.dict_id;
-        } else {
-            if (c->num_dict_ids == c->cap_dict_ids) {
-                const size_t cap = c->cap_dict_ids ? 2 * c->cap_dict_ids : 4;
-                uint32_t* const grown = (uint32_t*)realloc(c->dict_ids, cap * sizeof(uint32_t));
+        // Per run of one id: id << 32 | rank, rising as the walk goes back
+        if (num == 0 || (uint32_t)(keys[num - 1] >> 32) != fi.dict_id) {
+            if (num == cap) {
+                cap = cap ? 2 * cap : 4;
+                uint64_t* const grown = (uint64_t*)realloc(keys, cap * sizeof(uint64_t));
                 if (!grown) {
                     rc = ZXC_ERROR_MEMORY;
                     break;
                 }
-                c->dict_ids = grown;
-                c->cap_dict_ids = cap;
+                keys = grown;
             }
-            c->dict_ids[c->num_dict_ids++] = fi.dict_id;
+            keys[num] = (uint64_t)fi.dict_id << 32 | (uint32_t)num;
+            num++;
         }
         c->first = fi;  // the first frame's, once the walk is done
         end -= fi.compressed_size;
     } while (end > 0);
-    for (size_t i = 0; i < c->num_dict_ids / 2; i++) {
-        const uint32_t t = c->dict_ids[i];
-        c->dict_ids[i] = c->dict_ids[c->num_dict_ids - 1 - i];
-        c->dict_ids[c->num_dict_ids - 1 - i] = t;
+    // Highest rank per id, then by falling rank: file order
+    if (rc == ZXC_OK) {
+        qsort(keys, num, sizeof(uint64_t), zxc_cmp_u64);
+        size_t n = 0;
+        for (size_t i = 0; i < num; i++)
+            if (i + 1 == num || (keys[i] ^ keys[i + 1]) >> 32)
+                keys[n++] = ~keys[i] << 32 | keys[i] >> 32;
+        qsort(keys, n, sizeof(uint64_t), zxc_cmp_u64);
+        c->dict_ids = (uint32_t*)malloc(n * sizeof(uint32_t));
+        if (c->dict_ids) {
+            for (size_t i = 0; i < n; i++) c->dict_ids[i] = (uint32_t)keys[i];
+            c->num_dict_ids = n;
+        } else {
+            rc = ZXC_ERROR_MEMORY;
+        }
     }
+    free(keys);
     if (fseeko(f, 0, SEEK_SET) != 0 && rc == ZXC_OK) rc = ZXC_ERROR_IO;
     return rc;
 }
@@ -1313,9 +1344,9 @@ static void zxc_install_signal_cleanup(void) {}
 static void zxc_set_partial_output(const char* path) { (void)path; }
 #endif
 
-static FILE* zxc_stream_from_fd(const int fd) {
+static FILE* zxc_stream_from_fd(const int fd, const char* mode) {
     if (fd == -1) return NULL;
-    FILE* const f = fdopen(fd, "wb");
+    FILE* const f = fdopen(fd, mode);
     if (!f) {
         const int err = errno;  // close() may clobber it
         close(fd);
@@ -1333,7 +1364,7 @@ static FILE* zxc_open_new(const char* path, const int owner_only) {
     const int fd = open(path, O_CREAT | O_EXCL | O_WRONLY,
                         owner_only ? S_IRUSR | S_IWUSR : S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
 #endif
-    FILE* const f = zxc_stream_from_fd(fd);
+    FILE* const f = zxc_stream_from_fd(fd, "wb");
     if (!f && fd != -1) {
         const int err = errno;  // unlink() may clobber it
         unlink(path);
@@ -1354,7 +1385,23 @@ static FILE* zxc_open_special(const char* path) {
         errno = EEXIST;
         return NULL;
     }
-    return zxc_stream_from_fd(fd);
+    return zxc_stream_from_fd(fd, "wb");
+#endif
+}
+
+static FILE* zxc_open_input(const char* path) {
+#ifdef _WIN32
+    return fopen(path, "rb");
+#else
+    // O_NONBLOCK: a FIFO must not hang
+    const int fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY);
+    struct stat opened;
+    if (fd != -1 && (fstat(fd, &opened) != 0 || !S_ISREG(opened.st_mode))) {
+        close(fd);
+        errno = EINVAL;
+        return NULL;
+    }
+    return zxc_stream_from_fd(fd, "rb");
 #endif
 }
 
@@ -1566,20 +1613,24 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     int use_stdin = 1;
     int use_stdout = 0;
     int created_out_file = 0;
+    int out_special = 0;  // output.special, set only once an output is open
     zxc_output_t output;
     int overall_ret = 0;
     zxc_file_attrs_t in_attrs = {0};
 
     if (in_path && strcmp(in_path, "-") != 0) {
-        if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) != 0) {
+        if (g_walking) {
+            snprintf(resolved_in_path, sizeof(resolved_in_path), "%s", zxc_base_name(in_path));
+        } else if (zxc_validate_input_path(in_path, resolved_in_path, sizeof(resolved_in_path)) !=
+                   0) {
             zxc_log("Error: Invalid input file '%s': %s\n", in_path, strerror(errno));
             if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
         }
 
-        f_in = fopen(resolved_in_path, "rb");
+        f_in = zxc_open_input(resolved_in_path);
         if (!f_in) {
-            zxc_log("Error open input %s: %s\n", resolved_in_path, strerror(errno));
+            zxc_log("Error open input %s: %s\n", in_path, strerror(errno));
             if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
         }
@@ -1638,7 +1689,10 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // Open output file if not writing to stdout
     if (!use_stdout && mode != MODE_INTEGRITY) {
-        if (zxc_validate_output_path(out_path, resolved_out_path, sizeof(resolved_out_path)) != 0) {
+        if (g_walking) {
+            snprintf(resolved_out_path, sizeof(resolved_out_path), "%s", zxc_base_name(out_path));
+        } else if (zxc_validate_output_path(out_path, resolved_out_path,
+                                            sizeof(resolved_out_path)) != 0) {
             zxc_log("Error: Invalid output path '%s': %s\n", out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
             return 1;
@@ -1657,14 +1711,15 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         // Private while written if the input's mode is restored at the end
         if (zxc_output_open(&output, resolved_out_path, force, in_attrs.valid) != 0) {
             if (errno == EEXIST && !force)
-                zxc_log("Output exists. Use -f to overwrite '%s'.\n", resolved_out_path);
+                zxc_log("Output exists. Use -f to overwrite '%s'.\n", out_path);
             else
-                zxc_log("Error creating output %s: %s\n", resolved_out_path, strerror(errno));
+                zxc_log("Error creating output %s: %s\n", out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
             return 1;
         }
         f_out = output.f;
-        if (output.special) in_attrs.valid = 0;
+        out_special = output.special;
+        if (out_special) in_attrs.valid = 0;
         created_out_file = 1;
     }
 
@@ -1701,7 +1756,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
     // The frame walks seek once per frame: on f_in each would refill its 1 MB buffer.
     FILE* const f_walk = (!use_stdin && mode != MODE_COMPRESS && !pass_through)
-                             ? fopen(resolved_in_path, "rb")
+                             ? zxc_open_input(resolved_in_path)
                              : NULL;
     FILE* const f_meta = f_walk ? f_walk : f_in;
 
@@ -1802,14 +1857,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     free(b2);
 
     if (bytes >= 0 && write_error) {
-        zxc_log("Error: %s: write failed: %s\n", created_out_file ? resolved_out_path : "<stdout>",
+        zxc_log("Error: %s: write failed: %s\n", created_out_file ? out_path : "<stdout>",
                 strerror(errno));
         if (created_out_file) zxc_output_discard(&output);
         return 1;
     }
 
     if (bytes >= 0 && created_out_file && zxc_output_commit(&output) != 0) {
-        zxc_log("Error: cannot replace %s: %s\n", resolved_out_path, strerror(errno));
+        zxc_log("Error: cannot replace %s: %s\n", out_path, strerror(errno));
         zxc_output_discard(&output);
         return 1;
     }
@@ -1854,14 +1909,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
         const int remove_input = !use_stdin && !use_stdout && !keep_input && !out_path_override &&
-                                 mode != MODE_INTEGRITY;
+                                 mode != MODE_INTEGRITY && !out_special;
         // The input is the only copy of what could not be carried over
         if (attrs_lost)
-            zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", resolved_out_path,
-                    resolved_in_path, remove_input ? "; input kept" : "");
+            zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", out_path, in_path,
+                    remove_input ? "; input kept" : "");
         else if (remove_input)
             // The name given: through a symlink the target stays
-            unlink(in_path);
+            unlink(g_walking ? resolved_in_path : in_path);
     } else {
         if (mode == MODE_INTEGRITY) {
             const int err_code = (int)bytes;

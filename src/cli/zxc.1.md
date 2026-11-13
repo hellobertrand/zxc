@@ -80,7 +80,7 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 : Keep the input file. This is the default behavior; the flag overrides **--rm**.
 
 **--rm**
-: Remove the input file(s) once compression or decompression has succeeded. Ignored when writing to stdout or to a file named with **-o** or *OUTPUT-FILE*, and with **-t** or **-l**. A symbolic link given as input is itself removed; its target is left intact.
+: Remove the input file(s) once compression or decompression has succeeded. Ignored when writing to stdout, to a device or to a file named with **-o** or *OUTPUT-FILE*, and with **-t** or **-l**. A symbolic link given as input is itself removed; its target is left intact.
 
 **--no-preserve**
 : Do not copy the input's attributes to the output. By default, when the input is a regular file, the output takes its permission bits (no setuid, setgid or sticky), access and modification times, group and, as root, owner; decompression thus restores the original's. The output is created `0600` and gets its final mode once complete; a group that cannot be kept loses its permission bits. If the mode or times cannot be set, **zxc** warns and keeps the input. On Windows only the times are copied. The format stores none of these.
