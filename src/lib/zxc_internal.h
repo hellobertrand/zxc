@@ -1590,7 +1590,7 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_lsx_movemask_b(const __m128i v) {
 /**
  * @brief Copies exactly 16 bytes as one vector move where the ISA has one.
  *
- * SSE2 on x86, NEON on ARM, memcpy elsewhere. Fixed width: the caller must
+ * SSE2 on x86, NEON on ARM, LSX on LoongArch, memcpy elsewhere. Fixed width: the caller must
  * have 16 readable and 16 writable bytes.
  *
  * @param[out] dst Pointer to the destination memory block.
@@ -1602,6 +1602,9 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
     _mm_storeu_si128((__m128i*)dst, _mm_loadu_si128((const __m128i*)src));
 #elif defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32)
     vst1q_u8((uint8_t*)dst, vld1q_u8((const uint8_t*)src));
+#elif defined(ZXC_USE_LSX)
+    // GCC 14 lowers the memcpy to GPR moves.
+    __lsx_vst(__lsx_vld(src, 0), dst, 0);
 #else
     ZXC_MEMCPY(dst, src, 16);
 #endif
@@ -1610,8 +1613,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 /**
  * @brief Copies 32 bytes from source to destination using SIMD when available.
  *
- * Uses AVX2/AVX-512, two SSE2/NEON halves, two 16-byte halves on fast-misaligned
- * RISC-V without V, otherwise one 32-byte memcpy.
+ * Uses AVX2/AVX-512, two SSE2/NEON/LSX halves, two 16-byte halves on
+ * fast-misaligned RISC-V without V, otherwise one 32-byte memcpy.
  *
  * @param[out] dst Pointer to the destination memory block.
  * @param[in] src Pointer to the source memory block.
@@ -1630,6 +1633,11 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
     const uint8x16_t b = vld1q_u8((const uint8_t*)src + 16);
     vst1q_u8((uint8_t*)dst, a);
     vst1q_u8((uint8_t*)dst + 16, b);
+#elif defined(ZXC_USE_LSX)
+    const __m128i a = __lsx_vld(src, 0);
+    const __m128i b = __lsx_vld(src, 16);
+    __lsx_vst(a, dst, 0);
+    __lsx_vst(b, dst, 16);
 #elif defined(__riscv_misaligned_fast) && !defined(__riscv_vector)
     uint8_t a[16], b[16];
     ZXC_MEMCPY(a, src, 16);
