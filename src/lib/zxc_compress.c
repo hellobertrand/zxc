@@ -133,6 +133,14 @@ static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
     const uint8x16_t eq = vceqq_u8(vld1q_u8(p), vld1q_u8(p + 1));
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
 }
+#elif defined(ZXC_USE_LSX)
+#define ZXC_RLE_WIN 16
+#define ZXC_RLE_BPB 1
+#define ZXC_RLE_CTZ(x) zxc_ctz32(x)
+typedef uint32_t zxc_rle_mask_t;
+static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
+    return zxc_lsx_movemask_b(__lsx_vseq_b(__lsx_vld(p, 0), __lsx_vld(p, 1)));
+}
 #endif
 
 // SSE2 selected, not merely available: guards the two helpers below.
@@ -795,6 +803,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                     }
                 }
             }
+#elif defined(ZXC_USE_LSX)
+            const uint8_t* limit_16 = iend - 16;
+            while (ip + mlen < limit_16) {
+                const uint32_t mask = zxc_lsx_movemask_b(
+                    __lsx_vseq_b(__lsx_vld(ip + mlen, 0), __lsx_vld(ref + mlen, 0)));
+                if (mask == 0xFFFFU)
+                    mlen += 16;
+                else {
+                    mlen += (uint32_t)zxc_ctz32(~mask);
+                    goto _match_len_done;
+                }
+            }
 #endif
             while (ip + mlen < limit_8) {
                 const uint64_t diff = zxc_le64(ip + mlen) ^ zxc_le64(ref + mlen);
@@ -881,6 +901,7 @@ static ZXC_ALWAYS_INLINE void zxc_opt_relax(uint32_t* RESTRICT dp, uint16_t* RES
  *                       updated with a packed 8x16 mask + 128-bit blend.
  *   - NEON64 / NEON32 : 4-wide via vcgtq_u32 + vbslq_u32, with vmovn_u32
  *                       to narrow the mask for the 4x16 parent_off update.
+ *   - LSX / LASX      : 4-wide via vslt.wu + vbitsel.v, narrowed by vpickev.h.
  *
  * @param[in,out] dp         DP cost array; dp[p + L] is relaxed when
  *                           @p nxt < dp[p + L].
@@ -999,6 +1020,25 @@ static ZXC_ALWAYS_INLINE size_t zxc_opt_dp_update_const_cost(
             __m128i v_po = _mm_loadl_epi64((const __m128i*)&parent_off[p + L]);
             v_po = zxc_mm_blendv_epi8_sse2(v_po, v_off, v_mask16);
             _mm_storel_epi64((__m128i*)&parent_off[p + L], v_po);
+        }
+    }
+#elif defined(ZXC_USE_LSX)
+    if (L + 4 <= L_end) {
+        static const ZXC_ALIGN(16) uint32_t k_inc_array[4] = {0, 1, 2, 3};
+        const __m128i v_inc = __lsx_vld(k_inc_array, 0);
+        const __m128i v_nxt = __lsx_vreplgr2vr_w((int)nxt);
+        const __m128i v_off = __lsx_vreplgr2vr_h(off_biased);
+        for (; L + 4 <= L_end; L += 4) {
+            const __m128i v_L_lanes = __lsx_vadd_w(v_inc, __lsx_vreplgr2vr_w((int)L));
+            const __m128i v_dp = __lsx_vld(&dp[p + L], 0);
+            const __m128i v_mask = __lsx_vslt_wu(v_nxt, v_dp);
+            __lsx_vst(__lsx_vbitsel_v(v_dp, v_nxt, v_mask), &dp[p + L], 0);
+            const __m128i v_mask16 = __lsx_vpickev_h(v_mask, v_mask);
+            const __m128i v_L_u16 = __lsx_vpickev_h(v_L_lanes, v_L_lanes);
+            const __m128i v_pl = __lsx_vldrepl_d(&parent_len[p + L], 0);
+            __lsx_vstelm_d(__lsx_vbitsel_v(v_pl, v_L_u16, v_mask16), &parent_len[p + L], 0, 0);
+            const __m128i v_po = __lsx_vldrepl_d(&parent_off[p + L], 0);
+            __lsx_vstelm_d(__lsx_vbitsel_v(v_po, v_off, v_mask16), &parent_off[p + L], 0, 0);
         }
     }
 #endif
@@ -1632,11 +1672,21 @@ parse_done:;
                 }
                 p += 16;
             }
+#elif defined(ZXC_USE_LSX)
+            const __m128i vb = __lsx_vreplgr2vr_b(b);
+            while (p <= p_end - 16) {
+                const uint32_t mask = zxc_lsx_movemask_b(__lsx_vseq_b(__lsx_vld(p, 0), vb));
+                if (mask != 0xFFFFU) {
+                    p += zxc_ctz32(~mask);
+                    goto _run_done;
+                }
+                p += 16;
+            }
 #endif
             while (p < p_end && *p == b) p++;
 
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2)
+    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2) || defined(ZXC_USE_LSX)
         _run_done:;
 #endif
             const size_t run = (size_t)(p - run_start);
@@ -1714,7 +1764,7 @@ parse_done:;
                 if (p >= p_end_4) p = p_end;
 
 #if defined(ZXC_USE_AVX512) || defined(ZXC_USE_AVX2) || defined(ZXC_USE_NEON64) || \
-    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2)
+    defined(ZXC_USE_NEON32) || defined(ZXC_USE_SSE2) || defined(ZXC_USE_LSX)
             _lit_done:;
 #endif
                 const size_t lit_run = (size_t)(p - lit_start);
