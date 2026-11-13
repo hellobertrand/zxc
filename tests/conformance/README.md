@@ -14,6 +14,7 @@ invalid_cases.h     Recipe for the 29 generated invalid ones; gen_invalid.c like
 ```
 
 Vectors are frozen **per format version** and never regenerated once that version ships.
+A decoder for version N must pass every corpus from `v9/` to `vN/` (`FORMAT.md` §10.3).
 
 ## Validating a decoder
 
@@ -121,5 +122,8 @@ cmake --build build --target zxc_valid_gen zxc_invalid_gen
 ```
 
 The `.expected` plaintexts and the `.zxd` dictionaries are inputs, never
-rewritten. After a format bump the corpus moves to a new `tests/conformance/v<N>/`:
-create it, generate into it, then write its `FORMAT_VERSION` and manifest.
+rewritten. After a format bump a new corpus goes in `tests/conformance/v<N>/`, beside
+the older ones, which stay (from `v9/` on). Create it and copy in the previous corpus's
+inputs: the `.expected` and `.zxd` files of `valid/`, and the `invalid/` vectors that
+`INVALID_EXPECT` does not mark `generated`. Then generate into it and write its
+`FORMAT_VERSION` and manifest.

@@ -390,7 +390,7 @@ zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 256 * 1024);   // power of two, 4 KB.
 
 ## Format & Conformance
 
-The wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 9), so any third party can build an independent, interoperable decoder. Each format break is clean: v9 tools reject v8 archives, and [`docs/MIGRATION.md`](docs/MIGRATION.md) lists what changed and how to convert.
+The wire format is fully specified in [`docs/FORMAT.md`](docs/FORMAT.md) (format version 9), so any third party can build an independent, interoperable decoder. Format v9 is frozen as of 1.0: every later release reads v9 archives. The pre-1.0 formats were clean breaks: v9 tools reject v8 archives, and [`docs/MIGRATION.md`](docs/MIGRATION.md) lists what changed and how to convert.
 
 Two byte-frozen suites guard the format:
 
