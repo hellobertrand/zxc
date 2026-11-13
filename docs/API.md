@@ -633,9 +633,10 @@ if (need < 0) return need;                       /* invalid header */
 if (need) fetch_zxd(zxc_get_dict_id(comp, csize)); /* ID may be 0 */
 ```
 
-**Returns**: `zxc_get_dict_id()` gives the ID, or `0` when none is required or
-the buffer is invalid. `zxc_requires_dict()` gives `1` or `0`, or a negative
-`zxc_error_t` for an invalid header.
+**Returns**: `zxc_get_dict_id()` gives the ID, or `0` when none is required,
+the buffer is shorter than a header or the magic word is wrong. It checks
+nothing else: `zxc_requires_dict()` validates the whole header and gives `1`
+or `0`, or a negative `zxc_error_t` for an invalid one.
 
 ### `zxc_get_frame_info`
 

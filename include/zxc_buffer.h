@@ -244,8 +244,10 @@ ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.
- * @return Dictionary ID, or 0 if no dictionary is required or the buffer is invalid.
- *         0 is also a valid ID: zxc_requires_dict() tells them apart.
+ * @return Dictionary ID, or 0 if no dictionary is required, the buffer is too
+ *         small or the magic word is wrong; the rest of the header is not
+ *         checked. 0 is also a valid ID: zxc_requires_dict() tells them apart
+ *         and validates the header.
  */
 ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
 

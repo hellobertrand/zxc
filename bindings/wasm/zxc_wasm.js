@@ -1432,11 +1432,11 @@ export default async function createZXC(moduleOverrides, factory) {
    * @throws {Error} On an invalid header.
    */
   function requiresDict(archive) {
-    archive = _bytes(archive);
-    const ptr = _alloc(archive.length || 1);
+    const head = _bytes(archive).subarray(0, 16);
+    const ptr = _alloc(head.length || 1);
     try {
-      Module.HEAPU8.set(archive, ptr);
-      const rc = _requires_dict(ptr, archive.length);
+      Module.HEAPU8.set(head, ptr);
+      const rc = _requires_dict(ptr, head.length);
       if (rc < 0) {
         throw new Error(`ZXC header error: ${_error_name(rc)} (${rc})`);
       }
