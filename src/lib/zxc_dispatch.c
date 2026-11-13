@@ -1654,8 +1654,8 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
         }
 
         // The block's room: the rest of dst, in place cut at the unread input. The
-        // fast decoder never writes past its capacity; a block that does not fit
-        // decodes aside and copies only its real output.
+        // fast decoder needs a whole block plus its margin there; short of that, the
+        // strict decoder writes straight to dst, which spares the copy.
         const size_t rem_cap = (size_t)(op_end - op);
         size_t room = rem_cap;
         if (inplace) {
@@ -1672,9 +1672,17 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
         } else if (LIKELY(room >= work_sz)) {
             res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, op, work_sz, block_index);
         } else {
-            res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf, ctx->work_buf_cap,
-                                               block_index);
-            bounce = ctx->work_buf;
+            res = ZXC_ERROR_OVERFLOW;
+            if (!inplace && room)
+                res = zxc_decompress_chunk_wrapper_safe_public(ctx, ip, rem_src, op, room,
+                                                               block_index);
+            // Any failure is settled aside: it keeps the bounce path's verdict, and
+            // this is the path that tells a short dst from a corrupt block.
+            if (UNLIKELY(res < 0)) {
+                res = zxc_decompress_chunk_wrapper(ctx, ip, rem_src, ctx->work_buf,
+                                                   ctx->work_buf_cap, block_index);
+                bounce = ctx->work_buf;
+            }
         }
         if (bounce && LIKELY(res > 0)) {
             // A no-destination probe lands here too. In place, output past the

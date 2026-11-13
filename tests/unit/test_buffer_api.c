@@ -701,10 +701,10 @@ int test_buffer_api_scratch_buf(void) {
 
 // Tests that the two decompression paths in zxc_decompress() produce
 // identical results:
-//   - Fast path: rem_cap >= runtime_chunk_size + ZXC_PAD_SIZE
+//   - Fast path: rem_cap >= runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
 //     -> decompress directly into dst (enough padding for wild copies).
-//   - Safe path: rem_cap < runtime_chunk_size + ZXC_PAD_SIZE
-//     -> decompress into bounce buffer (work_buf), then memcpy exact result.
+//   - Safe path: rem_cap < runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD
+//     -> strict decoder into dst, bounce buffer (work_buf) if that fails.
 //
 int test_decompress_fast_vs_safe_path(void) {
     printf("=== TEST: Unit - Decompress Fast Path vs Safe Path ===\n");
@@ -754,8 +754,8 @@ int test_decompress_fast_vs_safe_path(void) {
     // ----- Sub-test 2: Safe path (exact-fit) -----
     // Provide dst_capacity == src_sz exactly. After the first 256KB block is
     // written, rem_cap for the second block (4KB) is exactly 4KB which is
-    // < runtime_chunk_size (256KB) + ZXC_PAD_SIZE (32). This forces the
-    // safe path (bounce buffer) for the second block.
+    // < runtime_chunk_size + ZXC_DECOMPRESS_TAIL_PAD. This forces the
+    // safe path (strict decoder) for the second block.
     {
         uint8_t* dst = test_malloc(src_sz);  // no slack at all
         const int64_t dec_sz = test_decompress_verified(comp, (size_t)comp_sz, dst, src_sz);
@@ -825,6 +825,92 @@ int test_decompress_fast_vs_safe_path(void) {
     free(comp);
     printf("PASS\n\n");
     return 1;
+}
+
+/* A frame decoded without the tail margin, at every level: the last block goes
+ * through the strict decoder, and a failure keeps the bounce path's verdict. dst
+ * is allocated to the exact capacity, so sanitizers catch a write past it. */
+static int check_no_margin_decode(const uint8_t* src, const size_t n, const uint8_t* comp,
+                                  const size_t comp_sz, const size_t cap) {
+    uint8_t* dst = test_malloc(cap);
+    const int64_t r = test_decompress_verified(comp, comp_sz, dst, cap);
+    const int ok = r == (int64_t)n && memcmp(src, dst, n) == 0;
+    free(dst);
+    return ok;
+}
+
+int test_decompress_no_tail_margin(void) {
+    printf("=== TEST: Unit - Decompress Without Tail Margin ===\n");
+
+    const size_t block = 64 * 1024;
+    const size_t max_n = 3 * block + 1234;
+    const size_t comp_cap = zxc_compress_bound(max_n);
+    uint8_t* src = malloc(max_n);
+    uint8_t* comp = malloc(comp_cap);
+    uint8_t* tiny = malloc(max_n);
+    int ok = 0;
+    if (!src || !comp || !tiny) goto done;
+
+    gen_lz_data(src, max_n);
+    for (int level = ZXC_LEVEL_FASTEST; level <= ZXC_LEVEL_ULTRA; level++) {
+        // One block, so every byte takes the strict path; then a tail after fast blocks.
+        const size_t sizes[] = {block, max_n};
+        for (size_t s = 0; s < sizeof(sizes) / sizeof(sizes[0]); s++) {
+            const size_t n = sizes[s];
+            const int64_t cs = test_compress_cfg(src, n, comp, comp_cap, level, block, 1, 0);
+            if (cs <= 0 || comp[ZXC_FILE_HEADER_SIZE] == ZXC_BLOCK_RAW) {
+                printf("  [FAIL] level %d: expected a compressed block\n", level);
+                goto done;
+            }
+            if (!check_no_margin_decode(src, n, comp, (size_t)cs, n) ||
+                !check_no_margin_decode(src, n, comp, (size_t)cs,
+                                        n + ZXC_DECOMPRESS_TAIL_PAD - 1)) {
+                printf("  [FAIL] level %d, size %zu: round trip\n", level, n);
+                goto done;
+            }
+            // One byte short of the output: too small, not corrupt.
+            const int64_t r = test_decompress_verified(comp, (size_t)cs, tiny, n - 1);
+            if (r != ZXC_ERROR_DST_TOO_SMALL) {
+                printf("  [FAIL] level %d, size %zu: short dst gave %lld\n", level, n,
+                       (long long)r);
+                goto done;
+            }
+            // A bad checksum on a block taking the strict path.
+            if (n == block) {
+                const size_t at = ZXC_FILE_HEADER_SIZE + ZXC_BLOCK_HEADER_SIZE +
+                                  zxc_le32(comp + ZXC_FILE_HEADER_SIZE + 3);
+                comp[at] ^= 1;
+                const int64_t rc = test_decompress_verified(comp, (size_t)cs, tiny, n);
+                comp[at] ^= 1;
+                if (rc != ZXC_ERROR_BAD_CHECKSUM) {
+                    printf("  [FAIL] level %d: bad checksum gave %lld\n", level, (long long)rc);
+                    goto done;
+                }
+            }
+        }
+    }
+    printf("  [PASS] levels 1-7: exact fit, short dst, bad checksum\n");
+
+    // RAW blocks have no strict decoder of their own to fall back from.
+    gen_random_data(src, block);
+    {
+        const int64_t cs =
+            test_compress_cfg(src, block, comp, comp_cap, ZXC_LEVEL_FASTEST, block, 1, 0);
+        if (cs <= 0 || comp[ZXC_FILE_HEADER_SIZE] != ZXC_BLOCK_RAW ||
+            !check_no_margin_decode(src, block, comp, (size_t)cs, block)) {
+            printf("  [FAIL] RAW block exact fit\n");
+            goto done;
+        }
+    }
+    printf("  [PASS] RAW block: exact fit\n");
+
+    ok = 1;
+    printf("PASS\n\n");
+done:
+    free(src);
+    free(comp);
+    free(tiny);
+    return ok;
 }
 
 /* In-place decompression: compressed placed flush-right in one buffer, decoded
