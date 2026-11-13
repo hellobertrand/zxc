@@ -14,8 +14,8 @@ Both macOS archives need macOS 15.0 or later; on earlier versions,
 x86_64 builds dispatch AVX2/AVX-512 at runtime; ARM64 builds carry NEON. `zxc-<version>.tar.gz` is
 the canonical source, reproducible with
 `git archive --format=tar --prefix=zxc-<version>/ v<version> | gzip -n -9`; `zxc-<version>.tar.zxc`
-is that same tar compressed with `zxc -7`, readable only by a `zxc` whose format version matches, so
-keep the `.tar.gz` for archival.
+is that same tar compressed with `zxc -7`, readable by that release's `zxc` or any later one; the
+`.tar.gz` needs no `zxc` at all.
 
 Verify before extracting — the manifest is signed, so check it first:
 

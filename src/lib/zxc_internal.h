@@ -323,8 +323,8 @@ static inline int zxc_magic_prefix_ok(const uint8_t* p, const size_t n) {
         if (p[i] != magic[i]) return 0;
     return 1;
 }
-/** @brief Current on-disk file format version. The decoder accepts only this
- *  version; Older versions are rejected with ZXC_ERROR_BAD_VERSION. */
+/** @brief Current on-disk file format version. A decoder for version N reads 9 to N
+ *  (FORMAT.md §10.3); others get ZXC_ERROR_BAD_VERSION. */
 #define ZXC_FILE_FORMAT_VERSION 9
 
 /** @brief Safety padding appended to buffers to tolerate overruns. */

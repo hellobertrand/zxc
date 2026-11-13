@@ -14,6 +14,7 @@ invalid_cases.h     Recipe for the 29 generated invalid ones; gen_invalid.c like
 ```
 
 Vectors are frozen **per format version** and never regenerated once that version ships.
+A decoder for version N must pass every corpus from `v9/` to `vN/` (`FORMAT.md` §10.3).
 
 ## Validating a decoder
 

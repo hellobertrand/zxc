@@ -80,7 +80,8 @@ Offset  Size  Field
 ### 3.1 Field definitions
 
 - **Magic Word** (`u32`): `0x9CB02EF5`.
-- **Format Version** (`u8`): `9`. Any other value is rejected as an unsupported version;
+- **Format Version** (`u8`): `9`. A decoder implementing version N accepts `9` to N (§10.3)
+  and rejects any other value as an unsupported version.
 - **Chunk Size Code** (`u8`):
   - The value is an **exponent** in the range `[12, 21]`: `block_size = 2^code`.
     - `12` = 4 KB, `13` = 8 KB, ..., `19` = 512 KB (default), ..., `21` = 2 MB.
@@ -829,7 +830,8 @@ Example: 10 000 000 source bytes compressed to a 3 000 000-byte prefix, no check
 ### 10.1 Format version field
 
 The format version is a single byte at offset `0x04` of the file header.
-A conforming decoder **MUST** reject any file whose version it does not support.
+Version 9 is frozen as of ZXC 1.0.0: later versions are added alongside it and never
+change how a v9 archive is read.
 
 ### 10.2 Version bump criteria
 
@@ -848,8 +850,8 @@ encoding, layout, or the checksum algorithm — requires a **version bump**.
 
 ### 10.3 Compatibility rules
 
-- **Version compatibility**: a decoder accepts **only** the format version it implements and **MUST** reject any other version. Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** attempt to interpret an archive whose version byte it does not recognise.
-- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for its format version. The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
+- **Version compatibility**: a decoder that implements version N **MUST** accept every version from 9 to N, reading each archive by the rules of the version it declares, and **MUST** reject any version above N and any version below 9 (pre-1.0 formats, see `MIGRATION.md`). Because block-type numbering and payload formats may change between versions, a decoder **MUST NOT** interpret an archive under the rules of another version.
+- **Unknown block types**: a decoder **MUST reject** any block whose type is not defined for the archive's format version. The block-type set is fixed per version; introducing a new type is a version bump (decoders do **not** skip unknown blocks — silently advancing past untrusted, unrecognised data is unsafe).
 - **Reserved fields**: all reserved bytes and flag bits **MUST** be written as zero by encoders. Assigning a reserved field any meaning is a **version bump**, never a same-version extension. A decoder rejects a file header that sets flag bit 4 or a reserved byte (§3), a block header whose Block Flags or Reserved byte is non-zero, whatever the block type (§4.1), and a footer whose `L` byte sets bit 3 or 7 (§8); a dictionary loader rejects a `.zxd` header with non-zero Flags or Reserved bytes (§12.4). The SPL/PAK sub-header fields written as 0 and ignored on decode (Match Length Encoding, PAK Offset Encoding, §5.2, §5.3) are the exception.
 - **Defined-but-bounded fields**: where only specific values are defined (e.g. the checksum-algorithm id, currently `0` = RapidHash only), the decoder **rejects** out-of-range values as a corrupt header.
 
@@ -990,10 +992,11 @@ Offset  Size  Field
 ```
 
 - **Magic Word**: `0x9CB0D1C7`. Allows immediate rejection of non-dictionary files.
-- **Version**: `2`. Decoders reject any other version with
-  an unsupported dictionary version. Version 1 shipped with format v8: its header
-  was signed with the pre-v9 checksum, not the one § 7.1 now specifies, so it is
-  rejected on the version byte before the checksum is ever compared.
+- **Version**: `2`, frozen with format v9. A loader that implements `.zxd` version M
+  accepts `2` to M and rejects any other version as unsupported. Version 1 shipped
+  with format v8: its header was signed with the pre-v9 checksum, not the one § 7.1
+  now specifies, so it is rejected on the version byte before the checksum is ever
+  compared.
 - **Flags**: bits `0..3` carry the checksum algorithm id (`0` = RapidHash-based folding), matching the ZXC file header flags; bits `4..7` are reserved (must be 0). A loader **MUST** reject any other id or a reserved bit set.
 - **Reserved** (`0x0C..0x0D`): must be 0; a loader **MUST** reject a non-zero value.
 - **Shared literal Huffman table**: code lengths for the Literal Encoding `3` literal
