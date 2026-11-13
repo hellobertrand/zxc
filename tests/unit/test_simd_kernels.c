@@ -39,6 +39,10 @@
 #define KT_HAVE_GUARD 1
 #endif
 
+#if defined(__linux__) && defined(__loongarch64)
+#include <sys/auxv.h>
+#endif
+
 static uint64_t g_rng = 0x9E3779B97F4A7C15ULL;
 
 static uint32_t kt_rand(void) {
@@ -461,8 +465,39 @@ static void test_lsx_semantics(void) {
 }
 #endif
 
+#if defined(ZXC_USE_LASX)
+static void test_lasx_semantics(void) {
+    printf("LASX semantics: xvshuf.b lanes, 32-bit movemask\n");
+    uint8_t tab[32];
+    uint8_t idx[32];
+    uint8_t got[32];
+    for (int i = 0; i < 32; i++) {
+        tab[i] = (uint8_t)(0x40 + i);
+        idx[i] = (uint8_t)(15 - (i & 15));
+    }
+    /* xvshuf.b stays within its 128-bit lane. */
+    const __m256i t = __lasx_xvld(tab, 0);
+    __lasx_xvst(__lasx_xvshuf_b(t, t, __lasx_xvld(idx, 0)), got, 0);
+    for (int i = 0; i < 32; i++)
+        KT_CHECK(got[i] == tab[(i & 16) + idx[i]], "xvshuf.b lane, byte %d", i);
+    for (int i = 0; i < 32; i++) {
+        ZXC_MEMSET(idx, 0x7F, 32);
+        idx[i] = 0x80;
+        KT_CHECK(zxc_lasx_movemask_b(__lasx_xvld(idx, 0)) == (1U << i), "movemask bit %d", i);
+    }
+}
+#endif
+
 int main(void) {
-#if defined(ZXC_USE_LSX)
+#if defined(ZXC_USE_LASX)
+    const char* const tier = "LASX";
+#if defined(__linux__)
+    if (!(getauxval(AT_HWCAP) & (1U << 5))) {
+        printf("SIMD kernels: LASX build on a CPU without LASX, skipped.\n");
+        return 0;
+    }
+#endif
+#elif defined(ZXC_USE_LSX)
     const char* const tier = "LSX";
 #elif defined(ZXC_USE_AVX512)
     const char* const tier = "AVX-512";
@@ -481,6 +516,9 @@ int main(void) {
     printf("=== SIMD kernels against their scalar definition (%s) ===\n", tier);
 #if defined(ZXC_USE_LSX)
     test_lsx_semantics();
+#endif
+#if defined(ZXC_USE_LASX)
+    test_lasx_semantics();
 #endif
     test_wild_copies();
     test_overlap_copies();

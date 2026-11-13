@@ -72,7 +72,7 @@ extern "C" {
 /**
  * @name SIMD Intrinsics & Compiler Macros
  * @brief Auto-detected SIMD feature macros for x86 (SSE/AVX), ARM (NEON) and
- *        LoongArch (LSX).
+ *        LoongArch (LSX/LASX).
  *
  * Depending on the target architecture and compiler flags the following macros
  * may be defined:
@@ -81,6 +81,7 @@ extern "C" {
  * - @c ZXC_USE_SSE2   - SSE2 (x86-64 baseline) available.
  * - @c ZXC_USE_NEON64 - AArch64 NEON available.
  * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
+ * - @c ZXC_USE_LASX   - LoongArch LASX (256-bit) available.
  * - @c ZXC_USE_LSX    - LoongArch LSX (128-bit) available.
  *
  * Note: @c -mavx2 / @c -mavx512f imply @c __SSE2__, so @c ZXC_USE_SSE2 is
@@ -95,7 +96,8 @@ extern "C" {
  * emulated with pure SSE2 instruction sequences or fall back to scalar code.
  *
  * LoongArch: LSX is keyed on @c __loongarch_sx (the @c la64v1.0 baseline;
- * @c -march=loongarch64 lacks it), so @c _default carries it.
+ * @c -march=loongarch64 lacks it), so @c _default carries it. @c -mlasx implies
+ * it: branches are ordered LASX -> LSX.
  *
  * Define @c ZXC_DISABLE_SIMD to gate all hand-written SIMD paths (intrinsics,
  * inline assembly), as wasm, the kernel module and scalar fuzzers do.
@@ -136,6 +138,12 @@ extern "C" {
 #include <lsxintrin.h>
 #ifndef ZXC_USE_LSX
 #define ZXC_USE_LSX
+#endif
+#if defined(__loongarch_asx)
+#include <lasxintrin.h>
+#ifndef ZXC_USE_LASX
+#define ZXC_USE_LASX
+#endif
 #endif
 #endif
 #endif    /* ZXC_DISABLE_SIMD */
@@ -1587,6 +1595,14 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_lsx_movemask_b(const __m128i v) {
 }
 #endif
 
+#if defined(ZXC_USE_LASX)
+/** @brief 32-byte movemask; @c xvmskltz.b leaves one 16-bit mask per lane. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_lasx_movemask_b(const __m256i v) {
+    const __m256i m = __lasx_xvmskltz_b(v);
+    return (uint32_t)__lasx_xvpickve2gr_wu(m, 0) | ((uint32_t)__lasx_xvpickve2gr_wu(m, 4) << 16);
+}
+#endif
+
 /**
  * @brief Copies exactly 16 bytes as one vector move where the ISA has one.
  *
@@ -1613,7 +1629,7 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 /**
  * @brief Copies 32 bytes from source to destination using SIMD when available.
  *
- * Uses AVX2/AVX-512, two SSE2/NEON/LSX halves, two 16-byte halves on
+ * Uses AVX2/AVX-512/LASX, two SSE2/NEON/LSX halves, two 16-byte halves on
  * fast-misaligned RISC-V without V, otherwise one 32-byte memcpy.
  *
  * @param[out] dst Pointer to the destination memory block.
@@ -1633,6 +1649,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
     const uint8x16_t b = vld1q_u8((const uint8_t*)src + 16);
     vst1q_u8((uint8_t*)dst, a);
     vst1q_u8((uint8_t*)dst + 16, b);
+#elif defined(ZXC_USE_LASX)
+    __lasx_xvst(__lasx_xvld(src, 0), dst, 0);
 #elif defined(ZXC_USE_LSX)
     const __m128i a = __lsx_vld(src, 0);
     const __m128i b = __lsx_vld(src, 16);
