@@ -9,10 +9,11 @@
  * @file zxc_dispatch.c
  * @brief Runtime CPU feature detection and SIMD dispatch layer.
  *
- * Detects AVX2/AVX512 (x86-64) and NEON (32-bit ARM) at runtime and routes
- * compress/decompress calls to the best available implementation via
- * lazy-initialised function pointers. SSE2 on x86-64 and NEON on AArch64 are
- * baseline ISA guarantees, so the _default variant already covers those tiers.
+ * Detects AVX2/AVX512 (x86-64), NEON (32-bit ARM) and LASX (LoongArch64) at
+ * runtime and routes compress/decompress calls to the best available
+ * implementation via lazy-initialised function pointers. SSE2 on x86-64, NEON
+ * on AArch64 and LSX on LoongArch64 (la64v1.0) are baseline ISA guarantees, so
+ * the _default variant already covers those tiers.
  * Also contains the public one-shot buffer API (@ref zxc_compress,
  * @ref zxc_decompress, @ref zxc_get_decompressed_size).
  */
@@ -22,7 +23,7 @@
 #include "zxc_internal.h"
 
 // ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
-// an AVX2/AVX512/NEON variant.
+// an AVX2/AVX512/NEON/LASX variant.
 #if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT)
 #define ZXC_ONLY_DEFAULT
 #endif
@@ -49,6 +50,18 @@
 #endif
 #ifndef HWCAP_NEON
 #define HWCAP_NEON (1 << 12)
+#endif
+#endif
+
+#if defined(__linux__) && defined(__loongarch64) && !defined(ZXC_ONLY_DEFAULT)
+#include <sys/auxv.h>
+#ifdef __has_include
+#if __has_include(<asm/hwcap.h>)
+#include <asm/hwcap.h>
+#endif
+#endif
+#ifndef HWCAP_LOONGARCH_LASX
+#define HWCAP_LOONGARCH_LASX (1 << 5)
 #endif
 #endif
 
@@ -107,6 +120,18 @@ int zxc_decompress_chunk_wrapper_safe_neon32(const zxc_cctx_t* RESTRICT ctx,
                                              const uint8_t* RESTRICT src, const size_t src_sz,
                                              uint8_t* RESTRICT dst, const size_t dst_cap,
                                              const uint64_t block_index);
+#elif defined(__loongarch64)
+int zxc_decompress_chunk_wrapper_lasx(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                      const size_t src_sz, uint8_t* RESTRICT dst,
+                                      const size_t dst_cap, const uint64_t block_index);
+int zxc_decompress_chunk_wrapper_dict_lasx(const zxc_cctx_t* RESTRICT ctx,
+                                           const uint8_t* RESTRICT src, const size_t src_sz,
+                                           uint8_t* RESTRICT dst, const size_t dst_cap,
+                                           const uint64_t block_index);
+int zxc_decompress_chunk_wrapper_safe_lasx(const zxc_cctx_t* RESTRICT ctx,
+                                           const uint8_t* RESTRICT src, const size_t src_sz,
+                                           uint8_t* RESTRICT dst, const size_t dst_cap,
+                                           const uint64_t block_index);
 #endif
 #endif
 
@@ -154,6 +179,10 @@ int zxc_compress_chunk_wrapper_avx512(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                       const size_t src_sz, uint8_t* RESTRICT dst,
                                       const size_t dst_cap, const uint64_t block_index);
+#elif defined(__loongarch64)
+int zxc_compress_chunk_wrapper_lasx(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                    const size_t src_sz, uint8_t* RESTRICT dst,
+                                    const size_t dst_cap, const uint64_t block_index);
 #endif
 
 // ============================================================================
@@ -209,15 +238,16 @@ typedef enum {
     ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
     ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available (dedicated variant on 32-bit ARM only;
                           *          AArch64 baseline, served by _default there). */
-    ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline,
+    ZXC_CPU_SSE2 = 4,    /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline,
                           *          served by _default (no dedicated variant). */
+    ZXC_CPU_LASX = 5     /**< @brief LoongArch64 LASX available (LSX is served by _default). */
 } zxc_cpu_feature_t;
 
 /**
  * @brief Probes the running CPU for SIMD support.
  *
  * Uses CPUID on x86-64 (MSVC and GCC/Clang paths), `getauxval` on
- * 32-bit ARM Linux, and compile-time constants on AArch64.
+ * 32-bit ARM and LoongArch64 Linux, and compile-time constants on AArch64.
  *
  * @return The highest @ref zxc_cpu_feature_t level supported.
  */
@@ -285,6 +315,13 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     features = ZXC_CPU_NEON;
 #endif
 #endif
+
+#elif defined(__loongarch64)
+#if defined(__linux__)
+    if (getauxval(AT_HWCAP) & HWCAP_LOONGARCH_LASX) {
+        features = ZXC_CPU_LASX;
+    }
+#endif
 #endif
 
     return features;
@@ -326,6 +363,8 @@ ZXC_VARIANT_SET(_avx2);
 ZXC_VARIANT_SET(_avx512);
 #elif defined(__arm__) || defined(_M_ARM)
 ZXC_VARIANT_SET(_neon32);
+#elif defined(__loongarch64)
+ZXC_VARIANT_SET(_lasx);
 #endif
 #endif
 #undef ZXC_VARIANT_SET
@@ -351,6 +390,9 @@ static const zxc_variant_set_t* zxc_select_variants(void) {
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) return &zxc_variants_neon32;
+#elif defined(__loongarch64)
+    // cppcheck-suppress knownConditionTrueFalse
+    if (cpu == ZXC_CPU_LASX) return &zxc_variants_lasx;
 #else
     (void)cpu;
 #endif
@@ -406,6 +448,8 @@ static ZXC_COLD ZXC_NOINLINE zxc_decompress_func_t zxc_decompress_safe_resolve(v
     if (v == &zxc_variants_avx2) f = zxc_decompress_chunk_wrapper_safe_avx2;
 #elif defined(__arm__) || defined(_M_ARM)
     if (v == &zxc_variants_neon32) f = zxc_decompress_chunk_wrapper_safe_neon32;
+#elif defined(__loongarch64)
+    if (v == &zxc_variants_lasx) f = zxc_decompress_chunk_wrapper_safe_lasx;
 #else
     (void)v;
 #endif
@@ -472,7 +516,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 // HUFFMAN TRAMPOLINES
 // ============================================================================
 // The Huffman codec is built per-variant (default / avx2 / avx512, plus neon32
-// on 32-bit ARM)
+// on 32-bit ARM and lasx on LoongArch64)
 // alongside zxc_compress.c and zxc_decompress.c, so the LZ77 stages and the
 // Huffman stage in a given variant share the same ISA flags (e.g. -mbmi2 on
 // the AVX2/AVX512 variants). The compress/decompress variant TUs resolve

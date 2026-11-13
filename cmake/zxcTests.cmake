@@ -120,6 +120,11 @@ if(ZXC_BUILD_TESTS)
     endmacro()
     zxc_add_kernel_test(zxc_simd_kernel_test "")
     add_test(NAME simd_kernels COMMAND zxc_simd_kernel_test)
+    if(ZXC_TARGET_LOONGARCH64 AND ZXC_HAS_MLASX AND NOT ZXC_DISABLE_SIMD)
+        # Skips itself on a CPU without LASX.
+        zxc_add_kernel_test(zxc_simd_kernel_test_lasx "-mlasx")
+        add_test(NAME simd_kernels_lasx COMMAND zxc_simd_kernel_test_lasx)
+    endif()
 
     # --- Conformance suite ---------------------------------------------------
     add_executable(zxc_conformance_test tests/conformance/test_conformance.c)

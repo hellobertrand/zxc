@@ -58,6 +58,7 @@
 #define ZXC_PRIMARY__avx2 0
 #define ZXC_PRIMARY__avx512 0
 #define ZXC_PRIMARY__neon32 0
+#define ZXC_PRIMARY__lasx 0
 #define ZXC_PRIMARY_CAT_(a, b) a##b
 #define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
 #if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
@@ -2266,6 +2267,22 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
     static const ZXC_ALIGN(32)
         uint8_t bit_sel[32] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128,
                                1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+#if defined(ZXC_USE_LASX)
+    // xvshuf.b stays in its lane: both get the control dword.
+    {
+        const __m256i y0 = __lasx_xvreplgr2vr_b(sym0);
+        const __m256i ydelta = __lasx_xvreplgr2vr_b(sym0 ^ sym1);
+        const __m256i yrep = __lasx_xvld(rep_idx, 0);
+        const __m256i ysel = __lasx_xvld(bit_sel, 0);
+        while (i + 32 <= n) {
+            const __m256i ctrl = __lasx_xvldrepl_w(bits + (i >> 3), 0);
+            const __m256i rep = __lasx_xvshuf_b(ctrl, ctrl, yrep);
+            const __m256i mask = __lasx_xvseq_b(__lasx_xvand_v(rep, ysel), ysel);
+            __lasx_xvst(__lasx_xvxor_v(y0, __lasx_xvand_v(ydelta, mask)), out + i, 0);
+            i += 32;
+        }
+    }
+#endif
     const __m128i vsym0 = __lsx_vreplgr2vr_b(sym0);
     const __m128i vdelta = __lsx_vreplgr2vr_b(sym0 ^ sym1);
     const __m128i vrep = __lsx_vld(rep_idx, 0);

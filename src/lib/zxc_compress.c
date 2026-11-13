@@ -133,6 +133,14 @@ static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
     const uint8x16_t eq = vceqq_u8(vld1q_u8(p), vld1q_u8(p + 1));
     return vget_lane_u64(vreinterpret_u64_u8(vshrn_n_u16(vreinterpretq_u16_u8(eq), 4)), 0);
 }
+#elif defined(ZXC_USE_LASX)
+#define ZXC_RLE_WIN 32
+#define ZXC_RLE_BPB 1
+#define ZXC_RLE_CTZ(x) zxc_ctz32(x)
+typedef uint32_t zxc_rle_mask_t;
+static ZXC_ALWAYS_INLINE zxc_rle_mask_t zxc_rle_pair_mask(const uint8_t* p) {
+    return zxc_lasx_movemask_b(__lasx_xvseq_b(__lasx_xvld(p, 0), __lasx_xvld(p, 1)));
+}
 #elif defined(ZXC_USE_LSX)
 #define ZXC_RLE_WIN 16
 #define ZXC_RLE_BPB 1
@@ -801,6 +809,18 @@ static ZXC_ALWAYS_INLINE zxc_match_t zxc_lz77_find_best_match(
                                      3);
                         goto _match_len_done;
                     }
+                }
+            }
+#elif defined(ZXC_USE_LASX)
+            const uint8_t* limit_32 = iend - 32;
+            while (ip + mlen < limit_32) {
+                const uint32_t mask = zxc_lasx_movemask_b(
+                    __lasx_xvseq_b(__lasx_xvld(ip + mlen, 0), __lasx_xvld(ref + mlen, 0)));
+                if (mask == 0xFFFFFFFF)
+                    mlen += 32;
+                else {
+                    mlen += (uint32_t)zxc_ctz32(~mask);
+                    goto _match_len_done;
                 }
             }
 #elif defined(ZXC_USE_LSX)
@@ -1671,6 +1691,16 @@ parse_done:;
                     goto _run_done;
                 }
                 p += 16;
+            }
+#elif defined(ZXC_USE_LASX)
+            const __m256i vb = __lasx_xvreplgr2vr_b(b);
+            while (p <= p_end - 32) {
+                const uint32_t mask = zxc_lasx_movemask_b(__lasx_xvseq_b(__lasx_xvld(p, 0), vb));
+                if (mask != 0xFFFFFFFF) {
+                    p += zxc_ctz32(~mask);
+                    goto _run_done;
+                }
+                p += 32;
             }
 #elif defined(ZXC_USE_LSX)
             const __m128i vb = __lsx_vreplgr2vr_b(b);

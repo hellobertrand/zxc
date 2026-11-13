@@ -1586,8 +1586,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 /**
  * @brief Copies 32 bytes from source to destination using SIMD when available.
  *
- * Uses AVX2 on x86, NEON on ARM64/ARM32, LSX on LoongArch, or two 16-byte
- * copies as fallback.
+ * Uses AVX2 on x86, NEON on ARM64/ARM32, LASX or LSX on LoongArch, or two
+ * 16-byte copies as fallback.
  *
  * @param[out] dst Pointer to the destination memory block.
  * @param[in] src Pointer to the source memory block.
@@ -1606,6 +1606,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
     const uint8x16_t b = vld1q_u8((const uint8_t*)src + 16);
     vst1q_u8((uint8_t*)dst, a);
     vst1q_u8((uint8_t*)dst + 16, b);
+#elif defined(ZXC_USE_LASX)
+    __lasx_xvst(__lasx_xvld(src, 0), dst, 0);
 #elif defined(ZXC_USE_LSX)
     const __m128i a = __lsx_vld(src, 0);
     const __m128i b = __lsx_vld(src, 16);

@@ -365,6 +365,17 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
             vst1q_u8(p + 16, v);
         } while (p < last);
     }
+#elif defined(ZXC_USE_LASX)
+    const __m256i v = __lasx_xvreplgr2vr_b(byte);
+    __lasx_xvst(v, dst, 0);
+    if (UNLIKELY(ml > 32)) {
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            __lasx_xvst(v, p, 0);
+        } while (p < last);
+    }
 #elif defined(ZXC_USE_LSX)
     const __m128i v = __lsx_vreplgr2vr_b(byte);
     __lsx_vst(v, dst, 0);
