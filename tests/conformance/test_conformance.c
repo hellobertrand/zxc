@@ -682,7 +682,10 @@ static int test_corpus(const char* root, const unsigned version, tally_t* t) {
         name_list_free(&zxc_files);
     }
 
-    if (!current) return 1;
+    if (!current) {
+        printf("\n");
+        return 1;
+    }
 
     /* --- Valid vector recipes --- */
     printf("\n=== Valid vector recipes (%s) ===\n", valid_dir);
@@ -726,7 +729,6 @@ int main(int argc, char** argv) {
 
     tally_t t = {0};
     for (unsigned v = CONFORMANCE_OLDEST_VERSION; v <= (unsigned)ZXC_FILE_FORMAT_VERSION; v++) {
-        if (v > CONFORMANCE_OLDEST_VERSION) printf("\n");
         if (!test_corpus(root, v, &t)) return 1;
     }
 
