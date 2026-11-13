@@ -134,7 +134,7 @@ ZXC_EXPORT size_t zxc_dict_save_bound(size_t content_size);
  * @param[in] buf       Buffer containing the .zxd file.
  * @param[in] buf_size  Size of @p buf in bytes.
  * @return Dictionary ID, or 0 if @p buf is too small or the magic word does
- *         not match.
+ *         not match. 0 is also a valid ID: zxc_dict_load() tells them apart.
  */
 ZXC_EXPORT uint32_t zxc_dict_read_id(const void* buf, size_t buf_size);
 

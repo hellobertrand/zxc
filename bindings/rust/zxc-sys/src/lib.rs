@@ -488,7 +488,8 @@ unsafe extern "C" {
     /// # Safety
     /// - `buf` must be a valid pointer to `buf_size` bytes.
     ///
-    /// Returns 0 if the buffer is not a valid `.zxd` file.
+    /// Returns 0 if the buffer is not a valid `.zxd` file; 0 is also a valid
+    /// ID, see [`zxc_dict_load`].
     pub fn zxc_dict_read_id(buf: *const c_void, buf_size: usize) -> u32;
 
     /// Returns the `.zxd` file size for a given content size

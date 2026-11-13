@@ -133,7 +133,8 @@ pub fn requires_dict(archive: &[u8]) -> Result<bool> {
 
 /// Returns the dictionary ID stored in a `.zxd` file buffer.
 ///
-/// Returns 0 if the buffer is not a valid `.zxd` file.
+/// Returns 0 if the buffer is not a valid `.zxd` file. 0 is also a valid ID:
+/// [`dict_load`] tells them apart.
 pub fn dict_get_id(zxd: &[u8]) -> u32 {
     unsafe { zxc_sys::zxc_dict_read_id(zxd.as_ptr() as *const c_void, zxd.len()) }
 }

@@ -176,6 +176,7 @@ function requiresDict(archive) {
 
 /**
  * Returns the dictionary ID stored in a `.zxd` dictionary file, or 0 if invalid.
+ * 0 is also a valid ID: {@link dictLoad} tells them apart.
  * @param {Buffer} zxd
  * @returns {number}
  */

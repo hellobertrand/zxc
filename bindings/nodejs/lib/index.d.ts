@@ -209,7 +209,8 @@ export function requiresDict(archive: Buffer): boolean;
 
 /**
  * Returns the dictionary ID stored in a `.zxd` dictionary file, or 0 if the
- * buffer is not a valid `.zxd` file.
+ * buffer is not a valid `.zxd` file. 0 is also a valid ID: {@link dictLoad}
+ * tells them apart.
  */
 export function dictGetId(zxd: Buffer): number;
 

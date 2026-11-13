@@ -242,7 +242,10 @@ def requires_dict(archive: bytes) -> bool:
 
 
 def dict_get_id(zxd: bytes) -> int:
-    """Return the dictionary ID stored in a ``.zxd`` file (0 if not valid)."""
+    """Return the dictionary ID stored in a ``.zxd`` file (0 if not valid).
+
+    0 is also a valid ID: `dict_load` tells them apart.
+    """
     return pyzxc_dict_get_id(zxd)
 
 

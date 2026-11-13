@@ -181,7 +181,8 @@ func RequiresDict(archive []byte) (bool, error) {
 }
 
 // DictGetID returns the dictionary ID stored in a serialized .zxd file buffer,
-// or 0 if the buffer is not a valid .zxd file.
+// or 0 if the buffer is not a valid .zxd file. 0 is also a valid ID: DictLoad
+// tells them apart.
 func DictGetID(zxd []byte) uint32 {
 	if len(zxd) == 0 {
 		return 0

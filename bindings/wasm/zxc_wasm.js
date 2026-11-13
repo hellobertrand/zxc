@@ -1449,7 +1449,8 @@ export default async function createZXC(moduleOverrides, factory) {
   /**
    * Read the dictionary ID stored in a serialized `.zxd` file buffer.
    * @param {Uint8Array} zxd
-   * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd).
+   * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd). 0 is also
+   *   a valid ID: `dictLoad` tells them apart.
    */
   function dictGetId(zxd) {
     return _callIdOnBuffer(_dict_get_id, zxd);
