@@ -6,7 +6,7 @@ Reference test vectors for validating any ZXC decoder implementation.
 
 ```
 v9/                 Corpus for format version 9 (FORMAT_VERSION declares it)
-  valid/            17 *.zxc archives, *.expected outputs, *.zxd dictionaries
+  valid/            18 *.zxc archives, *.expected outputs, *.zxd dictionaries
   invalid/          35 *.zxc archives that must be rejected
   vectors.sha256    Byte-stability manifest
 valid_cases.h       Recipe for each valid vector; gen_valid.c rebuilds them
@@ -18,7 +18,7 @@ Vectors are frozen **per format version** and never regenerated once that versio
 ## Validating a decoder
 
 For each `valid/*.zxc`: decompress it and compare byte-for-byte against the
-matching `.expected`. Any mismatch is a decoder bug. The three `dict_*` vectors
+matching `.expected`. Any mismatch is a decoder bug. The four `dict_*` vectors
 need their dictionary supplied — the `.zxd` in the same directory whose
 `dict_id` matches the archive header.
 
@@ -57,7 +57,7 @@ echo "Passed: $pass  Failed: $fail"
 
 ## Coverage
 
-17 valid vectors, one per decoder-visible trait — a decoder never sees the
+18 valid vectors, one per decoder-visible trait — a decoder never sees the
 compression level, only the block type and the encodings it selects:
 
 | Vector               | What it alone covers                                    |
@@ -79,6 +79,7 @@ compression level, only the block type and the encodings it selects:
 | `dict_http`          | Dictionary **without** a shared Huffman table           |
 | `dict_no_checksum`   | Same input and dictionary, checksums off                |
 | `dict_seekable_l7`   | Dictionary **with** one (`enc_lit=3`), plus seek + checksum |
+| `dict_id_zero`       | Dictionary whose ID is 0: only the header flag requires it |
 
 All four literal encodings (`enc_lit` 0 to 3) and both token encodings
 (`enc_tok` 0 and 2) are exercised.
