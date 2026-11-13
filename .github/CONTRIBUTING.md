@@ -146,14 +146,15 @@ reachable.
 ### Versioning and compatibility
 
 ZXC follows [Semantic Versioning](https://semver.org/) for its public API and
-CLI. From 1.0.0 onwards, the compressed format is stable within a major version:
-data written by any `1.x` release must decompress with every later `1.x` release.
+CLI. Format v9 is frozen as of 1.0.0: data written by any release from 1.0.0 on must
+decompress with every later release, whatever its major version. A later format
+version is added alongside v9, never in its place ([`FORMAT.md`](../docs/FORMAT.md) §10.3).
 
 - **Patch** (`1.0.1`): bug fixes and security fixes only. No new API, no change
   to the compressed output that would affect existing readers.
 - **Minor** (`1.1.0`): new features and API additions, backward compatible.
-- **Major** (`2.0.0`): breaking changes to the API or the format. These are not
-  merged into `main` until a 2.0 is planned.
+- **Major** (`2.0.0`): breaking changes to the API. These are not merged into
+  `main` until a 2.0 is planned. Dropping a format version is not one of them.
 
 ### Where changes go
 
