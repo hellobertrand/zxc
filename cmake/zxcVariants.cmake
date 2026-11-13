@@ -52,7 +52,7 @@ endif()
 
 # --- 2. Architecture Specific Variants (skipped in no-intrinsics mode) ---
 if(ZXC_DISABLE_SIMD)
-    message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
+    message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON/LASX code paths).")
 else()
 # Driven by the target architectures, not the host: a universal build enables
 # several of these branches at once, so they are independent ifs.
@@ -102,5 +102,18 @@ endif()
 if(ZXC_TARGET_ARM32)
     message(STATUS "Building ARMv7 NEON32 variant...")
     zxc_add_variant(_neon32 "-march=armv7-a;-mfpu=neon" "${ZXC_SIMD_SOURCES}")
+endif()
+
+if(ZXC_TARGET_LOONGARCH64)
+    # No _lsx variant: LSX is the la64v1.0 baseline, compiled by _default.
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag("-mlasx" ZXC_HAS_MLASX)
+    if(ZXC_HAS_MLASX)
+        message(STATUS "Building LoongArch64 LASX variant...")
+        zxc_add_variant(_lasx "-mlasx" "compress;decompress;huffman")
+    else()
+        message(STATUS "LoongArch64: compiler lacks -mlasx; building _default only.")
+        add_compile_definitions(ZXC_ONLY_DEFAULT)
+    endif()
 endif()
 endif()
