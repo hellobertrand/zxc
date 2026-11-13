@@ -146,9 +146,10 @@ reachable.
 ### Versioning and compatibility
 
 ZXC follows [Semantic Versioning](https://semver.org/) for its public API and
-CLI. Format v9 is frozen as of 1.0.0: data written by any release from 1.0.0 on must
-decompress with every later release, whatever its major version. A later format
-version is added alongside v9, never in its place ([`FORMAT.md`](../docs/FORMAT.md) §10.3).
+CLI. Format v9 is frozen as of 1.0.0, and a later format version is added alongside
+it, never in its place: a decoder that implements format version N reads every
+version from 9 to N, whatever its major version, and rejects any version above N
+([`FORMAT.md`](../docs/FORMAT.md) §10.3).
 
 - **Patch** (`1.0.1`): bug fixes and security fixes only. No new API, no change
   to the compressed output that would affect existing readers.

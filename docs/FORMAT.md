@@ -831,7 +831,9 @@ Example: 10 000 000 source bytes compressed to a 3 000 000-byte prefix, no check
 
 The format version is a single byte at offset `0x04` of the file header.
 Version 9 is frozen as of ZXC 1.0.0: later versions are added alongside it and never
-change how a v9 archive is read.
+change how a v9 archive is read. Compatibility follows the format version, not the
+release number: a release that still implements version N, such as a patch on an
+older line, rejects archives of any later version (§10.3).
 
 ### 10.2 Version bump criteria
 
