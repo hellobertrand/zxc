@@ -165,6 +165,14 @@ jobs:
             cross_prefix: loongarch64-linux-gnu
             cmake_processor: loongarch64
             qemu_binary: qemu-loongarch64
+          # -march=loongarch64 lacks LSX: the scalar path.
+          - name: loong64-nolsx
+            tier: 2
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            cmake_c_flags: "-march=loongarch64"
+            qemu_binary: qemu-loongarch64
           # Tier 3
           - name: armv6
             tier: 3
@@ -302,6 +310,7 @@ jobs:
 
               echo "Running Tests for $LIB_TYPE via QEMU..."
               "${RUN[@]}" ./$BUILD_DIR/zxc_test
+              "${RUN[@]}" ./$BUILD_DIR/zxc_simd_kernel_test
               "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./tests/conformance
               "${RUN[@]}" ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
 
