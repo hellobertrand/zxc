@@ -1613,6 +1613,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     int use_stdin = 1;
     int use_stdout = 0;
     int created_out_file = 0;
+    int out_special = 0;  // output.special, set only once an output is open
     zxc_output_t output;
     int overall_ret = 0;
     zxc_file_attrs_t in_attrs = {0};
@@ -1717,7 +1718,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             return 1;
         }
         f_out = output.f;
-        if (output.special) in_attrs.valid = 0;
+        out_special = output.special;
+        if (out_special) in_attrs.valid = 0;
         created_out_file = 1;
     }
 
@@ -1907,7 +1909,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
         }
         const int remove_input = !use_stdin && !use_stdout && !keep_input && !out_path_override &&
-                                 mode != MODE_INTEGRITY && !output.special;
+                                 mode != MODE_INTEGRITY && !out_special;
         // The input is the only copy of what could not be carried over
         if (attrs_lost)
             zxc_log("Warning: %s: could not copy the mode and times of %s%s\n", out_path, in_path,
