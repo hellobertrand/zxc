@@ -103,6 +103,24 @@ if(ZXC_BUILD_TESTS)
         add_test(NAME ${_name} COMMAND zxc_test --exact ${_name})
     endforeach()
 
+    # --- SIMD kernels against their scalar definition -------------------------
+    # The kernels are static: the test compiles the codec sources into itself,
+    # so each ISA tier needs its own executable, built with that tier's flags.
+    macro(zxc_add_kernel_test name flags)
+        add_executable(${name} tests/unit/test_simd_kernels.c)
+        target_link_libraries(${name} PRIVATE ${ZXC_INTERNAL_LIB})
+        target_include_directories(${name} PRIVATE ${CMAKE_SOURCE_DIR}/include
+            ${CMAKE_SOURCE_DIR}/src/lib
+            ${RAPIDHASH_INCLUDE_DIR})
+        target_compile_options(${name} PRIVATE ${flags})
+        zxc_apply_warnings(${name})
+        if(ZXC_ENABLE_COVERAGE)
+            target_link_options(${name} PRIVATE --coverage)
+        endif()
+    endmacro()
+    zxc_add_kernel_test(zxc_simd_kernel_test "")
+    add_test(NAME simd_kernels COMMAND zxc_simd_kernel_test)
+
     # --- Conformance suite ---------------------------------------------------
     add_executable(zxc_conformance_test tests/conformance/test_conformance.c)
     target_link_libraries(zxc_conformance_test PRIVATE ${ZXC_INTERNAL_LIB})

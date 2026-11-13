@@ -34,7 +34,7 @@
 #include "zxc_internal.h"
 
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
-    defined(ZXC_USE_AVX512)
+    defined(ZXC_USE_AVX512) || defined(ZXC_USE_LSX)
 /**
  * @brief Periodic pattern masks, `mask[off][i] = i % off`, for off in [2, 31].
  *
@@ -197,6 +197,18 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
         copied += stride;
     } while (copied < ml);
 
+#elif defined(ZXC_USE_LSX)
+    // vshuf.b(hi, lo, idx) indexes {lo, hi}; defined for idx < 32 only.
+    const __m128i t0 = __lsx_vld(dst - off, 0);
+    const __m128i t1 = __lsx_vld(dst - off, 16);
+    const __m128i pat_lo = __lsx_vshuf_b(t1, t0, __lsx_vld(zxc_overlap_masks32[off], 0));
+    const __m128i pat_hi = __lsx_vshuf_b(t1, t0, __lsx_vld(zxc_overlap_masks32[off], 16));
+    do {
+        __lsx_vst(pat_lo, dst + copied, 0);
+        __lsx_vst(pat_hi, dst + copied, 16);
+        copied += stride;
+    } while (copied < ml);
+
 #else
     // SSE2 (no PSHUFB) and non-SIMD tiers: build the 32-byte pattern with a
     // wrap counter (no per-byte modulo), then store it as two 16-byte halves.
@@ -281,6 +293,14 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const 
                             _mm_slli_epi16(m_hi, 3)));
     }
 
+#elif defined(ZXC_USE_LSX)
+    const __m128i s0 = __lsx_vld(dst - off, 0);
+    __lsx_vst(__lsx_vshuf_b(s0, s0, __lsx_vld(zxc_overlap_masks32[off], 0)), dst, 0);
+    if (UNLIKELY(ml > 16)) {
+        const __m128i s1 = __lsx_vld(dst - off, 16);
+        __lsx_vst(__lsx_vshuf_b(s1, s0, __lsx_vld(zxc_overlap_masks32[off], 16)), dst, 16);
+    }
+
 #else
     const uint8_t* src = dst - off;
     const size_t n = (ml > 16) ? 32 : 16;
@@ -343,6 +363,19 @@ static ZXC_ALWAYS_INLINE void zxc_decode_fill_run(uint8_t* dst, const uint8_t by
             p += 32;
             vst1q_u8(p, v);
             vst1q_u8(p + 16, v);
+        } while (p < last);
+    }
+#elif defined(ZXC_USE_LSX)
+    const __m128i v = __lsx_vreplgr2vr_b(byte);
+    __lsx_vst(v, dst, 0);
+    __lsx_vst(v, dst, 16);
+    if (UNLIKELY(ml > 32)) {
+        uint8_t* p = dst;
+        const uint8_t* const last = dst + ml - 32;
+        do {
+            p += 32;
+            __lsx_vst(v, p, 0);
+            __lsx_vst(v, p, 16);
         } while (p < last);
     }
 #else

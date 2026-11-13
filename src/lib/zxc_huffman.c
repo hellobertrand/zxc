@@ -22,7 +22,7 @@
  *    only the bit LAYOUT differs -- bits are grouped by tree level into
  *    per-node branch runs (see the section banner below and FORMAT.md
  *    section 5.2.1), so decoding runs data-parallel list merges
- *    (NEON TBL / SSSE3 pshufb / AVX-512-VBMI2 vpexpandb kernels, plus flat
+ *    (NEON TBL / SSSE3 pshufb / AVX-512-VBMI2 vpexpandb / LSX vshuf.b kernels, plus flat
  *    subtree unpacking and a leaf-pair fast path) instead of a serial
  *    bit chain.
  *
@@ -1398,6 +1398,20 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
         const int pc = pc0 + zxc_pivco_popcnt32(b1);
         ZXC_PIVCO_MERGE_STEP(16, pc);
     }
+#elif defined(ZXC_USE_LSX)
+    // 16 outputs per step, as on NEON64; the table lanes all sit in [0, 31].
+    while (i + 16 <= n) {
+        const uint8_t b0 = bits[i >> 3];
+        const uint8_t b1 = bits[(i >> 3) + 1];
+        const __m128i vl = __lsx_vld(L + lp, 0);
+        const __m128i vr = __lsx_vld(R + rp, 0);
+        const int pc0 = zxc_pivco_popcnt32(b0);
+        const __m128i ia = __lsx_vldrepl_d(zxc_pivco_idxa_u8[b0], 0);
+        const __m128i ib = __lsx_vldrepl_d(zxc_pivco_idxb_pre[pc0][b1], 0);
+        __lsx_vst(__lsx_vshuf_b(vr, vl, __lsx_vilvl_d(ib, ia)), out + i, 0);
+        const int pc = pc0 + zxc_pivco_popcnt32(b1);
+        ZXC_PIVCO_MERGE_STEP(16, pc);
+    }
 #else /* x86 tiers */
 #if defined(ZXC_USE_AVX512) && defined(__AVX512VBMI2__)
     // 64 outputs per step: the merge IS a pair of byte expands - L's bytes fill
@@ -1543,6 +1557,73 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
 }
 
 #undef ZXC_PIVCO_MERGE_STEP
+
+#if defined(ZXC_USE_LSX)
+/**
+ * @brief LSX flat unpack for the widths that straddle bytes (D = 3, 5, 6).
+ *
+ * The NEON64 window scheme, 16 codes and exactly 2*D source bytes per step.
+ * @p D must be a constant: it folds the tables and the loads.
+ *
+ * @return Codes decoded, a multiple of 16.
+ */
+static ZXC_ALWAYS_INLINE size_t zxc_pivco_unpack_flat_win_lsx(uint8_t* RESTRICT out, const size_t n,
+                                                              const int D,
+                                                              const uint8_t* RESTRICT bits,
+                                                              const uint8_t* RESTRICT c2s) {
+    ZXC_ALIGN(16) uint8_t wa[16];
+    ZXC_ALIGN(16) uint8_t wb[16];
+    ZXC_ALIGN(16) uint16_t sh[8];
+    for (int q = 0; q < 8; q++) {
+        const int ba = (q * D) >> 3;
+        wa[2 * q] = (uint8_t)ba;
+        wa[2 * q + 1] = (uint8_t)(ba + 1);
+        wb[2 * q] = (uint8_t)(ba + D);
+        wb[2 * q + 1] = (uint8_t)(ba + D + 1);
+        sh[q] = (uint16_t)((q * D) & 7);
+    }
+    const __m128i vwa = __lsx_vld(wa, 0);
+    const __m128i vwb = __lsx_vld(wb, 0);
+    const __m128i vsh = __lsx_vld(sh, 0);
+    const __m128i vmask = __lsx_vreplgr2vr_h((1 << D) - 1);
+    ZXC_ALIGN(16) uint8_t tab[64];
+    for (int e = 0; e < 64; e++) tab[e] = c2s[e & ((1 << D) - 1)];
+    const __m128i t0 = __lsx_vld(tab, 0);
+    const __m128i t1 = __lsx_vld(tab, 16);
+    const __m128i zero = __lsx_vldi(0);
+    size_t i = 0;
+    while (i + 16 <= n) {
+        const uint8_t* const src = bits + ((i * (size_t)D) >> 3);
+        __m128i raw;
+        if (D == 3) {
+            raw = __lsx_vinsgr2vr_w(zero, (int)zxc_le32(src), 0);
+            raw = __lsx_vinsgr2vr_h(raw, zxc_le16(src + 4), 2);
+        } else {
+            raw = __lsx_vinsgr2vr_d(zero, (long)zxc_le64(src), 0);
+            if (D == 5)
+                raw = __lsx_vinsgr2vr_h(raw, zxc_le16(src + 8), 4);
+            else
+                raw = __lsx_vinsgr2vr_w(raw, (int)zxc_le32(src + 8), 2);
+        }
+        const __m128i cA = __lsx_vand_v(__lsx_vsrl_h(__lsx_vshuf_b(raw, raw, vwa), vsh), vmask);
+        const __m128i cB = __lsx_vand_v(__lsx_vsrl_h(__lsx_vshuf_b(raw, raw, vwb), vsh), vmask);
+        const __m128i codes = __lsx_vpickev_b(cB, cA);
+        __m128i sym;
+        if (D == 6) {
+            // vshuf.b reaches 32 entries: bit 5 picks the table pair.
+            const __m128i ix = __lsx_vandi_b(codes, 0x1F);
+            const __m128i lo = __lsx_vshuf_b(t1, t0, ix);
+            const __m128i hi = __lsx_vshuf_b(__lsx_vld(tab, 48), __lsx_vld(tab, 32), ix);
+            sym = __lsx_vbitsel_v(hi, lo, __lsx_vslei_bu(codes, 31));
+        } else {
+            sym = __lsx_vshuf_b(t1, t0, codes);
+        }
+        __lsx_vst(sym, out + i, 0);
+        i += 16;
+    }
+    return i;
+}
+#endif /* ZXC_USE_LSX */
 
 /**
  * @brief Decode a flat subtree's packed D-bit code run into symbols.
@@ -2025,6 +2106,46 @@ static void zxc_pivco_unpack_flat(uint8_t* RESTRICT out, const size_t n, const i
         }
     }
 #endif /* AVX-512 VBMI, else AVX2 + SSE */
+#elif defined(ZXC_USE_LSX)
+    if (D == 2) {
+        ZXC_ALIGN(16) uint8_t c2s16[16];
+        for (int k = 0; k < 16; k++) c2s16[k] = c2s[k & 3];
+        const __m128i vc2s = __lsx_vld(c2s16, 0);
+        static const ZXC_ALIGN(16)
+            uint8_t rep4[16] = {0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3};
+        static const ZXC_ALIGN(16)
+            uint8_t sh2[16] = {0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6, 0, 2, 4, 6};
+        const __m128i vrep = __lsx_vld(rep4, 0);
+        const __m128i vsh = __lsx_vld(sh2, 0);
+        while (i + 16 <= n) {
+            const __m128i raw = __lsx_vldrepl_w(bits + ((i * 2) >> 3), 0);
+            const __m128i rep = __lsx_vshuf_b(raw, raw, vrep);
+            const __m128i codes = __lsx_vandi_b(__lsx_vsrl_b(rep, vsh), 0x03);
+            __lsx_vst(__lsx_vshuf_b(vc2s, vc2s, codes), out + i, 0);
+            i += 16;
+        }
+    } else if (D == 4) {
+        const __m128i vc2s = __lsx_vld(c2s, 0);
+        static const ZXC_ALIGN(16)
+            uint8_t rep2[16] = {0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7};
+        static const ZXC_ALIGN(16)
+            uint8_t sh4[16] = {0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4, 0, 4};
+        const __m128i vrep = __lsx_vld(rep2, 0);
+        const __m128i vsh = __lsx_vld(sh4, 0);
+        while (i + 16 <= n) {
+            const __m128i raw = __lsx_vldrepl_d(bits + ((i * 4) >> 3), 0);
+            const __m128i rep = __lsx_vshuf_b(raw, raw, vrep);
+            const __m128i codes = __lsx_vandi_b(__lsx_vsrl_b(rep, vsh), 0x0F);
+            __lsx_vst(__lsx_vshuf_b(vc2s, vc2s, codes), out + i, 0);
+            i += 16;
+        }
+    } else if (D == 3) {
+        i = zxc_pivco_unpack_flat_win_lsx(out, n, 3, bits, c2s);
+    } else if (D == 5) {
+        i = zxc_pivco_unpack_flat_win_lsx(out, n, 5, bits, c2s);
+    } else if (D == 6) {
+        i = zxc_pivco_unpack_flat_win_lsx(out, n, 6, bits, c2s);
+    }
 #endif
     // Generic scalar bit-reader (any D).
     {
@@ -2138,6 +2259,24 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_emit_leaf_pair(uint8_t* RESTRICT out, co
         i += 16;
     }
 #endif /* AVX-512, else AVX2 + SSE */
+#elif defined(ZXC_USE_LSX)
+    static const ZXC_ALIGN(32)
+        uint8_t rep_idx[32] = {0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1,
+                               2, 2, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3, 3, 3};
+    static const ZXC_ALIGN(32)
+        uint8_t bit_sel[32] = {1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128,
+                               1, 2, 4, 8, 16, 32, 64, 128, 1, 2, 4, 8, 16, 32, 64, 128};
+    const __m128i vsym0 = __lsx_vreplgr2vr_b(sym0);
+    const __m128i vdelta = __lsx_vreplgr2vr_b(sym0 ^ sym1);
+    const __m128i vrep = __lsx_vld(rep_idx, 0);
+    const __m128i vsel = __lsx_vld(bit_sel, 0);
+    while (i + 16 <= n) {
+        const __m128i ctrl = __lsx_vldrepl_h(bits + (i >> 3), 0);
+        const __m128i rep = __lsx_vshuf_b(ctrl, ctrl, vrep);
+        const __m128i mask = __lsx_vseq_b(__lsx_vand_v(rep, vsel), vsel);
+        __lsx_vst(__lsx_vxor_v(vsym0, __lsx_vand_v(vdelta, mask)), out + i, 0);
+        i += 16;
+    }
 #endif
     while (i < n) {
         const int bit = (bits[i >> 3] >> (i & 7)) & 1;
