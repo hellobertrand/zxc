@@ -688,8 +688,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 #else
     const int nested = g_walking;
     const int back = open(".", O_RDONLY | O_DIRECTORY);
-    const int fd = nested ? open(zxc_base_name(dir_path), O_RDONLY | O_DIRECTORY | O_NOFOLLOW)
-                          : open(dir_path, O_RDONLY | O_DIRECTORY);
+    const int fd =
+        open(nested ? zxc_base_name(dir_path) : dir_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     DIR* const dir = (fd != -1) ? fdopendir(fd) : NULL;
     if (back == -1 || !dir || fchdir(fd) != 0) {
         zxc_log("Error opening directory '%s': %s\n", dir_path, strerror(errno));
