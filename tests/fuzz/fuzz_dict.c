@@ -50,7 +50,6 @@
 static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const void* huf,
                                const uint8_t* src, size_t n) {
     static uint8_t comp[FUZZ_DICT_HUF_PAYLOAD * 2 + 1024];
-    static uint8_t out[FUZZ_DICT_HUF_PAYLOAD];
     if (n > FUZZ_DICT_HUF_PAYLOAD) n = FUZZ_DICT_HUF_PAYLOAD;
     if (n == 0 || zxc_compress_bound(n) > sizeof(comp)) return;
     static zxc_cctx* cctx = NULL;
@@ -61,7 +60,8 @@ static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const v
     const int ready = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, 6) == ZXC_OK &&
                       zxc_cctx_set_dict(cctx, dict, dict_size, huf) == ZXC_OK &&
                       zxc_dctx_set_dict(dctx, dict, dict_size, huf) == ZXC_OK;
-    if (ready) {
+    uint8_t* const out = ready ? (uint8_t*)malloc(n) : NULL;
+    if (out) {
         const int64_t c = zxc_compress_cctx(cctx, src, n, comp, sizeof(comp));
         assert(c > 0);
         const int64_t d = zxc_decompress_dctx(dctx, comp, (size_t)c, out, n);
@@ -69,6 +69,7 @@ static void dict_huf_roundtrip(const void* dict, const size_t dict_size, const v
         (void)c;
         (void)d;
     }
+    free(out);
 }
 
 /* Configures a compression context for phase 3; ZXC_OK, or the setter's error. */
@@ -88,13 +89,59 @@ static int configure_dctx(zxc_dctx* d, const int checksum, const void* dict, con
     return rc;
 }
 
+/* Phase 3. */
+static void dict_roundtrip(const uint8_t* data, const size_t size, const int level,
+                           const int use_checksum, const void* dict, const size_t dict_size,
+                           const void* dict_huf, uint8_t* comp_buf, uint8_t* comp2_buf,
+                           const size_t bound, uint8_t* decomp_buf) {
+    /* Reference: a fresh context, used once. */
+    zxc_cctx* const fresh = zxc_create_cctx();
+    if (!fresh) return;
+    if (configure_cctx(fresh, level, use_checksum, dict, dict_size, dict_huf) != ZXC_OK) {
+        zxc_free_cctx(fresh);
+        return;
+    }
+    const int64_t csize = zxc_compress_cctx(fresh, data, size, comp_buf, bound);
+    zxc_free_cctx(fresh);
+    if (csize < 0) return;
+
+    /* The context reused across runs must produce the very same archive. */
+    static zxc_cctx* cctx = NULL;
+    if (!cctx) cctx = zxc_create_cctx();
+    if (cctx && configure_cctx(cctx, level, use_checksum, dict, dict_size, dict_huf) == ZXC_OK) {
+        const int64_t c2 = zxc_compress_cctx(cctx, data, size, comp2_buf, bound);
+        assert(c2 == csize);
+        assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
+    }
+
+    /* Reference decode: a fresh context, used once. */
+    zxc_dctx* const fresh_d = zxc_create_dctx();
+    if (!fresh_d) return;
+    if (configure_dctx(fresh_d, use_checksum, dict, dict_size, dict_huf) != ZXC_OK) {
+        zxc_free_dctx(fresh_d);
+        return;
+    }
+    const int64_t dsize = zxc_decompress_dctx(fresh_d, comp_buf, (size_t)csize, decomp_buf, size);
+    zxc_free_dctx(fresh_d);
+
+    if (dsize >= 0) {
+        assert((size_t)dsize == size);
+        assert(memcmp(data, decomp_buf, size) == 0);
+    }
+
+    /* Same archive through the context reused across runs: must agree. */
+    static zxc_dctx* dctx = NULL;
+    if (!dctx) dctx = zxc_create_dctx();
+    if (dctx && configure_dctx(dctx, use_checksum, dict, dict_size, dict_huf) == ZXC_OK) {
+        const int64_t d2 = zxc_decompress_dctx(dctx, comp_buf, (size_t)csize, decomp_buf, size);
+        assert(d2 == dsize);
+        if (d2 >= 0) assert(memcmp(data, decomp_buf, size) == 0);
+    }
+}
+
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     static uint8_t* dict_buf = NULL; /* trained dict content (<= ZXC_DICT_SIZE_MAX) */
     static uint8_t* zxd_buf = NULL;  /* serialized .zxd (header + content)          */
-    static void* comp_buf = NULL;
-    static size_t comp_cap = 0;
-    static void* decomp_buf = NULL;
-    static size_t decomp_cap = 0;
 
     if (size > FUZZ_DICT_MAX_INPUT) return 0;
 
@@ -235,74 +282,16 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     const size_t bound = zxc_compress_bound(size);
     if (bound == 0) return 0;
-    if (bound > comp_cap) {
-        void* nb = realloc(comp_buf, bound);
-        if (!nb) return 0;
-        comp_buf = nb;
-        comp_cap = bound;
-    }
-
-    const void* const dict_huf = use_huf ? huf : NULL;
-
-    /* Reference: a fresh context, used once. */
-    zxc_cctx* const fresh = zxc_create_cctx();
-    if (!fresh) return 0;
-    if (configure_cctx(fresh, level, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) != ZXC_OK) {
-        zxc_free_cctx(fresh);
-        return 0;
-    }
-    const int64_t csize = zxc_compress_cctx(fresh, data, size, comp_buf, bound);
-    zxc_free_cctx(fresh);
-    if (csize < 0) return 0;
-
-    /* The context reused across runs must produce the very same archive. */
-    static zxc_cctx* cctx = NULL;
-    static void* comp2_buf = NULL;
-    static size_t comp2_cap = 0;
-    if (!cctx) cctx = zxc_create_cctx();
-    if (bound > comp2_cap) {
-        void* nb = realloc(comp2_buf, bound);
-        if (!nb) return 0;
-        comp2_buf = nb;
-        comp2_cap = bound;
-    }
-    if (cctx &&
-        configure_cctx(cctx, level, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) == ZXC_OK) {
-        const int64_t c2 = zxc_compress_cctx(cctx, data, size, comp2_buf, bound);
-        assert(c2 == csize);
-        assert(memcmp(comp_buf, comp2_buf, (size_t)csize) == 0);
-    }
-
-    if (size > decomp_cap) {
-        void* nb = realloc(decomp_buf, size);
-        if (!nb) return 0;
-        decomp_buf = nb;
-        decomp_cap = size;
-    }
-
-    /* Reference decode: a fresh context, used once. */
-    zxc_dctx* const fresh_d = zxc_create_dctx();
-    if (!fresh_d) return 0;
-    if (configure_dctx(fresh_d, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) != ZXC_OK) {
-        zxc_free_dctx(fresh_d);
-        return 0;
-    }
-    const int64_t dsize = zxc_decompress_dctx(fresh_d, comp_buf, (size_t)csize, decomp_buf, size);
-    zxc_free_dctx(fresh_d);
-
-    if (dsize >= 0) {
-        assert((size_t)dsize == size);
-        assert(memcmp(data, decomp_buf, size) == 0);
-    }
-
-    /* Same archive through the context reused across runs: must agree. */
-    static zxc_dctx* dctx = NULL;
-    if (!dctx) dctx = zxc_create_dctx();
-    if (dctx && configure_dctx(dctx, use_checksum, dict_buf, (size_t)dict_sz, dict_huf) == ZXC_OK) {
-        const int64_t d2 = zxc_decompress_dctx(dctx, comp_buf, (size_t)csize, decomp_buf, size);
-        assert(d2 == dsize);
-        if (d2 >= 0) assert(memcmp(data, decomp_buf, size) == 0);
-    }
+    /* Exact sizes: ASan sees overruns. */
+    uint8_t* const comp_buf = (uint8_t*)malloc(bound);
+    uint8_t* const comp2_buf = (uint8_t*)malloc(bound);
+    uint8_t* const decomp_buf = (uint8_t*)malloc(size);
+    if (comp_buf && comp2_buf && decomp_buf)
+        dict_roundtrip(data, size, level, use_checksum, dict_buf, (size_t)dict_sz,
+                       use_huf ? huf : NULL, comp_buf, comp2_buf, bound, decomp_buf);
+    free(comp_buf);
+    free(comp2_buf);
+    free(decomp_buf);
 
     return 0;
 }
