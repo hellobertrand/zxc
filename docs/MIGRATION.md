@@ -1,8 +1,9 @@
 # Migrating ZXC archives across format versions
 
-A decoder accepts **only its own format version**: any other version byte is rejected
-with `ZXC_ERROR_BAD_VERSION`. Moving an archive to a new format therefore takes a
-one-time **[transcode](#migrate-transcode-with-the-old-build-recompress-with-v9)**.
+Format v9 is frozen as of ZXC 1.0.0: every later release reads v9 archives, and a decoder
+for version N reads every version from 9 to N. Archives older than v9 (v5 to v8) are
+rejected with `ZXC_ERROR_BAD_VERSION` and take a one-time
+**[transcode](#migrate-transcode-with-the-old-build-recompress-with-v9)**.
 
 | Format | Introduced by | Headline change |
 | :--- | :--- | :--- |
