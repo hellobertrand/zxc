@@ -70,7 +70,8 @@ extern "C" {
 
 /**
  * @name SIMD Intrinsics & Compiler Macros
- * @brief Auto-detected SIMD feature macros for x86 (SSE/AVX) and ARM (NEON).
+ * @brief Auto-detected SIMD feature macros for x86 (SSE/AVX), ARM (NEON) and
+ *        LoongArch (LSX/LASX).
  *
  * Depending on the target architecture and compiler flags the following macros
  * may be defined:
@@ -79,6 +80,8 @@ extern "C" {
  * - @c ZXC_USE_SSE2   - SSE2 (x86-64 baseline) available.
  * - @c ZXC_USE_NEON64 - AArch64 NEON available.
  * - @c ZXC_USE_NEON32 - ARMv7 NEON available.
+ * - @c ZXC_USE_LASX   - LoongArch LASX (256-bit) available.
+ * - @c ZXC_USE_LSX    - LoongArch LSX (128-bit) available.
  *
  * Note: @c -mavx2 / @c -mavx512f imply @c __SSE2__, so @c ZXC_USE_SSE2 is
  * also defined in the AVX variants. The hand-written SIMD code paths therefore
@@ -90,6 +93,10 @@ extern "C" {
  * operations that would otherwise require SSE4.1 (@c _mm_max_epu32,
  * @c _mm_blendv_epi8, @c _mm_packus_epi32) or SSSE3 (@c _mm_shuffle_epi8) are
  * emulated with pure SSE2 instruction sequences or fall back to scalar code.
+ *
+ * LoongArch: LSX is keyed on @c __loongarch_sx (the @c la64v1.0 baseline;
+ * @c -march=loongarch64 lacks it), so @c _default carries it. @c -mlasx implies
+ * it: branches are ordered LASX -> LSX.
  *
  * Define @c ZXC_DISABLE_SIMD to gate all hand-written SIMD paths (intrinsics,
  * inline assembly).  Compiler auto-vectorisation is unaffected.
@@ -127,6 +134,17 @@ extern "C" {
 #else
 #ifndef ZXC_USE_NEON32
 #define ZXC_USE_NEON32
+#endif
+#endif
+#elif defined(__loongarch_sx)
+#include <lsxintrin.h>
+#ifndef ZXC_USE_LSX
+#define ZXC_USE_LSX
+#endif
+#if defined(__loongarch_asx)
+#include <lasxintrin.h>
+#ifndef ZXC_USE_LASX
+#define ZXC_USE_LASX
 #endif
 #endif
 #endif
@@ -1526,6 +1544,21 @@ static ZXC_ALWAYS_INLINE void zxc_file_header_sign(uint8_t* h) {
     zxc_store_le16(h + 14, 0);
     zxc_store_le16(h + 14, zxc_hash16(h));
 }
+
+#if defined(ZXC_USE_LSX)
+/** @brief Byte movemask: bit i is the sign bit of byte i of @p v. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_lsx_movemask_b(const __m128i v) {
+    return (uint32_t)__lsx_vpickve2gr_hu(__lsx_vmskltz_b(v), 0);
+}
+#endif
+
+#if defined(ZXC_USE_LASX)
+/** @brief 32-byte movemask; @c xvmskltz.b leaves one 16-bit mask per lane. */
+static ZXC_ALWAYS_INLINE uint32_t zxc_lasx_movemask_b(const __m256i v) {
+    const __m256i m = __lasx_xvmskltz_b(v);
+    return (uint32_t)__lasx_xvpickve2gr_wu(m, 0) | ((uint32_t)__lasx_xvpickve2gr_wu(m, 4) << 16);
+}
+#endif
 
 /**
  * @brief Copies exactly 16 bytes as one vector move where the ISA has one.
