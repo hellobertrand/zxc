@@ -1,3 +1,23 @@
+[v1.0.1] - 2026-11-14
+fix: Remove redundant homepage field (#620)
+fix: Drop bad_esc sum miscompiled by GCC 14.2 AVX-512 (#614)
+fix: Group changelog entries by type/scope (#612)
+cli: Hardens CLI against race conditions and fixes rm/dedup bugs (#621)
+build: Use upstream lzbench repo
+build: Add GCC c23 + c11 matrix variant (#613)
+build: Bump vitest from 5.0.5 to 5.1.0 in /bindings/nodejs (#609)
+build: Bump scikit-build-core in /bindings/python (#604)
+build: Bump github/codeql-action from 4.39.1 to 4.39.3 (#607)
+build: Bump cc from 1.10.0 to 1.11.1 in /bindings/rust (#608)
+build: Bump semver from 7.8.5 to 7.8.6 in /bindings/nodejs (#610)
+build: Bump marked from 18.1.2 to 18.1.3 in /site (#611)
+build: Bump peter-evans/create-pull-request from 8.1.1 to 8.1.2 (#603)
+build: Bump actions-rust-lang/setup-rust-toolchain (#606)
+build: Add macOS x86_64 release target (#601)
+build: Label dependabot PRs by ecosystem (#600)
+doc: Clarifies format v9 is frozen and forward-compatible (#627)
+doc: Refresh Apple M3 figures and charts (#617)
+
 [v1.0.0] - 2026-11-11
 api: Honor -T as worker count (#561)
 api: Add zxc_version_codename() (#560)
