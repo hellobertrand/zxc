@@ -26,43 +26,19 @@
 
 #define FUZZ_SEEKABLE_MAX_INPUT (4 << 20) /* 4 MiB */
 
-int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    if (size < 2) return 0;
-
-    /* Save original input for phase 7 (raw parser fuzzing) */
-    const uint8_t* const raw_data = data;
-    const size_t raw_size = size;
-
-    /* Use first byte as level, second as flags */
-    const int level = (data[0] % 5) + 1;
-    const int use_checksum = data[1] & 1;
-    const int use_mt = data[1] & 2;
-    const int small_blocks = data[1] & 0x40; /* many blocks: in place, several batches */
-    data += 2;
-    size -= 2;
-
-    if (size == 0 || size > FUZZ_SEEKABLE_MAX_INPUT) return 0;
-
-    /* Persistent buffers - reused across iterations to reduce allocator pressure */
-    static uint8_t* comp_buf = NULL;
-    static size_t comp_cap = 0;
-    static uint8_t* decomp_buf = NULL;
-    static size_t decomp_cap = 0;
+/* Phases 1-6 and 8; @p flags is the control byte. */
+static void seekable_phases(const uint8_t* data, const size_t size, const int level,
+                            const uint8_t flags, uint8_t* comp_buf, const size_t bound,
+                            uint8_t* decomp_buf) {
+    const int use_checksum = flags & 1;
+    const int use_mt = flags & 2;
+    const int small_blocks = flags & 0x40; /* many blocks: in place, several batches */
 
     /* ------------------------------------------------------------------ */
     /* Phase 1: Compress with seekable=1                                  */
     /* ------------------------------------------------------------------ */
-    const size_t bound = zxc_compress_bound(size);
-    if (bound == 0) return 0;
-    if (bound > comp_cap) {
-        void* new_buf = realloc(comp_buf, bound);
-        if (!new_buf) return 0;
-        comp_buf = (uint8_t*)new_buf;
-        comp_cap = bound;
-    }
-
     zxc_cctx* const cctx = zxc_create_cctx();
-    if (!cctx) return 0;
+    if (!cctx) return;
     int64_t csize = -1;
     if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
         zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, use_checksum) == ZXC_OK &&
@@ -71,13 +47,13 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         csize = zxc_compress_cctx(cctx, data, size, comp_buf, bound);
     }
     zxc_free_cctx(cctx);
-    if (csize < 0) return 0;
+    if (csize < 0) return;
 
     /* ------------------------------------------------------------------ */
     /* Phase 2: Open seekable handle                                       */
     /* ------------------------------------------------------------------ */
     zxc_seekable* s = zxc_seekable_open(comp_buf, (size_t)csize);
-    if (!s) return 0;
+    if (!s) return;
 
     /* ------------------------------------------------------------------ */
     /* Phase 3: Exercise metadata getters                                 */
@@ -101,16 +77,6 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     /* Phase 4: Full decompression via seekable range                     */
     /* ------------------------------------------------------------------ */
-    if (size > decomp_cap) {
-        void* new_buf = realloc(decomp_buf, size);
-        if (!new_buf) {
-            zxc_seekable_free(s);
-            return 0;
-        }
-        decomp_buf = (uint8_t*)new_buf;
-        decomp_cap = size;
-    }
-
     int64_t dec_result;
     if (use_mt && size > 4096) {
         dec_result = zxc_seekable_decompress_range_mt(s, decomp_buf, size, 0, size, 2);
@@ -128,9 +94,13 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         /* Extract a range from the middle */
         const size_t off = size / 4;
         const size_t len = size / 2;
-        dec_result = zxc_seekable_decompress_range(s, decomp_buf, len, off, len);
-        assert(dec_result == (int64_t)len);
-        assert(memcmp(data + off, decomp_buf, len) == 0);
+        uint8_t* const part = (uint8_t*)malloc(len);
+        if (part) {
+            dec_result = zxc_seekable_decompress_range(s, part, len, off, len);
+            assert(dec_result == (int64_t)len);
+            assert(memcmp(data + off, part, len) == 0);
+            free(part);
+        }
     }
 
     /* ------------------------------------------------------------------ */
@@ -161,7 +131,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (bad && out) {
             memcpy(bad, comp_buf, (size_t)csize);
             const size_t span = blocks_end - ZXC_FILE_HEADER_SIZE;
-            const int flips = 1 + ((raw_data[1] >> 2) & 3);
+            const int flips = 1 + ((flags >> 2) & 3);
             for (int k = 0; k < flips; k++) {
                 const uint8_t a = data[(size_t)k % size], b = data[(size_t)(k * 7 + 3) % size];
                 bad[ZXC_FILE_HEADER_SIZE + ((size_t)a * 257 + b) * 2654435761U % span] ^=
@@ -169,8 +139,7 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             }
             zxc_seekable* const sc = zxc_seekable_open(bad, (size_t)csize);
             if (sc) {
-                zxc_seekable_decompress_range_mt(sc, out, size, 0, size,
-                                                 2 + ((raw_data[1] >> 4) & 3));
+                zxc_seekable_decompress_range_mt(sc, out, size, 0, size, 2 + ((flags >> 4) & 3));
                 zxc_seekable_decompress_range(sc, out, size, 0, size);
                 zxc_seekable_free(sc);
             }
@@ -183,6 +152,32 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* Cleanup                                                            */
     /* ------------------------------------------------------------------ */
     zxc_seekable_free(s);
+}
+
+int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    if (size < 2) return 0;
+
+    /* Save original input for phase 7 (raw parser fuzzing) */
+    const uint8_t* const raw_data = data;
+    const size_t raw_size = size;
+
+    /* Use first byte as level, second as flags */
+    const int level = (data[0] % 5) + 1;
+    const uint8_t flags = data[1];
+    data += 2;
+    size -= 2;
+
+    if (size == 0 || size > FUZZ_SEEKABLE_MAX_INPUT) return 0;
+
+    const size_t bound = zxc_compress_bound(size);
+    if (bound == 0) return 0;
+    /* Exact sizes: ASan sees overruns. */
+    uint8_t* const comp_buf = (uint8_t*)malloc(bound);
+    uint8_t* const decomp_buf = (uint8_t*)malloc(size);
+    if (comp_buf && decomp_buf)
+        seekable_phases(data, size, level, flags, comp_buf, bound, decomp_buf);
+    free(comp_buf);
+    free(decomp_buf);
 
     /* ------------------------------------------------------------------ */
     /* Phase 7: Fuzz the parser with raw data (malformed seekable archives) */

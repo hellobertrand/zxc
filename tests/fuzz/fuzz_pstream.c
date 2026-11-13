@@ -107,30 +107,10 @@ static int64_t drip_decompress(const uint8_t* comp, size_t csize, uint8_t* out, 
     return (int64_t)out_total;
 }
 
-int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
-    if (size < 3) return 0;
-
-    /* Save raw input for the parser-fuzzing phase. */
-    const uint8_t* const raw_data = data;
-    const size_t raw_size = size;
-
-    /* Header bytes drive pstream-specific axes. data[0] is reserved (the
-     * compression level is intentionally fixed to 1, see copts below); it
-     * is still consumed so corpus byte offsets stay stable. */
-    const int checksum_enabled = data[1] & 1;
-    const size_t in_chunk = derive_chunk_size(data[2]);
-    data += 3;
-    size -= 3;
-
-    if (size == 0 || size > FUZZ_PSTREAM_MAX_INPUT) return 0;
-
-    /* Persistent buffers - reused across iterations to reduce allocator
-     * pressure (same pattern as fuzz_seekable.c). */
-    static uint8_t* comp_buf = NULL;
-    static size_t comp_cap = 0;
-    static uint8_t* round_buf = NULL;
-    static size_t round_cap = 0;
-
+/* Phases 1-2. */
+static void push_roundtrip(const uint8_t* data, const size_t size, const int checksum_enabled,
+                           const size_t in_chunk, uint8_t* comp_buf, const size_t bound,
+                           uint8_t* round_buf) {
     /* ------------------------------------------------------------------ */
     /* Phase 1: Push compression in chunks                                */
     /* ------------------------------------------------------------------ */
@@ -142,27 +122,11 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (!copts || zxc_cctx_set_param(copts, ZXC_C_LEVEL, 1) != ZXC_OK ||
         zxc_cctx_set_param(copts, ZXC_C_CHECKSUM, checksum_enabled) != ZXC_OK) {
         zxc_free_cctx(copts);
-        return 0;
+        return;
     }
     zxc_cstream* cs = zxc_cstream_create(copts);
     zxc_free_cctx(copts);
-    if (!cs) return 0;
-
-    /* Sized so the compressor never runs out - bound is a safe upper limit. */
-    const size_t bound = zxc_compress_bound(size);
-    if (bound == 0) {
-        zxc_cstream_free(cs);
-        return 0;
-    }
-    if (bound > comp_cap) {
-        void* nb = realloc(comp_buf, bound);
-        if (!nb) {
-            zxc_cstream_free(cs);
-            return 0;
-        }
-        comp_buf = (uint8_t*)nb;
-        comp_cap = bound;
-    }
+    if (!cs) return;
 
     size_t comp_len = 0;
     size_t in_pos = 0;
@@ -179,13 +143,13 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
             if (window == 0) {
                 /* Bound exhausted - shouldn't happen with zxc_compress_bound. */
                 zxc_cstream_free(cs);
-                return 0;
+                return;
             }
             zxc_outbuf_t ob = {.dst = comp_buf + comp_len, .size = window, .pos = 0};
             const int64_t r = zxc_cstream_compress(cs, &ob, &in);
             if (r < 0) {
                 zxc_cstream_free(cs);
-                return 0;
+                return;
             }
             comp_len += ob.pos;
             if (in.pos == in.size && r == 0) break;
@@ -199,13 +163,13 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
         if (window > FUZZ_PSTREAM_OUT_CAP) window = FUZZ_PSTREAM_OUT_CAP;
         if (window == 0) {
             zxc_cstream_free(cs);
-            return 0;
+            return;
         }
         zxc_outbuf_t ob = {.dst = comp_buf + comp_len, .size = window, .pos = 0};
         const int64_t pending = zxc_cstream_end(cs, &ob);
         if (pending < 0) {
             zxc_cstream_free(cs);
-            return 0;
+            return;
         }
         comp_len += ob.pos;
         if (pending == 0) break;
@@ -216,19 +180,40 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     /* ------------------------------------------------------------------ */
     /* Phase 2: Push decompression with chunked feeding + roundtrip       */
     /* ------------------------------------------------------------------ */
-    if (size > round_cap) {
-        void* nb = realloc(round_buf, size);
-        if (!nb) return 0;
-        round_buf = (uint8_t*)nb;
-        round_cap = size;
-    }
-
     const int64_t dsize =
         drip_decompress(comp_buf, comp_len, round_buf, size, in_chunk, checksum_enabled);
     if (dsize >= 0) {
         assert((size_t)dsize == size);
         assert(memcmp(data, round_buf, size) == 0);
     }
+}
+
+int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
+    if (size < 3) return 0;
+
+    /* Save raw input for the parser-fuzzing phase. */
+    const uint8_t* const raw_data = data;
+    const size_t raw_size = size;
+
+    /* Header bytes drive pstream-specific axes. data[0] is reserved (the
+     * compression level is intentionally fixed to 1, see push_roundtrip); it
+     * is still consumed so corpus byte offsets stay stable. */
+    const int checksum_enabled = data[1] & 1;
+    const size_t in_chunk = derive_chunk_size(data[2]);
+    data += 3;
+    size -= 3;
+
+    if (size == 0 || size > FUZZ_PSTREAM_MAX_INPUT) return 0;
+
+    /* Exact sizes: ASan sees overruns. */
+    const size_t bound = zxc_compress_bound(size);
+    if (bound == 0) return 0;
+    uint8_t* const comp_buf = (uint8_t*)malloc(bound);
+    uint8_t* const round_buf = (uint8_t*)malloc(size);
+    if (comp_buf && round_buf)
+        push_roundtrip(data, size, checksum_enabled, in_chunk, comp_buf, bound, round_buf);
+    free(comp_buf);
+    free(round_buf);
 
     /* ------------------------------------------------------------------ */
     /* Phase 3: Parser fuzzing - feed raw input directly                  */
