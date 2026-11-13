@@ -121,7 +121,7 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 | `ZXC_BUILD_TESTS` | ON | OFF | Build unit tests |
 | `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
 | `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
-| `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
+| `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON/LSX/LASX) |
 | `ZXC_OPTIMIZE` | `perf` | `perf` | SIMD variants to build: `perf`, `balanced` or `size` (see [Trimming the library](#trimming-the-library)) |
 | `ZXC_DICTIONARY` | ON | ON | Support dictionary frames (compression and decompression) |
 | `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
