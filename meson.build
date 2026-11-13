@@ -137,6 +137,13 @@ elif host_cpu == 'arm'
   # 32-bit ARM only: NEON is optional there (runtime getauxval dispatch).
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
   variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon']]]
+elif host_cpu == 'loongarch64'
+  # No _lsx variant: LSX is the la64v1.0 baseline, compiled by _default.
+  if cc.has_argument('-mlasx')
+    variant_sets += [['_lasx', ['-mlasx']]]
+  else
+    add_project_arguments('-DZXC_ONLY_DEFAULT', language : 'c')
+  endif
 endif
 
 variant_objects = []

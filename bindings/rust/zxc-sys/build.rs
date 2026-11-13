@@ -14,6 +14,7 @@
 //! the x86-64 baseline, already active in `_default`).
 //! On 32-bit ARM: `_default` and `_neon32` (NEON is optional there; the
 //! dispatcher probes it at runtime).
+//! On LoongArch64: `_default` (LSX, the la64v1.0 baseline) and `_lasx`.
 //! Everywhere else (incl. AArch64, where NEON is baseline, and i686):
 //! `_default` only.
 
@@ -300,6 +301,8 @@ fn main() {
             "_neon32",
             &["-march=armv7-a", "-mfpu=neon"],
         );
+    } else if target.starts_with("loongarch64") {
+        compile_variant(&include_dir, &src_lib, "_lasx", &["-mlasx"]);
     }
 
     // PivCo tables: const data used only by the variant Huffman decoders, so it

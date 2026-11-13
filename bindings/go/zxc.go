@@ -34,6 +34,8 @@ package zxc
 // Baseline only: arm needs per-file NEON flags, and Windows GCC needs an assembler
 // flag cgo refuses to keep AVX stack spills from faulting (PR54412).
 #cgo arm windows CFLAGS: -DZXC_ONLY_DEFAULT
+// No LASX variant: cgo cannot pass -mlasx to one file. _default carries LSX.
+#cgo loong64 CFLAGS: -DZXC_ONLY_DEFAULT
 #cgo LDFLAGS: -lpthread
 
 #include <stdlib.h>
