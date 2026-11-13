@@ -146,12 +146,30 @@ jobs:
             cross_prefix: riscv64-linux-gnu
             cmake_processor: riscv64
             qemu_binary: qemu-riscv64
+          # la464 has LASX: the dispatcher picks _lasx. lasx=off leaves _default,
+          # LSX in the baseline build and scalar under -march=loongarch64.
           - name: loong64
             tier: 2
             cross_pkg: gcc-loongarch64-linux-gnu
             cross_prefix: loongarch64-linux-gnu
             cmake_processor: loongarch64
             qemu_binary: qemu-loongarch64
+            qemu_cpu: "la464,lasx=off"
+          - name: loong64-lasx
+            tier: 2
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            qemu_binary: qemu-loongarch64
+            qemu_cpu: la464
+          - name: loong64-nolsx
+            tier: 2
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            cmake_c_flags: "-march=loongarch64"
+            qemu_binary: qemu-loongarch64
+            qemu_cpu: "la464,lasx=off"
           # Tier 3
           - name: armv6
             tier: 3
@@ -289,6 +307,10 @@ jobs:
 
               echo "Running Tests for $LIB_TYPE via QEMU..."
               "${RUN[@]}" ./$BUILD_DIR/zxc_test
+              "${RUN[@]}" ./$BUILD_DIR/zxc_simd_kernel_test
+              if [ -x ./$BUILD_DIR/zxc_simd_kernel_test_lasx ]; then
+                  "${RUN[@]}" ./$BUILD_DIR/zxc_simd_kernel_test_lasx
+              fi
               "${RUN[@]}" ./$BUILD_DIR/zxc_conformance_test ./tests/conformance
               "${RUN[@]}" ./$BUILD_DIR/zxc_format_golden_test ./tests/format/golden
 

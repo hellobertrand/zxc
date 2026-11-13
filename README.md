@@ -158,7 +158,7 @@ Apple M3 (ARM64)
 - **O(1) random access.** An optional seek table (`-S`) decompresses any block without reading the rest.
 - **Decodes in place.** One buffer instead of two, zero allocations with a static context: made for firmware, FOTA and bootloaders ([details](#in-place-decompression)).
 - **Small payloads too.** A trained dictionary recovers ratio on 4–128 KB blocks ([details](#dictionary-compression)).
-- **Runs everywhere.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, POWER, s390x, i386, with hand-tuned SIMD (AVX2/AVX-512/NEON).
+- **Runs everywhere.** x86_64, ARM64, ARMv7, ARMv6, RISC-V, LoongArch, POWER, s390x, i386, with hand-tuned SIMD (AVX2/AVX-512/NEON/LSX/LASX).
 - **Production-grade.** Continuously fuzzed by OSS-Fuzz, ASan/UBSan/Valgrind-clean, a [specified wire format](docs/FORMAT.md) with conformance vectors, signed releases, BSD-3-Clause.
 
 **Used in** [ClickHouse](https://clickhouse.com/docs/reference/statements/create/table/codec) (experimental column codec) · **Packaged in** Debian 14, Ubuntu 26.10, Homebrew, vcpkg, Conan, Winget · **Benchmarked in** lzbench & TurboBench
