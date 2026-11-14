@@ -112,6 +112,7 @@ jobs:
           echo "stream inputs: $(find corpus/corpus/zxc_fuzzer_stream -type f 2>/dev/null | wc -l)"
           echo "inplace inputs: $(find corpus/corpus/zxc_fuzzer_inplace -type f 2>/dev/null | wc -l)"
           echo "block inputs: $(find corpus/corpus/zxc_fuzzer_block -type f 2>/dev/null | wc -l)"
+          echo "variants inputs: $(find corpus/corpus/zxc_fuzzer_variants -type f 2>/dev/null | wc -l)"
 
       - name: Build Coverage Harnesses
         run: |
@@ -145,6 +146,22 @@ jobs:
           clang $CFLAGS $INCLUDES $DEFS $SOURCES tests/fuzz/fuzz_block.c \
             -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_block
 
+          # Same variant flags as .clusterfuzzlite/build.sh.
+          mkdir -p build-cov/variants
+          BASE_DEFS="-D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
+          for v in "_avx2 -mavx2 -mbmi -mbmi2 -mlzcnt" \
+                   "_avx512 -mavx512f -mavx512bw -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt"; do
+            set -- $v
+            sfx=$1
+            shift
+            for src in compress decompress huffman; do
+              clang $CFLAGS $INCLUDES $BASE_DEFS -DZXC_FUNCTION_SUFFIX=$sfx "$@" \
+                -c src/lib/zxc_$src.c -o build-cov/variants/zxc_${src}${sfx}.o
+            done
+          done
+          clang $CFLAGS $INCLUDES $DEFS -DFUZZ_X86_VARIANTS $SOURCES tests/fuzz/fuzz_variants.c \
+            build-cov/variants/*.o -fsanitize=fuzzer -lm -lpthread -o build-cov/fuzz_variants
+
       - name: Replay Corpora
         shell: bash
         run: |
@@ -176,6 +193,10 @@ jobs:
             LLVM_PROFILE_FILE="build-cov/block.profraw" \
               build-cov/fuzz_block corpus/corpus/zxc_fuzzer_block/ -runs=0 2>&1 | tail -1
           fi
+          if [ -d corpus/corpus/zxc_fuzzer_variants ]; then
+            LLVM_PROFILE_FILE="build-cov/variants.profraw" \
+              build-cov/fuzz_variants corpus/corpus/zxc_fuzzer_variants/ -runs=0 2>&1 | tail -1
+          fi
 
       - name: Generate Coverage Report
         run: |
@@ -187,6 +208,7 @@ jobs:
             $([ -f build-cov/stream.profraw ] && echo build-cov/stream.profraw) \
             $([ -f build-cov/inplace.profraw ] && echo build-cov/inplace.profraw) \
             $([ -f build-cov/block.profraw ] && echo build-cov/block.profraw) \
+            $([ -f build-cov/variants.profraw ] && echo build-cov/variants.profraw) \
             -o build-cov/fuzz.profdata
 
           echo "=== COVERAGE SUMMARY ==="
@@ -198,6 +220,7 @@ jobs:
             $([ -f build-cov/fuzz_stream ] && echo "-object build-cov/fuzz_stream") \
             $([ -f build-cov/fuzz_inplace ] && echo "-object build-cov/fuzz_inplace") \
             $([ -f build-cov/fuzz_block ] && echo "-object build-cov/fuzz_block") \
+            $([ -f build-cov/fuzz_variants ] && echo "-object build-cov/fuzz_variants") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_)'
 
@@ -209,6 +232,7 @@ jobs:
             $([ -f build-cov/fuzz_stream ] && echo "-object build-cov/fuzz_stream") \
             $([ -f build-cov/fuzz_inplace ] && echo "-object build-cov/fuzz_inplace") \
             $([ -f build-cov/fuzz_block ] && echo "-object build-cov/fuzz_block") \
+            $([ -f build-cov/fuzz_variants ] && echo "-object build-cov/fuzz_variants") \
             -instr-profile=build-cov/fuzz.profdata \
             --ignore-filename-regex='(vendors/|tests/|fuzz_)' \
             --format=html -output-dir=build-cov/coverage_html

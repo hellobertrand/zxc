@@ -15,7 +15,7 @@
  * runs an instruction the machine lacks.
  *
  *  1. The raw input, as a block, through the fast and the strict decoder of
- *     every available variant. When two succeed they must agree byte for byte.
+ *     every available variant: same verdict per decoder, same bytes on success.
  *  2. The input compressed by a chosen variant: the bytes must match the
  *     `_default` encoder's, and a chosen variant must decode them bit-exact.
  *
@@ -115,6 +115,9 @@ static void decode_untrusted(const uint8_t* src, const size_t len, const size_t 
 
     uint8_t* ref = NULL;
     int ref_n = -1;
+    /* First variant's verdict per decoder; error codes may differ. */
+    int accepted[2] = {0, 0};
+    int have_verdict[2] = {0, 0};
     for (size_t i = 0; i < g_n_variants; i++) {
         /* The strict decoder is not the RAW path: the block API routes around it. */
         for (int safe = 0; safe < (src[0] == ZXC_BLOCK_RAW ? 1 : 2); safe++) {
@@ -122,6 +125,13 @@ static void decode_untrusted(const uint8_t* src, const size_t len, const size_t 
             const int n = safe ? decode(g_variants[i].decode_safe, &ctx, src, len, block_size, &out)
                                : decode(g_variants[i].decode, &ctx, src, len,
                                         block_size + ZXC_DECOMPRESS_TAIL_PAD, &out);
+            if (!out) continue; /* allocation failed */
+            if (have_verdict[safe]) {
+                assert((n > 0) == accepted[safe]);
+            } else {
+                accepted[safe] = n > 0;
+                have_verdict[safe] = 1;
+            }
             if (n > 0 && ref_n > 0) {
                 assert(n == ref_n);
                 assert(memcmp(out, ref, (size_t)n) == 0);
