@@ -270,7 +270,26 @@ fn main() {
             &include_dir,
             &src_lib,
             "_avx512",
-            &["/arch:AVX512", "/D__BMI__", "/D__BMI2__", "/D__LZCNT__"],
+            // /arch:AVX512 does not cover VBMI/VBMI2.
+            &if cc::Build::new().get_compiler().is_like_clang_cl() {
+                [
+                    "/arch:AVX512",
+                    "/D__BMI__",
+                    "/D__BMI2__",
+                    "/D__LZCNT__",
+                    "-mavx512vbmi",
+                    "-mavx512vbmi2",
+                ]
+            } else {
+                [
+                    "/arch:AVX512",
+                    "/D__BMI__",
+                    "/D__BMI2__",
+                    "/D__LZCNT__",
+                    "/D__AVX512VBMI__",
+                    "/D__AVX512VBMI2__",
+                ]
+            },
         );
     } else if is_x86_64 {
         compile_variant(

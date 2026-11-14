@@ -128,7 +128,7 @@ if host_cpu == 'x86_64'
   # No _sse2 variant (SSE2 = x86-64 baseline, already active in _default).
   if is_cl
     variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
-    variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
+    variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__', '/D__AVX512VBMI__', '/D__AVX512VBMI2__']]]
   else
     variant_sets += [['_avx2',   ['-mavx2', '-mbmi', '-mbmi2', '-mlzcnt']]]
     variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vl', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
