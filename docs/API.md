@@ -1,6 +1,6 @@
 # ZXC API & ABI Reference
 
-**Library version**: 1.0.0
+**Library version**: 1.0.1
 **SOVERSION**: 6  
 **License**: BSD-3-Clause
 
@@ -142,7 +142,7 @@ libzxc.so.{SOVERSION}                   # its soname, the name binaries load
 | Field | Description | Current |
 |-------|-------------|---------|
 | `SOVERSION` | Bumped on **ABI-breaking** changes (struct layout, removed symbols, changed signatures). | **6** |
-| `VERSION` | File version: `SOVERSION.MINOR.PATCH`, with MINOR and PATCH taken from the release number (1.0.0). | **6.0.0** |
+| `VERSION` | File version: `SOVERSION.MINOR.PATCH`, with MINOR and PATCH taken from the release number (1.0.1). | **6.0.1** |
 
 **Compatibility rule**: any binary compiled against SOVERSION N will load against
 any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
@@ -151,8 +151,8 @@ any libzxc with the same SOVERSION, regardless of the `VERSION` triple.
 
 | Platform | Files |
 |----------|-------|
-| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.6.0.0` |
-| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.6.0.0.dylib` |
+| Linux | `libzxc.so` -> `libzxc.so.6` -> `libzxc.so.6.0.1` |
+| macOS | `libzxc.dylib` -> `libzxc.6.dylib` -> `libzxc.6.0.1.dylib` |
 | Windows | `libzxc.dll` + `zxc.lib` (MSVC import, built from the shipped `libzxc.def`) or `libzxc.dll.a` (MinGW import) |
 
 ---
@@ -179,9 +179,9 @@ Defined in `zxc_constants.h`:
 ```c
 #define ZXC_VERSION_MAJOR     1
 #define ZXC_VERSION_MINOR     0
-#define ZXC_VERSION_PATCH     0
+#define ZXC_VERSION_PATCH     1
 #define ZXC_VERSION_CODENAME  "Hydrogen"
-#define ZXC_LIB_VERSION_STR   "1.0.0"
+#define ZXC_LIB_VERSION_STR   "1.0.1"
 #define ZXC_VERSION_NUMBER    (ZXC_VERSION_MAJOR * 10000 + ZXC_VERSION_MINOR * 100 + ZXC_VERSION_PATCH)
 ```
 

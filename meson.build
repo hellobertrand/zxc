@@ -4,7 +4,7 @@
 # Copyright (c) Bertrand Lebonnois and contributors.
 
 project('zxc', 'c',
-  version : '1.0.0',
+  version : '1.0.1',
   license : 'BSD-3-Clause',
   default_options : ['c_std=c17', 'buildtype=release', 'warning_level=2',
                      'pkgconfig.relocatable=true'],
@@ -53,7 +53,7 @@ endif
 
 # Keep in sync with ZXC_SOVERSION in CMakeLists.txt (bumps only on an ABI break).
 zxc_soversion = '6'
-# As in CMakeLists.txt, the file name starts with the soname number: libzxc.so.6.0.0.
+# As in CMakeLists.txt, the file name starts with the soname number: libzxc.so.6.0.1.
 zxc_version_parts = meson.project_version().split('.')
 zxc_lib_version = '@0@.@1@.@2@'.format(zxc_soversion, zxc_version_parts[1], zxc_version_parts[2])
 
