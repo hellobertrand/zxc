@@ -243,8 +243,9 @@ Magic (u32):
 
 Format Version (u8):
 : The wire-format version. This document specifies version 9. A
-  conforming decoder MUST reject any file whose Format Version it
-  does not support, as an unsupported version ({{error-handling}}).
+  decoder implementing version N accepts 9 to N
+  ({{compatibility-rules}}) and MUST reject any other value as an
+  unsupported version ({{error-handling}}).
 
 Chunk Size Code (u8):
 : Values from 12 to 21 inclusive are interpreted as exponents, where
@@ -1304,7 +1305,9 @@ Magic (u32):
 
 Dictionary Format Version (u8):
 : The dictionary file format version. This document specifies version 2.
-  A decoder MUST reject any other version. Version 1 dictionaries were
+  Version 2 is frozen with Format Version 9: a loader that implements
+  dictionary format version M accepts 2 to M and MUST reject any other
+  version as unsupported. Version 1 dictionaries were
   signed with the header checksum of Format Version 8, not the one of
   {{header-checksums}}, so they are rejected on this byte before the
   checksum is compared. The dictionary format version is independent of
@@ -1436,11 +1439,12 @@ reported as success.
 ## Format Version Field
 
 The Format Version is a single byte at offset 0x04 of the File
-Header. A conforming decoder accepts only the version it implements
-and MUST reject any other version. Because block-type numbering and
-payload layouts may change between versions, a decoder MUST NOT
-attempt to interpret an archive whose version byte it does not
-recognise.
+Header. Version 9 is frozen as of version 1.0.0 of the reference
+implementation: later versions are added alongside it and never
+change how a version 9 archive is read. Compatibility follows the
+Format Version, not the release number: an implementation that
+implements version N, such as a patch release on an older line,
+rejects archives of any later version ({{compatibility-rules}}).
 
 ## Version Bump Criteria
 
@@ -1457,9 +1461,17 @@ correctly requires a version bump:
 
 ## Compatibility Rules {#compatibility-rules}
 
+Version compatibility:
+: A decoder that implements version N MUST accept every version from
+  9 to N, reading each archive by the rules of the version it
+  declares, and MUST reject any version above N and any version below
+  9, which predate this document. Because block-type numbering and
+  payload layouts may change between versions, a decoder MUST NOT
+  interpret an archive under the rules of another version.
+
 Unknown block types:
-: A decoder MUST reject any block whose type is not defined for its
-  Format Version. The block-type set is fixed per version;
+: A decoder MUST reject any block whose type is not defined for the
+  archive's Format Version. The block-type set is fixed per version;
   introducing a new type is a version bump. Decoders MUST NOT skip
   unknown blocks: silently advancing past unrecognised data is
   unsafe.
