@@ -412,3 +412,52 @@ jobs:
               echo ">>> Completed Build: $LIB_TYPE"
               echo ""
           done
+
+  # MSVC's AVX-512 variant under SDE: hosted runners do not all have VBMI2.
+  build-windows-sde:
+    name: "Tier 2: x86_64 (windows 2025, sde avx-512)"
+    runs-on: windows-2025
+    timeout-minutes: 15
+    env:
+      SDE_URL: "https://downloadmirror.intel.com/915934/sde-external-10.8.0-2026-03-15-win.tar.xz"
+      SDE_SHA256: "176f87c80eb42bb91b73e1428f4a0fd067df322f901f9b4359b20b86b92c2bae"
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install Intel SDE (pinned + checksum-verified)
+        shell: bash
+        run: |
+          curl -fsSL -o sde.tar.xz "$SDE_URL"
+          echo "${SDE_SHA256}  sde.tar.xz" | sha256sum -c -
+          SDE_DIR="$(cygpath -u "$RUNNER_TEMP")/sde"
+          mkdir -p "$SDE_DIR"
+          tar -xf sde.tar.xz -C "$SDE_DIR" --strip-components=1
+          cygpath -w "$SDE_DIR" >> "$GITHUB_PATH"
+
+      - name: Configure, Build & Test (Static & Shared) under SDE
+        shell: bash
+        run: |
+          SDE="sde -icx --"
+          for LIB_TYPE in "STATIC" "SHARED"; do
+              echo ">>> Starting Build: $LIB_TYPE"
+              BUILD_DIR="build_${LIB_TYPE}"
+
+              SHARED_FLAG="OFF"
+              if [ "$LIB_TYPE" == "SHARED" ]; then SHARED_FLAG="ON"; fi
+
+              cmake -S . -B "$BUILD_DIR" -A x64 \
+                  -DCMAKE_COMPILE_WARNING_AS_ERROR=ON \
+                  -DZXC_NATIVE_ARCH=OFF \
+                  -DBUILD_SHARED_LIBS=$SHARED_FLAG
+
+              cmake --build "$BUILD_DIR" --config Release --parallel
+
+              echo "Running Tests for $LIB_TYPE under Intel SDE (avx-512)..."
+              $SDE ./"$BUILD_DIR"/Release/zxc_test.exe
+              $SDE ./"$BUILD_DIR"/Release/zxc_conformance_test.exe ./tests/conformance
+              $SDE ./"$BUILD_DIR"/Release/zxc_format_golden_test.exe ./tests/format/golden
+
+              echo ">>> Completed Build: $LIB_TYPE"
+              echo ""
+          done
