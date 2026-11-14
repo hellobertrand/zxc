@@ -21,7 +21,7 @@ name = "zxc_sys"
 libc = "0.2"
 
 [build-dependencies]
-cc = "1.2"
+cc = "1.2.8"
 
 [features]
 default = []
