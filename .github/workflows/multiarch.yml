@@ -419,8 +419,8 @@ jobs:
     runs-on: windows-2025
     timeout-minutes: 15
     env:
-      SDE_URL: "https://downloadmirror.intel.com/915934/sde-external-10.8.0-2026-03-15-win.tar.xz"
-      SDE_SHA256: "176f87c80eb42bb91b73e1428f4a0fd067df322f901f9b4359b20b86b92c2bae"
+      SDE_URL: "https://downloadmirror.intel.com/859732/sde-external-9.58.0-2025-06-16-win.tar.xz"
+      SDE_SHA256: "ebb8b3b63fcb0b6c1f9721118ba4883703d2aed9e0db2defed4e44fba78d9ca9"
     steps:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
