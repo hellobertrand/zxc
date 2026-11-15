@@ -1465,6 +1465,7 @@ static ZXC_ALWAYS_INLINE int zxc_lz77_lazy_parse_spl_impl(
         if (UNLIKELY(ip + step >= search_limit)) step = 1;
 
         // ip + step <= search_limit either way, so this read stays in the block.
+        // cppcheck-suppress unreadVariable
         const uint32_t h_next = zxc_hash_func(zxc_le64(ip + step), use_hash5);
         ZXC_PREFETCH_READ(&hash_tags[h_next]);
         ZXC_PREFETCH_READ(&hash_table[h_next]);
@@ -2271,9 +2272,9 @@ static int zxc_encode_block_pak(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
         zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
                          epoch_mark, offset_mask, level);
 
-    uint8_t* const literals = ctx->literals;
-    uint8_t* const buf_extras = ctx->buf_extras;
-    uint32_t* const buf_sequences = ctx->buf_sequences;
+    const uint8_t* const literals = ctx->literals;
+    const uint8_t* const buf_extras = ctx->buf_extras;
+    const uint32_t* const buf_sequences = ctx->buf_sequences;
 
     uint32_t seq_c = 0;
     size_t extras_c = 0;
