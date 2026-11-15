@@ -140,7 +140,7 @@ extern "C" {
  * the AVX-512 tier, which only runs on CPUs where it takes a few cycles. On the
  * AVX2 tier it asks the CPU: call it per block, not per sequence.
  */
-#if (defined(__x86_64__) || defined(_M_X64)) && !defined(ZXC_ONLY_DEFAULT)
+#if defined(__x86_64__) || defined(_M_X64)
 int zxc_pdep_is_fast(void);
 #endif
 #if (defined(__x86_64__) || defined(_M_X64)) && defined(__BMI2__) && \

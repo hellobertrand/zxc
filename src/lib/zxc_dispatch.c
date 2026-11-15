@@ -34,8 +34,8 @@
 #endif
 #endif
 
-#if (defined(__x86_64__) || defined(_M_X64)) && !defined(_MSC_VER) && !defined(ZXC_ONLY_DEFAULT)
-#include <cpuid.h>  // __cpuid_count: CPUID probes in zxc_detect_cpu_features
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(_MSC_VER)
+#include <cpuid.h>  // __cpuid_count: CPUID probes
 #endif
 
 #if defined(__linux__) && (defined(__arm__) || defined(_M_ARM)) && !defined(ZXC_ONLY_DEFAULT)
@@ -160,7 +160,7 @@ int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 // CPU DETECTION LOGIC
 // ============================================================================
 
-#if (defined(__x86_64__) || defined(_M_X64)) && !defined(ZXC_ONLY_DEFAULT)
+#if defined(__x86_64__) || defined(_M_X64)
 
 /** @brief Reads CPUID leaf @p leaf, subleaf @p sub into @p regs (EAX,EBX,ECX,EDX). */
 static inline void zxc_cpuid(const uint32_t leaf, const uint32_t sub, uint32_t regs[4]) {
@@ -176,6 +176,7 @@ static inline void zxc_cpuid(const uint32_t leaf, const uint32_t sub, uint32_t r
 #endif
 }
 
+#ifndef ZXC_ONLY_DEFAULT
 /** @brief Reads XCR0 (@c XGETBV with ECX=0). Callers must check OSXSAVE first. */
 static inline uint64_t zxc_xgetbv0(void) {
 #if defined(_MSC_VER)
@@ -188,6 +189,7 @@ static inline uint64_t zxc_xgetbv0(void) {
     return ((uint64_t)hi << 32) | lo;
 #endif
 }
+#endif  // ZXC_ONLY_DEFAULT
 
 /**
  * @brief Tells whether PDEP is fast, from CPUID leaf 0 EBX/EDX/ECX and leaf 1 EAX.
@@ -229,7 +231,7 @@ int zxc_pdep_is_fast(void) {
     }
     return state == 1;
 }
-#endif /* x86-64 && !ZXC_ONLY_DEFAULT */
+#endif /* x86-64 */
 
 /** @brief Function pointer type for the chunk decompressor. */
 typedef int (*zxc_decompress_func_t)(const zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT,
