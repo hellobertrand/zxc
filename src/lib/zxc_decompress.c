@@ -144,6 +144,8 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
                                                             const uint64_t ml) {
     const size_t stride = zxc_overlap_strides32[off];
     size_t copied = 0;
+    // MSan keeps the shadow of the bytes a shuffle loads but never selects.
+    ZXC_MSAN_UNPOISON(dst, 32 - off);
 #if defined(ZXC_USE_NEON64)
     uint8x16x2_t tbl;
     tbl.val[0] = vld1q_u8(dst - off);
@@ -247,6 +249,7 @@ static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_run32(uint8_t* dst, const 
 // codeql[cpp/unused-static-function] : False positive
 static ZXC_ALWAYS_INLINE void zxc_decode_copy_overlap_short(uint8_t* dst, const uint32_t off,
                                                             const uint64_t ml) {
+    ZXC_MSAN_UNPOISON(dst, ml > 16 ? 32 - off : (off < 16 ? 16 - off : 0));
 #if defined(ZXC_USE_NEON64)
     const uint8x16_t s0 = vld1q_u8(dst - off);
     vst1q_u8(dst, vqtbl1q_u8(s0, vld1q_u8(zxc_overlap_masks32[off])));

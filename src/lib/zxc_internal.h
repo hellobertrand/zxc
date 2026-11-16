@@ -256,6 +256,19 @@ extern "C" {
  */
 #define ZXC_ALIGN(x) _Alignas(x)
 #endif
+
+/** @def ZXC_MSAN_UNPOISON
+ * @brief Marks @p n bytes at @p p initialised under MemorySanitizer; no-op elsewhere.
+ */
+#if defined(__has_feature)
+#if __has_feature(memory_sanitizer)
+#include <sanitizer/msan_interface.h>
+#define ZXC_MSAN_UNPOISON(p, n) __msan_unpoison((p), (n))
+#endif
+#endif
+#ifndef ZXC_MSAN_UNPOISON
+#define ZXC_MSAN_UNPOISON(p, n) ((void)0)
+#endif
 /** @} */ /* end of Compiler Abstractions */
 
 // Heap allocator and cache-line-aligned allocator macros are now defined
