@@ -5,10 +5,19 @@
   ninja,
   pkg-config,
   doxygen,
+  makeWrapper,
+  less,
+  gnugrep,
+  bash,
 }:
 stdenv.mkDerivation (finalAttrs: {
   pname = "zxc";
-  version = "1.0.1";
+  version =
+    let
+      h = builtins.readFile ./include/zxc_constants.h;
+      get = n: builtins.head (builtins.match ".*#define ZXC_VERSION_${n} ([0-9]+).*" h);
+    in
+    "${get "MAJOR"}.${get "MINOR"}.${get "PATCH"}";
   src = lib.cleanSource ./.;
 
   nativeBuildInputs = [
@@ -16,6 +25,7 @@ stdenv.mkDerivation (finalAttrs: {
     ninja
     pkg-config
     doxygen
+    makeWrapper
   ];
 
   cmakeFlags = [
@@ -23,6 +33,20 @@ stdenv.mkDerivation (finalAttrs: {
     "-DZXC_NATIVE_ARCH=OFF"
     "-DZXC_INSTALL=ON"
   ];
+
+  # zxcless / zxcgrep resolve less, grep, sh and zxc vía PATH.
+  postInstall = lib.optionalString (!stdenv.hostPlatform.isWindows) ''
+    for prog in zxcless zxcgrep; do
+      wrapProgram "$out/bin/$prog" \
+       --prefix PATH : ${
+         lib.makeBinPath [
+           less
+           gnugrep
+           bash
+         ]
+       }:$out/bin
+    done
+  '';
 
   doCheck = true;
 
@@ -44,7 +68,6 @@ stdenv.mkDerivation (finalAttrs: {
     homepage = "https://github.com/hellobertrand/zxc";
     changelog = "https://github.com/hellobertrand/zxc/releases/tag/v${finalAttrs.version}";
     license = licenses.bsd3;
-    maintainers = with maintainers; [ kleindotc ];
     platforms = platforms.all;
     mainProgram = "zxc";
     pkgConfigModules = [ "libzxc" ];

@@ -100,3 +100,4 @@ site/.wrangler/
 # nix build
 result
 result-man
+result-dev
