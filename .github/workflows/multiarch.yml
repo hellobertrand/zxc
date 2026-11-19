@@ -320,8 +320,13 @@ jobs:
               if [ -n "${{ matrix.expect_variant }}" ]; then
                   "${RUN[@]}" -d in_asm -D qemu_in_asm.log \
                       ./$BUILD_DIR/zxc_conformance_test ./tests/conformance > /dev/null
-                  grep -q "IN: zxc_decompress_chunk_wrapper${{ matrix.expect_variant }}\$" qemu_in_asm.log
-                  grep -q "IN: zxc_compress_chunk_wrapper${{ matrix.expect_variant }}\$" qemu_in_asm.log
+                  for fn in decompress compress; do
+                      if ! grep -q "IN: zxc_${fn}_chunk_wrapper${{ matrix.expect_variant }}\$" qemu_in_asm.log; then
+                          echo "::error::zxc_${fn}_chunk_wrapper${{ matrix.expect_variant }} never ran; wrappers seen:"
+                          grep -oE 'IN: zxc_[a-z]+_chunk_wrapper[a-z0-9_]*$' qemu_in_asm.log | sort -u
+                          exit 1
+                      fi
+                  done
                   rm -f qemu_in_asm.log
               fi
 

@@ -162,7 +162,7 @@ fn riscv64_variant_flag() -> Option<&'static str> {
     let probe = cc::Build::new();
     let compiler = probe.get_compiler();
     let flag = if compiler.is_like_clang() {
-        "-mno-strict-align"
+        "-mno-scalar-strict-align"
     } else if compiler.is_like_gnu() {
         "-mtune=generic-ooo"
     } else {
@@ -241,11 +241,14 @@ fn main() {
     let is_x86_64 = target.contains("x86_64");
     let is_arm32 = (target.starts_with("arm") && !target.starts_with("arm64"))
         || target.starts_with("thumbv7");
-    let rv64fast_flag = if target.starts_with("riscv64") && target.contains("linux") {
-        riscv64_variant_flag()
-    } else {
-        None
-    };
+    // Linux only (not Android), as in CMake and meson.
+    let rv64fast_flag =
+        if target.starts_with("riscv64") && target.contains("linux") && !target.contains("android")
+        {
+            riscv64_variant_flag()
+        } else {
+            None
+        };
 
     // =========================================================================
     // Core library files (common to all architectures)

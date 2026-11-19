@@ -1564,7 +1564,8 @@ static ZXC_ALWAYS_INLINE void zxc_copy16(void* dst, const void* src) {
 /**
  * @brief Copies 32 bytes from source to destination using SIMD when available.
  *
- * Uses AVX2 on x86, NEON on ARM64/ARM32, or two 16-byte copies as fallback.
+ * Uses AVX2/AVX-512, two SSE2/NEON halves, two 16-byte halves on fast-misaligned
+ * RISC-V without V, otherwise one 32-byte memcpy.
  *
  * @param[out] dst Pointer to the destination memory block.
  * @param[in] src Pointer to the source memory block.

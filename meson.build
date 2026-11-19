@@ -166,8 +166,8 @@ elif host_cpu == 'riscv64' and host_machine.system() == 'linux'
   rv64fast_args = []
   if cc.get_id() == 'gcc' and cc.has_argument('-mtune=generic-ooo')
     rv64fast_args = ['-mtune=generic-ooo']
-  elif cc.get_id() == 'clang' and cc.has_argument('-mno-strict-align')
-    rv64fast_args = ['-mno-strict-align']
+  elif cc.get_id() == 'clang' and cc.has_argument('-mno-scalar-strict-align')
+    rv64fast_args = ['-mno-scalar-strict-align']
   endif
   if rv64fast_args.length() > 0
     variant_sets += [['_rv64fast', rv64fast_args, variant_sources]]

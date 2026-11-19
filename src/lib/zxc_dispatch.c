@@ -72,6 +72,16 @@ typedef struct {
     uint64_t value;
 } zxc_riscv_hwprobe_t;
 
+// A syscall clobbers the vector state (Linux riscv vector ABI).
+#ifdef __riscv_vector
+#define ZXC_RISCV_ECALL_CLOBBERS                                                                   \
+    "memory", "v0", "v1", "v2", "v3", "v4", "v5", "v6", "v7", "v8", "v9", "v10", "v11", "v12",     \
+        "v13", "v14", "v15", "v16", "v17", "v18", "v19", "v20", "v21", "v22", "v23", "v24", "v25", \
+        "v26", "v27", "v28", "v29", "v30", "v31", "vl", "vtype"
+#else
+#define ZXC_RISCV_ECALL_CLOBBERS "memory"
+#endif
+
 /** @brief `riscv_hwprobe(pairs, count, 0, NULL, 0)`; 0 or -errno. */
 static inline long zxc_riscv_hwprobe(zxc_riscv_hwprobe_t* pairs, const size_t count) {
     register long a0 __asm__("a0") = (long)pairs;
@@ -80,7 +90,10 @@ static inline long zxc_riscv_hwprobe(zxc_riscv_hwprobe_t* pairs, const size_t co
     register long a3 __asm__("a3") = 0;
     register long a4 __asm__("a4") = 0;
     register long a7 __asm__("a7") = ZXC_NR_RISCV_HWPROBE;
-    __asm__ volatile("ecall" : "+r"(a0) : "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a7) : "memory");
+    __asm__ volatile("ecall"
+                     : "+r"(a0)
+                     : "r"(a1), "r"(a2), "r"(a3), "r"(a4), "r"(a7)
+                     : ZXC_RISCV_ECALL_CLOBBERS);
     return a0;
 }
 #endif
