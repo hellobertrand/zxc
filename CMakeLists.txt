@@ -23,6 +23,7 @@ if(PROJECT_IS_TOP_LEVEL AND NOT ZXC_MULTI_CONFIG AND NOT CMAKE_BUILD_TYPE
     message(STATUS "zxc: no CMAKE_BUILD_TYPE given, defaulting to Release")
 endif()
 
+include(GNUInstallDirs)     # CMAKE_INSTALL_* paths
 include(zxcOptions)         # Build options
 include(zxcPlatform)        # Target architecture + Emscripten/WASM overrides
 include(zxcCompilerFlags)   # C standard, LTO/PGO, per-target flag helpers
@@ -81,7 +82,7 @@ set_target_properties(zxc_lib PROPERTIES
 target_include_directories(zxc_lib
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-        $<INSTALL_INTERFACE:include>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/src/lib
         ${RAPIDHASH_INCLUDE_DIR}
