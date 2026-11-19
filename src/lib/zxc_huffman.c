@@ -1397,6 +1397,8 @@ static ZXC_ALWAYS_INLINE void zxc_pivco_merge(uint8_t* RESTRICT out, const uint8
     size_t i = 0;
     size_t lp = 0;
     size_t rp = 0;
+    // MSan keeps the shadow of the bytes a shuffle loads but never selects.
+    ZXC_MSAN_UNPOISON(src + n, 16);
 #if defined(ZXC_USE_NEON64)
     // 16 outputs per step: two-register TBL over {L[0..15], R[0..15]} with the
     // signed-index tables (see zxc_pivco_tables.h).
