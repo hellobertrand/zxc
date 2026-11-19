@@ -96,3 +96,7 @@ bindings/nodejs/zxc-core/
 site/dist/
 site/node_modules/
 site/.wrangler/
+
+# nix build
+result
+result-man
