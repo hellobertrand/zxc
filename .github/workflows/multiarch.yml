@@ -170,22 +170,6 @@ jobs:
             qemu_binary: qemu-riscv64
             qemu_cpu: rv64
             expect_variant: _rv64fast
-          - name: riscv64 _rvv
-            tier: 2
-            cross_pkg: gcc-riscv64-linux-gnu
-            cross_prefix: riscv64-linux-gnu
-            cmake_processor: riscv64
-            qemu_binary: qemu-riscv64
-            qemu_cpu: "rv64,v=true,vlen=128,rvv_ta_all_1s=true,rvv_ma_all_1s=true"
-            expect_variant: _rvv
-          - name: riscv64 _rvv
-            tier: 2
-            cross_pkg: gcc-riscv64-linux-gnu
-            cross_prefix: riscv64-linux-gnu
-            cmake_processor: riscv64
-            qemu_binary: qemu-riscv64
-            qemu_cpu: "rv64,v=true,vlen=1024"
-            expect_variant: _rvv
           - name: loong64
             tier: 2
             cross_pkg: gcc-loongarch64-linux-gnu

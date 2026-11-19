@@ -162,28 +162,16 @@ elif host_cpu == 'arm'
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
   variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon'], simd_sources]]
 elif host_cpu == 'riscv64' and host_machine.system() == 'linux'
-  # Mirrors cmake/zxcVariants.cmake: fast misaligned scalar accesses, then V.
+  # Mirrors cmake/zxcVariants.cmake: fast misaligned scalar accesses.
   rv64fast_args = []
-  rvv_args = []
   if cc.get_id() == 'gcc' and cc.has_argument('-mtune=generic-ooo')
     rv64fast_args = ['-mtune=generic-ooo']
-    rvv_args = ['-march=rv64gcv', '-mtune=generic-ooo']
-    if cc.has_argument('-mvector-strict-align')
-      rvv_args += ['-mvector-strict-align']
-    endif
-  elif cc.get_id() == 'clang'
-    if cc.has_argument('-mno-strict-align')
-      rv64fast_args = ['-mno-strict-align']
-    endif
-    rvv_args = ['-march=rv64gcv', '-mno-scalar-strict-align']
+  elif cc.get_id() == 'clang' and cc.has_argument('-mno-strict-align')
+    rv64fast_args = ['-mno-strict-align']
   endif
   if rv64fast_args.length() > 0
     variant_sets += [['_rv64fast', rv64fast_args, variant_sources]]
     variant_dispatch_args += ['-DZXC_HAVE_RV64FAST_VARIANT']
-    if cc.has_multi_arguments(rvv_args)
-      variant_sets += [['_rvv', rvv_args, variant_sources]]
-      variant_dispatch_args += ['-DZXC_HAVE_RVV_VARIANT']
-    endif
   endif
 endif
 
