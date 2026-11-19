@@ -185,6 +185,7 @@ foreach info : variant_sets
       c_args : info[1] + msvc_wd_args + lib_warning_args + ['-DZXC_FUNCTION_SUFFIX=' + info[0]] + lib_export_args,
       include_directories : libzxc_includes,
       pic : true,
+      gnu_symbol_visibility : 'hidden',
     )
     variant_objects += obj.extract_all_objects(recursive : false)
   endforeach
