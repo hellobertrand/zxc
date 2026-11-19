@@ -6,8 +6,6 @@
 # Installation: headers, pkg-config and the CMake package for find_package(zxc).
 
 if(ZXC_INSTALL)
-    include(GNUInstallDirs)
-
     # A pkg-config consumer gets no CMake usage requirements, so the .pc must
     # carry them: the export macro matching the build, and -pthread only when
     # FindThreads actually picked pthreads (MSVC ignores it with LNK4044).
@@ -51,7 +49,6 @@ if(ZXC_INSTALL)
         ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR}
         LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
         RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-        INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
 
     install(DIRECTORY include/
