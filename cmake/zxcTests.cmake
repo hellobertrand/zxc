@@ -57,8 +57,7 @@ if(ZXC_BUILD_TESTS)
         # Same settings as the main library
         zxc_apply_lib_flags(zxc_lib_static)
         if(NOT MSVC)
-            target_compile_options(zxc_lib_static PRIVATE
-                $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>)
+            target_compile_options(zxc_lib_static PRIVATE ${ZXC_NATIVE_FLAGS})
             if(PROJECT_IS_TOP_LEVEL)
                 target_compile_options(zxc_lib_static PRIVATE
                     -fomit-frame-pointer -fstrict-aliasing -ffunction-sections -fdata-sections)
@@ -76,8 +75,7 @@ if(ZXC_BUILD_TESTS)
     target_link_libraries(zxc_test PRIVATE ${ZXC_INTERNAL_LIB})
 
     zxc_apply_common_flags(zxc_test)
-    target_compile_options(zxc_test PRIVATE
-        $<$<AND:$<NOT:$<BOOL:${MSVC}>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>)
+    target_compile_options(zxc_test PRIVATE ${ZXC_NATIVE_FLAGS})
     # Propagate definitions
     target_compile_definitions(zxc_test PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
