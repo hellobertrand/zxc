@@ -51,3 +51,19 @@ endif()
 if(ZXC_DISABLE_SIMD)
     add_compile_definitions(ZXC_DISABLE_SIMD)
 endif()
+
+# =============================================================================
+# Native tuning
+# =============================================================================
+# Probed: GCC rejects -march=native on RISC-V and POWER.
+set(ZXC_NATIVE_FLAGS "")
+if(ZXC_NATIVE_ARCH AND NOT MSVC)
+    include(CheckCCompilerFlag)
+    check_c_compiler_flag("-march=native" ZXC_HAS_MARCH_NATIVE)
+    if(ZXC_HAS_MARCH_NATIVE)
+        set(ZXC_NATIVE_FLAGS -march=native)
+    else()
+        message(STATUS "zxc: compiler rejects -march=native - ignoring ZXC_NATIVE_ARCH.")
+        set(ZXC_NATIVE_ARCH OFF)
+    endif()
+endif()
