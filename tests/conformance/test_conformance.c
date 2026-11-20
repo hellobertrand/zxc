@@ -212,8 +212,11 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
                    : ZXC_ERROR_NULL_INPUT;
             zxc_seekable_free(s);
         }
-        const int rejected = r == ZXC_ERROR_DICT_UNSUPPORTED && rs == ZXC_ERROR_DICT_UNSUPPORTED &&
-                             (!seekable || rk == ZXC_ERROR_DICT_UNSUPPORTED);
+        /* An empty range reads no frame: 0 before any dictionary check. */
+        const int seek_ok =
+            !seekable || rk == ZXC_ERROR_DICT_UNSUPPORTED || (expected_sz == 0 && rk == 0);
+        const int rejected =
+            r == ZXC_ERROR_DICT_UNSUPPORTED && rs == ZXC_ERROR_DICT_UNSUPPORTED && seek_ok;
         if (!rejected)
             fprintf(stderr, "FAIL: %s  no-dict build: buffer %lld, stream %lld, seekable %lld\n",
                     zxc_path, (long long)r, (long long)rs, seekable ? (long long)rk : 0LL);
