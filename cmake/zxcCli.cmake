@@ -21,8 +21,7 @@ if(ZXC_BUILD_CLI)
     endif()
 
     zxc_apply_common_flags(zxc)
-    target_compile_options(zxc PRIVATE
-        $<$<AND:$<NOT:$<BOOL:${MSVC}>>,$<BOOL:${ZXC_NATIVE_ARCH}>>:-march=native>)
+    target_compile_options(zxc PRIVATE ${ZXC_NATIVE_FLAGS})
     target_compile_definitions(zxc PRIVATE
         $<$<BOOL:${MSVC}>:_CRT_SECURE_NO_WARNINGS>)
 

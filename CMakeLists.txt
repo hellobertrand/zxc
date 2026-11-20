@@ -118,7 +118,7 @@ endif()
 zxc_apply_lib_flags(zxc_lib)
 
 if(NOT MSVC)
-    target_compile_options(zxc_lib PRIVATE $<$<BOOL:${ZXC_NATIVE_ARCH}>:-march=native>)
+    target_compile_options(zxc_lib PRIVATE ${ZXC_NATIVE_FLAGS})
 
     # Code generation policy: the parent's business when vendored. Kept off the
     # variant objects, whose emitted code must not move.
