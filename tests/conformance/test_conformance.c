@@ -21,6 +21,7 @@
 #include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
+#include "../../include/zxc_stream.h"
 #include "../format/vector_io.h"
 #include "invalid_cases.h"
 #include "valid_cases.h"
@@ -188,15 +189,34 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
     uint8_t* dict_buf = NULL;
     const uint32_t did = zxc_get_dict_id(comp, comp_sz);
 #ifdef ZXC_NO_DICT
-    /* No dictionary support: the vector must be rejected. */
+    /* No dictionary support: every decoder must refuse the vector as such. */
     if (zxc_requires_dict(comp, comp_sz) == 1) {
         const size_t cap = expected_sz ? expected_sz : 1;
         uint8_t* const out = (uint8_t*)malloc(cap);
         const int64_t r = out ? zxc_decompress(comp, comp_sz, out, cap) : ZXC_ERROR_MEMORY;
-        const int rejected = out && r < 0 && r != ZXC_ERROR_MEMORY;
+        int64_t rs = ZXC_ERROR_MEMORY, rk = ZXC_ERROR_MEMORY;
+        FILE* const in = tmpfile();
+        FILE* const sink = tmpfile();
+        if (in && sink && fwrite(comp, 1, comp_sz, in) == comp_sz && fseek(in, 0, SEEK_SET) == 0)
+            rs = zxc_stream_decompress(in, sink, NULL);
+        if (in) fclose(in);
+        if (sink) fclose(sink);
+        /* The seekable reader only for a vector with a seek table, and it must open. */
+        zxc_frame_info_t fi;
+        const int seekable =
+            zxc_get_frame_info(comp, comp_sz, &fi, sizeof(fi)) == ZXC_OK && fi.has_seek_table;
+        if (seekable) {
+            zxc_seekable* const s = zxc_seekable_open(comp, comp_sz);
+            rk = s ? (out ? zxc_seekable_decompress_range(s, out, cap, 0, expected_sz)
+                          : ZXC_ERROR_MEMORY)
+                   : ZXC_ERROR_NULL_INPUT;
+            zxc_seekable_free(s);
+        }
+        const int rejected = r == ZXC_ERROR_DICT_UNSUPPORTED && rs == ZXC_ERROR_DICT_UNSUPPORTED &&
+                             (!seekable || rk == ZXC_ERROR_DICT_UNSUPPORTED);
         if (!rejected)
-            fprintf(stderr, "FAIL: %s  no-dict build should reject it, got %lld\n", zxc_path,
-                    (long long)r);
+            fprintf(stderr, "FAIL: %s  no-dict build: buffer %lld, stream %lld, seekable %lld\n",
+                    zxc_path, (long long)r, (long long)rs, seekable ? (long long)rk : 0LL);
         free(out);
         free(comp);
         free(expected);
@@ -422,7 +442,11 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
                     (long long)result);
             ok = 0;
         } else {
-            const int want = exp->expected;
+            int want = exp->expected;
+#ifdef ZXC_NO_DICT
+            /* No dictionary support: a missing dictionary is reported as such. */
+            if (want == ZXC_ERROR_DICT_REQUIRED) want = ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
             if ((int)result != want) {
                 fprintf(stderr, "FAIL: %s  rejected as %s, expected %s\n", zxc_path,
                         zxc_error_name((int)result), zxc_error_name(want));

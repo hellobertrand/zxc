@@ -170,8 +170,8 @@ The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
 variant, AVX-512 CPUs run the AVX2 one.
 
 `ZXC_DICTIONARY=OFF` removes dictionary support. Unlike `ZXC_OPTIMIZE`, it changes what
-the library accepts: installing a dictionary returns `ZXC_ERROR_DICT_UNSUPPORTED`, and an
-archive written with a dictionary cannot be read.
+the library accepts: installing a dictionary, or reading an archive written with one,
+returns `ZXC_ERROR_DICT_UNSUPPORTED`.
 
 ```bash
 # Small static library without dictionary support

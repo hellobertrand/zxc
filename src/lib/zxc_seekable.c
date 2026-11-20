@@ -492,10 +492,14 @@ uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint64_
  * @brief Gives @p ctx frame @p f's dictionary, copied in unless @p *held, the one
  *        it holds, is already that one.
  *
- * @return ZXC_OK, or @ref ZXC_ERROR_DICT_REQUIRED when it is not installed.
+ * @return ZXC_OK, or @ref ZXC_ERROR_DICT_REQUIRED when it is not installed
+ *         (@ref ZXC_ERROR_DICT_UNSUPPORTED without dictionary support).
  */
 static int zxc_seek_use_dict(const zxc_seekable* s, zxc_cctx_t* ctx, const zxc_seek_dict_t** held,
                              const zxc_seek_frame_t* f) {
+#ifdef ZXC_NO_DICT
+    if (UNLIKELY(f->has_dict)) return ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
     const zxc_seek_dict_t* d = NULL;
     for (size_t i = 0; f->has_dict && i < s->num_dicts && !d; i++)
         if (s->dicts[i].id == f->dict_id) d = &s->dicts[i];

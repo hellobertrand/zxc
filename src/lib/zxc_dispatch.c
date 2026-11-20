@@ -1677,6 +1677,9 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
 
     // Dictionary binding: same contract as zxc_decompress().
     if (header_has_dict) {
+#ifdef ZXC_NO_DICT
+        return ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
         if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
         if (UNLIKELY(zxc_dict_compute_id(dict, dict_size, dict_huf) != header_dict_id))
             return ZXC_ERROR_DICT_MISMATCH;
