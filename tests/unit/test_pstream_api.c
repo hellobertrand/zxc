@@ -403,6 +403,7 @@ int test_pstream_invalid_args(void) {
     if (zxc_dstream_in_size(NULL) != 0) return 0;
     if (zxc_dstream_out_size(NULL) != 0) return 0;
 
+#if TEST_HAS_DICT
     /* A dictionary on the configuring context is rejected at create time (the
      * push-stream format carries no dict_id): it must never be silently dropped. */
     {
@@ -432,6 +433,7 @@ int test_pstream_invalid_args(void) {
             return 0;
         }
     }
+#endif
 
     /* Malformed descriptors must be rejected before any helper does an
      * unchecked memcpy() that could underflow size_t arithmetic or

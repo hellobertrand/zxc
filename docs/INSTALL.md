@@ -122,8 +122,7 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 | `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
 | `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
 | `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
-| `ZXC_ENCODER` | `runtime` | `runtime` | SIMD variants of the encoder: `runtime` or `default` (see [Trimming the library](#trimming-the-library)) |
-| `ZXC_DECODER` | `runtime` | `runtime` | SIMD variants of the decoder: `runtime`, `entropy` or `default` |
+| `ZXC_OPTIMIZE` | `perf` | `perf` | SIMD variants to build: `perf`, `balanced` or `size` (see [Trimming the library](#trimming-the-library)) |
 | `ZXC_DICTIONARY` | ON | ON | Support dictionary frames (compression and decompression) |
 | `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
 | `RAPIDHASH_INCLUDE_DIR` | *(found)* | *(found)* | Directory holding a system `rapidhash.h`, when `find_path` cannot locate it |
@@ -157,26 +156,29 @@ cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 By default the codec is built once per SIMD tier of the target (baseline, AVX2 and
 AVX-512 on x86-64; baseline and NEON on 32-bit ARM) and the tier is selected at run
 time. Each tier is a full copy of the codec, which a size-sensitive static link may
-not want. Three options trade those copies away; none of them changes the format or
-the API, and every build reads what any other build wrote.
+not want. `ZXC_OPTIMIZE` trades those copies away without changing the format or the
+API: every such build reads what any other build wrote.
 
-| Setting | Effect |
-|---------|--------|
-| `ZXC_ENCODER=default` | Encoder built for the baseline tier only. |
-| `ZXC_DECODER=default` | Decoder built for the baseline tier only. |
-| `ZXC_DECODER=entropy` | LZ decoder built for the baseline tier only; the entropy section decoder, which levels 6 and 7 rely on, is still selected at run time. |
-| `ZXC_DICTIONARY=OFF` | No dictionary support: installing a dictionary returns `ZXC_ERROR_DICT_UNSUPPORTED`, and a frame that needs one is rejected. |
+| `ZXC_OPTIMIZE` | Encoder | LZ decoder | Entropy decoder (levels 6-7) |
+|----------------|---------|------------|------------------------------|
+| `perf` (default) | every tier | every tier | every tier |
+| `balanced` | baseline | baseline, AVX2 / NEON | baseline, AVX2 / NEON |
+| `size` | baseline | baseline | baseline, AVX2 / NEON |
 
 The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
-`ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. On targets whose only
-tier is the baseline one, `default` just binds the dispatcher at compile time.
+`ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. Without an AVX-512
+variant, AVX-512 CPUs run the AVX2 one.
+
+`ZXC_DICTIONARY=OFF` removes dictionary support. Unlike `ZXC_OPTIMIZE`, it changes what
+the library accepts: installing a dictionary returns `ZXC_ERROR_DICT_UNSUPPORTED`, and an
+archive written with a dictionary cannot be read.
 
 ```bash
-# Small static library: baseline encoder, run-time entropy decoder, no dictionaries
-cmake -B build -DZXC_ENCODER=default -DZXC_DECODER=entropy -DZXC_DICTIONARY=OFF
+# Small static library without dictionary support
+cmake -B build -DZXC_OPTIMIZE=size -DZXC_DICTIONARY=OFF
 ```
 
-The Meson build has the same switches: `-Dencoder=`, `-Ddecoder=` and `-Ddictionary=`.
+The Meson build has the same switches: `-Doptimize=` and `-Ddictionary=`.
 
 ### Profile-Guided Optimization (PGO — Clang and GCC, single-config generators)
 
@@ -305,8 +307,7 @@ skipped automatically).
 |--------|---------|-------------|
 | `build_cli` | `false` | Build the command-line interface |
 | `use_system_rapidhash` | `false` | Use a system-installed `rapidhash.h` instead of the vendored copy |
-| `encoder` | `runtime` | SIMD variants of the encoder: `runtime` or `default` |
-| `decoder` | `runtime` | SIMD variants of the decoder: `runtime`, `entropy` or `default` |
+| `optimize` | `perf` | SIMD variants to build: `perf`, `balanced` or `size` |
 | `dictionary` | `true` | Support dictionary frames (compression and decompression) |
 
 `use_system_rapidhash` mirrors `ZXC_USE_SYSTEM_RAPIDHASH` in the CMake build,
@@ -314,5 +315,5 @@ with the same setup-time check. It has no equivalent of `RAPIDHASH_INCLUDE_DIR`:
 Meson probes the compiler's default search path, so a header installed elsewhere
 is reached with `-Dc_args=-I<dir>`.
 
-`encoder`, `decoder` and `dictionary` mirror `ZXC_ENCODER`, `ZXC_DECODER` and
-`ZXC_DICTIONARY`; see [Trimming the library](#trimming-the-library).
+`optimize` and `dictionary` mirror `ZXC_OPTIMIZE` and `ZXC_DICTIONARY`; see
+[Trimming the library](#trimming-the-library).

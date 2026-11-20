@@ -7,9 +7,8 @@
 # Populates ZXC_VARIANT_OBJECTS, consumed by the zxc_lib target.
 
 # Function Multi-Versioning Helper
-# Compiles the listed sources (compress, decompress, huffman) with specific
-# flags and suffix so the runtime dispatcher can route to a
-# BMI2/AVX2/AVX512/NEON-aware Huffman codec in addition to the LZ77 stages.
+# Compiles the listed sources with specific flags and suffix, for the runtime
+# dispatcher.
 macro(zxc_add_variant suffix flags sources)
     foreach(_src ${sources})
         add_library(zxc_${_src}${suffix} OBJECT src/lib/zxc_${_src}.c)
@@ -42,29 +41,27 @@ set(ZXC_VARIANT_OBJECTS "")
 # --- 1. Default Variant (Scalar/Baseline) ---
 zxc_add_variant(_default "" "compress;decompress;huffman")
 
-# Sources of the SIMD variants: those of the roles still dispatched. The
-# entropy codec serves both roles.
-set(ZXC_SIMD_SOURCES "")
-if(ZXC_ENCODER_EFFECTIVE STREQUAL "runtime")
-    list(APPEND ZXC_SIMD_SOURCES compress)
-endif()
-if(ZXC_DECODER_EFFECTIVE STREQUAL "runtime")
-    list(APPEND ZXC_SIMD_SOURCES decompress)
-endif()
-if(ZXC_ENCODER_EFFECTIVE STREQUAL "runtime" OR NOT ZXC_DECODER_EFFECTIVE STREQUAL "default")
-    list(APPEND ZXC_SIMD_SOURCES huffman)
+# SIMD variant sources per preset (src/lib/zxc_build.h); AVX-512 in perf only.
+if(ZXC_OPTIMIZE STREQUAL "perf")
+    set(ZXC_SIMD_SOURCES compress decompress huffman)
+elseif(ZXC_OPTIMIZE STREQUAL "balanced")
+    set(ZXC_SIMD_SOURCES decompress huffman)
+else()
+    set(ZXC_SIMD_SOURCES huffman)
 endif()
 
 # --- 2. Architecture Specific Variants (skipped in no-intrinsics mode) ---
 if(ZXC_DISABLE_SIMD)
     message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
-elseif(NOT ZXC_SIMD_SOURCES)
-    message(STATUS "Encoder and decoder bound to the baseline variant: no SIMD variants built.")
 else()
 # Driven by the target architectures, not the host: a universal build enables
 # several of these branches at once, so they are independent ifs.
 if(ZXC_TARGET_X86)
-    message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
+    if(ZXC_OPTIMIZE STREQUAL "perf")
+        message(STATUS "Building x86_64 AVX2 and AVX512 variants...")
+    else()
+        message(STATUS "Building x86_64 AVX2 variant...")
+    endif()
     # No _sse2 variant: SSE2 is the x86-64 baseline, so _default already
     # compiles the SSE2 code paths (ZXC_USE_SSE2 in zxc_internal.h).
     if(MSVC)
@@ -78,7 +75,9 @@ if(ZXC_TARGET_X86)
         else()
             list(APPEND ZXC_MSVC_AVX512_FLAGS -mavx512vbmi -mavx512vbmi2)
         endif()
-        zxc_add_variant(_avx512 "${ZXC_MSVC_AVX512_FLAGS}" "${ZXC_SIMD_SOURCES}")
+        if(ZXC_OPTIMIZE STREQUAL "perf")
+            zxc_add_variant(_avx512 "${ZXC_MSVC_AVX512_FLAGS}" "${ZXC_SIMD_SOURCES}")
+        endif()
     else()
         set(ZXC_AVX2_FLAGS   -mavx2 -mbmi -mbmi2 -mlzcnt)
         set(ZXC_AVX512_FLAGS -mavx512f -mavx512bw -mavx512vl -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt)
@@ -90,7 +89,9 @@ if(ZXC_TARGET_X86)
             list(TRANSFORM ZXC_AVX512_FLAGS PREPEND "-Xarch_x86_64;")
         endif()
         zxc_add_variant(_avx2   "${ZXC_AVX2_FLAGS}"   "${ZXC_SIMD_SOURCES}")
-        zxc_add_variant(_avx512 "${ZXC_AVX512_FLAGS}" "${ZXC_SIMD_SOURCES}")
+        if(ZXC_OPTIMIZE STREQUAL "perf")
+            zxc_add_variant(_avx512 "${ZXC_AVX512_FLAGS}" "${ZXC_SIMD_SOURCES}")
+        endif()
     endif()
 endif()
 

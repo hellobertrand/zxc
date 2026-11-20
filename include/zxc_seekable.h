@@ -285,7 +285,9 @@ ZXC_EXPORT int zxc_seekable_set_checksum(zxc_seekable* s, int enabled);
  *                      archive's dict_id binds the (dict, table) pair. A pair
  *                      no frame uses: @ref ZXC_ERROR_DICT_MISMATCH, on this call,
  *                      unless no frame needs a dictionary: then it is ignored.
- * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code.
+ * @return @ref ZXC_OK on success, or a negative @ref zxc_error_t code;
+ *         @ref ZXC_ERROR_DICT_UNSUPPORTED when the library was built without
+ *         dictionary support.
  */
 ZXC_EXPORT int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, size_t dict_size,
                                      const void* dict_huf);

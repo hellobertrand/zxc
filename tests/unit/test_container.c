@@ -578,6 +578,7 @@ int test_container_seekable(void) {
         free(m.p);
     }
 
+#if TEST_HAS_DICT
     /* A dictionary per frame, of different sizes, or none; each cut from the data
      * of a frame using it, so decoding with another fails. */
     static uint8_t da[4096], db[1500], dc[512];
@@ -634,6 +635,7 @@ int test_container_seekable(void) {
     }
     zxc_seekable_free(sd);
     free(m.p);
+#endif
 
     free(b.p);
     free(out);

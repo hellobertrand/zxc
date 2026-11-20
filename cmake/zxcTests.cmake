@@ -98,6 +98,7 @@ if(ZXC_BUILD_TESTS)
     endforeach()
     foreach(_name IN LISTS ZXC_TEST_NAMES)
         add_test(NAME ${_name} COMMAND zxc_test --exact ${_name})
+        set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)
     endforeach()
 
     # --- Conformance suite ---------------------------------------------------

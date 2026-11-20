@@ -16,12 +16,9 @@ option(ZXC_INSTALL "Generate install rules (headers, pkg-config, CMake package)"
        ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
-# SIMD variants per role: "runtime" selects one per CPU, "default" builds the
-# baseline one alone, "entropy" (decoder) dispatches the entropy decoder only.
-set(ZXC_ENCODER "runtime" CACHE STRING "Encoder SIMD variants: runtime or default")
-set_property(CACHE ZXC_ENCODER PROPERTY STRINGS runtime default)
-set(ZXC_DECODER "runtime" CACHE STRING "Decoder SIMD variants: runtime, entropy or default")
-set_property(CACHE ZXC_DECODER PROPERTY STRINGS runtime entropy default)
+# SIMD variants to build (docs/INSTALL.md, "Trimming the library").
+set(ZXC_OPTIMIZE "perf" CACHE STRING "SIMD variants to build: perf, balanced or size")
+set_property(CACHE ZXC_OPTIMIZE PROPERTY STRINGS perf balanced size)
 option(ZXC_DICTIONARY "Support dictionary frames (compression and decompression)" ON)
 option(ZXC_USE_SYSTEM_RAPIDHASH "Use a system-installed rapidhash.h instead of the vendored copy"
        OFF)

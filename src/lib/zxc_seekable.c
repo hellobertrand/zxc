@@ -1015,6 +1015,11 @@ int zxc_seekable_set_checksum(zxc_seekable* s, const int enabled) {
 int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size,
                           const void* dict_huf) {
     if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
+#ifdef ZXC_NO_DICT
+    // No dictionary support, as zxc_dctx_set_dict().
+    (void)dict_huf;
+    return ZXC_ERROR_DICT_UNSUPPORTED;
+#else
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     const uint32_t id = zxc_dict_compute_id(dict, dict_size, (const uint8_t*)dict_huf);
     int used = 0;
@@ -1025,12 +1030,6 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     }
     // No frame needs a dictionary: ignore it, as before. Otherwise one must use it.
     if (!any) return ZXC_OK;
-#ifdef ZXC_NO_DICT
-    // No dictionary support: these frames cannot be decoded.
-    (void)used;
-    (void)dict_huf;
-    return ZXC_ERROR_DICT_UNSUPPORTED;
-#else
     if (UNLIKELY(!used)) return ZXC_ERROR_DICT_MISMATCH;
 
     zxc_seek_dict_t* d = NULL;

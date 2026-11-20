@@ -21,35 +21,7 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-// Roles bound to _default at build time, instead of dispatched per CPU:
-//   ZXC_ENCODER_ONLY_DEFAULT      the encoder.
-//   ZXC_DECODER_ONLY_DEFAULT      the decoder.
-//   ZXC_DECODER_ENTROPY_DISPATCH  the LZ decoder; the entropy one is dispatched.
-//   ZXC_ONLY_DEFAULT              everything, no CPU probe.
-
-// ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
-// an AVX2/AVX512/NEON variant.
-#if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT)
-#define ZXC_ONLY_DEFAULT
-#endif
-
-// Nothing left to dispatch.
-#if defined(ZXC_ENCODER_ONLY_DEFAULT) && defined(ZXC_DECODER_ONLY_DEFAULT) && \
-    !defined(ZXC_DECODER_ENTROPY_DISPATCH) && !defined(ZXC_ONLY_DEFAULT)
-#define ZXC_ONLY_DEFAULT
-#endif
-
-// Normalised switches.
-#if !defined(ZXC_ONLY_DEFAULT) && defined(ZXC_DECODER_ENTROPY_DISPATCH)
-#define ZXC_DISPATCH_ENTROPY
-#endif
-#if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_DECODER_ONLY_DEFAULT) || \
-    defined(ZXC_DECODER_ENTROPY_DISPATCH)
-#define ZXC_LZ_DECODER_DEFAULT
-#endif
-#if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_ENCODER_ONLY_DEFAULT)
-#define ZXC_ENCODER_DEFAULT
-#endif
+// Roles bound to _default (ZXC_ONLY_DEFAULT and the rest): see zxc_build.h.
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -416,7 +388,9 @@ ZXC_VARIANT_SET(_default);
 #ifndef ZXC_ONLY_DEFAULT
 #if defined(__x86_64__) || defined(_M_X64)
 ZXC_VARIANT_SET(_avx2);
+#ifndef ZXC_NO_AVX512
 ZXC_VARIANT_SET(_avx512);
+#endif
 #elif defined(__arm__) || defined(_M_ARM)
 ZXC_VARIANT_SET(_neon32);
 #endif
@@ -442,8 +416,12 @@ static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
 static const zxc_variant_set_t* zxc_select_variants(void) {
     const zxc_cpu_feature_t cpu = zxc_detect_cpu_features();
 #if defined(__x86_64__) || defined(_M_X64)
+#ifdef ZXC_NO_AVX512
+    if (cpu == ZXC_CPU_AVX512 || cpu == ZXC_CPU_AVX2) return &zxc_variants_avx2;
+#else
     if (cpu == ZXC_CPU_AVX512) return &zxc_variants_avx512;
     if (cpu == ZXC_CPU_AVX2) return &zxc_variants_avx2;
+#endif
 #elif defined(__arm__) || defined(_M_ARM)
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
@@ -499,7 +477,9 @@ static ZXC_COLD ZXC_NOINLINE zxc_decompress_func_t zxc_decompress_safe_resolve(v
     const zxc_variant_set_t* v = zxc_variants();
     zxc_decompress_func_t f = zxc_decompress_chunk_wrapper_safe_default;
 #if defined(__x86_64__) || defined(_M_X64)
+#ifndef ZXC_NO_AVX512
     if (v == &zxc_variants_avx512) f = zxc_decompress_chunk_wrapper_safe_avx512;
+#endif
     if (v == &zxc_variants_avx2) f = zxc_decompress_chunk_wrapper_safe_avx2;
 #elif defined(__arm__) || defined(_M_ARM)
     if (v == &zxc_variants_neon32) f = zxc_decompress_chunk_wrapper_safe_neon32;
@@ -583,9 +563,7 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 //
 // These thin wrappers exist only for tests and external callers that link
 // against the un-suffixed names. They forward to the default (scalar) variant.
-//
-// With ZXC_DISPATCH_ENTROPY, the two section decoders dispatch per CPU instead:
-// the _default decompress TU calls them, one indirect call per section.
+// With ZXC_DISPATCH_ENTROPY, the two section decoders dispatch per CPU instead.
 /**
  * @brief Build length-limited per-symbol Huffman code lengths from frequencies.
  *

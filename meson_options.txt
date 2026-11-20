@@ -7,10 +7,8 @@ option('build_cli', type : 'boolean', value : false,
        description : 'Build the command-line interface')
 option('use_system_rapidhash', type : 'boolean', value : false,
        description : 'Use a system-installed rapidhash.h instead of the vendored copy')
-# As CMake's ZXC_ENCODER / ZXC_DECODER / ZXC_DICTIONARY.
-option('encoder', type : 'combo', choices : ['runtime', 'default'], value : 'runtime',
-       description : 'Encoder SIMD variants: runtime dispatch or the baseline variant only')
-option('decoder', type : 'combo', choices : ['runtime', 'entropy', 'default'], value : 'runtime',
-       description : 'Decoder SIMD variants: runtime dispatch, entropy decoder only, or the baseline variant only')
+# As CMake's ZXC_OPTIMIZE / ZXC_DICTIONARY.
+option('optimize', type : 'combo', choices : ['perf', 'balanced', 'size'], value : 'perf',
+       description : 'SIMD variants to build: perf (all), balanced (no encoder variants, no AVX-512), size (AVX2/NEON entropy decoder only)')
 option('dictionary', type : 'boolean', value : true,
        description : 'Support dictionary frames (compression and decompression)')

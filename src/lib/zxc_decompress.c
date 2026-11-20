@@ -14,6 +14,8 @@
  * @c ZXC_FUNCTION_SUFFIX to produce per-ISA variants.
  */
 
+#include "zxc_build.h"
+
 // Function Multi-Versioning Support
 // With ZXC_FUNCTION_SUFFIX defined (e.g. _avx2), rename the entry point AND the
 // Huffman decoder this TU consumes. The defines precede zxc_internal.h so the
@@ -26,8 +28,8 @@
     ZXC_CAT(zxc_decompress_chunk_wrapper_dict, ZXC_FUNCTION_SUFFIX)
 #define zxc_decompress_chunk_wrapper_safe \
     ZXC_CAT(zxc_decompress_chunk_wrapper_safe, ZXC_FUNCTION_SUFFIX)
-// ZXC_DECODER_ENTROPY_DISPATCH: the un-suffixed entry points dispatch per CPU.
-#ifndef ZXC_DECODER_ENTROPY_DISPATCH
+// ZXC_DISPATCH_ENTROPY: the un-suffixed entry points dispatch per CPU.
+#ifndef ZXC_DISPATCH_ENTROPY
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
@@ -741,7 +743,7 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT
 }
 
 #ifdef ZXC_NO_DICT
-// No dictionary support: stand-ins for the dict decoders, never reached.
+// No dictionary support: error-returning stand-ins (corrupt input reaches them).
 #define zxc_decode_lit_pivco_dict(ctx, payload, psize, required_size) ZXC_ERROR_DICT_REQUIRED
 #define zxc_decode_block_spl_entropy_dict(ctx, src, src_size, dst, dst_capacity) \
     ZXC_ERROR_DICT_REQUIRED

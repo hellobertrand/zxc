@@ -27,6 +27,9 @@
 
 /* ---------- helpers ------------------------------------------------------ */
 
+/* Returned by a check that cannot run in this build. */
+#define TEST_SKIPPED 2
+
 static int file_exists(const char* path) {
 #ifdef _WIN32
     DWORD attr = GetFileAttributesA(path);
@@ -185,12 +188,19 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
     uint8_t* dict_buf = NULL;
     const uint32_t did = zxc_get_dict_id(comp, comp_sz);
 #ifdef ZXC_NO_DICT
-    /* No dictionary support: the vector cannot be decoded. */
+    /* No dictionary support: the vector must be rejected. */
     if (zxc_requires_dict(comp, comp_sz) == 1) {
-        printf("SKIP: %s  (built without dictionary support)\n", zxc_path);
+        const size_t cap = expected_sz ? expected_sz : 1;
+        uint8_t* const out = (uint8_t*)malloc(cap);
+        const int64_t r = out ? zxc_decompress(comp, comp_sz, out, cap) : ZXC_ERROR_MEMORY;
+        const int rejected = out && r < 0 && r != ZXC_ERROR_MEMORY;
+        if (!rejected)
+            fprintf(stderr, "FAIL: %s  no-dict build should reject it, got %lld\n", zxc_path,
+                    (long long)r);
+        free(out);
         free(comp);
         free(expected);
-        return 1;
+        return rejected;
     }
 #endif
     if (zxc_requires_dict(comp, comp_sz) == 1) {
@@ -380,11 +390,11 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
 #ifdef ZXC_NO_DICT
         /* No dictionary support: the defect is out of reach. */
         if (exp->dict) {
-            printf("SKIP: %s  (built without dictionary support)\n", zxc_path);
+            printf("  SKIP: %s  (built without dictionary support)\n", zxc_path);
             zxc_free_dctx(dctx);
             free(output);
             free(comp);
-            return 1;
+            return TEST_SKIPPED;
         }
 #endif
         if (exp->dict) {
@@ -509,8 +519,8 @@ static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
 #ifdef ZXC_NO_DICT
     /* No dictionary support: the recipe cannot be replayed. */
     if (vc->dict) {
-        printf("SKIP: %s  (built without dictionary support)\n", vc->name);
-        return 1;
+        printf("  SKIP: %s  (built without dictionary support)\n", vc->name);
+        return TEST_SKIPPED;
     }
 #endif
 
@@ -615,12 +625,14 @@ static int test_invalid_recipe(const char* invalid_dir, invalid_bases_t* bases, 
 #define CONFORMANCE_OLDEST_VERSION 9U
 
 typedef struct {
-    int passed, failed, total;
+    int passed, failed, skipped, total;
 } tally_t;
 
 static void tally(tally_t* t, const int ok) {
     t->total++;
-    if (ok)
+    if (ok == TEST_SKIPPED)
+        t->skipped++;
+    else if (ok)
         t->passed++;
     else
         t->failed++;
@@ -702,7 +714,7 @@ static int test_corpus(const char* root, const unsigned version, tally_t* t) {
             stem[strlen(stem) - 4] = '\0';
 
             const int ok = test_invalid_vector(zxc_path, valid_dir);
-            if (ok) printf("  PASS: %s  (correctly rejected)\n", stem);
+            if (ok == 1) printf("  PASS: %s  (correctly rejected)\n", stem);
             tally(t, ok);
         }
 
@@ -718,7 +730,7 @@ static int test_corpus(const char* root, const unsigned version, tally_t* t) {
     printf("\n=== Valid vector recipes (%s) ===\n", valid_dir);
     for (size_t i = 0; i < VALID_CASE_COUNT; i++) {
         const int ok = test_recipe(valid_dir, &VALID_CASES[i]);
-        if (ok) printf("  PASS: %s\n", VALID_CASES[i].name);
+        if (ok == 1) printf("  PASS: %s\n", VALID_CASES[i].name);
         tally(t, ok);
     }
 
@@ -761,7 +773,8 @@ int main(int argc, char** argv) {
 
     /* --- Summary --- */
     printf("\n=== Summary ===\n");
-    printf("Total: %d  Passed: %d  Failed: %d\n", t.total, t.passed, t.failed);
+    printf("Total: %d  Passed: %d  Failed: %d  Skipped: %d\n", t.total, t.passed, t.failed,
+           t.skipped);
 
     if (t.failed > 0) {
         printf("CONFORMANCE TESTS FAILED.\n");

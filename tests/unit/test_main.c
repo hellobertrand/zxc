@@ -55,7 +55,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_error_codes),
     TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),
-    TEST_CASE_DICT(test_frame_info),
+    TEST_CASE(test_frame_info),
     TEST_CASE(test_footer_strictness),
     TEST_CASE(test_decompress_fast_vs_safe_path),
     TEST_CASE(test_decompress_no_tail_margin),
@@ -66,7 +66,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_block_api),
     TEST_CASE(test_block_api_boundary_sizes),
     TEST_CASE(test_block_api_tiny_capacity),
-    TEST_CASE_DICT(test_block_api_direct_decode),
+    TEST_CASE(test_block_api_direct_decode),
     TEST_CASE(test_block_api_large_block_varint),
     TEST_CASE(test_block_api_invalid_varint),
     TEST_CASE(test_decompress_block_bound),
@@ -74,12 +74,12 @@ static const test_entry_t g_tests[] = {
 
     /* --- Context API --- */
     TEST_CASE(test_opaque_context_api),
-    TEST_CASE_DICT(test_context_api_empty_input),
+    TEST_CASE(test_context_api_empty_input),
     TEST_CASE(test_context_api_seekable_frame),
-    TEST_CASE_DICT(test_context_api_seekable_compress),
+    TEST_CASE(test_context_api_seekable_compress),
     TEST_CASE(test_cctx_level_raise_reinit),
-    TEST_CASE_DICT(test_cctx_param_contract),
-    TEST_CASE_DICT(test_dctx_param_contract),
+    TEST_CASE(test_cctx_param_contract),
+    TEST_CASE(test_dctx_param_contract),
     TEST_CASE_DICT(test_ctx_dict_copied),
     TEST_CASE(test_cctx_configured_archives),
     TEST_CASE(test_estimate_cctx_size),
@@ -88,11 +88,11 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_static_ctx_size_query),
     TEST_CASE(test_static_ctx_workspace_too_small),
     TEST_CASE(test_static_ctx_block_size_locked),
-    TEST_CASE_DICT(test_static_dctx_probe_honours_guards),
+    TEST_CASE(test_static_dctx_probe_honours_guards),
     TEST_CASE(test_static_ctx_level_raise_rejected),
     TEST_CASE(test_static_ctx_null_inputs),
     TEST_CASE(test_static_ctx_roundtrip_all_levels),
-    TEST_CASE_DICT(test_static_dctx_block_bounds),
+    TEST_CASE(test_static_dctx_block_bounds),
     TEST_CASE(test_static_dctx_inplace),
 
     /* --- Stream API --- */
@@ -122,7 +122,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_container_concat),
     TEST_CASE(test_container_frame_walk),
     TEST_CASE(test_container_engine_reuse),
-    TEST_CASE_DICT(test_container_seekable),
+    TEST_CASE(test_container_seekable),
     TEST_CASE(test_container_seekable_inplace),
 
     /* --- Push Streaming API --- */
@@ -135,7 +135,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_pstream_large_random),
     TEST_CASE(test_pstream_compatible_with_buffer_api),
     TEST_CASE(test_pstream_decompress_compatible_with_buffer_api),
-    TEST_CASE_DICT(test_pstream_invalid_args),
+    TEST_CASE(test_pstream_invalid_args),
     TEST_CASE(test_pstream_truncated_input),
     TEST_CASE(test_pstream_corrupted_magic),
     TEST_CASE(test_pstream_decode_seekable_archive),
@@ -163,11 +163,12 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_header_checksum_single_bit),
 
     /* --- Encoder output --- */
-    TEST_CASE_DICT(test_encoder_output_pinned),
+    TEST_CASE(test_encoder_output_pinned),
 
     /* --- Misc --- */
     TEST_CASE(test_error_name),
     TEST_CASE(test_library_info_api),
+    TEST_CASE(test_dict_build_support),
 
     /* --- Dictionary --- */
     TEST_CASE(test_dict_zxd_roundtrip),
@@ -293,6 +294,7 @@ int main(int argc, char** argv) {
 
     int total_failures = 0;
     int ran = 0;
+    int skipped = 0;
 
     for (size_t i = 0; i < g_tests_count; i++) {
         if (filter) {
@@ -300,13 +302,12 @@ int main(int argc, char** argv) {
                                     : (strstr(g_tests[i].name, filter) != NULL);
             if (!match) continue;
         }
-#ifdef ZXC_NO_DICT
-        if (g_tests[i].needs_dict) {
+        if (g_tests[i].needs_dict && !TEST_HAS_DICT) {
             printf("SKIPPED: %s (library built without dictionary support)\n", g_tests[i].name);
             ran++;
+            skipped++;
             continue;
         }
-#endif
         if (!g_tests[i].fn()) total_failures++;
         ran++;
     }
@@ -315,6 +316,9 @@ int main(int argc, char** argv) {
         printf("No tests matched filter \"%s\"%s.\n", filter, exact ? " (exact)" : "");
         return 1;
     }
+
+    if (total_failures == 0 && skipped == ran) return TEST_SKIP_EXIT_CODE;
+    if (skipped) printf("%d tests skipped.\n", skipped);
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);
