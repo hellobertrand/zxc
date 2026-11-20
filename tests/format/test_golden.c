@@ -575,11 +575,21 @@ int main(int argc, char** argv) {
     }
 
     int failed = 0;
+    int skipped = 0;
     printf("=== Golden format conformance (%s) ===\n", dir);
 
     for (size_t i = 0; i < GOLDEN_CASE_COUNT; i++) {
         const golden_case_t* gc = &GOLDEN_CASES[i];
         const char* ctx = gc->name;
+
+#ifdef ZXC_NO_DICT
+        /* No dictionary support: the case cannot be replayed. */
+        if (gc->opts.dict && gc->opts.dict_size > 0) {
+            printf("  SKIP: %-14s (built without dictionary support)\n", gc->name);
+            skipped++;
+            continue;
+        }
+#endif
 
         char path[1024];
         snprintf(path, sizeof path, "%s/%s.zxc", dir, gc->name);
@@ -627,8 +637,8 @@ int main(int argc, char** argv) {
     }
 
     printf("\n=== Summary ===\n");
-    printf("Total: %zu  Passed: %zu  Failed: %d\n", (size_t)GOLDEN_CASE_COUNT,
-           GOLDEN_CASE_COUNT - (size_t)failed, failed);
+    printf("Total: %zu  Passed: %zu  Failed: %d  Skipped: %d\n", (size_t)GOLDEN_CASE_COUNT,
+           GOLDEN_CASE_COUNT - (size_t)failed - (size_t)skipped, failed, skipped);
     if (failed) {
         printf("GOLDEN CONFORMANCE FAILED.\n");
         return 1;

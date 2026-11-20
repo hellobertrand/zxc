@@ -328,6 +328,7 @@ int test_static_dctx_probe_honours_guards(void) {
             break;
         }
 
+#if TEST_HAS_DICT
         /* A dictionary-bound archive, which a static dctx has no room for. */
         zxc_cctx* const wc = zxc_create_cctx();
         int64_t dn = wc ? ZXC_OK : ZXC_ERROR_MEMORY;
@@ -348,6 +349,9 @@ int test_static_dctx_probe_honours_guards(void) {
             zxc_free_cctx(wc);
             break;
         }
+#else
+        zxc_cctx* const wc = NULL;
+#endif
 
         /* Same guards on an archive that stores data: the payload rejection
          * must not answer first, or the caller is told "give me a buffer" for
@@ -368,6 +372,7 @@ int test_static_dctx_probe_honours_guards(void) {
             zxc_free_cctx(wc);
             break;
         }
+#if TEST_HAS_DICT
         const int64_t pdn = zxc_compress_cctx(wc, body, sizeof(body), arc, sizeof(arc));
         zxc_free_cctx(wc);
         if (pdn <= 0) {
@@ -379,6 +384,9 @@ int test_static_dctx_probe_honours_guards(void) {
                    (long long)zxc_decompress_dctx(dctx, arc, (size_t)pdn, NULL, 0));
             break;
         }
+#else
+        zxc_free_cctx(wc);
+#endif
 
         /* No dictionary can be attached to a static dctx, oversized or not:
          * the setter refuses it, and the context stays as it was. */
@@ -752,8 +760,8 @@ int test_static_dctx_block_bounds(void) {
         zxc_dctx_set_param(sd, ZXC_D_CHECKSUM, 0); /* B_FIT carries no checksum */
         const int64_t after = bound_decode(sd, &blocks[B_FIT], 1, out, PIN);
         if (d1 != ZXC_ERROR_DICT_UNSUPPORTED || d2 != ZXC_ERROR_DICT_UNSUPPORTED ||
-            d3 != ZXC_ERROR_DICT_TOO_LARGE || d4 != ZXC_OK || after != PIN ||
-            zxc_dctx_set_dict(hd, NULL, 0, NULL) != ZXC_OK) {
+            d3 != (TEST_HAS_DICT ? ZXC_ERROR_DICT_TOO_LARGE : ZXC_ERROR_DICT_UNSUPPORTED) ||
+            d4 != TEST_DICT_OK || after != PIN || zxc_dctx_set_dict(hd, NULL, 0, NULL) != ZXC_OK) {
             printf(
                 "  [FAIL] dictionary: static %d, oversized %d; dynamic oversized %d, %d;"
                 " decode after %lld\n",

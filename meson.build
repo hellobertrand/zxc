@@ -122,26 +122,49 @@ variant_sources = ['src/lib/zxc_compress.c',
                    'src/lib/zxc_decompress.c',
                    'src/lib/zxc_huffman.c']
 
-variant_sets = [['_default', []]]
+variant_sets = [['_default', [], variant_sources]]
+
+# SIMD variant sources per preset (src/lib/zxc_build.h); AVX-512 in perf only.
+optimize = get_option('optimize')
+if optimize == 'perf'
+  simd_sources = variant_sources
+elif optimize == 'balanced'
+  simd_sources = ['src/lib/zxc_decompress.c', 'src/lib/zxc_huffman.c']
+else
+  simd_sources = ['src/lib/zxc_huffman.c']
+endif
+with_avx512 = optimize == 'perf'
+
+# Project-wide: library, variant objects and tests must agree.
+if optimize != 'perf'
+  add_project_arguments('-DZXC_OPTIMIZE_' + optimize.to_upper(), language : 'c')
+endif
+if not get_option('dictionary')
+  add_project_arguments('-DZXC_NO_DICT', language : 'c')
+endif
 
 if host_cpu == 'x86_64'
   # No _sse2 variant (SSE2 = x86-64 baseline, already active in _default).
   if is_cl
-    variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
-    variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
+    variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__'], simd_sources]]
+    if with_avx512
+      variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__'], simd_sources]]
+    endif
   else
-    variant_sets += [['_avx2',   ['-mavx2', '-mbmi', '-mbmi2', '-mlzcnt']]]
-    variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
+    variant_sets += [['_avx2',   ['-mavx2', '-mbmi', '-mbmi2', '-mlzcnt'], simd_sources]]
+    if with_avx512
+      variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt'], simd_sources]]
+    endif
   endif
 elif host_cpu == 'arm'
   # 32-bit ARM only: NEON is optional there (runtime getauxval dispatch).
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
-  variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon']]]
+  variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon'], simd_sources]]
 endif
 
 variant_objects = []
 foreach info : variant_sets
-  foreach src : variant_sources
+  foreach src : info[2]
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,

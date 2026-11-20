@@ -21,11 +21,15 @@
 #include "../../include/zxc_dict.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
+#include "../../include/zxc_stream.h"
 #include "../format/vector_io.h"
 #include "invalid_cases.h"
 #include "valid_cases.h"
 
 /* ---------- helpers ------------------------------------------------------ */
+
+/* Returned by a check that cannot run in this build. */
+#define TEST_SKIPPED 2
 
 static int file_exists(const char* path) {
 #ifdef _WIN32
@@ -184,6 +188,44 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
     const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
     uint32_t did = zxc_get_dict_id(comp, comp_sz);
+#ifdef ZXC_NO_DICT
+    /* No dictionary support: every decoder must refuse the vector as such. */
+    if (did != 0) {
+        const size_t cap = expected_sz ? expected_sz : 1;
+        uint8_t* const out = (uint8_t*)malloc(cap);
+        const int64_t r = out ? zxc_decompress(comp, comp_sz, out, cap) : ZXC_ERROR_MEMORY;
+        int64_t rs = ZXC_ERROR_MEMORY, rk = ZXC_ERROR_MEMORY;
+        FILE* const in = tmpfile();
+        FILE* const sink = tmpfile();
+        if (in && sink && fwrite(comp, 1, comp_sz, in) == comp_sz && fseek(in, 0, SEEK_SET) == 0)
+            rs = zxc_stream_decompress(in, sink, NULL);
+        if (in) fclose(in);
+        if (sink) fclose(sink);
+        /* The seekable reader only for a vector with a seek table, and it must open. */
+        zxc_frame_info_t fi;
+        const int seekable =
+            zxc_get_frame_info(comp, comp_sz, &fi, sizeof(fi)) == ZXC_OK && fi.has_seek_table;
+        if (seekable) {
+            zxc_seekable* const s = zxc_seekable_open(comp, comp_sz);
+            rk = s ? (out ? zxc_seekable_decompress_range(s, out, cap, 0, expected_sz)
+                          : ZXC_ERROR_MEMORY)
+                   : ZXC_ERROR_NULL_INPUT;
+            zxc_seekable_free(s);
+        }
+        /* An empty range reads no frame: 0 before any dictionary check. */
+        const int seek_ok =
+            !seekable || rk == ZXC_ERROR_DICT_UNSUPPORTED || (expected_sz == 0 && rk == 0);
+        const int rejected =
+            r == ZXC_ERROR_DICT_UNSUPPORTED && rs == ZXC_ERROR_DICT_UNSUPPORTED && seek_ok;
+        if (!rejected)
+            fprintf(stderr, "FAIL: %s  no-dict build: buffer %lld, stream %lld, seekable %lld\n",
+                    zxc_path, (long long)r, (long long)rs, seekable ? (long long)rk : 0LL);
+        free(out);
+        free(comp);
+        free(expected);
+        return rejected;
+    }
+#endif
     if (did != 0) {
         dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size, &dict_huf);
         if (!dict_buf) {
@@ -368,6 +410,16 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
         /* Some defects sit past an earlier gate: a forged dict_id is only
          * reachable once a dictionary is actually offered. */
         uint8_t* dict_buf = NULL;
+#ifdef ZXC_NO_DICT
+        /* No dictionary support: the defect is out of reach. */
+        if (exp->dict) {
+            printf("  SKIP: %s  (built without dictionary support)\n", zxc_path);
+            zxc_free_dctx(dctx);
+            free(output);
+            free(comp);
+            return TEST_SKIPPED;
+        }
+#endif
         if (exp->dict) {
             char dpath[2048];
             snprintf(dpath, sizeof dpath, "%s/%s", valid_dir, exp->dict);
@@ -393,7 +445,11 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
                     (long long)result);
             ok = 0;
         } else {
-            const int want = exp->expected;
+            int want = exp->expected;
+#ifdef ZXC_NO_DICT
+            /* No dictionary support: a missing dictionary is reported as such. */
+            if (want == ZXC_ERROR_DICT_REQUIRED) want = ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
             if ((int)result != want) {
                 fprintf(stderr, "FAIL: %s  rejected as %s, expected %s\n", zxc_path,
                         zxc_error_name((int)result), zxc_error_name(want));
@@ -486,6 +542,14 @@ static const valid_case_t* valid_case_for(const char* stem) {
 static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
     char path[2048];
     int ok = 0;
+
+#ifdef ZXC_NO_DICT
+    /* No dictionary support: the recipe cannot be replayed. */
+    if (vc->dict) {
+        printf("  SKIP: %s  (built without dictionary support)\n", vc->name);
+        return TEST_SKIPPED;
+    }
+#endif
 
     snprintf(path, sizeof path, "%s/%s.expected", valid_dir, vc->name);
     size_t in_size = 0;
@@ -588,12 +652,14 @@ static int test_invalid_recipe(const char* invalid_dir, invalid_bases_t* bases, 
 #define CONFORMANCE_OLDEST_VERSION 9U
 
 typedef struct {
-    int passed, failed, total;
+    int passed, failed, skipped, total;
 } tally_t;
 
 static void tally(tally_t* t, const int ok) {
     t->total++;
-    if (ok)
+    if (ok == TEST_SKIPPED)
+        t->skipped++;
+    else if (ok)
         t->passed++;
     else
         t->failed++;
@@ -675,7 +741,7 @@ static int test_corpus(const char* root, const unsigned version, tally_t* t) {
             stem[strlen(stem) - 4] = '\0';
 
             const int ok = test_invalid_vector(zxc_path, valid_dir);
-            if (ok) printf("  PASS: %s  (correctly rejected)\n", stem);
+            if (ok == 1) printf("  PASS: %s  (correctly rejected)\n", stem);
             tally(t, ok);
         }
 
@@ -691,7 +757,7 @@ static int test_corpus(const char* root, const unsigned version, tally_t* t) {
     printf("\n=== Valid vector recipes (%s) ===\n", valid_dir);
     for (size_t i = 0; i < VALID_CASE_COUNT; i++) {
         const int ok = test_recipe(valid_dir, &VALID_CASES[i]);
-        if (ok) printf("  PASS: %s\n", VALID_CASES[i].name);
+        if (ok == 1) printf("  PASS: %s\n", VALID_CASES[i].name);
         tally(t, ok);
     }
 
@@ -734,7 +800,8 @@ int main(int argc, char** argv) {
 
     /* --- Summary --- */
     printf("\n=== Summary ===\n");
-    printf("Total: %d  Passed: %d  Failed: %d\n", t.total, t.passed, t.failed);
+    printf("Total: %d  Passed: %d  Failed: %d  Skipped: %d\n", t.total, t.passed, t.failed,
+           t.skipped);
 
     if (t.failed > 0) {
         printf("CONFORMANCE TESTS FAILED.\n");

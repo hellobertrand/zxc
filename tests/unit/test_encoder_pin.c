@@ -199,6 +199,7 @@ int test_encoder_output_pinned(void) {
                         sizeof(k_block_sizes) / sizeof(k_block_sizes[0]), NULL, 0, NULL, got);
     int same = ok && pin_check("k_pinned", k_pinned, got);
 
+#if TEST_HAS_DICT
     // Trained here: its dict_id is in every archive, so the pin covers the
     // trainer too.
     enum { n_samples = PIN_N_INPUTS * PIN_SAMPLES_PER_INPUT };
@@ -220,6 +221,10 @@ int test_encoder_output_pinned(void) {
     ok = ok &&
          pin_pass(src, comp, cap, back, k_dict_block_size, 1, dict, (size_t)dict_size, huf, got);
     if (ok) same = pin_check("k_pinned_dict", k_pinned_dict, got) && same;
+#else
+    (void)k_pinned_dict;
+    (void)k_dict_block_size;
+#endif
 
     free(src);
     free(comp);

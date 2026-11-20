@@ -573,7 +573,8 @@ ZXC_EXPORT int zxc_cctx_get_param(const zxc_cctx* cctx, zxc_cparam_t param, int6
  * @param[in]     dict_huf  Shared literal table, or NULL.
  * @return @ref ZXC_OK; @ref ZXC_ERROR_DICT_TOO_LARGE above the maximum;
  *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context, which has no
- *         room for the dictionary prefix; @ref ZXC_ERROR_MEMORY when the copy
+ *         room for the dictionary prefix, or when the library was built
+ *         without dictionary support; @ref ZXC_ERROR_MEMORY when the copy
  *         cannot be allocated. A refused call leaves the attached dictionary.
  */
 ZXC_EXPORT int zxc_cctx_set_dict(zxc_cctx* cctx, const void* dict, size_t dict_size,
@@ -682,7 +683,8 @@ ZXC_EXPORT int zxc_dctx_get_param(const zxc_dctx* dctx, zxc_dparam_t param, int6
  * @param[in]     dict_size Size of @p dict in bytes, at most @ref ZXC_DICT_SIZE_MAX.
  * @param[in]     dict_huf  Shared literal table, or NULL.
  * @return @ref ZXC_OK; @ref ZXC_ERROR_DICT_TOO_LARGE above the maximum;
- *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context;
+ *         @ref ZXC_ERROR_DICT_UNSUPPORTED on a static context, or when the
+ *         library was built without dictionary support;
  *         @ref ZXC_ERROR_MEMORY when the copy cannot be allocated.
  */
 ZXC_EXPORT int zxc_dctx_set_dict(zxc_dctx* dctx, const void* dict, size_t dict_size,

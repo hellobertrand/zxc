@@ -12,6 +12,7 @@ typedef int (*test_fn_t)(void);
 typedef struct {
     const char* name;
     test_fn_t fn;
+    int needs_dict; /* see TEST_CASE_DICT */
 } test_entry_t;
 
 static const test_entry_t g_tests[] = {
@@ -78,7 +79,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_cctx_level_raise_reinit),
     TEST_CASE(test_cctx_param_contract),
     TEST_CASE(test_dctx_param_contract),
-    TEST_CASE(test_ctx_dict_copied),
+    TEST_CASE_DICT(test_ctx_dict_copied),
     TEST_CASE(test_cctx_configured_archives),
     TEST_CASE(test_estimate_cctx_size),
 
@@ -98,7 +99,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_stream_level_clamp),
     TEST_CASE(test_stream_corrupt_block_header),
     TEST_CASE(test_stream_dry_run_size),
-    TEST_CASE(test_stream_oversized_dict),
+    TEST_CASE_DICT(test_stream_oversized_dict),
     TEST_CASE(test_invalid_arguments),
     TEST_CASE(test_truncated_input),
     TEST_CASE(test_io_failures),
@@ -139,7 +140,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_pstream_decode_seekable_archive),
     TEST_CASE(test_pstream_compress_after_end_rejected),
     TEST_CASE(test_pstream_compress_drain_block_resume),
-    TEST_CASE(test_pstream_dict_archive_rejected),
+    TEST_CASE_DICT(test_pstream_dict_archive_rejected),
 
     /* --- Format (on-disk) --- */
     TEST_CASE(test_huffman_codec),
@@ -166,42 +167,43 @@ static const test_entry_t g_tests[] = {
     /* --- Misc --- */
     TEST_CASE(test_error_name),
     TEST_CASE(test_library_info_api),
+    TEST_CASE(test_dict_build_support),
 
     /* --- Dictionary --- */
     TEST_CASE(test_dict_zxd_roundtrip),
     TEST_CASE(test_dict_id_deterministic),
-    TEST_CASE(test_dict_get_id_apis),
-    TEST_CASE(test_dict_buffer_roundtrip),
-    TEST_CASE(test_dict_block_roundtrip),
-    TEST_CASE(test_dict_block_safe_roundtrip),
-    TEST_CASE(test_dict_mismatch_error),
-    TEST_CASE(test_dict_required_error),
+    TEST_CASE_DICT(test_dict_get_id_apis),
+    TEST_CASE_DICT(test_dict_buffer_roundtrip),
+    TEST_CASE_DICT(test_dict_block_roundtrip),
+    TEST_CASE_DICT(test_dict_block_safe_roundtrip),
+    TEST_CASE_DICT(test_dict_mismatch_error),
+    TEST_CASE_DICT(test_dict_required_error),
     TEST_CASE(test_dict_no_dict_compat),
-    TEST_CASE(test_dict_stream_roundtrip),
-    TEST_CASE(test_dict_large_dict_roundtrip),
-    TEST_CASE(test_dict_safe_loop_backref),
-    TEST_CASE(test_dict_seekable_roundtrip),
-    TEST_CASE(test_dict_train_roundtrip),
+    TEST_CASE_DICT(test_dict_stream_roundtrip),
+    TEST_CASE_DICT(test_dict_large_dict_roundtrip),
+    TEST_CASE_DICT(test_dict_safe_loop_backref),
+    TEST_CASE_DICT(test_dict_seekable_roundtrip),
+    TEST_CASE_DICT(test_dict_train_roundtrip),
     TEST_CASE(test_dict_train_no_frequent_patterns),
     TEST_CASE(test_dict_train_size_overflow),
     TEST_CASE(test_dict_huf_train_over_budget),
-    TEST_CASE(test_dict_seekable_mt_roundtrip),
-    TEST_CASE(test_dict_stream_dict_id_checks),
-    TEST_CASE(test_dict_seekable_dict_id_checks),
-    TEST_CASE(test_dict_dctx_roundtrip),
-    TEST_CASE(test_dict_static_dctx_rejected),
-    TEST_CASE(test_dict_cctx_roundtrip),
-    TEST_CASE(test_dict_block_cctx_dict_reinit),
-    TEST_CASE(test_dict_ctx_table_cache_recovers),
-    TEST_CASE(test_dict_ctx_table_without_dict),
-    TEST_CASE(test_dict_oversized_rejected_everywhere),
-    TEST_CASE(test_dict_block_huf_roundtrip),
-    TEST_CASE(test_dict_block_stored_block_size),
-    TEST_CASE(test_dict_id_collision_caught_by_checksum),
-    TEST_CASE(test_dict_checksum_cross_paths),
+    TEST_CASE_DICT(test_dict_seekable_mt_roundtrip),
+    TEST_CASE_DICT(test_dict_stream_dict_id_checks),
+    TEST_CASE_DICT(test_dict_seekable_dict_id_checks),
+    TEST_CASE_DICT(test_dict_dctx_roundtrip),
+    TEST_CASE_DICT(test_dict_static_dctx_rejected),
+    TEST_CASE_DICT(test_dict_cctx_roundtrip),
+    TEST_CASE_DICT(test_dict_block_cctx_dict_reinit),
+    TEST_CASE_DICT(test_dict_ctx_table_cache_recovers),
+    TEST_CASE_DICT(test_dict_ctx_table_without_dict),
+    TEST_CASE_DICT(test_dict_oversized_rejected_everywhere),
+    TEST_CASE_DICT(test_dict_block_huf_roundtrip),
+    TEST_CASE_DICT(test_dict_block_stored_block_size),
+    TEST_CASE_DICT(test_dict_id_collision_caught_by_checksum),
+    TEST_CASE_DICT(test_dict_checksum_cross_paths),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
-    TEST_CASE(test_dict_huf_table_roundtrip),
-    TEST_CASE(test_dict_huf_degenerate_corpus),
+    TEST_CASE_DICT(test_dict_huf_table_roundtrip),
+    TEST_CASE_DICT(test_dict_huf_degenerate_corpus),
 
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),
@@ -290,12 +292,19 @@ int main(int argc, char** argv) {
 
     int total_failures = 0;
     int ran = 0;
+    int skipped = 0;
 
     for (size_t i = 0; i < g_tests_count; i++) {
         if (filter) {
             const int match = exact ? (strcmp(g_tests[i].name, filter) == 0)
                                     : (strstr(g_tests[i].name, filter) != NULL);
             if (!match) continue;
+        }
+        if (g_tests[i].needs_dict && !TEST_HAS_DICT) {
+            printf("SKIPPED: %s (library built without dictionary support)\n", g_tests[i].name);
+            ran++;
+            skipped++;
+            continue;
         }
         if (!g_tests[i].fn()) total_failures++;
         ran++;
@@ -305,6 +314,9 @@ int main(int argc, char** argv) {
         printf("No tests matched filter \"%s\"%s.\n", filter, exact ? " (exact)" : "");
         return 1;
     }
+
+    if (total_failures == 0 && skipped == ran) return TEST_SKIP_EXIT_CODE;
+    if (skipped) printf("%d tests skipped.\n", skipped);
 
     if (total_failures > 0) {
         printf("FAILED: %d tests failed.\n", total_failures);

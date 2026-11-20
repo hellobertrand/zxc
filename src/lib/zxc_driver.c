@@ -1201,6 +1201,9 @@ static int zxc_stream_read_frame_header(zxc_stream_ctx_t* ctx, FILE* f_in, const
                                          &header_dict_id, has_seek);
     if (UNLIKELY(hrc != ZXC_OK)) return hrc;
     if (header_dict_id != 0) {
+#ifdef ZXC_NO_DICT
+        return ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
         if (UNLIKELY(dict_id == 0)) return ZXC_ERROR_DICT_REQUIRED;
         if (UNLIKELY(dict_id != header_dict_id)) return ZXC_ERROR_DICT_MISMATCH;
     }

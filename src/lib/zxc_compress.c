@@ -1779,6 +1779,7 @@ parse_done:;
     // bitstream minus the 128-byte header, so it stays viable far below
     // ZXC_HUF_MIN_LITERALS. A literal without a code drops the candidate.
     size_t huf_dict_total_size = SIZE_MAX;
+#ifndef ZXC_NO_DICT
     if (level >= ZXC_LEVEL_DENSITY && ctx->dict_huf_tree_ok && lit_c > 0) {
         // The dict candidate runs on sections too small for the per-block
         // table, so the histogram may not have been built above.
@@ -1800,6 +1801,7 @@ parse_done:;
             if (huf_dict_j < best_j) enc_lit = ZXC_SECTION_ENCODING_HUFFMAN_DICT;
         }
     }
+#endif
 
     // Level-7 (ULTRA): Huffman-code the token stream with the literal codec -
     // tokens are a <= 256-symbol alphabet. Same J rule; the decoder picks the
@@ -1860,6 +1862,7 @@ parse_done:;
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
+#ifndef ZXC_NO_DICT
     } else if (enc_lit == ZXC_SECTION_ENCODING_HUFFMAN_DICT) {
         const int written =
             zxc_huf_encode_section_dict(literals, lit_c, lit_freq, ctx->dict_huf->code_len,
@@ -1867,6 +1870,7 @@ parse_done:;
         if (UNLIKELY(written < 0)) return written;
         if (UNLIKELY((size_t)written != huf_dict_total_size)) return ZXC_ERROR_DST_TOO_SMALL;
         p_curr += written;
+#endif
     } else if (enc_lit == ZXC_SECTION_ENCODING_RLE) {
         // Write RLE - optimized single-pass encoding
         const uint8_t* lit_ptr = literals;

@@ -67,3 +67,20 @@ if(ZXC_NATIVE_ARCH AND NOT MSVC)
         set(ZXC_NATIVE_ARCH OFF)
     endif()
 endif()
+
+# =============================================================================
+# Optimize preset and optional features
+# =============================================================================
+if(NOT ZXC_OPTIMIZE MATCHES "^(perf|balanced|size)$")
+    message(FATAL_ERROR "ZXC_OPTIMIZE must be perf, balanced or size, not '${ZXC_OPTIMIZE}'.")
+endif()
+# The sources read the preset (src/lib/zxc_build.h); perf is the default.
+if(ZXC_OPTIMIZE STREQUAL "balanced")
+    add_compile_definitions(ZXC_OPTIMIZE_BALANCED)
+elseif(ZXC_OPTIMIZE STREQUAL "size")
+    add_compile_definitions(ZXC_OPTIMIZE_SIZE)
+endif()
+
+if(NOT ZXC_DICTIONARY)
+    add_compile_definitions(ZXC_NO_DICT)
+endif()

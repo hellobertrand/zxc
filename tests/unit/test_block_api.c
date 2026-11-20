@@ -856,7 +856,7 @@ int test_block_api_direct_decode(void) {
                 const size_t n = sizes[s];
                 for (size_t l = 0; l < sizeof(levels) / sizeof(levels[0]); l++) {
                     /* the same block without and with a dictionary */
-                    for (int with_dict = 0; with_dict < 2; with_dict++) {
+                    for (int with_dict = 0; with_dict < 1 + TEST_HAS_DICT; with_dict++) {
                         const uint8_t* const d = with_dict ? dict : NULL;
                         const size_t dsz = with_dict ? 4096 : 0;
                         if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, levels[l]) != ZXC_OK ||
@@ -901,7 +901,8 @@ int test_block_api_direct_decode(void) {
         }
         if (failed) break;
         const int expected_cells = 2 * (int)(sizeof(sizes) / sizeof(sizes[0])) *
-                                   (int)(sizeof(levels) / sizeof(levels[0])) * 2 * 4;
+                                   (int)(sizeof(levels) / sizeof(levels[0])) * (1 + TEST_HAS_DICT) *
+                                   4;
         if (cells != expected_cells) {
             printf("  [FAIL] %d decodes ran, expected %d\n", cells, expected_cells);
             break;

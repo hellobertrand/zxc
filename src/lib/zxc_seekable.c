@@ -489,10 +489,14 @@ uint32_t zxc_seekable_get_block_decomp_size(const zxc_seekable* s, const uint64_
  * @brief Gives @p ctx frame @p f's dictionary, copied in unless @p *held, the one
  *        it holds, is already that one.
  *
- * @return ZXC_OK, or @ref ZXC_ERROR_DICT_REQUIRED when it is not installed.
+ * @return ZXC_OK, or @ref ZXC_ERROR_DICT_REQUIRED when it is not installed
+ *         (@ref ZXC_ERROR_DICT_UNSUPPORTED without dictionary support).
  */
 static int zxc_seek_use_dict(const zxc_seekable* s, zxc_cctx_t* ctx, const zxc_seek_dict_t** held,
                              const zxc_seek_frame_t* f) {
+#ifdef ZXC_NO_DICT
+    if (UNLIKELY(f->dict_id)) return ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
     const zxc_seek_dict_t* d = NULL;
     for (size_t i = 0; f->dict_id && i < s->num_dicts && !d; i++)
         if (s->dicts[i].id == f->dict_id) d = &s->dicts[i];
@@ -1012,6 +1016,11 @@ int zxc_seekable_set_checksum(zxc_seekable* s, const int enabled) {
 int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_size,
                           const void* dict_huf) {
     if (UNLIKELY(!s || !dict || dict_size == 0)) return ZXC_ERROR_NULL_INPUT;
+#ifdef ZXC_NO_DICT
+    // No dictionary support, as zxc_dctx_set_dict().
+    (void)dict_huf;
+    return ZXC_ERROR_DICT_UNSUPPORTED;
+#else
     if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return ZXC_ERROR_DICT_TOO_LARGE;
     const uint32_t id = zxc_dict_compute_id(dict, dict_size, (const uint8_t*)dict_huf);
     int used = 0;
@@ -1054,6 +1063,7 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
         s->dctx_initialized = 0;
     }
     return ZXC_OK;
+#endif  // ZXC_NO_DICT
 }
 
 /**

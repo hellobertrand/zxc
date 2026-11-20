@@ -1392,7 +1392,7 @@ int test_frame_info(void) {
 
     static uint8_t dict[4096];
     memset(dict, 'z', sizeof(dict));
-    for (int v = 0; ok && v < 3; v++) {
+    for (int v = 0; ok && v < (TEST_HAS_DICT ? 3 : 2); v++) {
         zxc_cctx* const c = zxc_create_cctx();
         int rc = c ? ZXC_OK : ZXC_ERROR_MEMORY;
         if (rc == ZXC_OK) rc = zxc_cctx_set_param(c, ZXC_C_LEVEL, 3);
