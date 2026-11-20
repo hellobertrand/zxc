@@ -122,26 +122,57 @@ variant_sources = ['src/lib/zxc_compress.c',
                    'src/lib/zxc_decompress.c',
                    'src/lib/zxc_huffman.c']
 
-variant_sets = [['_default', []]]
+variant_sets = [['_default', [], variant_sources]]
 
-if host_cpu == 'x86_64'
+# Sources of the SIMD variants: those of the roles still dispatched. The
+# entropy codec serves both roles.
+encoder_mode = get_option('encoder')
+decoder_mode = get_option('decoder')
+
+simd_sources = []
+if encoder_mode == 'runtime'
+  simd_sources += ['src/lib/zxc_compress.c']
+endif
+if decoder_mode == 'runtime'
+  simd_sources += ['src/lib/zxc_decompress.c']
+endif
+if encoder_mode == 'runtime' or decoder_mode != 'default'
+  simd_sources += ['src/lib/zxc_huffman.c']
+endif
+
+# Project-wide: library, variant objects and tests must agree.
+if encoder_mode == 'default'
+  add_project_arguments('-DZXC_ENCODER_ONLY_DEFAULT', language : 'c')
+endif
+if decoder_mode == 'default'
+  add_project_arguments('-DZXC_DECODER_ONLY_DEFAULT', language : 'c')
+elif decoder_mode == 'entropy'
+  add_project_arguments('-DZXC_DECODER_ENTROPY_DISPATCH', language : 'c')
+endif
+if not get_option('dictionary')
+  add_project_arguments('-DZXC_NO_DICT', language : 'c')
+endif
+
+if simd_sources.length() == 0
+  # Both roles on the baseline variant: no SIMD variants.
+elif host_cpu == 'x86_64'
   # No _sse2 variant (SSE2 = x86-64 baseline, already active in _default).
   if is_cl
-    variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__']]]
-    variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__', '/D__AVX512VBMI__', '/D__AVX512VBMI2__']]]
+    variant_sets += [['_avx2',   ['/arch:AVX2', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__'], simd_sources]]
+    variant_sets += [['_avx512', ['/arch:AVX512', '/D__BMI__', '/D__BMI2__', '/D__LZCNT__', '/D__AVX512VBMI__', '/D__AVX512VBMI2__'], simd_sources]]
   else
-    variant_sets += [['_avx2',   ['-mavx2', '-mbmi', '-mbmi2', '-mlzcnt']]]
-    variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vl', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt']]]
+    variant_sets += [['_avx2',   ['-mavx2', '-mbmi', '-mbmi2', '-mlzcnt'], simd_sources]]
+    variant_sets += [['_avx512', ['-mavx512f', '-mavx512bw', '-mavx512vl', '-mavx512vbmi', '-mavx512vbmi2', '-mbmi', '-mbmi2', '-mlzcnt'], simd_sources]]
   endif
 elif host_cpu == 'arm'
   # 32-bit ARM only: NEON is optional there (runtime getauxval dispatch).
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
-  variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon']]]
+  variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon'], simd_sources]]
 endif
 
 variant_objects = []
 foreach info : variant_sets
-  foreach src : variant_sources
+  foreach src : info[2]
     obj = static_library(
       'zxc' + info[0] + '_' + src.underscorify(),
       src,

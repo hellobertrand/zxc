@@ -184,6 +184,15 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
     const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
     const uint32_t did = zxc_get_dict_id(comp, comp_sz);
+#ifdef ZXC_NO_DICT
+    /* No dictionary support: the vector cannot be decoded. */
+    if (zxc_requires_dict(comp, comp_sz) == 1) {
+        printf("SKIP: %s  (built without dictionary support)\n", zxc_path);
+        free(comp);
+        free(expected);
+        return 1;
+    }
+#endif
     if (zxc_requires_dict(comp, comp_sz) == 1) {
         dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size, &dict_huf);
         if (!dict_buf) {
@@ -368,6 +377,16 @@ static int test_invalid_vector(const char* zxc_path, const char* valid_dir) {
         /* Some defects sit past an earlier gate: a forged dict_id is only
          * reachable once a dictionary is actually offered. */
         uint8_t* dict_buf = NULL;
+#ifdef ZXC_NO_DICT
+        /* No dictionary support: the defect is out of reach. */
+        if (exp->dict) {
+            printf("SKIP: %s  (built without dictionary support)\n", zxc_path);
+            zxc_free_dctx(dctx);
+            free(output);
+            free(comp);
+            return 1;
+        }
+#endif
         if (exp->dict) {
             char dpath[2048];
             snprintf(dpath, sizeof dpath, "%s/%s", valid_dir, exp->dict);
@@ -486,6 +505,14 @@ static const valid_case_t* valid_case_for(const char* stem) {
 static int test_recipe(const char* valid_dir, const valid_case_t* vc) {
     char path[2048];
     int ok = 0;
+
+#ifdef ZXC_NO_DICT
+    /* No dictionary support: the recipe cannot be replayed. */
+    if (vc->dict) {
+        printf("SKIP: %s  (built without dictionary support)\n", vc->name);
+        return 1;
+    }
+#endif
 
     snprintf(path, sizeof path, "%s/%s.expected", valid_dir, vc->name);
     size_t in_size = 0;

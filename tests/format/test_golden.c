@@ -581,6 +581,14 @@ int main(int argc, char** argv) {
         const golden_case_t* gc = &GOLDEN_CASES[i];
         const char* ctx = gc->name;
 
+#ifdef ZXC_NO_DICT
+        /* No dictionary support: the case cannot be replayed. */
+        if (gc->opts.dict && gc->opts.dict_size > 0) {
+            printf("  SKIP: %-14s (built without dictionary support)\n", gc->name);
+            continue;
+        }
+#endif
+
         char path[1024];
         snprintf(path, sizeof path, "%s/%s.zxc", dir, gc->name);
 

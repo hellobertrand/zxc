@@ -26,8 +26,11 @@
     ZXC_CAT(zxc_decompress_chunk_wrapper_dict, ZXC_FUNCTION_SUFFIX)
 #define zxc_decompress_chunk_wrapper_safe \
     ZXC_CAT(zxc_decompress_chunk_wrapper_safe, ZXC_FUNCTION_SUFFIX)
+// ZXC_DECODER_ENTROPY_DISPATCH: the un-suffixed entry points dispatch per CPU.
+#ifndef ZXC_DECODER_ENTROPY_DISPATCH
 #define zxc_huf_decode_section ZXC_CAT(zxc_huf_decode_section, ZXC_FUNCTION_SUFFIX)
 #define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
+#endif
 #endif
 
 #include "../../include/zxc_error.h"
@@ -737,6 +740,14 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco(const zxc_cctx_t* RESTRICT
                                   ctx->pivco_scratch);
 }
 
+#ifdef ZXC_NO_DICT
+// No dictionary support: stand-ins for the dict decoders, never reached.
+#define zxc_decode_lit_pivco_dict(ctx, payload, psize, required_size) ZXC_ERROR_DICT_REQUIRED
+#define zxc_decode_block_spl_entropy_dict(ctx, src, src_size, dst, dst_capacity) \
+    ZXC_ERROR_DICT_REQUIRED
+#define zxc_decode_block_spl_dict(ctx, src, src_size, dst, dst_capacity) ZXC_ERROR_DICT_REQUIRED
+#define zxc_decode_block_pak_dict(ctx, src, src_size, dst, dst_capacity) ZXC_ERROR_DICT_REQUIRED
+#else
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RESTRICT ctx,
                                                            const uint8_t* RESTRICT payload,
                                                            const size_t psize,
@@ -750,6 +761,7 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_lit_pivco_dict(const zxc_cctx_t* RES
     return zxc_huf_decode_section_dict(payload, psize, ctx->lit_buffer, required_size,
                                        &ctx->dict_huf->tree, ctx->pivco_scratch);
 }
+#endif  // ZXC_NO_DICT
 
 static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT ctx,
                                                       const uint8_t* RESTRICT payload,
@@ -765,10 +777,12 @@ static ZXC_NOINLINE ZXC_COLD int zxc_decode_tok_pivco(const zxc_cctx_t* RESTRICT
 static ZXC_NOINLINE int zxc_decode_block_spl_entropy(const zxc_cctx_t* RESTRICT ctx,
                                                      const uint8_t* RESTRICT src, size_t src_size,
                                                      uint8_t* RESTRICT dst, size_t dst_capacity);
+#ifndef ZXC_NO_DICT
 static ZXC_NOINLINE int zxc_decode_block_spl_entropy_dict(const zxc_cctx_t* RESTRICT ctx,
                                                           const uint8_t* RESTRICT src,
                                                           size_t src_size, uint8_t* RESTRICT dst,
                                                           size_t dst_capacity);
+#endif  // ZXC_NO_DICT
 static ZXC_NOINLINE int zxc_decode_block_spl_entropy_safe(const zxc_cctx_t* RESTRICT ctx,
                                                           const uint8_t* RESTRICT src,
                                                           size_t src_size, uint8_t* RESTRICT dst,
@@ -1431,6 +1445,7 @@ static ZXC_NOINLINE int zxc_decode_block_spl_entropy(const zxc_cctx_t* RESTRICT 
     return zxc_decode_block_spl_impl(ctx, src, src_size, dst, dst_capacity, 0, 0, 1);
 }
 
+#ifndef ZXC_NO_DICT
 static ZXC_NOINLINE int zxc_decode_block_spl_entropy_dict(const zxc_cctx_t* RESTRICT ctx,
                                                           const uint8_t* RESTRICT src,
                                                           const size_t src_size,
@@ -1438,6 +1453,7 @@ static ZXC_NOINLINE int zxc_decode_block_spl_entropy_dict(const zxc_cctx_t* REST
                                                           const size_t dst_capacity) {
     return zxc_decode_block_spl_impl(ctx, src, src_size, dst, dst_capacity, 0, 1, 1);
 }
+#endif  // ZXC_NO_DICT
 
 static ZXC_NOINLINE int zxc_decode_block_spl_entropy_safe(const zxc_cctx_t* RESTRICT ctx,
                                                           const uint8_t* RESTRICT src,
@@ -1484,6 +1500,7 @@ static int zxc_decode_block_pak(const zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     return zxc_decode_block_pak_impl(ctx, src, src_size, dst, dst_capacity, 0, 0);
 }
 
+#ifndef ZXC_NO_DICT
 /**
  * @brief Decode a SPL block against a dictionary prefix (cold path).
  *
@@ -1504,7 +1521,9 @@ static ZXC_NOINLINE int zxc_decode_block_spl_dict(const zxc_cctx_t* RESTRICT ctx
                                                   const size_t dst_capacity) {
     return zxc_decode_block_spl_impl(ctx, src, src_size, dst, dst_capacity, 0, 1, 0);
 }
+#endif  // ZXC_NO_DICT
 
+#ifndef ZXC_NO_DICT
 /**
  * @brief Decode a PAK block against a dictionary prefix (cold path).
  *
@@ -1524,6 +1543,7 @@ static ZXC_NOINLINE int zxc_decode_block_pak_dict(const zxc_cctx_t* RESTRICT ctx
                                                   const size_t dst_capacity) {
     return zxc_decode_block_pak_impl(ctx, src, src_size, dst, dst_capacity, 0, 1);
 }
+#endif  // ZXC_NO_DICT
 
 /**
  * @brief Decode a SPL block with the strict-tail safe loop (no wild copies).
@@ -1668,6 +1688,7 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
     return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, block_index, 0, 0);
 }
 
+#ifndef ZXC_NO_DICT
 /**
  * @brief Public dictionary chunk decoder.
  *
@@ -1689,6 +1710,7 @@ int zxc_decompress_chunk_wrapper_dict(const zxc_cctx_t* RESTRICT ctx, const uint
                                       const size_t dst_cap, const uint64_t block_index) {
     return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, block_index, 1, 0);
 }
+#endif  // ZXC_NO_DICT
 
 /**
  * @brief Public strict-tail safe chunk decoder (dst_cap == exact decoded size).

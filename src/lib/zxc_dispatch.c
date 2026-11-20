@@ -21,10 +21,34 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
+// Roles bound to _default at build time, instead of dispatched per CPU:
+//   ZXC_ENCODER_ONLY_DEFAULT      the encoder.
+//   ZXC_DECODER_ONLY_DEFAULT      the decoder.
+//   ZXC_DECODER_ENTROPY_DISPATCH  the LZ decoder; the entropy one is dispatched.
+//   ZXC_ONLY_DEFAULT              everything, no CPU probe.
+
 // ZXC_DISABLE_SIMD => force ZXC_ONLY_DEFAULT so the dispatcher never selects
 // an AVX2/AVX512/NEON variant.
 #if defined(ZXC_DISABLE_SIMD) && !defined(ZXC_ONLY_DEFAULT)
 #define ZXC_ONLY_DEFAULT
+#endif
+
+// Nothing left to dispatch.
+#if defined(ZXC_ENCODER_ONLY_DEFAULT) && defined(ZXC_DECODER_ONLY_DEFAULT) && \
+    !defined(ZXC_DECODER_ENTROPY_DISPATCH) && !defined(ZXC_ONLY_DEFAULT)
+#define ZXC_ONLY_DEFAULT
+#endif
+
+// Normalised switches.
+#if !defined(ZXC_ONLY_DEFAULT) && defined(ZXC_DECODER_ENTROPY_DISPATCH)
+#define ZXC_DISPATCH_ENTROPY
+#endif
+#if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_DECODER_ONLY_DEFAULT) || \
+    defined(ZXC_DECODER_ENTROPY_DISPATCH)
+#define ZXC_LZ_DECODER_DEFAULT
+#endif
+#if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_ENCODER_ONLY_DEFAULT)
+#define ZXC_ENCODER_DEFAULT
 #endif
 
 #if defined(_MSC_VER)
@@ -156,6 +180,23 @@ int zxc_compress_chunk_wrapper_neon32(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
                                       const size_t dst_cap, const uint64_t block_index);
 #endif
 
+#ifdef ZXC_DISPATCH_ENTROPY
+// Entropy section decoders of the SIMD variants.
+#define ZXC_HUF_DECODE_PROTOTYPES(sfx)                                                           \
+    int zxc_huf_decode_section##sfx(const uint8_t* RESTRICT payload, size_t payload_size,        \
+                                    uint8_t* RESTRICT dst, size_t n, uint8_t* RESTRICT scratch); \
+    int zxc_huf_decode_section_dict##sfx(                                                        \
+        const uint8_t* RESTRICT payload, size_t payload_size, uint8_t* RESTRICT dst, size_t n,   \
+        const zxc_pivco_tree_t* RESTRICT tree, uint8_t* RESTRICT scratch)
+#if defined(__x86_64__) || defined(_M_X64)
+ZXC_HUF_DECODE_PROTOTYPES(_avx2);
+ZXC_HUF_DECODE_PROTOTYPES(_avx512);
+#elif defined(__arm__) || defined(_M_ARM)
+ZXC_HUF_DECODE_PROTOTYPES(_neon32);
+#endif
+#undef ZXC_HUF_DECODE_PROTOTYPES
+#endif
+
 // ============================================================================
 // CPU DETECTION LOGIC
 // ============================================================================
@@ -196,6 +237,17 @@ typedef int (*zxc_decompress_func_t)(const zxc_cctx_t* RESTRICT, const uint8_t* 
 /** @brief Function pointer type for the chunk compressor. */
 typedef int (*zxc_compress_func_t)(zxc_cctx_t* RESTRICT, const uint8_t* RESTRICT, const size_t,
                                    uint8_t* RESTRICT, const size_t, const uint64_t);
+#ifdef ZXC_DISPATCH_ENTROPY
+/** @brief Function pointer type for the entropy section decoder. */
+typedef int (*zxc_huf_decode_func_t)(const uint8_t* RESTRICT, size_t, uint8_t* RESTRICT, size_t,
+                                     uint8_t* RESTRICT);
+#ifndef ZXC_NO_DICT
+/** @brief Function pointer type for the shared-table entropy section decoder. */
+typedef int (*zxc_huf_decode_dict_func_t)(const uint8_t* RESTRICT, size_t, uint8_t* RESTRICT,
+                                          size_t, const zxc_pivco_tree_t* RESTRICT,
+                                          uint8_t* RESTRICT);
+#endif
+#endif
 
 #ifndef ZXC_ONLY_DEFAULT
 
@@ -301,23 +353,64 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
 
 /**
  * @struct zxc_variant_set_t
- * @brief The three chunk entry points of one ISA variant; adding a tier is one
- *        line here.
+ * @brief The entry points of one ISA tier; adding a tier is one line here.
+ *
+ * A role bound to `_default` holds that symbol in every set.
  *
  * The `_safe` decoder is kept out on purpose: a table entry is a reference the
  * linker cannot prove dead, so every static link would carry its decoders.
  */
 typedef struct {
     zxc_decompress_func_t decompress;
+#ifndef ZXC_NO_DICT
     zxc_decompress_func_t decompress_dict;
+#endif
     zxc_compress_func_t compress;
+#ifdef ZXC_DISPATCH_ENTROPY
+    zxc_huf_decode_func_t huf_decode;
+#ifndef ZXC_NO_DICT
+    zxc_huf_decode_dict_func_t huf_decode_dict;
+#endif
+#endif
 } zxc_variant_set_t;
 
-/** @brief Defines the constant variant set of suffix @p sfx. */
-#define ZXC_VARIANT_SET(sfx)                                                                    \
-    static const zxc_variant_set_t zxc_variants##sfx = {zxc_decompress_chunk_wrapper##sfx,      \
-                                                        zxc_decompress_chunk_wrapper_dict##sfx, \
-                                                        zxc_compress_chunk_wrapper##sfx}
+#define ZXC_GLUE_IMPL(a, b) a##b
+#define ZXC_GLUE(a, b) ZXC_GLUE_IMPL(a, b)
+
+/** @brief Suffix of a role in the set of tier @p sfx. */
+#ifdef ZXC_LZ_DECODER_DEFAULT
+#define ZXC_DEC_SFX(sfx) _default
+#else
+#define ZXC_DEC_SFX(sfx) sfx
+#endif
+#ifdef ZXC_ENCODER_DEFAULT
+#define ZXC_ENC_SFX(sfx) _default
+#else
+#define ZXC_ENC_SFX(sfx) sfx
+#endif
+
+#ifndef ZXC_NO_DICT
+#define ZXC_VARIANT_DICT(sfx) \
+    .decompress_dict = ZXC_GLUE(zxc_decompress_chunk_wrapper_dict, ZXC_DEC_SFX(sfx)),
+#else
+#define ZXC_VARIANT_DICT(sfx)
+#endif
+
+#if defined(ZXC_DISPATCH_ENTROPY) && !defined(ZXC_NO_DICT)
+#define ZXC_VARIANT_HUF(sfx) \
+    .huf_decode = zxc_huf_decode_section##sfx, .huf_decode_dict = zxc_huf_decode_section_dict##sfx,
+#elif defined(ZXC_DISPATCH_ENTROPY)
+#define ZXC_VARIANT_HUF(sfx) .huf_decode = zxc_huf_decode_section##sfx,
+#else
+#define ZXC_VARIANT_HUF(sfx)
+#endif
+
+/** @brief Defines the constant variant set of tier @p sfx. */
+#define ZXC_VARIANT_SET(sfx)                                                    \
+    static const zxc_variant_set_t zxc_variants##sfx = {                        \
+        .decompress = ZXC_GLUE(zxc_decompress_chunk_wrapper, ZXC_DEC_SFX(sfx)), \
+        .compress = ZXC_GLUE(zxc_compress_chunk_wrapper, ZXC_ENC_SFX(sfx)),     \
+        ZXC_VARIANT_DICT(sfx) ZXC_VARIANT_HUF(sfx)}
 
 ZXC_VARIANT_SET(_default);
 #ifndef ZXC_ONLY_DEFAULT
@@ -329,6 +422,10 @@ ZXC_VARIANT_SET(_neon32);
 #endif
 #endif
 #undef ZXC_VARIANT_SET
+#undef ZXC_VARIANT_HUF
+#undef ZXC_VARIANT_DICT
+#undef ZXC_ENC_SFX
+#undef ZXC_DEC_SFX
 
 #ifdef ZXC_ONLY_DEFAULT
 /** @brief The variant set in use: `_default`, bound at compile time. */
@@ -387,7 +484,7 @@ static ZXC_ALWAYS_INLINE const zxc_variant_set_t* zxc_variants(void) {
 }
 #endif  // ZXC_ONLY_DEFAULT
 
-#ifdef ZXC_ONLY_DEFAULT
+#ifdef ZXC_LZ_DECODER_DEFAULT
 /** @brief The `_safe` decoder in use: `_default`, bound at compile time. */
 static ZXC_ALWAYS_INLINE zxc_decompress_func_t zxc_decompress_safe_variant(void) {
     return zxc_decompress_chunk_wrapper_safe_default;
@@ -428,7 +525,7 @@ static ZXC_ALWAYS_INLINE zxc_decompress_func_t zxc_decompress_safe_variant(void)
     if (UNLIKELY(!f)) f = zxc_decompress_safe_resolve();
     return f;
 }
-#endif  // ZXC_ONLY_DEFAULT
+#endif  // ZXC_LZ_DECODER_DEFAULT
 
 /** @brief Public decompression dispatcher. */
 int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
@@ -438,8 +535,13 @@ int zxc_decompress_chunk_wrapper(const zxc_cctx_t* RESTRICT ctx, const uint8_t* 
     // loop) routes to the dict variant only when a dictionary is active, so the
     // no-dict path runs the dict-free chunk wrapper (identical codegen to main).
     const zxc_variant_set_t* v = zxc_variants();
+#ifdef ZXC_NO_DICT
+    // dict_size is always 0.
+    return v->decompress(ctx, src, src_sz, dst, dst_cap, block_index);
+#else
     return (ctx->dict_size ? v->decompress_dict : v->decompress)(ctx, src, src_sz, dst, dst_cap,
                                                                  block_index);
+#endif
 }
 
 /**
@@ -481,6 +583,9 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 //
 // These thin wrappers exist only for tests and external callers that link
 // against the un-suffixed names. They forward to the default (scalar) variant.
+//
+// With ZXC_DISPATCH_ENTROPY, the two section decoders dispatch per CPU instead:
+// the _default decompress TU calls them, one indirect call per section.
 /**
  * @brief Build length-limited per-symbol Huffman code lengths from frequencies.
  *
@@ -506,7 +611,11 @@ int zxc_huf_encode_section(const uint8_t* RESTRICT literals, const size_t n_lite
 
 int zxc_huf_decode_section(const uint8_t* RESTRICT payload, const size_t payload_size,
                            uint8_t* RESTRICT dst, const size_t n, uint8_t* RESTRICT scratch) {
+#ifdef ZXC_DISPATCH_ENTROPY
+    return zxc_variants()->huf_decode(payload, payload_size, dst, n, scratch);
+#else
     return zxc_huf_decode_section_default(payload, payload_size, dst, n, scratch);
+#endif
 }
 
 int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n_literals,
@@ -521,7 +630,11 @@ int zxc_huf_encode_section_dict(const uint8_t* RESTRICT literals, const size_t n
 int zxc_huf_decode_section_dict(const uint8_t* RESTRICT payload, const size_t payload_size,
                                 uint8_t* RESTRICT dst, const size_t n,
                                 const zxc_pivco_tree_t* RESTRICT tree, uint8_t* RESTRICT scratch) {
+#if defined(ZXC_DISPATCH_ENTROPY) && !defined(ZXC_NO_DICT)
+    return zxc_variants()->huf_decode_dict(payload, payload_size, dst, n, tree, scratch);
+#else
     return zxc_huf_decode_section_dict_default(payload, payload_size, dst, n, tree, scratch);
+#endif
 }
 
 size_t zxc_huf_calc_size_dict(const uint32_t* RESTRICT freq, const uint8_t* RESTRICT code_len,
@@ -1141,6 +1254,10 @@ int zxc_cctx_get_param(const zxc_cctx* cctx, const zxc_cparam_t param, int64_t* 
 int zxc_cctx_set_dict(zxc_cctx* cctx, const void* dict, const size_t dict_size,
                       const void* dict_huf) {
     if (UNLIKELY(!cctx)) return ZXC_ERROR_NULL_INPUT;
+#ifdef ZXC_NO_DICT
+    // No dictionary support: clearing is a no-op.
+    if (UNLIKELY(dict && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
     // No room for the dictionary prefix in a workspace carved without it.
     if (UNLIKELY(cctx->owns_workspace && dict && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     const int rc = zxc_dict_copy_set(&cctx->dict_copy, dict, dict_size, dict_huf);
@@ -1406,6 +1523,10 @@ int zxc_dctx_get_param(const zxc_dctx* dctx, const zxc_dparam_t param, int64_t* 
 int zxc_dctx_set_dict(zxc_dctx* dctx, const void* dict, const size_t dict_size,
                       const void* dict_huf) {
     if (UNLIKELY(!dctx)) return ZXC_ERROR_NULL_INPUT;
+#ifdef ZXC_NO_DICT
+    // No dictionary support: clearing is a no-op.
+    if (UNLIKELY(dict && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
+#endif
     if (UNLIKELY(dctx->owns_workspace && dict && dict_size > 0)) return ZXC_ERROR_DICT_UNSUPPORTED;
     const int rc = zxc_dict_copy_set(&dctx->dict_copy, dict, dict_size, dict_huf);
     if (UNLIKELY(rc != ZXC_OK)) return rc;

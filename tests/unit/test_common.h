@@ -26,8 +26,10 @@
 #include "../../include/zxc_stream.h"
 #include "../../src/lib/zxc_internal.h"
 
-/* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo } */
-#define TEST_CASE(fn) {#fn, fn}
+/* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo }.
+ * TEST_CASE_DICT: the test installs a dictionary, skipped under ZXC_NO_DICT. */
+#define TEST_CASE(fn) {#fn, fn, 0}
+#define TEST_CASE_DICT(fn) {#fn, fn, 1}
 
 /* --- IO helper ---------------------------------------------------------- */
 

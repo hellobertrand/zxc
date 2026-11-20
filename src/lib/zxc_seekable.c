@@ -1025,6 +1025,12 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
     }
     // No frame needs a dictionary: ignore it, as before. Otherwise one must use it.
     if (!any) return ZXC_OK;
+#ifdef ZXC_NO_DICT
+    // No dictionary support: these frames cannot be decoded.
+    (void)used;
+    (void)dict_huf;
+    return ZXC_ERROR_DICT_UNSUPPORTED;
+#else
     if (UNLIKELY(!used)) return ZXC_ERROR_DICT_MISMATCH;
 
     zxc_seek_dict_t* d = NULL;
@@ -1057,6 +1063,7 @@ int zxc_seekable_set_dict(zxc_seekable* s, const void* dict, const size_t dict_s
         s->dctx_initialized = 0;
     }
     return ZXC_OK;
+#endif  // ZXC_NO_DICT
 }
 
 /**

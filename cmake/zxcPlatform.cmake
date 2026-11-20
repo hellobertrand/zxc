@@ -67,3 +67,35 @@ if(ZXC_NATIVE_ARCH AND NOT MSVC)
         set(ZXC_NATIVE_ARCH OFF)
     endif()
 endif()
+
+# =============================================================================
+# Per-role SIMD variants and optional features
+# =============================================================================
+if(NOT ZXC_ENCODER MATCHES "^(runtime|default)$")
+    message(FATAL_ERROR "ZXC_ENCODER must be runtime or default, not '${ZXC_ENCODER}'.")
+endif()
+if(NOT ZXC_DECODER MATCHES "^(runtime|entropy|default)$")
+    message(FATAL_ERROR
+        "ZXC_DECODER must be runtime, entropy or default, not '${ZXC_DECODER}'.")
+endif()
+
+# ZXC_DISABLE_SIMD leaves nothing to select.
+set(ZXC_ENCODER_EFFECTIVE "${ZXC_ENCODER}")
+set(ZXC_DECODER_EFFECTIVE "${ZXC_DECODER}")
+if(ZXC_DISABLE_SIMD)
+    set(ZXC_ENCODER_EFFECTIVE "default")
+    set(ZXC_DECODER_EFFECTIVE "default")
+endif()
+
+if(ZXC_ENCODER_EFFECTIVE STREQUAL "default")
+    add_compile_definitions(ZXC_ENCODER_ONLY_DEFAULT)
+endif()
+if(ZXC_DECODER_EFFECTIVE STREQUAL "default")
+    add_compile_definitions(ZXC_DECODER_ONLY_DEFAULT)
+elseif(ZXC_DECODER_EFFECTIVE STREQUAL "entropy")
+    add_compile_definitions(ZXC_DECODER_ENTROPY_DISPATCH)
+endif()
+
+if(NOT ZXC_DICTIONARY)
+    add_compile_definitions(ZXC_NO_DICT)
+endif()

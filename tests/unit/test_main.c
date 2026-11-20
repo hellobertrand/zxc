@@ -12,6 +12,7 @@ typedef int (*test_fn_t)(void);
 typedef struct {
     const char* name;
     test_fn_t fn;
+    int needs_dict; /* see TEST_CASE_DICT */
 } test_entry_t;
 
 static const test_entry_t g_tests[] = {
@@ -54,7 +55,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_buffer_error_codes),
     TEST_CASE(test_decompress_inplace),
     TEST_CASE(test_get_decompressed_size),
-    TEST_CASE(test_frame_info),
+    TEST_CASE_DICT(test_frame_info),
     TEST_CASE(test_footer_strictness),
     TEST_CASE(test_decompress_fast_vs_safe_path),
     TEST_CASE(test_decompress_no_tail_margin),
@@ -65,7 +66,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_block_api),
     TEST_CASE(test_block_api_boundary_sizes),
     TEST_CASE(test_block_api_tiny_capacity),
-    TEST_CASE(test_block_api_direct_decode),
+    TEST_CASE_DICT(test_block_api_direct_decode),
     TEST_CASE(test_block_api_large_block_varint),
     TEST_CASE(test_block_api_invalid_varint),
     TEST_CASE(test_decompress_block_bound),
@@ -73,13 +74,13 @@ static const test_entry_t g_tests[] = {
 
     /* --- Context API --- */
     TEST_CASE(test_opaque_context_api),
-    TEST_CASE(test_context_api_empty_input),
+    TEST_CASE_DICT(test_context_api_empty_input),
     TEST_CASE(test_context_api_seekable_frame),
-    TEST_CASE(test_context_api_seekable_compress),
+    TEST_CASE_DICT(test_context_api_seekable_compress),
     TEST_CASE(test_cctx_level_raise_reinit),
-    TEST_CASE(test_cctx_param_contract),
-    TEST_CASE(test_dctx_param_contract),
-    TEST_CASE(test_ctx_dict_copied),
+    TEST_CASE_DICT(test_cctx_param_contract),
+    TEST_CASE_DICT(test_dctx_param_contract),
+    TEST_CASE_DICT(test_ctx_dict_copied),
     TEST_CASE(test_cctx_configured_archives),
     TEST_CASE(test_estimate_cctx_size),
 
@@ -87,11 +88,11 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_static_ctx_size_query),
     TEST_CASE(test_static_ctx_workspace_too_small),
     TEST_CASE(test_static_ctx_block_size_locked),
-    TEST_CASE(test_static_dctx_probe_honours_guards),
+    TEST_CASE_DICT(test_static_dctx_probe_honours_guards),
     TEST_CASE(test_static_ctx_level_raise_rejected),
     TEST_CASE(test_static_ctx_null_inputs),
     TEST_CASE(test_static_ctx_roundtrip_all_levels),
-    TEST_CASE(test_static_dctx_block_bounds),
+    TEST_CASE_DICT(test_static_dctx_block_bounds),
     TEST_CASE(test_static_dctx_inplace),
 
     /* --- Stream API --- */
@@ -99,7 +100,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_stream_level_clamp),
     TEST_CASE(test_stream_corrupt_block_header),
     TEST_CASE(test_stream_dry_run_size),
-    TEST_CASE(test_stream_oversized_dict),
+    TEST_CASE_DICT(test_stream_oversized_dict),
     TEST_CASE(test_invalid_arguments),
     TEST_CASE(test_truncated_input),
     TEST_CASE(test_io_failures),
@@ -121,7 +122,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_container_concat),
     TEST_CASE(test_container_frame_walk),
     TEST_CASE(test_container_engine_reuse),
-    TEST_CASE(test_container_seekable),
+    TEST_CASE_DICT(test_container_seekable),
     TEST_CASE(test_container_seekable_inplace),
 
     /* --- Push Streaming API --- */
@@ -134,13 +135,13 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_pstream_large_random),
     TEST_CASE(test_pstream_compatible_with_buffer_api),
     TEST_CASE(test_pstream_decompress_compatible_with_buffer_api),
-    TEST_CASE(test_pstream_invalid_args),
+    TEST_CASE_DICT(test_pstream_invalid_args),
     TEST_CASE(test_pstream_truncated_input),
     TEST_CASE(test_pstream_corrupted_magic),
     TEST_CASE(test_pstream_decode_seekable_archive),
     TEST_CASE(test_pstream_compress_after_end_rejected),
     TEST_CASE(test_pstream_compress_drain_block_resume),
-    TEST_CASE(test_pstream_dict_archive_rejected),
+    TEST_CASE_DICT(test_pstream_dict_archive_rejected),
 
     /* --- Format (on-disk) --- */
     TEST_CASE(test_huffman_codec),
@@ -162,7 +163,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_header_checksum_single_bit),
 
     /* --- Encoder output --- */
-    TEST_CASE(test_encoder_output_pinned),
+    TEST_CASE_DICT(test_encoder_output_pinned),
 
     /* --- Misc --- */
     TEST_CASE(test_error_name),
@@ -171,39 +172,39 @@ static const test_entry_t g_tests[] = {
     /* --- Dictionary --- */
     TEST_CASE(test_dict_zxd_roundtrip),
     TEST_CASE(test_dict_id_deterministic),
-    TEST_CASE(test_dict_get_id_apis),
-    TEST_CASE(test_dict_buffer_roundtrip),
-    TEST_CASE(test_dict_block_roundtrip),
-    TEST_CASE(test_dict_block_safe_roundtrip),
-    TEST_CASE(test_dict_mismatch_error),
-    TEST_CASE(test_dict_required_error),
+    TEST_CASE_DICT(test_dict_get_id_apis),
+    TEST_CASE_DICT(test_dict_buffer_roundtrip),
+    TEST_CASE_DICT(test_dict_block_roundtrip),
+    TEST_CASE_DICT(test_dict_block_safe_roundtrip),
+    TEST_CASE_DICT(test_dict_mismatch_error),
+    TEST_CASE_DICT(test_dict_required_error),
     TEST_CASE(test_dict_no_dict_compat),
-    TEST_CASE(test_dict_stream_roundtrip),
-    TEST_CASE(test_dict_large_dict_roundtrip),
-    TEST_CASE(test_dict_safe_loop_backref),
-    TEST_CASE(test_dict_seekable_roundtrip),
-    TEST_CASE(test_dict_train_roundtrip),
+    TEST_CASE_DICT(test_dict_stream_roundtrip),
+    TEST_CASE_DICT(test_dict_large_dict_roundtrip),
+    TEST_CASE_DICT(test_dict_safe_loop_backref),
+    TEST_CASE_DICT(test_dict_seekable_roundtrip),
+    TEST_CASE_DICT(test_dict_train_roundtrip),
     TEST_CASE(test_dict_train_no_frequent_patterns),
     TEST_CASE(test_dict_train_size_overflow),
     TEST_CASE(test_dict_huf_train_over_budget),
-    TEST_CASE(test_dict_seekable_mt_roundtrip),
-    TEST_CASE(test_dict_stream_dict_id_checks),
-    TEST_CASE(test_dict_id_zero),
-    TEST_CASE(test_dict_seekable_dict_id_checks),
-    TEST_CASE(test_dict_dctx_roundtrip),
-    TEST_CASE(test_dict_static_dctx_rejected),
-    TEST_CASE(test_dict_cctx_roundtrip),
-    TEST_CASE(test_dict_block_cctx_dict_reinit),
-    TEST_CASE(test_dict_ctx_table_cache_recovers),
-    TEST_CASE(test_dict_ctx_table_without_dict),
-    TEST_CASE(test_dict_oversized_rejected_everywhere),
-    TEST_CASE(test_dict_block_huf_roundtrip),
-    TEST_CASE(test_dict_block_stored_block_size),
-    TEST_CASE(test_dict_id_collision_caught_by_checksum),
-    TEST_CASE(test_dict_checksum_cross_paths),
+    TEST_CASE_DICT(test_dict_seekable_mt_roundtrip),
+    TEST_CASE_DICT(test_dict_stream_dict_id_checks),
+    TEST_CASE_DICT(test_dict_id_zero),
+    TEST_CASE_DICT(test_dict_seekable_dict_id_checks),
+    TEST_CASE_DICT(test_dict_dctx_roundtrip),
+    TEST_CASE_DICT(test_dict_static_dctx_rejected),
+    TEST_CASE_DICT(test_dict_cctx_roundtrip),
+    TEST_CASE_DICT(test_dict_block_cctx_dict_reinit),
+    TEST_CASE_DICT(test_dict_ctx_table_cache_recovers),
+    TEST_CASE_DICT(test_dict_ctx_table_without_dict),
+    TEST_CASE_DICT(test_dict_oversized_rejected_everywhere),
+    TEST_CASE_DICT(test_dict_block_huf_roundtrip),
+    TEST_CASE_DICT(test_dict_block_stored_block_size),
+    TEST_CASE_DICT(test_dict_id_collision_caught_by_checksum),
+    TEST_CASE_DICT(test_dict_checksum_cross_paths),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
-    TEST_CASE(test_dict_huf_table_roundtrip),
-    TEST_CASE(test_dict_huf_degenerate_corpus),
+    TEST_CASE_DICT(test_dict_huf_table_roundtrip),
+    TEST_CASE_DICT(test_dict_huf_degenerate_corpus),
 
     /* --- Seekable (single-threaded) --- */
     TEST_CASE(test_seekable_table_sizes),
@@ -299,6 +300,13 @@ int main(int argc, char** argv) {
                                     : (strstr(g_tests[i].name, filter) != NULL);
             if (!match) continue;
         }
+#ifdef ZXC_NO_DICT
+        if (g_tests[i].needs_dict) {
+            printf("SKIPPED: %s (library built without dictionary support)\n", g_tests[i].name);
+            ran++;
+            continue;
+        }
+#endif
         if (!g_tests[i].fn()) total_failures++;
         ran++;
     }
