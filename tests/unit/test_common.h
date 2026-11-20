@@ -26,8 +26,21 @@
 #include "../../include/zxc_stream.h"
 #include "../../src/lib/zxc_internal.h"
 
-/* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo } */
-#define TEST_CASE(fn) {#fn, fn}
+/* Declarative test-table entry: TEST_CASE(test_foo) -> { "test_foo", test_foo }.
+ * TEST_CASE_DICT: the test installs a dictionary, skipped under ZXC_NO_DICT. */
+#define TEST_CASE(fn) {#fn, fn, 0}
+/* Exit code of a run whose tests were all skipped: CTest and Meson report it. */
+#define TEST_SKIP_EXIT_CODE 77
+#define TEST_CASE_DICT(fn) {#fn, fn, 1}
+
+/* Dictionary sub-cases: skipped, and setters refuse, under ZXC_NO_DICT. */
+#ifdef ZXC_NO_DICT
+#define TEST_HAS_DICT 0
+#define TEST_DICT_OK ZXC_ERROR_DICT_UNSUPPORTED
+#else
+#define TEST_HAS_DICT 1
+#define TEST_DICT_OK ZXC_OK
+#endif
 
 /* --- IO helper ---------------------------------------------------------- */
 
@@ -337,6 +350,7 @@ int test_encoder_output_pinned(void);
 /* Misc */
 int test_error_name(void);
 int test_library_info_api(void);
+int test_dict_build_support(void);
 
 /* Dictionary */
 int test_dict_zxd_roundtrip(void);

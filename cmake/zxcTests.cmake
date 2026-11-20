@@ -89,15 +89,16 @@ if(ZXC_BUILD_TESTS)
 
     target_include_directories(zxc_test PRIVATE src/lib ${RAPIDHASH_INCLUDE_DIR})
 
-    file(STRINGS tests/unit/test_main.c ZXC_TEST_CASE_LINES REGEX "TEST_CASE\\(")
+    file(STRINGS tests/unit/test_main.c ZXC_TEST_CASE_LINES REGEX "TEST_CASE(_DICT)?\\(")
     set(ZXC_TEST_NAMES "")
     foreach(_line IN LISTS ZXC_TEST_CASE_LINES)
-        if(_line MATCHES "TEST_CASE\\(([A-Za-z0-9_]+)\\)")
-            list(APPEND ZXC_TEST_NAMES ${CMAKE_MATCH_1})
+        if(_line MATCHES "TEST_CASE(_DICT)?\\(([A-Za-z0-9_]+)\\)")
+            list(APPEND ZXC_TEST_NAMES ${CMAKE_MATCH_2})
         endif()
     endforeach()
     foreach(_name IN LISTS ZXC_TEST_NAMES)
         add_test(NAME ${_name} COMMAND zxc_test --exact ${_name})
+        set_tests_properties(${_name} PROPERTIES SKIP_RETURN_CODE 77)
     endforeach()
 
     # --- Conformance suite ---------------------------------------------------

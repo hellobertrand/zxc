@@ -135,3 +135,55 @@ int test_library_info_api(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* The dictionary setters follow the build's dictionary support. */
+int test_dict_build_support(void) {
+    printf("=== TEST: Dict - setters follow the build's dictionary support ===\n");
+#ifdef ZXC_NO_DICT
+    const int want = ZXC_ERROR_DICT_UNSUPPORTED;
+#else
+    const int want = ZXC_OK;
+#endif
+    static const char dict[] = "a dictionary the setters are offered, long enough to count";
+    const size_t dsz = sizeof(dict) - 1;
+    const size_t n = 16 * 1024;
+    uint8_t* src = malloc(n);
+    uint8_t* comp = malloc(zxc_compress_bound(n));
+    zxc_cctx* cctx = zxc_create_cctx();
+    zxc_dctx* dctx = zxc_create_dctx();
+    zxc_seekable* s = NULL;
+    int ok = src && comp && cctx && dctx;
+
+    if (ok) {
+        gen_lz_data(src, n);
+        const int64_t csz = zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1) == ZXC_OK
+                                ? zxc_compress_cctx(cctx, src, n, comp, zxc_compress_bound(n))
+                                : -1;
+        s = csz > 0 ? zxc_seekable_open(comp, (size_t)csz) : NULL;
+        ok = s != NULL;
+        if (!ok) printf("  [FAIL] setup\n");
+    }
+    if (ok) {
+        const int rc = zxc_cctx_set_dict(cctx, dict, dsz, NULL);
+        const int rd = zxc_dctx_set_dict(dctx, dict, dsz, NULL);
+        const int rs = zxc_seekable_set_dict(s, dict, dsz, NULL);
+        ok = rc == want && rd == want && rs == want;
+        if (!ok)
+            printf("  [FAIL] cctx %s, dctx %s, seekable %s; expected %s\n", zxc_error_name(rc),
+                   zxc_error_name(rd), zxc_error_name(rs), zxc_error_name(want));
+    }
+    if (ok) {
+        ok = zxc_cctx_set_dict(cctx, NULL, 0, NULL) == ZXC_OK &&
+             zxc_dctx_set_dict(dctx, NULL, 0, NULL) == ZXC_OK;
+        if (!ok) printf("  [FAIL] detaching\n");
+    }
+
+    zxc_seekable_free(s);
+    zxc_free_dctx(dctx);
+    zxc_free_cctx(cctx);
+    free(comp);
+    free(src);
+    if (!ok) return 0;
+    printf("PASS\n\n");
+    return 1;
+}

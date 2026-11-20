@@ -207,10 +207,12 @@ static void noop_progress(uint64_t done, uint64_t total, const void* user) {
     (void)user;
 }
 
+#if TEST_HAS_DICT
 /* The context owns a copy of its dictionary: the same bytes at another address. */
 static int dict_copied(const void* attached, size_t attached_size, const void* dict, size_t n) {
     return attached && attached != dict && attached_size == n && memcmp(attached, dict, n) == 0;
 }
+#endif
 
 /* The contexts own a copy of the dictionary and its table: the caller's buffers
  * may change or go once set_dict() has returned. Level 7 reads the table, and
@@ -400,6 +402,7 @@ int test_cctx_param_contract(void) {
     /* Dictionary and callback setters; an oversized dictionary is refused and
      * the attached one stays. */
     const zxc_cparams_t* const p = zxc_cctx_params(c);
+#if TEST_HAS_DICT
     if (zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != ZXC_OK ||
         !dict_copied(p->dict, p->dict_size, dict, sizeof(dict)) ||
         zxc_cctx_set_dict(c, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL) !=
@@ -409,6 +412,7 @@ int test_cctx_param_contract(void) {
                p->dict_size);
         fails++;
     }
+#endif
     if (zxc_cctx_set_progress(c, noop_progress, &marker) != ZXC_OK ||
         p->progress_cb != noop_progress || p->user_data != &marker ||
         zxc_cctx_set_progress(c, NULL, &marker) != ZXC_OK || p->progress_cb != NULL ||
@@ -417,7 +421,7 @@ int test_cctx_param_contract(void) {
         fails++;
     }
     if (zxc_cctx_set_dict(c, NULL, 0, NULL) != ZXC_OK || p->dict != NULL || p->dict_size != 0 ||
-        zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != ZXC_OK) {
+        zxc_cctx_set_dict(c, dict, sizeof(dict), NULL) != TEST_DICT_OK) {
         printf("  [FAIL] NULL dictionary must detach\n");
         fails++;
     }
@@ -549,11 +553,14 @@ int test_dctx_param_contract(void) {
 
     /* Dictionary and callback setters, then reset detaches both. */
     const zxc_dparams_t* const p = zxc_dctx_params(d);
-    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK ||
+    if (
+#if TEST_HAS_DICT
+        zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK ||
         !dict_copied(p->dict, p->dict_size, dict, sizeof(dict)) ||
         zxc_dctx_set_dict(d, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL) !=
             ZXC_ERROR_DICT_TOO_LARGE ||
         !dict_copied(p->dict, p->dict_size, dict, sizeof(dict)) ||
+#endif
         zxc_dctx_set_dict(d, NULL, 0, NULL) != ZXC_OK || p->dict != NULL || p->dict_size != 0 ||
         zxc_dctx_set_progress(d, noop_progress, &marker) != ZXC_OK ||
         p->progress_cb != noop_progress || p->user_data != &marker ||
@@ -561,7 +568,7 @@ int test_dctx_param_contract(void) {
         printf("  [FAIL] dictionary / progress setters\n");
         fails++;
     }
-    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != ZXC_OK ||
+    if (zxc_dctx_set_dict(d, dict, sizeof(dict), NULL) != TEST_DICT_OK ||
         zxc_dctx_set_progress(d, noop_progress, &marker) != ZXC_OK ||
         zxc_dctx_set_param(d, ZXC_D_THREADS, 4) != ZXC_OK || zxc_dctx_reset(d) != ZXC_OK ||
         zxc_dctx_get_param(d, ZXC_D_THREADS, &v) != ZXC_OK || v != 0 ||
@@ -605,6 +612,7 @@ int test_dctx_param_contract(void) {
                 fails++;
             }
         }
+#if TEST_HAS_DICT
         zxc_cctx* const c = zxc_create_cctx();
         int64_t dn = c ? ZXC_OK : ZXC_ERROR_MEMORY;
         if (dn == ZXC_OK) dn = zxc_cctx_set_dict(c, dict, sizeof(dict), NULL);
@@ -621,6 +629,7 @@ int test_dctx_param_contract(void) {
                    (long long)dn, (long long)r3, (long long)r4);
             fails++;
         }
+#endif
         if (!fails) printf("  [PASS] checksum and dictionary take effect, reset drops them\n");
     }
     free(src);
@@ -990,8 +999,10 @@ int test_context_api_seekable_compress(void) {
     fails += configure_seekable(cctx, 5, 1, NULL, 0) != ZXC_OK;
     fails += !cctx_seekable_matches("checksums", cctx, src, n, 5, 1, NULL, 0);
     fails += !cctx_seekable_matches("reused, unchanged", cctx, src, n, 5, 1, NULL, 0);
+#if TEST_HAS_DICT
     fails += configure_seekable(cctx, 5, 1, dict, sizeof(dict)) != ZXC_OK;
     fails += !cctx_seekable_matches("dictionary", cctx, src, n, 5, 1, dict, sizeof(dict));
+#endif
     fails += configure_seekable(cctx, 3, 0, NULL, 0) != ZXC_OK;
     fails += !cctx_seekable_matches("dictionary detached", cctx, src, n, 3, 0, NULL, 0);
     fails += !cctx_seekable_matches("one block", cctx, src, 1000, 3, 0, NULL, 0);
@@ -1188,10 +1199,11 @@ int test_context_api_empty_input(void) {
         disagreed += !probe_and_decode("corrupted block checksum", bad, (size_t)cn, 1, NULL, 0,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_BAD_CHECKSUM);
 
-        /* An unsupplied dictionary is only caught by the frame walk, so the
-         * probe has to reach it. */
         static uint8_t dict[8192];
         memset(dict, 'x', sizeof(dict));
+#if TEST_HAS_DICT
+        /* An unsupplied dictionary is only caught by the frame walk, so the
+         * probe has to reach it. */
         if (zxc_cctx_set_dict(cctx, dict, sizeof(dict), NULL) != ZXC_OK) {
             printf("  [FAIL] zxc_cctx_set_dict\n");
             break;
@@ -1203,6 +1215,7 @@ int test_context_api_empty_input(void) {
         }
         disagreed += !probe_and_decode("dictionary not supplied", bad, (size_t)dn, 0, NULL, 0,
                                        ZXC_ERROR_DICT_REQUIRED, ZXC_ERROR_DICT_REQUIRED);
+#endif
 
         /* A forged stored size is corrupt data, not "destination too small". */
         static const char payload[] = "a forged footer must read as corrupt data, not as size";
@@ -1237,6 +1250,7 @@ int test_context_api_empty_input(void) {
         const size_t zn = test_forge_footer_size(bad, (size_t)pn, zeroed, sizeof(zeroed), 0);
         disagreed += !probe_and_decode("payload behind a zeroed size", zeroed, zn, 0, NULL, 0,
                                        ZXC_ERROR_DST_TOO_SMALL, ZXC_ERROR_CORRUPT_DATA);
+#if TEST_HAS_DICT
         /* Same, with the dictionary the archive needs: the probe still refuses
          * on capacity, through the dictionary bounce path this time. */
         if (zxc_cctx_set_dict(cctx, dict, sizeof(dict), NULL) != ZXC_OK) {
@@ -1251,6 +1265,7 @@ int test_context_api_empty_input(void) {
         disagreed += !probe_and_decode("payload behind a dictionary", bad, (size_t)pdn, 0, dict,
                                        sizeof(dict), ZXC_ERROR_DST_TOO_SMALL,
                                        (int64_t)(sizeof(payload) - 1));
+#endif
 
         /* A dictionary size the library cannot honour is a caller error: the
          * setter refuses it before any archive is read, and the context goes
@@ -1262,7 +1277,8 @@ int test_context_api_empty_input(void) {
         }
         const int huge = zxc_dctx_set_dict(nd, dict, (size_t)ZXC_DICT_SIZE_MAX + 1, NULL);
         const int64_t after_huge = zxc_decompress_dctx(nd, from_ctx, (size_t)n2, NULL, 0);
-        if (huge != ZXC_ERROR_DICT_TOO_LARGE || after_huge != 0) {
+        if (huge != (TEST_HAS_DICT ? ZXC_ERROR_DICT_TOO_LARGE : ZXC_ERROR_DICT_UNSUPPORTED) ||
+            after_huge != 0) {
             printf("  [FAIL] oversized dictionary: setter %d, probe after %lld\n", huge,
                    (long long)after_huge);
             zxc_free_dctx(nd);
@@ -1322,6 +1338,7 @@ int test_context_api_empty_input(void) {
                    (long long)e2);
             break;
         }
+#if TEST_HAS_DICT
         if (zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 0) != ZXC_OK ||
             zxc_cctx_set_dict(cctx, dict, sizeof(dict), NULL) != ZXC_OK) {
             printf("  [FAIL] reconfigure for empty + dictionary\n");
@@ -1346,6 +1363,12 @@ int test_context_api_empty_input(void) {
                    (long long)dr);
             break;
         }
+#else
+        if (zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 0) != ZXC_OK) {
+            printf("  [FAIL] reconfigure without checksum\n");
+            break;
+        }
+#endif
         printf("  [PASS] the empty fast path keeps checksum and dictionary parameters\n");
 
         /* The block API keeps its documented [1, MAX] contract: a real pointer

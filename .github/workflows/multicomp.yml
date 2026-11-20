@@ -264,6 +264,13 @@ jobs:
       - name: Test (shared)
         run: meson test -C build-shared --print-errorlogs
 
+      - name: Setup, build and test (optimize=size, no dictionary)
+        run: |
+          meson setup build-size -Ddefault_library=static -Dwerror=true \
+            -Doptimize=size -Ddictionary=false
+          meson compile -C build-size
+          meson test -C build-size --print-errorlogs
+
       - name: Rapidhash resolution is enforced at setup time
         if: matrix.name == 'Linux x86_64'
         shell: bash

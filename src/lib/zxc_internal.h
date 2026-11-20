@@ -39,6 +39,7 @@
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 #include "rapidhash.h"
+#include "zxc_build.h"
 
 #ifdef __cplusplus
 extern "C" {

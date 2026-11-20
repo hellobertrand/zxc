@@ -19,7 +19,9 @@ linked into a single `zxc_test` binary by `cmake/zxcTests.cmake` and
 `meson.build`. `test_main.c` lists every case in a `TEST_CASE(...)` table;
 CMake reads that table and registers one ctest per case, so a new test needs
 a declaration in `test_common.h`, a definition in the right `test_*.c`, and a
-`TEST_CASE` line. Nothing else.
+`TEST_CASE` line. Nothing else. A test that installs a dictionary is listed with
+`TEST_CASE_DICT` instead, so a library built without dictionary support
+(`ZXC_DICTIONARY=OFF`) skips it.
 
 ```sh
 cmake -S . -B build -DZXC_BUILD_TESTS=ON && cmake --build build
