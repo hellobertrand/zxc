@@ -105,8 +105,9 @@ if(ZXC_TARGET_ARM32)
 endif()
 endif()
 
-# --- 3. RISC-V 64 (Linux): fast misaligned scalar access ---
-if(ZXC_TARGET_RISCV64 AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZXC_DISABLE_SIMD)
+# --- 3. RISC-V 64 (Linux): fast misaligned scalar access, perf only ---
+if(ZXC_TARGET_RISCV64 AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZXC_DISABLE_SIMD
+   AND ZXC_OPTIMIZE STREQUAL "perf")
     include(CheckCCompilerFlag)
     set(_zxc_saved_try_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
     set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
@@ -128,7 +129,7 @@ if(ZXC_TARGET_RISCV64 AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZXC_DISABLE
 
     if(ZXC_RV64FAST_FLAGS)
         message(STATUS "Building RISC-V 64 fast-unaligned variant (${ZXC_RV64FAST_FLAGS})...")
-        zxc_add_variant(_rv64fast "${ZXC_RV64FAST_FLAGS}" "compress;decompress;huffman")
+        zxc_add_variant(_rv64fast "${ZXC_RV64FAST_FLAGS}" "${ZXC_SIMD_SOURCES}")
         add_compile_definitions(ZXC_HAVE_RV64FAST_VARIANT)
     else()
         message(STATUS "RISC-V 64: no fast-unaligned flag; _default only.")

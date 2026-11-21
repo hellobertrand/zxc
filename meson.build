@@ -161,8 +161,8 @@ elif host_cpu == 'arm'
   # 32-bit ARM only: NEON is optional there (runtime getauxval dispatch).
   # AArch64 needs no extra variant: NEON is baseline and lives in _default.
   variant_sets += [['_neon32', ['-march=armv7-a', '-mfpu=neon'], simd_sources]]
-elif host_cpu == 'riscv64' and host_machine.system() == 'linux'
-  # Mirrors cmake/zxcVariants.cmake: fast misaligned scalar accesses.
+elif host_cpu == 'riscv64' and host_machine.system() == 'linux' and optimize == 'perf'
+  # Mirrors cmake/zxcVariants.cmake: fast misaligned scalar accesses, perf only.
   rv64fast_args = []
   if cc.get_id() == 'gcc' and cc.has_argument('-mtune=generic-ooo')
     rv64fast_args = ['-mtune=generic-ooo']
@@ -170,7 +170,7 @@ elif host_cpu == 'riscv64' and host_machine.system() == 'linux'
     rv64fast_args = ['-mno-scalar-strict-align']
   endif
   if rv64fast_args.length() > 0
-    variant_sets += [['_rv64fast', rv64fast_args, variant_sources]]
+    variant_sets += [['_rv64fast', rv64fast_args, simd_sources]]
     variant_dispatch_args += ['-DZXC_HAVE_RV64FAST_VARIANT']
   endif
 endif

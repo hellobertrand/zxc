@@ -167,7 +167,8 @@ API: every such build reads what any other build wrote.
 
 The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
 `ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. Without an AVX-512
-variant, AVX-512 CPUs run the AVX2 one.
+variant, AVX-512 CPUs run the AVX2 one. The RISC-V 64 `_rv64fast` variant (fast
+misaligned accesses, no intrinsics) is built by `perf` only.
 
 `ZXC_ENABLE_DICT=OFF` removes dictionary support. Unlike `ZXC_SIMD_VARIANTS`, it changes what
 the library accepts: installing a dictionary, or reading an archive written with one,
