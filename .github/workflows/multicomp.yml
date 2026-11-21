@@ -264,10 +264,10 @@ jobs:
       - name: Test (shared)
         run: meson test -C build-shared --print-errorlogs
 
-      - name: Setup, build and test (optimize=size, no dictionary)
+      - name: Setup, build and test (simd_variants=minimal, no dictionary)
         run: |
           meson setup build-size -Ddefault_library=static -Dwerror=true \
-            -Doptimize=size -Ddictionary=false
+            -Dsimd_variants=minimal -Ddict=false
           meson compile -C build-size
           meson test -C build-size --print-errorlogs
 

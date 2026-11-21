@@ -17,8 +17,8 @@ option(ZXC_INSTALL "Generate install rules (headers, pkg-config, CMake package)"
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
 option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
 # SIMD variants to build (docs/INSTALL.md, "Trimming the library").
-set(ZXC_OPTIMIZE "perf" CACHE STRING "SIMD variants to build: perf, balanced or size")
-set_property(CACHE ZXC_OPTIMIZE PROPERTY STRINGS perf balanced size)
-option(ZXC_DICTIONARY "Support dictionary frames (compression and decompression)" ON)
+set(ZXC_SIMD_VARIANTS "all" CACHE STRING "SIMD variants to build: all, decoder or minimal")
+set_property(CACHE ZXC_SIMD_VARIANTS PROPERTY STRINGS all decoder minimal)
+option(ZXC_ENABLE_DICT "Support dictionary frames (compression and decompression)" ON)
 option(ZXC_USE_SYSTEM_RAPIDHASH "Use a system-installed rapidhash.h instead of the vendored copy"
        OFF)
