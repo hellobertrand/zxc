@@ -2274,14 +2274,13 @@ else
     fi
 fi
 
-# 39. --favor-decode-speed: an encoder policy. Every 7th line repeats: 40-50 byte
-# matches, the lengths the split re-emits inline.
+# 39. --favor-decode-speed: an encoder policy. Lines drawn pseudo-randomly from 97
+# share a prefix: matches of about 100 bytes at offsets past 32, the escapes
+# the split re-emits inline.
 echo "Testing --favor-decode-speed..."
 PDS="$TEST_DIR/pds.txt"
-: > "$PDS"
-for i in $(seq 1 4000); do
-    printf 'the quick brown fox jumps over the lazy dog, line %d of 7\n' $((i % 7)) >> "$PDS"
-done
+awk 'BEGIN { s = 1; for (i = 0; i < 4000; i++) { s = (s * 75 + 74) % 65537
+    printf "the quick brown fox jumps over the lazy dog, line %d\n", s % 97 } }' > "$PDS"
 "$ZXC_BIN" -3 -c "$PDS" > "$TEST_DIR/pds_off.zxc"
 "$ZXC_BIN" -3 --favor-decode-speed -c "$PDS" > "$TEST_DIR/pds_on.zxc"
 "$ZXC_BIN" -d -c "$TEST_DIR/pds_on.zxc" > "$TEST_DIR/pds_on.dec"
@@ -2306,10 +2305,17 @@ else
 fi
 # 39.3 Benchmark mode reports it, with the budget the library applies
 BJ=$("$ZXC_BIN" -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null)
-if echo "$BJ" | grep -q '"favor_decode_speed": true' && echo "$BJ" | grep -q '"split_budget_pct": 10,'; then
+if echo "$BJ" | grep -q '"favor_decode_speed": true' && echo "$BJ" | grep -q '"split_budget_pct": 5,'; then
     log_pass "-b -j reports favor_decode_speed and the default budget"
 else
-    log_fail "-b -j does not report favor_decode_speed with budget 10"
+    log_fail "-b -j does not report favor_decode_speed with budget 5"
+fi
+# 39.3.0 ...and off at levels 1-2, where nothing applies
+BJ=$("$ZXC_BIN" -1 -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null)
+if echo "$BJ" | grep -q '"favor_decode_speed": false' && echo "$BJ" | grep -q '"split_budget_pct": 0,'; then
+    log_pass "-b -j reports favor_decode_speed off at level 1"
+else
+    log_fail "-b -j reports a budget at level 1"
 fi
 # 39.3.1 Levels 1-2 warn that the option does nothing there
 if "$ZXC_BIN" -1 --favor-decode-speed -c "$PDS" 2>&1 >/dev/null | grep -q "no effect at levels 1 and 2"; then
@@ -2324,6 +2330,13 @@ if cmp -s "$PDS" "$TEST_DIR/pds_on100.dec" && ! cmp -s "$TEST_DIR/pds_on.zxc" "$
     log_pass "--favor-decode-speed=100 round trip, differs from the default budget"
 else
     log_fail "--favor-decode-speed=100 round trip or budget ignored"
+fi
+# 39.4.1 The budget may also come as the next argument, all digits only
+"$ZXC_BIN" -3 --favor-decode-speed 100 -c "$PDS" > "$TEST_DIR/pds_sep100.zxc"
+if cmp -s "$TEST_DIR/pds_on100.zxc" "$TEST_DIR/pds_sep100.zxc"; then
+    log_pass "--favor-decode-speed 100 reads the separate budget"
+else
+    log_fail "--favor-decode-speed 100 did not read the separate budget"
 fi
 # 39.5 The budget is 1 to 100
 if ! "$ZXC_BIN" -3 --favor-decode-speed=0 -c "$PDS" > /dev/null 2>&1 && \

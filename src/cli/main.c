@@ -456,9 +456,18 @@ static int g_preserve = 1;
 // -r: entries go by name in the directory walked
 static int g_walking = 0;
 // --favor-decode-speed[=PCT]: ZXC_C_FAVOR_DECODE_SPEED, the budget being PCT or
-// ZXC_SPLIT_BUDGET_DEFAULT
+// ZXC_FAVOR_DECODE_SPEED_DEFAULT
 static int g_favor_decode_speed = 0;
 static int g_split_budget_pct = 0;
+
+// The next argument, consumed as an optional option's value when it is all
+// digits: "-b 5" or "--favor-decode-speed 25", while "5samples.bin" stays a file.
+static const char* cli_number_arg(const int argc, char** argv) {
+    if (optind >= argc || argv[optind][0] < '1' || argv[optind][0] > '9') return NULL;
+    const char* p = argv[optind] + 1;
+    while (*p >= '0' && *p <= '9') p++;
+    return *p == '\0' ? argv[optind++] : NULL;
+}
 
 /* Enables printf-style format/argument checking by the compiler on GCC/Clang
  * (catches format-vs-argument mismatches at every call site); no-op on MSVC. */
@@ -793,9 +802,9 @@ static void print_help(const char* app) {
         "  -D, --dict FILE   Use pre-trained dictionary (.zxd). Required to decompress\n"
         "                    an archive that was compressed with a dictionary\n"
         "  -S, --seekable    Append seek table for random-access decompression\n"
-        "  --favor-decode-speed[=PCT]\n"
+        "  --favor-decode-speed [PCT]\n"
         "                    Favor decode speed over size (levels 3-7); PCT = how much\n"
-        "                    a block may grow for it, 1-100 {10}\n"
+        "                    a block may grow for it, 1-100 {5}\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file {default}\n"
@@ -2098,15 +2107,7 @@ int main(int argc, char** argv) {
                 break;
             case 'b': {
                 mode = MODE_BENCHMARK;
-                const char* bench_arg = optarg;
-                if (!bench_arg && optind < argc && argv[optind][0] >= '1' &&
-                    argv[optind][0] <= '9') {
-                    // Consume the next argument as a duration only if it is all
-                    // digits, so a filename like "5samples.bin" is left alone
-                    const char* p = argv[optind] + 1;
-                    while (*p >= '0' && *p <= '9') p++;
-                    if (*p == '\0') bench_arg = argv[optind++];
-                }
+                const char* const bench_arg = optarg ? optarg : cli_number_arg(argc, argv);
                 if (bench_arg) {
                     char* end = NULL;
                     const long secs = strtol(bench_arg, &end, 10);
@@ -2194,13 +2195,14 @@ int main(int argc, char** argv) {
                 break;
             case OPT_FAVOR_DECODE_SPEED: {
                 g_favor_decode_speed = 1;
-                g_split_budget_pct = ZXC_SPLIT_BUDGET_DEFAULT;
-                if (optarg == NULL) break;
+                g_split_budget_pct = ZXC_FAVOR_DECODE_SPEED_DEFAULT;
+                const char* const pct_arg = optarg ? optarg : cli_number_arg(argc, argv);
+                if (pct_arg == NULL) break;
                 char* end = NULL;
-                const long pct = strtol(optarg, &end, 10);
-                if (end == optarg || *end != '\0' || pct < 1 || pct > ZXC_SPLIT_BUDGET_MAX) {
+                const long pct = strtol(pct_arg, &end, 10);
+                if (end == pct_arg || *end != '\0' || pct < 1 || pct > ZXC_FAVOR_DECODE_SPEED_MAX) {
                     fprintf(stderr, "Error: --favor-decode-speed budget must be 1 to %d\n",
-                            ZXC_SPLIT_BUDGET_MAX);
+                            ZXC_FAVOR_DECODE_SPEED_MAX);
                     return 1;
                 }
                 g_split_budget_pct = (int)pct;
@@ -2274,9 +2276,13 @@ int main(int argc, char** argv) {
     // The input stays unless --rm asks otherwise; -k wins over --rm
     if (!rm_input) keep_input = 1;
 
-    if (g_favor_decode_speed && level <= ZXC_LEVEL_FAST &&
-        (mode == MODE_COMPRESS || mode == MODE_BENCHMARK))
-        zxc_log("Warning: --favor-decode-speed has no effect at levels 1 and 2\n");
+    if (g_favor_decode_speed && level <= ZXC_LEVEL_FAST) {
+        if (mode == MODE_COMPRESS || mode == MODE_BENCHMARK)
+            zxc_log("Warning: --favor-decode-speed has no effect at levels 1 and 2\n");
+        // Nothing applies at PAK levels: -j reports it off
+        g_favor_decode_speed = 0;
+        g_split_budget_pct = 0;
+    }
 
     // -f only if no mode flag took over
     if (cat_mode && mode == MODE_DECOMPRESS) force = 1;

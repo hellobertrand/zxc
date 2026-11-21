@@ -390,9 +390,10 @@ decoder never takes its ML escape. By default it does this at levels 3 to 5,
 per block and only when that escape looks poorly predicted: on regular data
 the branch is already predictable and splitting would only add sequences.
 When asked to favor decode speed (`ZXC_C_FAVOR_DECODE_SPEED`), it splits at
-levels 3 to 7 every such match of up to 128 bytes, shortest first, within a
-budget on the block's growth (the parameter's value, in percent; 10 is the
-reference default), so
+levels 3 to 7 every such match of up to 128 bytes at an offset of at least
+32 bytes, shortest first, within a budget on the block's growth (the
+parameter's value, in percent; off by default, 5 when the reference CLI's
+option is given no value), so
 that data which compresses very well keeps most of its long matches whole. Levels 1 and 2 (PAK) never split. Like
 the distance floor, this changes which sequences an encoder emits, never how
 they are encoded, so the archive stays an ordinary SPL block and any

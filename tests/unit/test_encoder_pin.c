@@ -41,11 +41,11 @@ static const pin_t k_pinned[PIN_N_LEVELS] = {
 static const pin_t k_pinned_dspeed[PIN_N_LEVELS] = {
     {0x36C96735B3A565DBULL, 223833}, /* level 1 */
     {0xB5EB4781D0EFE78AULL, 222393}, /* level 2 */
-    {0x18358EF1E01FDA3FULL, 178925}, /* level 3 */
-    {0x69A2501161814868ULL, 178165}, /* level 4 */
-    {0x24676E6140784AA6ULL, 143267}, /* level 5 */
-    {0xC0D0EF4F416FDE0FULL, 137928}, /* level 6 */
-    {0xAF5ADDAF9B691853ULL, 118697}, /* level 7 */
+    {0x756EBE4D705FC0A5ULL, 176282}, /* level 3 */
+    {0xCE446EC038F02C2EULL, 174229}, /* level 4 */
+    {0x1D058EB18A9369FCULL, 142193}, /* level 5 */
+    {0xF1D3A1644369721DULL, 135077}, /* level 6 */
+    {0x4B26E6FE3EB50E4AULL, 115445}, /* level 7 */
 };
 
 /* Same inputs in 4 KB blocks, with a dictionary trained on them. */
@@ -135,12 +135,13 @@ static int pin_pass(const uint8_t* src, uint8_t* comp, const size_t cap, uint8_t
                     pin_t got[PIN_N_LEVELS]) {
     zxc_cctx* const cctx = zxc_create_cctx();
     zxc_dctx* const dctx = zxc_create_dctx();
-    int ok = cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) == ZXC_OK &&
-             zxc_cctx_set_param(cctx, ZXC_C_FAVOR_DECODE_SPEED,
-                                favor_decode_speed ? ZXC_SPLIT_BUDGET_DEFAULT : 0) == ZXC_OK &&
-             zxc_cctx_set_dict(cctx, dict, dict_size, dict_huf) == ZXC_OK &&
-             zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK &&
-             zxc_dctx_set_dict(dctx, dict, dict_size, dict_huf) == ZXC_OK;
+    int ok =
+        cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) == ZXC_OK &&
+        zxc_cctx_set_param(cctx, ZXC_C_FAVOR_DECODE_SPEED,
+                           favor_decode_speed ? ZXC_FAVOR_DECODE_SPEED_DEFAULT : 0) == ZXC_OK &&
+        zxc_cctx_set_dict(cctx, dict, dict_size, dict_huf) == ZXC_OK &&
+        zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK &&
+        zxc_dctx_set_dict(dctx, dict, dict_size, dict_huf) == ZXC_OK;
     if (!ok) printf("  [FAIL] context setup\n");
     for (int level = 1; ok && level <= PIN_N_LEVELS; level++) {
         pin_t p = {0, 0};

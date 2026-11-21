@@ -104,7 +104,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     const size_t block_size = kBlockSizes[(data[1] >> 5) & 3];
     const size_t tiles = (size_t)(data[2] & 7) + 1;
     const int favor_decode_speed = (data[2] >> 3) & 1;
-    const int split_budget_pct = 1 + ((data[2] >> 4) * 7) % ZXC_SPLIT_BUDGET_MAX; /* 1..100 */
+    const int split_budget_pct =
+        1 + (data[2] >> 4) * (ZXC_FAVOR_DECODE_SPEED_MAX - 1) / 15; /* 1..100 */
     const size_t dict_cap = ((size_t)data[3] + 1) * 256;
 
     fuzz_raw(data, size, n_threads, checksum);

@@ -175,9 +175,9 @@ pub const ZXC_HUF_TABLE_SIZE: usize = 128;
 pub const ZXC_MAX_THREADS: i64 = 512;
 /// The [`ZXC_C_FAVOR_DECODE_SPEED`] budget beyond which decoding barely speeds
 /// up: what the CLI's bare `--favor-decode-speed` sets.
-pub const ZXC_SPLIT_BUDGET_DEFAULT: i64 = 10;
+pub const ZXC_FAVOR_DECODE_SPEED_DEFAULT: i64 = 5;
 /// Largest [`ZXC_C_FAVOR_DECODE_SPEED`] budget.
-pub const ZXC_SPLIT_BUDGET_MAX: i64 = 100;
+pub const ZXC_FAVOR_DECODE_SPEED_MAX: i64 = 100;
 
 /// Compression parameter identifier (mirrors the C enum `zxc_cparam_t`).
 ///
@@ -196,9 +196,10 @@ pub const ZXC_C_THREADS: zxc_cparam_t = 3;
 pub const ZXC_C_CHECKSUM: zxc_cparam_t = 4;
 /// 1 appends a seek table for random-access decompression; default 0.
 pub const ZXC_C_SEEKABLE: zxc_cparam_t = 5;
-/// Favors decode speed over size at levels 3-7: the block growth budget in
-/// percent, 1 to [`ZXC_SPLIT_BUDGET_MAX`] ([`ZXC_SPLIT_BUDGET_DEFAULT`] is the
-/// knee); default 0, off.
+/// Favors decode speed over size at levels 3-7. Not a flag: the value is the
+/// block growth budget in percent, 1 to [`ZXC_FAVOR_DECODE_SPEED_MAX`], and 1
+/// barely changes anything; [`ZXC_FAVOR_DECODE_SPEED_DEFAULT`] is the knee.
+/// Default 0, off.
 pub const ZXC_C_FAVOR_DECODE_SPEED: zxc_cparam_t = 6;
 
 /// Decompression parameter identifier (mirrors the C enum `zxc_dparam_t`).
@@ -928,8 +929,8 @@ unsafe extern "C" {
     /// * `f_in` - Input file stream
     /// * `f_out` - Output file stream
     /// * `cfg` - Configured compression context, read for its parameters
-    ///   (level, block size, threads, checksum, seek table, dictionary,
-    ///   progress callback), or NULL for defaults. Its buffers are not used:
+    ///   (level, block size, threads, checksum, seek table, decode-speed
+    ///   budget, dictionary, progress callback), or NULL for defaults. Its buffers are not used:
     ///   it is configuration only and may be freed after the call.
     ///
     /// # Returns
