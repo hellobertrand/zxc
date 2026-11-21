@@ -24,6 +24,7 @@ jobs:
   lzbench-benchmark:
     name: Run Benchmark
     runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ contains(matrix.os, 'riscv') }}
     strategy:
       fail-fast: false
       matrix:
@@ -31,6 +32,7 @@ jobs:
         os:
           - ubuntu-latest
           - ${{ github.event_name == 'pull_request' && 'macos-26' || 'macos-26-xlarge' }}
+          - ubuntu-24.04-riscv
 
     env:
         LZBENCH_DIR: lzbench
@@ -60,10 +62,20 @@ jobs:
 
           # GCC 14 on Linux: the compiler of the published benchmarks
           if [ "$RUNNER_OS" = "Linux" ]; then
+            if ! command -v gcc-14 >/dev/null; then
+              sudo apt-get update -qq
+              sudo apt-get install -y -qq gcc-14 g++-14
+            fi
             export CC=gcc-14 CXX=g++-14
           fi
 
-          make -j BUILD_ONLY="${BUILD_ONLY}" CC="${CC:-cc}" MOREFLAGS="-march=native"
+          # No -march=native on riscv64 with GCC 14
+          MOREFLAGS="-march=native"
+          if [ "$(uname -m)" = "riscv64" ]; then
+            MOREFLAGS="-mtune=generic-ooo"
+          fi
+
+          make -j BUILD_ONLY="${BUILD_ONLY}" CC="${CC:-cc}" MOREFLAGS="${MOREFLAGS}"
 
       - name: Cache Silesia Corpus
         id: cache-silesia
