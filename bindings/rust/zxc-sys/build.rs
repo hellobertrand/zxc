@@ -14,6 +14,7 @@
 //! the x86-64 baseline, already active in `_default`).
 //! On 32-bit ARM: `_default` and `_neon32` (NEON is optional there; the
 //! dispatcher probes it at runtime).
+//! On riscv64 Linux: `_default` and `_rv64fast`.
 //! Everywhere else (incl. AArch64, where NEON is baseline, and i686):
 //! `_default` only.
 
@@ -156,6 +157,23 @@ fn compile_variant(include_dir: &Path, src_lib: &Path, suffix: &str, flags: &[&s
     }
 }
 
+/// `_rv64fast` flag, as in cmake/zxcVariants.cmake.
+fn riscv64_variant_flag() -> Option<&'static str> {
+    let probe = cc::Build::new();
+    let compiler = probe.get_compiler();
+    let flag = if compiler.is_like_clang() {
+        "-mno-scalar-strict-align"
+    } else if compiler.is_like_gnu() {
+        "-mtune=generic-ooo"
+    } else {
+        return None;
+    };
+    probe
+        .is_flag_supported(flag)
+        .unwrap_or(false)
+        .then_some(flag)
+}
+
 fn main() {
     // Path to ZXC source files
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
@@ -223,6 +241,14 @@ fn main() {
     let is_x86_64 = target.contains("x86_64");
     let is_arm32 = (target.starts_with("arm") && !target.starts_with("arm64"))
         || target.starts_with("thumbv7");
+    // Linux only (not Android), as in CMake and meson.
+    let rv64fast_flag =
+        if target.starts_with("riscv64") && target.contains("linux") && !target.contains("android")
+        {
+            riscv64_variant_flag()
+        } else {
+            None
+        };
 
     // =========================================================================
     // Core library files (common to all architectures)
@@ -243,6 +269,9 @@ fn main() {
         .warnings(false)
         .flag_if_supported("-pthread");
     apply_feature_macros(&mut core_build);
+    if rv64fast_flag.is_some() {
+        core_build.define("ZXC_HAVE_RV64FAST_VARIANT", None);
+    }
 
     core_build.compile("zxc_core");
 
@@ -320,6 +349,9 @@ fn main() {
             "_neon32",
             &["-march=armv7-a", "-mfpu=neon"],
         );
+    }
+    if let Some(flag) = rv64fast_flag {
+        compile_variant(&include_dir, &src_lib, "_rv64fast", &[flag]);
     }
 
     // PivCo tables: const data used only by the variant Huffman decoders, so it
