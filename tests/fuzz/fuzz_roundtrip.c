@@ -41,7 +41,8 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
 
     const int level = size > 0 ? (data[0] % (unsigned)zxc_max_level()) + 1 : 1;
     // Bit 6 of data[0] turns the decode-speed split on, data[1] sizes its budget.
-    const int budget = size > 1 && ((data[0] >> 6) & 1) ? 1 + data[1] % ZXC_SPLIT_BUDGET_MAX : 0;
+    const int budget =
+        size > 1 && ((data[0] >> 6) & 1) ? 1 + data[1] % ZXC_FAVOR_DECODE_SPEED_MAX : 0;
     int64_t csize = ZXC_ERROR_MEMORY;
     if (budget) {
         zxc_cctx* const cctx = zxc_create_cctx();

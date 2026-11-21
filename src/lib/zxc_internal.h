@@ -710,12 +710,16 @@ static_assert(ZXC_SPL_MATCH_SPLIT_CTX_BITS <= CHAR_BIT,
 #define ZXC_SPL_MATCH_SPLIT_MAX (128U - ZXC_LZ_MIN_MATCH_LEN) /* 123 */
 static_assert(ZXC_SPL_MATCH_SPLIT_MAX < (1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS),
               "the budget's histogram is one lane of zxc_spl_match_split_hist_t");
+/** @brief Shortest offset favor_decode_speed splits at. Below it the decoder copies
+ *         a match with one overlap run, but each piece with a dependent shuffle:
+ *         splitting made decode slower (-12 to -14 percent on short periods). */
+#define ZXC_SPL_MATCH_SPLIT_MIN_OFFSET ZXC_PAD_SIZE
 /*
  * The budget is ZXC_C_FAVOR_DECODE_SPEED's value, 0 = off, else 1 to
- * ZXC_SPLIT_BUDGET_MAX (the setter bounds it): an unbounded split inflates
+ * ZXC_FAVOR_DECODE_SPEED_MAX (the setter bounds it): an unbounded split inflates
  * blocks that compress well (JSON records: +45 percent at 128 bytes), so each
  * block may grow by this share of its size before entropy coding.
- * ZXC_SPLIT_BUDGET_DEFAULT is the knee on silesia: L3 decodes 10 percent
+ * ZXC_FAVOR_DECODE_SPEED_DEFAULT is the knee on silesia: L3 decodes 10 percent
  * faster for 1.8 percent more size.
  */
 /** @} */
@@ -1249,7 +1253,8 @@ typedef struct {
  */
 static ZXC_ALWAYS_INLINE zxc_lz77_params_t zxc_get_lz77_params(const int level) {
     // The distance floor stops at level 5: the slow levels keep every distance.
-    // Match splitting at levels 3-5 only: 1-2 are PAK, 6-7 keep every escape.
+    // Default match splitting at levels 3-5 only: 1-2 are PAK; favor_decode_speed
+    // also reaches 6-7.
     // search_depth, sufficient_len, use_lazy, lazy_attempts, lazy_len_threshold, step_base,
     // step_shift, min_offset, split_max
     static const zxc_lz77_params_t table[7] = {

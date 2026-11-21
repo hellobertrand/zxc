@@ -77,9 +77,9 @@
 
 /** @brief The @ref ZXC_C_FAVOR_DECODE_SPEED budget beyond which decoding barely
  *         speeds up: what the CLI's bare --favor-decode-speed sets. */
-#define ZXC_SPLIT_BUDGET_DEFAULT 10
+#define ZXC_FAVOR_DECODE_SPEED_DEFAULT 10
 /** @brief Largest @ref ZXC_C_FAVOR_DECODE_SPEED budget. */
-#define ZXC_SPLIT_BUDGET_MAX 100
+#define ZXC_FAVOR_DECODE_SPEED_MAX 100
 
 /**
  * @defgroup dictionary Dictionary

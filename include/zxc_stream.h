@@ -64,7 +64,7 @@ extern "C" {
  * @param[out] f_out  Output stream, opened in "wb" mode.
  * @param[in]  cfg    Configured compression context, read for its parameters
  *                   (level, block size, threads, checksum, seek table,
- *                   dictionary, progress callback), or NULL for defaults. Its
+ *                   decode-speed budget, dictionary, progress callback), or NULL for defaults. Its
  *                   buffers are not used: the pipeline carves its own per worker.
  *
  * @return Total compressed bytes written, or a negative @ref zxc_error_t

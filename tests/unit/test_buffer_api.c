@@ -1404,7 +1404,7 @@ static int split_round_trip(const char* what, const uint8_t* buf, const size_t n
     int ok = 0;
     if (!comp || !back) goto done;
     const int64_t c =
-        test_compress_decode_speed(buf, n, comp, cap, level, ZXC_SPLIT_BUDGET_DEFAULT);
+        test_compress_decode_speed(buf, n, comp, cap, level, ZXC_FAVOR_DECODE_SPEED_DEFAULT);
     const int64_t d = c > 0 ? zxc_decompress(comp, (size_t)c, back, n) : -1;
     if (c <= 0 || d != (int64_t)n || memcmp(back, buf, n) != 0) {
         printf("  [FAIL] %s, level %d: compress %lld, decompress %lld\n", what, level, (long long)c,
@@ -1479,7 +1479,7 @@ static void gen_short_escapes(uint8_t* buf, const size_t n) {
 // the default policy.
 int test_split_budget_pct(void) {
     printf("=== TEST: Unit - ZXC_C_FAVOR_DECODE_SPEED budget ===\n");
-    static const int pcts[] = {0, 1, ZXC_SPLIT_BUDGET_DEFAULT, ZXC_SPLIT_BUDGET_MAX};
+    static const int pcts[] = {0, 1, ZXC_FAVOR_DECODE_SPEED_DEFAULT, ZXC_FAVOR_DECODE_SPEED_MAX};
     enum { N = sizeof(pcts) / sizeof(pcts[0]) };
     const size_t n = 300000;
     const size_t cap = (size_t)zxc_compress_bound(n);

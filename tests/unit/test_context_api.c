@@ -291,7 +291,7 @@ int test_cctx_param_contract(void) {
         {ZXC_C_THREADS, "threads", 0, ZXC_MAX_THREADS, 0},
         {ZXC_C_CHECKSUM, "checksum", 0, 1, 0},
         {ZXC_C_SEEKABLE, "seekable", 0, 1, 0},
-        {ZXC_C_FAVOR_DECODE_SPEED, "favor_decode_speed", 1, ZXC_SPLIT_BUDGET_MAX, 0},
+        {ZXC_C_FAVOR_DECODE_SPEED, "favor_decode_speed", 1, ZXC_FAVOR_DECODE_SPEED_MAX, 0},
     };
     const size_t n_tab = sizeof(tab) / sizeof(tab[0]);
     zxc_cctx* const c = zxc_create_cctx();
@@ -351,7 +351,7 @@ int test_cctx_param_contract(void) {
         {ZXC_C_CHECKSUM, 2, ZXC_ERROR_BAD_PARAM},
         {ZXC_C_CHECKSUM, -1, ZXC_ERROR_BAD_PARAM},
         {ZXC_C_SEEKABLE, 2, ZXC_ERROR_BAD_PARAM},
-        {ZXC_C_FAVOR_DECODE_SPEED, ZXC_SPLIT_BUDGET_MAX + 1, ZXC_ERROR_BAD_PARAM},
+        {ZXC_C_FAVOR_DECODE_SPEED, ZXC_FAVOR_DECODE_SPEED_MAX + 1, ZXC_ERROR_BAD_PARAM},
         {ZXC_C_FAVOR_DECODE_SPEED, -1, ZXC_ERROR_BAD_PARAM},
         {(zxc_cparam_t)0, 1, ZXC_ERROR_BAD_PARAM},
         {(zxc_cparam_t)7, 0, ZXC_ERROR_BAD_PARAM},
@@ -1418,7 +1418,7 @@ int test_cctx_favor_decode_speed(void) {
         for (int k = 0; k < 3; k++) {
             uint8_t* const dst = k == 2 ? out : ref[k];
             if (zxc_cctx_set_param(c, ZXC_C_FAVOR_DECODE_SPEED,
-                                   k == 1 ? ZXC_SPLIT_BUDGET_MAX : 0) != ZXC_OK) {
+                                   k == 1 ? ZXC_FAVOR_DECODE_SPEED_MAX : 0) != ZXC_OK) {
                 printf("  [FAIL] %s: set_param\n", api);
                 zxc_free_cctx(c);
                 zxc_free_dctx(dc);
@@ -1430,7 +1430,7 @@ int test_cctx_favor_decode_speed(void) {
         zxc_free_cctx(c);
         const int differs =
             n[0] > 0 && n[1] > 0 && !(n[0] == n[1] && memcmp(ref[0], ref[1], (size_t)n[0]) == 0);
-        const int back_off = n[2] == n[0] && memcmp(out, ref[0], (size_t)n[0]) == 0;
+        const int back_off = n[0] > 0 && n[2] == n[0] && memcmp(out, ref[0], (size_t)n[0]) == 0;
         if (!differs || !back_off) {
             printf("  [FAIL] %s: on %s the output (%lld vs %lld), 0 %s it off\n", api,
                    differs ? "changes" : "leaves", (long long)n[0], (long long)n[1],
@@ -1457,11 +1457,11 @@ int test_cctx_favor_decode_speed(void) {
     void* const ws = ws_sz ? test_aligned_alloc(64, ws_sz) : NULL;
     zxc_cctx* const sc = ws ? zxc_init_static_cctx(ws, ws_sz, ZXC_BLOCK_SIZE_DEFAULT, 3) : NULL;
     const int64_t n_static =
-        sc && zxc_cctx_set_param(sc, ZXC_C_FAVOR_DECODE_SPEED, ZXC_SPLIT_BUDGET_MAX) == ZXC_OK
+        sc && zxc_cctx_set_param(sc, ZXC_C_FAVOR_DECODE_SPEED, ZXC_FAVOR_DECODE_SPEED_MAX) == ZXC_OK
             ? zxc_compress_cctx(sc, src, src_sz, out, cap)
             : -1;
     const int64_t n_ref =
-        test_compress_decode_speed(src, src_sz, ref[1], cap, 3, ZXC_SPLIT_BUDGET_MAX);
+        test_compress_decode_speed(src, src_sz, ref[1], cap, 3, ZXC_FAVOR_DECODE_SPEED_MAX);
     test_aligned_free(ws);
     if (n_static <= 0 || n_static != n_ref || memcmp(out, ref[1], (size_t)n_ref) != 0) {
         printf("  [FAIL] static context: %lld bytes, heap %lld\n", (long long)n_static,

@@ -66,10 +66,10 @@ typedef enum {
     ZXC_C_CHECKSUM = 4,
     /** 1 appends a seek table for random-access decompression; default 0. */
     ZXC_C_SEEKABLE = 5,
-    /** Favors decode speed over size at levels 3 to 7, same format. The value
-     *  is how much a block may grow for it, in percent, 1 to
-     *  @ref ZXC_SPLIT_BUDGET_MAX (@ref ZXC_SPLIT_BUDGET_DEFAULT is the knee);
-     *  default 0, off. */
+    /** Favors decode speed over size at levels 3 to 7, same format. Not a
+     *  flag: the value is how much a block may grow for it, in percent, 1 to
+     *  @ref ZXC_FAVOR_DECODE_SPEED_MAX, and 1 barely changes anything;
+     *  @ref ZXC_FAVOR_DECODE_SPEED_DEFAULT is the knee. Default 0, off. */
     ZXC_C_FAVOR_DECODE_SPEED = 6
 } zxc_cparam_t;
 

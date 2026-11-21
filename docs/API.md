@@ -293,7 +293,7 @@ typedef enum {
 | `ZXC_C_THREADS` | Workers of `zxc_stream_compress()`; the reader and writer come on top. 0: online processors, capped at `ZXC_MAX_THREADS`, minus one; at least one, at most 511. The buffer, block and push APIs are single-threaded and ignore it. | 0 (auto-detect) | 0 to `ZXC_MAX_THREADS` (512) |
 | `ZXC_C_CHECKSUM` | 1 appends the per-block checksums and the archive digest. | 0 | 0 or 1 |
 | `ZXC_C_SEEKABLE` | 1 appends a seek table for random-access decompression. | 0 | 0 or 1 |
-| `ZXC_C_FAVOR_DECODE_SPEED` | Favors decode speed over size at levels 3 to 7: long matches go out as chains of short inline matches, which the decoder handles without its length escape. The value is how much a block may grow for it, in percent of its size before entropy coding; `ZXC_SPLIT_BUDGET_DEFAULT` (10) is the knee beyond which decoding barely speeds up. A few percent larger, 10 to 25 percent faster to decode, same format; no effect at levels 1 and 2. | 0 (off) | 1 to `ZXC_SPLIT_BUDGET_MAX` (100) |
+| `ZXC_C_FAVOR_DECODE_SPEED` | Favors decode speed over size at levels 3 to 7: long matches go out as chains of short inline matches, which the decoder handles without its length escape; matches at offsets below 32 bytes stay whole, their one overlapping copy being cheaper than its pieces. Not a flag: the value is how much a block may grow for it, in percent of its size before entropy coding; `ZXC_FAVOR_DECODE_SPEED_DEFAULT` (10) is the knee beyond which decoding barely speeds up, and 1 barely changes anything. A few percent larger, 10 to 25 percent faster to decode, same format; no effect at levels 1 and 2. | 0 (off) | 1 to `ZXC_FAVOR_DECODE_SPEED_MAX` (100) |
 
 **Decompression parameters** (`zxc_dparam_t`):
 
@@ -314,8 +314,8 @@ For every parameter the value `0` restores the default, and `zxc_cctx_reset()` /
 reported by `zxc_cparam_bounds()` / `zxc_dparam_bounds()` (declared in
 `zxc_opts.h`, documented in §9): a setter **refuses** an out-of-bounds value
 rather than clamp it, and leaves the parameter as it was. Values the bounds do
-not cover (`ZXC_C_THREADS`, `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`, both
-decompression parameters) and unknown identifiers are `ZXC_ERROR_BAD_PARAM`.
+not cover (`ZXC_C_THREADS`, `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`,
+`ZXC_C_FAVOR_DECODE_SPEED`, both decompression parameters) and unknown identifiers are `ZXC_ERROR_BAD_PARAM`.
 
 The dictionary and the progress callback are pointers, so they have their own
 setters, `zxc_cctx_set_dict()` / `zxc_dctx_set_dict()` and
@@ -2124,7 +2124,7 @@ The setters validate up front, so a configuration mistake surfaces at the
 |---|---|---|
 | `zxc_cctx_set_param` | `ZXC_ERROR_BAD_LEVEL` | `ZXC_C_LEVEL` outside 1–7, or a raise into `ZXC_LEVEL_DENSITY` on a static workspace carved below it |
 | `zxc_cctx_set_param` | `ZXC_ERROR_BAD_BLOCK_SIZE` | `ZXC_C_BLOCK_SIZE` out of range, not a power of two, or different from a static context's pinned size |
-| `zxc_cctx_set_param`, `zxc_dctx_set_param`, `zxc_cctx_get_param`, `zxc_dctx_get_param`, `zxc_cparam_bounds`, `zxc_dparam_bounds` | `ZXC_ERROR_BAD_PARAM` | Unknown parameter identifier, or a value outside the bounds of `ZXC_C_THREADS`, `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`, `ZXC_D_THREADS`, `ZXC_D_CHECKSUM` |
+| `zxc_cctx_set_param`, `zxc_dctx_set_param`, `zxc_cctx_get_param`, `zxc_dctx_get_param`, `zxc_cparam_bounds`, `zxc_dparam_bounds` | `ZXC_ERROR_BAD_PARAM` | Unknown parameter identifier, or a value outside the bounds of `ZXC_C_THREADS`, `ZXC_C_CHECKSUM`, `ZXC_C_SEEKABLE`, `ZXC_C_FAVOR_DECODE_SPEED`, `ZXC_D_THREADS`, `ZXC_D_CHECKSUM` |
 | `zxc_cctx_set_dict`, `zxc_dctx_set_dict` | `ZXC_ERROR_DICT_TOO_LARGE` | `dict_size` above `ZXC_DICT_SIZE_MAX` |
 | `zxc_cctx_set_dict`, `zxc_dctx_set_dict` | `ZXC_ERROR_DICT_UNSUPPORTED` | Dictionary on a static context |
 

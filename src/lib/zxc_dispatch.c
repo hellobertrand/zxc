@@ -1144,7 +1144,7 @@ int zxc_cparam_bounds(const zxc_cparam_t param, int64_t* min, int64_t* max) {
             break;
         case ZXC_C_FAVOR_DECODE_SPEED:
             lo = 1;
-            hi = ZXC_SPLIT_BUDGET_MAX;
+            hi = ZXC_FAVOR_DECODE_SPEED_MAX;
             break;
         default:
             return ZXC_ERROR_BAD_PARAM;

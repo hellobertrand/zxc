@@ -2297,7 +2297,7 @@ int test_stream_favor_decode_speed(void) {
             fseek(f_in, 0, SEEK_SET);
             zxc_cctx* const co = cctx_for(2, levels[li], 0);
             if (!co || zxc_cctx_set_param(co, ZXC_C_FAVOR_DECODE_SPEED,
-                                          k ? ZXC_SPLIT_BUDGET_DEFAULT : 0) != ZXC_OK) {
+                                          k ? ZXC_FAVOR_DECODE_SPEED_DEFAULT : 0) != ZXC_OK) {
                 printf("  [FAIL] context setup\n");
                 zxc_free_cctx(co);
                 fclose(f_in);
