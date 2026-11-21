@@ -170,12 +170,12 @@ jobs:
             qemu_binary: qemu-riscv64
             qemu_cpu: rv64
             expect_variant: _rv64fast
-          - name: riscv64 size
+          - name: riscv64 minimal
             tier: 2
             cross_pkg: gcc-riscv64-linux-gnu
             cross_prefix: riscv64-linux-gnu
             cmake_processor: riscv64
-            optimize: size
+            simd_variants: minimal
             qemu_binary: qemu-riscv64
             qemu_cpu: rv64
             expect_variant: _default
@@ -305,8 +305,8 @@ jobs:
               if [ "${{ matrix.lto }}" = "true" ]; then
                   EXTRA_ARGS+=(-DZXC_ENABLE_LTO=ON)
               fi
-              if [ -n "${{ matrix.optimize }}" ]; then
-                  EXTRA_ARGS+=(-DZXC_OPTIMIZE="${{ matrix.optimize }}")
+              if [ -n "${{ matrix.simd_variants }}" ]; then
+                  EXTRA_ARGS+=(-DZXC_SIMD_VARIANTS="${{ matrix.simd_variants }}")
               fi
 
               cmake -S . -B $BUILD_DIR \

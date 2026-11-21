@@ -105,9 +105,9 @@ if(ZXC_TARGET_ARM32)
 endif()
 endif()
 
-# --- 3. RISC-V 64 (Linux): fast misaligned scalar access, perf only ---
+# --- 3. RISC-V 64 (Linux): fast misaligned scalar access, "all" only ---
 if(ZXC_TARGET_RISCV64 AND CMAKE_SYSTEM_NAME STREQUAL "Linux" AND NOT ZXC_DISABLE_SIMD
-   AND ZXC_OPTIMIZE STREQUAL "perf")
+   AND ZXC_SIMD_VARIANTS STREQUAL "all")
     include(CheckCCompilerFlag)
     set(_zxc_saved_try_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
     set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
