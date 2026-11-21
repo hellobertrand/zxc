@@ -149,6 +149,10 @@ cmake -B build -DZXC_DISABLE_SIMD=ON
 
 # Warnings as errors, as CI builds (CMake 3.24+)
 cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+# RISC-V CPU with fast misaligned accesses (e.g. T-Head C910): GCC 14+
+# (Clang: -mno-scalar-strict-align). Cores that trap on them get much slower.
+cmake -B build -DCMAKE_C_FLAGS="-mtune=generic-ooo"
 ```
 
 ### Trimming the library
@@ -167,8 +171,7 @@ API: every such build reads what any other build wrote.
 
 The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
 `ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. Without an AVX-512
-variant, AVX-512 CPUs run the AVX2 one. The RISC-V 64 `_rv64fast` variant (fast
-misaligned accesses, no intrinsics) is built by `all` only.
+variant, AVX-512 CPUs run the AVX2 one.
 
 `ZXC_ENABLE_DICT=OFF` removes dictionary support. Unlike `ZXC_SIMD_VARIANTS`, it changes what
 the library accepts: installing a dictionary, or reading an archive written with one,

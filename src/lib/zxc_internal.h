@@ -1585,8 +1585,6 @@ static ZXC_ALWAYS_INLINE void zxc_copy32(void* dst, const void* src) {
     vst1q_u8((uint8_t*)dst, a);
     vst1q_u8((uint8_t*)dst + 16, b);
 #elif defined(__riscv_misaligned_fast) && !defined(__riscv_vector)
-    // GCC 14 calls memcpy for 32 bytes even with fast misaligned accesses;
-    // 16-byte halves stay inline (ld/sd). Both loads first, as above.
     uint8_t a[16], b[16];
     ZXC_MEMCPY(a, src, 16);
     ZXC_MEMCPY(b, (const uint8_t*)src + 16, 16);
