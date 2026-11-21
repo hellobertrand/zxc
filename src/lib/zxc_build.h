@@ -21,9 +21,10 @@
 #endif
 
 // Nothing to dispatch: no SIMD, or a trimmed preset on a baseline-only target.
-#if !defined(ZXC_ONLY_DEFAULT) &&                                                           \
-    (defined(ZXC_DISABLE_SIMD) || (defined(ZXC_OPTIMIZE_TRIMMED) && !defined(__x86_64__) && \
-                                   !defined(_M_X64) && !defined(__arm__) && !defined(_M_ARM)))
+#if !defined(ZXC_ONLY_DEFAULT) &&                                                  \
+    (defined(ZXC_DISABLE_SIMD) ||                                                  \
+     (defined(ZXC_OPTIMIZE_TRIMMED) && !defined(__x86_64__) && !defined(_M_X64) && \
+      !defined(__arm__) && !defined(_M_ARM) && !defined(__loongarch64)))
 #define ZXC_ONLY_DEFAULT
 #endif
 

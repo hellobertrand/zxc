@@ -162,6 +162,15 @@ jobs:
             cmake_processor: loongarch64
             qemu_binary: qemu-loongarch64
             qemu_cpu: la464
+          - name: loong64-lasx size
+            tier: 2
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            optimize: size
+            dictionary: "OFF"
+            qemu_binary: qemu-loongarch64
+            qemu_cpu: la464
           - name: loong64-nolsx
             tier: 2
             cross_pkg: gcc-loongarch64-linux-gnu
@@ -289,6 +298,12 @@ jobs:
               fi
               if [ "${{ matrix.lto }}" = "true" ]; then
                   EXTRA_ARGS+=(-DZXC_ENABLE_LTO=ON)
+              fi
+              if [ -n "${{ matrix.optimize }}" ]; then
+                  EXTRA_ARGS+=(-DZXC_OPTIMIZE="${{ matrix.optimize }}")
+              fi
+              if [ -n "${{ matrix.dictionary }}" ]; then
+                  EXTRA_ARGS+=(-DZXC_DICTIONARY="${{ matrix.dictionary }}")
               fi
 
               cmake -S . -B $BUILD_DIR \

@@ -163,7 +163,7 @@ elif host_cpu == 'arm'
 elif host_cpu == 'loongarch64'
   # No _lsx variant: LSX is the la64v1.0 baseline, compiled by _default.
   if cc.has_argument('-mlasx')
-    variant_sets += [['_lasx', ['-mlasx'], variant_sources]]
+    variant_sets += [['_lasx', ['-mlasx'], simd_sources]]
   else
     add_project_arguments('-DZXC_ONLY_DEFAULT', language : 'c')
   endif

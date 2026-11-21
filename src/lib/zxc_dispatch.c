@@ -194,6 +194,8 @@ ZXC_HUF_DECODE_PROTOTYPES(_avx2);
 ZXC_HUF_DECODE_PROTOTYPES(_avx512);
 #elif defined(__arm__) || defined(_M_ARM)
 ZXC_HUF_DECODE_PROTOTYPES(_neon32);
+#elif defined(__loongarch64)
+ZXC_HUF_DECODE_PROTOTYPES(_lasx);
 #endif
 #undef ZXC_HUF_DECODE_PROTOTYPES
 #endif

@@ -154,18 +154,19 @@ cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 ### Trimming the library
 
 By default the codec is built once per SIMD tier of the target (baseline, AVX2 and
-AVX-512 on x86-64; baseline and NEON on 32-bit ARM) and the tier is selected at run
-time. Each tier is a full copy of the codec, which a size-sensitive static link may
+AVX-512 on x86-64; baseline and NEON on 32-bit ARM; baseline and LASX on LoongArch64)
+and the tier is selected at run time. Each tier is a full copy of the codec, which a size-sensitive static link may
 not want. `ZXC_OPTIMIZE` trades those copies away without changing the format or the
 API: every such build reads what any other build wrote.
 
 | `ZXC_OPTIMIZE` | Encoder | LZ decoder | Entropy decoder (levels 6-7) |
 |----------------|---------|------------|------------------------------|
 | `perf` (default) | every tier | every tier | every tier |
-| `balanced` | baseline | baseline, AVX2 / NEON | baseline, AVX2 / NEON |
-| `size` | baseline | baseline | baseline, AVX2 / NEON |
+| `balanced` | baseline | baseline, AVX2 / NEON / LASX | baseline, AVX2 / NEON / LASX |
+| `size` | baseline | baseline | baseline, AVX2 / NEON / LASX |
 
-The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
+The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64, LSX on
+LoongArch64), unlike
 `ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. Without an AVX-512
 variant, AVX-512 CPUs run the AVX2 one.
 
