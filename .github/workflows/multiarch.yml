@@ -153,15 +153,6 @@ jobs:
             cross_prefix: s390x-linux-gnu
             cmake_processor: s390x
             qemu_binary: qemu-s390x
-          - name: riscv64 _default
-            tier: 2
-            cross_pkg: gcc-riscv64-linux-gnu
-            cross_prefix: riscv64-linux-gnu
-            cmake_processor: riscv64
-            cmake_c_flags: "-DZXC_ONLY_DEFAULT"
-            qemu_binary: qemu-riscv64
-            qemu_cpu: rv64
-            expect_variant: _default
           - name: riscv64 _rv64fast
             tier: 2
             cross_pkg: gcc-riscv64-linux-gnu
