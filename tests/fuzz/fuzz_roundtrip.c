@@ -55,14 +55,15 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     } else {
         csize = zxc_compress(data, size, comp_buf, bound, level);
     }
+    if (csize < 0 && csize != ZXC_ERROR_MEMORY) abort();
 
     uint8_t* const decomp_buf = csize >= 0 && size > 0 ? (uint8_t*)malloc(size) : NULL;
     if (decomp_buf) {
         const int64_t dsize = zxc_decompress(comp_buf, (size_t)csize, decomp_buf, size);
-        if (dsize >= 0) {
-            assert((size_t)dsize == size);
-            assert(memcmp(data, decomp_buf, size) == 0);
-        }
+
+        if (dsize < 0) abort();
+        assert((size_t)dsize == size);
+        assert(memcmp(data, decomp_buf, size) == 0);
     }
 
     free(decomp_buf);
