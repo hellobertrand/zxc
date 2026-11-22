@@ -2338,8 +2338,17 @@ if cmp -s "$TEST_DIR/pds_on100.zxc" "$TEST_DIR/pds_sep100.zxc"; then
 else
     log_fail "--favor-decode-speed 100 did not read the separate budget"
 fi
+# 39.4.2 A leading zero still reads as a budget, not as a file name
+"$ZXC_BIN" -3 --favor-decode-speed=25 -c "$PDS" > "$TEST_DIR/pds_eq25.zxc"
+"$ZXC_BIN" -3 --favor-decode-speed 025 -c "$PDS" > "$TEST_DIR/pds_sep025.zxc"
+if cmp -s "$TEST_DIR/pds_eq25.zxc" "$TEST_DIR/pds_sep025.zxc"; then
+    log_pass "--favor-decode-speed 025 reads budget 25"
+else
+    log_fail "--favor-decode-speed 025 not read as budget 25"
+fi
 # 39.5 The budget is 1 to 100
 if ! "$ZXC_BIN" -3 --favor-decode-speed=0 -c "$PDS" > /dev/null 2>&1 && \
+   ! "$ZXC_BIN" -3 --favor-decode-speed 0 -c "$PDS" > /dev/null 2>&1 && \
    ! "$ZXC_BIN" -3 --favor-decode-speed=101 -c "$PDS" > /dev/null 2>&1 && \
    ! "$ZXC_BIN" -3 --favor-decode-speed=x -c "$PDS" > /dev/null 2>&1; then
     log_pass "--favor-decode-speed rejects a budget outside 1-100"

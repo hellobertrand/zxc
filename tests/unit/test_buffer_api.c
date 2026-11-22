@@ -1506,13 +1506,14 @@ int test_split_budget_pct(void) {
     const int off_is_plain = plain == sz[0] && memcmp(back, out[0], (size_t)plain) == 0;
     const int widens = sz[0] < sz[1] && sz[1] < sz[2] && sz[2] < sz[3];
     if (!off_is_plain || !widens) {
-        printf("  [FAIL] 0 %s the plain level; sizes off/1/10/100: %lld/%lld/%lld/%lld\n",
-               off_is_plain ? "==" : "!=", (long long)sz[0], (long long)sz[1], (long long)sz[2],
-               (long long)sz[3]);
+        printf("  [FAIL] 0 %s the plain level; sizes off/1/%d/100: %lld/%lld/%lld/%lld\n",
+               off_is_plain ? "==" : "!=", ZXC_FAVOR_DECODE_SPEED_DEFAULT, (long long)sz[0],
+               (long long)sz[1], (long long)sz[2], (long long)sz[3]);
         goto done;
     }
-    printf("  [PASS] budget off/1/10/100: %lld/%lld/%lld/%lld bytes\n", (long long)sz[0],
-           (long long)sz[1], (long long)sz[2], (long long)sz[3]);
+    printf("  [PASS] budget off/1/%d/100: %lld/%lld/%lld/%lld bytes\n",
+           ZXC_FAVOR_DECODE_SPEED_DEFAULT, (long long)sz[0], (long long)sz[1], (long long)sz[2],
+           (long long)sz[3]);
 
     gen_short_escapes(src, n);
     for (int lvl = ZXC_LEVEL_DEFAULT; lvl <= ZXC_LEVEL_COMPACT; lvl++) {

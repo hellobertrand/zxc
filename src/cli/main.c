@@ -463,7 +463,7 @@ static int g_split_budget_pct = 0;
 // The next argument, consumed as an optional option's value when it is all
 // digits: "-b 5" or "--favor-decode-speed 25", while "5samples.bin" stays a file.
 static const char* cli_number_arg(const int argc, char** argv) {
-    if (optind >= argc || argv[optind][0] < '1' || argv[optind][0] > '9') return NULL;
+    if (optind >= argc || argv[optind][0] < '0' || argv[optind][0] > '9') return NULL;
     const char* p = argv[optind] + 1;
     while (*p >= '0' && *p <= '9') p++;
     return *p == '\0' ? argv[optind++] : NULL;
