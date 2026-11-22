@@ -149,6 +149,10 @@ cmake -B build -DZXC_DISABLE_SIMD=ON
 
 # Warnings as errors, as CI builds (CMake 3.24+)
 cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
+
+# RISC-V CPU with fast misaligned accesses (e.g. T-Head C910): GCC 14+
+# (Clang: -mno-scalar-strict-align). Cores that trap on them get much slower.
+cmake -B build -DCMAKE_C_FLAGS="-mtune=generic-ooo"
 ```
 
 ### Trimming the library

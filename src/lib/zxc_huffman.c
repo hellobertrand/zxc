@@ -1036,6 +1036,7 @@ static ZXC_ALWAYS_INLINE int zxc_pivco_flat_leaves(const zxc_pivco_tree_t* RESTR
     return t->leaf_base[e] + t->base[e] - t->node_base[e] + ((g - t->base[d]) << D);
 }
 
+#if !defined(ZXC_HUF_NO_ENCODER) || !defined(ZXC_HUF_NO_DECODER)
 /** @brief Reorders @p s[0, 2^D) by bit-reversed index (an involution). */
 static void zxc_pivco_bitrev_permute(uint8_t* RESTRICT s, const int D) {
     const unsigned m = 1U << D;
@@ -1141,6 +1142,7 @@ static int zxc_pivco_tree_build(const uint8_t* RESTRICT code_len, zxc_pivco_tree
     }
     return 0;
 }
+#endif
 
 #ifndef ZXC_HUF_NO_ENCODER
 /**
