@@ -150,7 +150,7 @@ jobs:
           mkdir -p build-cov/variants
           BASE_DEFS="-D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
           for v in "_avx2 -mavx2 -mbmi -mbmi2 -mlzcnt" \
-                   "_avx512 -mavx512f -mavx512bw -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt"; do
+                   "_avx512 -mavx512f -mavx512bw -mavx512vl -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt"; do
             set -- $v
             sfx=$1
             shift

@@ -48,7 +48,7 @@ mkdir -p objvariants
 VARIANT_DEFS=""
 if [ "${ARCHITECTURE:-$(uname -m)}" = "x86_64" ]; then
     variant _avx2 -mavx2 -mbmi -mbmi2 -mlzcnt
-    variant _avx512 -mavx512f -mavx512bw -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt
+    variant _avx512 -mavx512f -mavx512bw -mavx512vl -mavx512vbmi -mavx512vbmi2 -mbmi -mbmi2 -mlzcnt
     VARIANT_DEFS="-DFUZZ_X86_VARIANTS"
 fi
 $CC $CFLAGS $ZXC_CFLAGS $VARIANT_DEFS -c tests/fuzz/fuzz_variants.c -o objvariants/fuzz_variants.o
