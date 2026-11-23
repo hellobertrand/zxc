@@ -269,6 +269,9 @@ if not meson.is_subproject() and get_option('build_cli')
 
   executable('zxc',
     'src/cli/main.c',
+    'src/cli/fileio.c',
+    'src/cli/list.c',
+    'src/cli/log.c',
     override_options : msvc_w4,
     c_args : cli_c_args,
     link_args : cli_link_args,

@@ -6,7 +6,11 @@
 # CLI Executable.
 
 if(ZXC_BUILD_CLI)
-    add_executable(zxc src/cli/main.c)
+    add_executable(zxc
+        src/cli/main.c
+        src/cli/fileio.c
+        src/cli/list.c
+        src/cli/log.c)
     target_link_libraries(zxc PRIVATE zxc_lib)
     target_include_directories(zxc PRIVATE ${RAPIDHASH_INCLUDE_DIR})
 
