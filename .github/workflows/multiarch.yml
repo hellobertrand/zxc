@@ -329,10 +329,10 @@ jobs:
   #   -dmr  Diamond Rapids  -> APX; its AVX-512 also makes the dispatcher pick
   #                            the AVX-512 tier, now in APX encodings. Needs
   #                            GCC >= 14 (ubuntu-26.04 ships 15) and SDE >= 9.48.
-  # Trimmed builds (ZXC_SIMD_VARIANTS): on -icx, an AVX-512 CPU runs the AVX2 variant.
+  # Trimmed builds (ZXC_BUILD_SIMD_VARIANTS): on -icx, an AVX-512 CPU runs the AVX2 variant.
   # ===========================================================================
   build-amd64-sde:
-    name: "Tier ${{ matrix.tier }}: x86_64 (sde ${{ matrix.simd }}${{ matrix.simd_variants && format(', {0}', matrix.simd_variants) || '' }}${{ matrix.dict == 'OFF' && ', no dict' || '' }})"
+    name: "Tier ${{ matrix.tier }}: x86_64 (sde ${{ matrix.simd }}${{ matrix.build_simd_variants && format(', {0}', matrix.build_simd_variants) || '' }}${{ matrix.dict == 'OFF' && ', no dict' || '' }})"
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 10
     container: ${{ matrix.container }}
@@ -359,23 +359,23 @@ jobs:
             runner: ubuntu-latest
             container: ubuntu:26.04
             sde_chip: mrm
-            simd_variants: minimal
+            build_simd_variants: minimal
           - simd: avx2
             tier: 2
             runner: ubuntu-latest
             sde_chip: hsw
-            simd_variants: minimal
+            build_simd_variants: minimal
             dict: "OFF"
           - simd: avx-512
             tier: 2
             runner: ubuntu-latest
             sde_chip: icx
-            simd_variants: decoder
+            build_simd_variants: decoder
           - simd: avx-512
             tier: 2
             runner: ubuntu-latest
             sde_chip: icx
-            simd_variants: minimal
+            build_simd_variants: minimal
             dict: "OFF"
           # Tier 3
           - simd: apx
@@ -422,8 +422,8 @@ jobs:
           if [ -n "${{ matrix.cmake_c_flags }}" ]; then
               EXTRA_ARGS+=(-DCMAKE_C_FLAGS="${{ matrix.cmake_c_flags }}")
           fi
-          if [ -n "${{ matrix.simd_variants }}" ]; then
-              EXTRA_ARGS+=(-DZXC_SIMD_VARIANTS="${{ matrix.simd_variants }}")
+          if [ -n "${{ matrix.build_simd_variants }}" ]; then
+              EXTRA_ARGS+=(-DZXC_BUILD_SIMD_VARIANTS="${{ matrix.build_simd_variants }}")
           fi
           if [ -n "${{ matrix.dict }}" ]; then
               EXTRA_ARGS+=(-DZXC_ENABLE_DICT="${{ matrix.dict }}")

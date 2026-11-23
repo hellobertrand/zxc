@@ -7,16 +7,16 @@
 
 /**
  * @file zxc_build.h
- * @brief Build configuration: what the ZXC_SIMD_VARIANTS choice runs, derived once.
+ * @brief Build configuration: what the ZXC_BUILD_SIMD_VARIANTS choice runs, derived once.
  *
- * The build defines ZXC_SIMD_VARIANTS_DECODER or ZXC_SIMD_VARIANTS_MINIMAL (all: neither)
- * and compiles the matching SIMD variants. Free of dependencies, so a variant
- * source can include it ahead of its suffix macros.
+ * The build defines ZXC_BUILD_SIMD_VARIANTS_DECODER or ZXC_BUILD_SIMD_VARIANTS_MINIMAL
+ * (all: neither) and compiles the matching SIMD variants. Free of dependencies, so a
+ * variant source can include it ahead of its suffix macros.
  */
 #ifndef ZXC_BUILD_H
 #define ZXC_BUILD_H
 
-#if defined(ZXC_SIMD_VARIANTS_DECODER) || defined(ZXC_SIMD_VARIANTS_MINIMAL)
+#if defined(ZXC_BUILD_SIMD_VARIANTS_DECODER) || defined(ZXC_BUILD_SIMD_VARIANTS_MINIMAL)
 #define ZXC_SIMD_TRIMMED
 #endif
 
@@ -31,7 +31,7 @@
 #if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_SIMD_TRIMMED)
 #define ZXC_ENCODER_DEFAULT
 #endif
-#if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_SIMD_VARIANTS_MINIMAL)
+#if defined(ZXC_ONLY_DEFAULT) || defined(ZXC_BUILD_SIMD_VARIANTS_MINIMAL)
 #define ZXC_LZ_DECODER_DEFAULT
 #endif
 #if defined(ZXC_ONLY_DEFAULT)
@@ -39,7 +39,7 @@
 #endif
 
 // minimal: the entropy decoder is dispatched on its own, the LZ decoder calling it.
-#if defined(ZXC_SIMD_VARIANTS_MINIMAL) && !defined(ZXC_ONLY_DEFAULT)
+#if defined(ZXC_BUILD_SIMD_VARIANTS_MINIMAL) && !defined(ZXC_ONLY_DEFAULT)
 #define ZXC_DISPATCH_ENTROPY
 #endif
 
