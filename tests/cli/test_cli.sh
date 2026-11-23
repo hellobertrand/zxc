@@ -2677,6 +2677,52 @@ if [[ "$ERR" == *"${ESC}["*"Error:"* ]] && [[ $RET -ne 0 ]]; then
 else
     log_fail "--color: colored error prefix / invalid value check failed"
 fi
+
+# 35.4 --color placed after the failing option still applies to its error
+set +e
+ERR_LATE=$("$ZXC_BIN" -B 3 --color=always "$TEST_FILE_ARG" 2>&1)
+ERR_LAST=$("$ZXC_BIN" --color=always -B 3 --color=never "$TEST_FILE_ARG" 2>&1)
+set -e
+if [[ "$ERR_LATE" == *"${ESC}["*"Error:"* ]] && [[ "$ERR_LAST" != *"$ESC"* ]]; then
+    log_pass "--color applies to errors raised by earlier options"
+else
+    log_fail "--color after the failing option should apply (last one wins)"
+fi
+
+# 35.5 On a terminal: auto colors, and NO_COLOR, TERM=dumb and --color=never do not.
+# Runs the command on a pseudo-terminal: util-linux script, else the BSD one.
+run_tty() {
+    if script -qec true /dev/null > /dev/null 2>&1 < /dev/null; then
+        script -qec "$(printf '%q ' "$@")" /dev/null < /dev/null
+    else
+        script -q /dev/null "$@" < /dev/null
+    fi
+}
+# An MSYS pty is a pipe to a native Windows zxc.exe, never a console.
+TTY_OK=0
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        if [[ "$(run_tty sh -c 'test -t 1 && test -t 2 && echo ZXC_TTY' 2> /dev/null || true)" == *ZXC_TTY* ]]; then
+            TTY_OK=1
+        fi
+        ;;
+esac
+if [[ $TTY_OK -eq 1 ]]; then
+    TTY_A=$(run_tty env -u NO_COLOR TERM=xterm "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    TTY_E=$(run_tty env NO_COLOR=1 TERM=xterm "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    TTY_D=$(run_tty env -u NO_COLOR TERM=dumb "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    TTY_N=$(run_tty env -u NO_COLOR TERM=xterm "$ZXC_BIN" --color=never -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    if [[ "$TTY_A" == *"${ESC}["*"OK"* ]] && [[ "$TTY_E" == *"OK"* ]] && [[ "$TTY_E" != *"$ESC"* ]] &&
+        [[ "$TTY_D" == *"OK"* ]] && [[ "$TTY_D" != *"$ESC"* ]] &&
+        [[ "$TTY_N" == *"OK"* ]] && [[ "$TTY_N" != *"$ESC"* ]]; then
+        log_pass "On a terminal, auto colors; NO_COLOR, TERM=dumb and --color=never do not"
+    else
+        log_fail "Terminal color policy (auto / NO_COLOR / TERM=dumb / --color=never)"
+    fi
+else
+    echo "  [SKIP] terminal color policy: no pseudo-terminal (script) available"
+fi
 rm -f "$TEST_DIR/color1.err"
 
 # A failed write is reported as such, even with a corrupt block further on

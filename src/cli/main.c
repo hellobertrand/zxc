@@ -533,6 +533,40 @@ static void zxc_color_init(void) {
     g_color_out = zxc_stream_wants_color(stdout);
 }
 
+// Sets g_color_mode from a --color value; -1 if it is not one.
+static int zxc_color_parse(const char* arg) {
+    if (arg == NULL) return -1;
+    if (strcmp(arg, "auto") == 0)
+        g_color_mode = ZXC_COLOR_AUTO;
+    else if (strcmp(arg, "always") == 0)
+        g_color_mode = ZXC_COLOR_ALWAYS;
+    else if (strcmp(arg, "never") == 0)
+        g_color_mode = ZXC_COLOR_NEVER;
+    else
+        return -1;
+    return 0;
+}
+
+// Applies --color ahead of option parsing, so that an error raised by an
+// option placed before it is colored as asked. Invalid values are left to the
+// option loop to report.
+static void zxc_color_prescan(const int argc, char** argv) {
+    for (int i = 1; i < argc && strcmp(argv[i], "--") != 0; i++) {
+        if (strncmp(argv[i], "--color", 7) != 0) continue;
+        if (argv[i][7] == '=')
+            (void)zxc_color_parse(argv[i] + 8);
+        else if (argv[i][7] == '\0' && i + 1 < argc)
+            (void)zxc_color_parse(argv[++i]);
+    }
+    zxc_color_init();
+}
+
+static int zxc_color_option(const char* arg, const int argc, char** argv) {
+    if (zxc_color_parse(arg) != 0) return -1;
+    zxc_color_prescan(argc, argv);
+    return 0;
+}
+
 /* Prints to stderr, coloring a leading "Error:" (red) or "Warning:" (yellow). */
 static void zxc_vemit(const char* fmt, va_list args) ZXC_PRINTF_FORMAT(1, 0);
 static void zxc_vemit(const char* fmt, va_list args) {
@@ -2120,7 +2154,7 @@ int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_DFL);
 #endif
     zxc_install_signal_cleanup();
-    zxc_color_init();
+    zxc_color_prescan(argc, argv);
 
     /* As "unzxc", default to decompression; as "zxccat", to zxc -dcf on every
      * argument. An explicit mode flag below still wins. */
@@ -2316,17 +2350,10 @@ int main(int argc, char** argv) {
                 }
                 break;
             case OPT_COLOR:
-                if (optarg != NULL && strcmp(optarg, "auto") == 0)
-                    g_color_mode = ZXC_COLOR_AUTO;
-                else if (optarg != NULL && strcmp(optarg, "always") == 0)
-                    g_color_mode = ZXC_COLOR_ALWAYS;
-                else if (optarg != NULL && strcmp(optarg, "never") == 0)
-                    g_color_mode = ZXC_COLOR_NEVER;
-                else {
+                if (zxc_color_option(optarg, argc, argv) != 0) {
                     zxc_err("Error: --color must be 'auto', 'always' or 'never'\n");
                     return 1;
                 }
-                zxc_color_init();
                 break;
             case 'o':
                 output_path = optarg;
