@@ -36,6 +36,18 @@ static const pin_t k_pinned[PIN_N_LEVELS] = {
     {0xB30932DF2B576440ULL, 111912}, /* level 7 */
 };
 
+/* Same inputs and block sizes with ZXC_C_FAVOR_DECODE_SPEED at its default budget
+ * (the split, levels 3-7). */
+static const pin_t k_pinned_dspeed[PIN_N_LEVELS] = {
+    {0x36C96735B3A565DBULL, 223833}, /* level 1 */
+    {0xB5EB4781D0EFE78AULL, 222393}, /* level 2 */
+    {0x3240D05EDF52F291ULL, 190958}, /* level 3 */
+    {0x4170011D228B49EDULL, 189063}, /* level 4 */
+    {0xE6E13B1EDF6699ACULL, 145321}, /* level 5 */
+    {0x582816D48049A8B5ULL, 138637}, /* level 6 */
+    {0xD516E3A9383E3F81ULL, 119796}, /* level 7 */
+};
+
 /* Same inputs in 4 KB blocks, with a dictionary trained on them. */
 static const pin_t k_pinned_dict[PIN_N_LEVELS] = {
     {0xBA0DF6B6EF9B95F3ULL, 119474}, /* level 1 */
@@ -119,13 +131,17 @@ static void pin_gen_mixed(uint8_t* buf, const size_t n) {
  * the archives of a level into its pin. */
 static int pin_pass(const uint8_t* src, uint8_t* comp, const size_t cap, uint8_t* back,
                     const size_t* block_sizes, const size_t n_block_sizes, const void* dict,
-                    const size_t dict_size, const void* dict_huf, pin_t got[PIN_N_LEVELS]) {
+                    const size_t dict_size, const void* dict_huf, const int favor_decode_speed,
+                    pin_t got[PIN_N_LEVELS]) {
     zxc_cctx* const cctx = zxc_create_cctx();
     zxc_dctx* const dctx = zxc_create_dctx();
-    int ok = cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) == ZXC_OK &&
-             zxc_cctx_set_dict(cctx, dict, dict_size, dict_huf) == ZXC_OK &&
-             zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK &&
-             zxc_dctx_set_dict(dctx, dict, dict_size, dict_huf) == ZXC_OK;
+    int ok =
+        cctx && dctx && zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, 1) == ZXC_OK &&
+        zxc_cctx_set_param(cctx, ZXC_C_FAVOR_DECODE_SPEED,
+                           favor_decode_speed ? ZXC_FAVOR_DECODE_SPEED_DEFAULT : 0) == ZXC_OK &&
+        zxc_cctx_set_dict(cctx, dict, dict_size, dict_huf) == ZXC_OK &&
+        zxc_dctx_set_param(dctx, ZXC_D_CHECKSUM, 1) == ZXC_OK &&
+        zxc_dctx_set_dict(dctx, dict, dict_size, dict_huf) == ZXC_OK;
     if (!ok) printf("  [FAIL] context setup\n");
     for (int level = 1; ok && level <= PIN_N_LEVELS; level++) {
         pin_t p = {0, 0};
@@ -196,8 +212,13 @@ int test_encoder_output_pinned(void) {
     // A mismatch does not stop the dictionary pass: one run prints both tables.
     pin_t got[PIN_N_LEVELS];
     ok = ok && pin_pass(src, comp, cap, back, k_block_sizes,
-                        sizeof(k_block_sizes) / sizeof(k_block_sizes[0]), NULL, 0, NULL, got);
+                        sizeof(k_block_sizes) / sizeof(k_block_sizes[0]), NULL, 0, NULL, 0, got);
     int same = ok && pin_check("k_pinned", k_pinned, got);
+
+    // The opt-in split, pinned on its own.
+    ok = ok && pin_pass(src, comp, cap, back, k_block_sizes,
+                        sizeof(k_block_sizes) / sizeof(k_block_sizes[0]), NULL, 0, NULL, 1, got);
+    if (ok) same = pin_check("k_pinned_dspeed", k_pinned_dspeed, got) && same;
 
 #if TEST_HAS_DICT
     // Trained here: its dict_id is in every archive, so the pin covers the
@@ -219,7 +240,7 @@ int test_encoder_output_pinned(void) {
         ok = 0;
     }
     ok = ok &&
-         pin_pass(src, comp, cap, back, k_dict_block_size, 1, dict, (size_t)dict_size, huf, got);
+         pin_pass(src, comp, cap, back, k_dict_block_size, 1, dict, (size_t)dict_size, huf, 0, got);
     if (ok) same = pin_check("k_pinned_dict", k_pinned_dict, got) && same;
 #else
     (void)k_pinned_dict;
