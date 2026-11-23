@@ -2682,8 +2682,14 @@ fi
 set +e
 ERR_LATE=$("$ZXC_BIN" -B 3 --color=always "$TEST_FILE_ARG" 2>&1)
 ERR_LAST=$("$ZXC_BIN" --color=always -B 3 --color=never "$TEST_FILE_ARG" 2>&1)
+# "--color=always" is here the value of -o, not an option
+ERR_ARG=$("$ZXC_BIN" --color=never -o --color=always -B 3 "$TEST_FILE_ARG" 2>&1)
+# The early look at --color must not report a bad option a second time
+ERR_ONCE=$("$ZXC_BIN" --color=always --zxc-no-such-option "$TEST_FILE_ARG" 2>&1 |
+    grep -c 'zxc-no-such-option')
 set -e
-if [[ "$ERR_LATE" == *"${ESC}["*"Error:"* ]] && [[ "$ERR_LAST" != *"$ESC"* ]]; then
+if [[ "$ERR_LATE" == *"${ESC}["*"Error:"* ]] && [[ "$ERR_LAST" != *"$ESC"* ]] &&
+    [[ "$ERR_ARG" == *"Error:"* ]] && [[ "$ERR_ARG" != *"$ESC"* ]] && [[ "$ERR_ONCE" -le 1 ]]; then
     log_pass "--color applies to errors raised by earlier options"
 else
     log_fail "--color after the failing option should apply (last one wins)"

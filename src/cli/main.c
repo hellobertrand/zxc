@@ -160,6 +160,8 @@ struct option {
 char* optarg = NULL;
 int optind = 1;
 int optopt = 0;
+int opterr = 1;
+#define ZXC_GETOPT_REWIND 1
 
 /**
  * @brief Minimal implementation of getopt_long for Windows.
@@ -199,8 +201,9 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
                 } else if (p->has_arg == optional_argument && name_end) {
                     optarg = name_end + 1;
                 } else if (name_end) {  // "--rm=false" is an error, not --rm
-                    fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", argv[0],
-                            p->name);
+                    if (opterr)
+                        fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", argv[0],
+                                p->name);
                     return '?';
                 }
                 if (p->flag) {
@@ -259,6 +262,8 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 #include <dirent.h>
 #include <fcntl.h>
 #include <getopt.h>
+// optind = 0 restarts getopt_long in glibc, musl and the BSD implementations
+#define ZXC_GETOPT_REWIND 0
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
@@ -533,38 +538,13 @@ static void zxc_color_init(void) {
     g_color_out = zxc_stream_wants_color(stdout);
 }
 
-// Sets g_color_mode from a --color value; -1 if it is not one.
+// The ZXC_COLOR_* mode named by a --color value, or -1.
 static int zxc_color_parse(const char* arg) {
     if (arg == NULL) return -1;
-    if (strcmp(arg, "auto") == 0)
-        g_color_mode = ZXC_COLOR_AUTO;
-    else if (strcmp(arg, "always") == 0)
-        g_color_mode = ZXC_COLOR_ALWAYS;
-    else if (strcmp(arg, "never") == 0)
-        g_color_mode = ZXC_COLOR_NEVER;
-    else
-        return -1;
-    return 0;
-}
-
-// Applies --color ahead of option parsing, so that an error raised by an
-// option placed before it is colored as asked. Invalid values are left to the
-// option loop to report.
-static void zxc_color_prescan(const int argc, char** argv) {
-    for (int i = 1; i < argc && strcmp(argv[i], "--") != 0; i++) {
-        if (strncmp(argv[i], "--color", 7) != 0) continue;
-        if (argv[i][7] == '=')
-            (void)zxc_color_parse(argv[i] + 8);
-        else if (argv[i][7] == '\0' && i + 1 < argc)
-            (void)zxc_color_parse(argv[++i]);
-    }
-    zxc_color_init();
-}
-
-static int zxc_color_option(const char* arg, const int argc, char** argv) {
-    if (zxc_color_parse(arg) != 0) return -1;
-    zxc_color_prescan(argc, argv);
-    return 0;
+    if (strcmp(arg, "auto") == 0) return ZXC_COLOR_AUTO;
+    if (strcmp(arg, "always") == 0) return ZXC_COLOR_ALWAYS;
+    if (strcmp(arg, "never") == 0) return ZXC_COLOR_NEVER;
+    return -1;
 }
 
 /* Prints to stderr, coloring a leading "Error:" (red) or "Warning:" (yellow). */
@@ -2144,6 +2124,26 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
  * Parses arguments and dispatches execution to Benchmark, Compress, or
  * Decompress modes.
  */
+// Applies the last --color of the command line before the options are
+// processed, so that an error raised by an earlier option is colored as asked.
+// A silent first getopt pass: invalid values are left to the option loop.
+static void zxc_color_prescan(const int argc, char** argv, const char* short_options,
+                              const struct option* long_options) {
+    int opt;
+    opterr = 0;
+    while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
+        if (opt == OPT_COLOR) {
+            const int color_mode = zxc_color_parse(optarg);
+            if (color_mode >= 0) g_color_mode = color_mode;
+        } else if ((opt == 'b' || opt == OPT_FAVOR_DECODE_SPEED) && optarg == NULL) {
+            (void)cli_number_arg(argc, argv);  // as the option loop does
+        }
+    }
+    opterr = 1;
+    optind = ZXC_GETOPT_REWIND;
+    zxc_color_init();
+}
+
 int main(int argc, char** argv) {
     zxc_mode_t mode = MODE_COMPRESS;
     int to_stdout = 0;
@@ -2154,7 +2154,7 @@ int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_DFL);
 #endif
     zxc_install_signal_cleanup();
-    zxc_color_prescan(argc, argv);
+    zxc_color_init();
 
     /* As "unzxc", default to decompression; as "zxccat", to zxc -dcf on every
      * argument. An explicit mode flag below still wins. */
@@ -2186,6 +2186,7 @@ int main(int argc, char** argv) {
     const char* dict_path = NULL;
     const char* output_path = NULL;
 
+    static const char short_options[] = "1234567b::B:cCdD:fho:jklmrNqST:tvVz";
     static const struct option long_options[] = {
         {"train", no_argument, 0, OPT_TRAIN_DICT},
         {"progress", required_argument, 0, OPT_PROGRESS},
@@ -2220,8 +2221,8 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "1234567b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
-                              NULL)) != -1) {
+    zxc_color_prescan(argc, argv, short_options, long_options);
+    while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -2350,7 +2351,8 @@ int main(int argc, char** argv) {
                 }
                 break;
             case OPT_COLOR:
-                if (zxc_color_option(optarg, argc, argv) != 0) {
+                // Applied by zxc_color_prescan(); only the value is checked here
+                if (zxc_color_parse(optarg) < 0) {
                     zxc_err("Error: --color must be 'auto', 'always' or 'never'\n");
                     return 1;
                 }
