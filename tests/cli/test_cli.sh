@@ -2641,6 +2641,44 @@ case "$(uname -s 2>/dev/null)" in
         ;;
 esac
 
+# 35. Colored output (--color)
+echo "Testing Colored Output (--color)..."
+ESC=$(printf '\033')
+"$ZXC_BIN" -z -f -k "$TEST_FILE_ARG" 2> /dev/null
+
+# 35.1 --color=always colors -t results, even through a pipe; never the progress bar
+OUT=$("$ZXC_BIN" --color=always -t "$TEST_FILE_ARG.zxc")
+"$ZXC_BIN" --color=always --progress=always -f -c "$TEST_FILE_ARG" > /dev/null \
+    2> "$TEST_DIR/color1.err"
+if [[ "$OUT" == *"${ESC}["*"OK"* ]] && ! grep -q "$ESC" "$TEST_DIR/color1.err"; then
+    log_pass "--color=always emits ANSI colors off-tty"
+else
+    log_fail "--color=always should emit ANSI colors"
+fi
+
+# 35.2 auto off-tty, never, and NO_COLOR stay plain
+OUT_A=$("$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1)
+OUT_N=$("$ZXC_BIN" --color=never -t "$TEST_FILE_ARG.zxc" 2>&1)
+OUT_E=$(NO_COLOR=1 "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1)
+if [[ "$OUT_A" != *"$ESC"* ]] && [[ "$OUT_N" != *"$ESC"* ]] && [[ "$OUT_E" != *"$ESC"* ]]; then
+    log_pass "--color=auto off-tty, --color=never and NO_COLOR are plain"
+else
+    log_fail "No ANSI colors expected (auto off-tty / never / NO_COLOR)"
+fi
+
+# 35.3 Errors get a colored prefix; invalid --color values are rejected
+set +e
+ERR=$("$ZXC_BIN" --color=always -B 3 "$TEST_FILE_ARG" 2>&1)
+"$ZXC_BIN" --color=bogus "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ "$ERR" == *"${ESC}["*"Error:"* ]] && [[ $RET -ne 0 ]]; then
+    log_pass "--color colors errors and rejects invalid values"
+else
+    log_fail "--color: colored error prefix / invalid value check failed"
+fi
+rm -f "$TEST_DIR/color1.err"
+
 # A failed write is reported as such, even with a corrupt block further on
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] write failure code: POSIX only" ;;
