@@ -71,14 +71,14 @@ endif()
 # =============================================================================
 # SIMD variants and optional features
 # =============================================================================
-if(NOT ZXC_SIMD_VARIANTS MATCHES "^(all|decoder|minimal)$")
-    message(FATAL_ERROR "ZXC_SIMD_VARIANTS must be all, decoder or minimal, not '${ZXC_SIMD_VARIANTS}'.")
+if(NOT ZXC_BUILD_SIMD_VARIANTS MATCHES "^(all|decoder|minimal)$")
+    message(FATAL_ERROR "ZXC_BUILD_SIMD_VARIANTS must be all, decoder or minimal, not '${ZXC_BUILD_SIMD_VARIANTS}'.")
 endif()
 # The sources read the choice (src/lib/zxc_build.h); all is the default.
-if(ZXC_SIMD_VARIANTS STREQUAL "decoder")
-    add_compile_definitions(ZXC_SIMD_VARIANTS_DECODER)
-elseif(ZXC_SIMD_VARIANTS STREQUAL "minimal")
-    add_compile_definitions(ZXC_SIMD_VARIANTS_MINIMAL)
+if(ZXC_BUILD_SIMD_VARIANTS STREQUAL "decoder")
+    add_compile_definitions(ZXC_BUILD_SIMD_VARIANTS_DECODER)
+elseif(ZXC_BUILD_SIMD_VARIANTS STREQUAL "minimal")
+    add_compile_definitions(ZXC_BUILD_SIMD_VARIANTS_MINIMAL)
 endif()
 
 if(NOT ZXC_ENABLE_DICT)

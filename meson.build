@@ -125,19 +125,19 @@ variant_sources = ['src/lib/zxc_compress.c',
 variant_sets = [['_default', [], variant_sources]]
 
 # SIMD variant sources (src/lib/zxc_build.h); AVX-512 with 'all' only.
-simd_variants = get_option('simd_variants')
-if simd_variants == 'all'
+build_simd_variants = get_option('build_simd_variants')
+if build_simd_variants == 'all'
   simd_sources = variant_sources
-elif simd_variants == 'decoder'
+elif build_simd_variants == 'decoder'
   simd_sources = ['src/lib/zxc_decompress.c', 'src/lib/zxc_huffman.c']
 else
   simd_sources = ['src/lib/zxc_huffman.c']
 endif
-with_avx512 = simd_variants == 'all'
+with_avx512 = build_simd_variants == 'all'
 
 # Project-wide: library, variant objects and tests must agree.
-if simd_variants != 'all'
-  add_project_arguments('-DZXC_SIMD_VARIANTS_' + simd_variants.to_upper(), language : 'c')
+if build_simd_variants != 'all'
+  add_project_arguments('-DZXC_BUILD_SIMD_VARIANTS_' + build_simd_variants.to_upper(), language : 'c')
 endif
 if not get_option('dict')
   add_project_arguments('-DZXC_NO_DICT', language : 'c')

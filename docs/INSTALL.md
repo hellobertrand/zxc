@@ -122,7 +122,7 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 | `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
 | `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
 | `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
-| `ZXC_SIMD_VARIANTS` | `all` | `all` | SIMD variants to build: `all`, `decoder` or `minimal` (see [Trimming the library](#trimming-the-library)) |
+| `ZXC_BUILD_SIMD_VARIANTS` | `all` | `all` | SIMD variants to build: `all`, `decoder` or `minimal` (see [Trimming the library](#trimming-the-library)) |
 | `ZXC_ENABLE_DICT` | ON | ON | Support dictionary frames (compression and decompression) |
 | `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
 | `RAPIDHASH_INCLUDE_DIR` | *(found)* | *(found)* | Directory holding a system `rapidhash.h`, when `find_path` cannot locate it |
@@ -156,10 +156,10 @@ cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
 By default the codec is built once per SIMD tier of the target (baseline, AVX2 and
 AVX-512 on x86-64; baseline and NEON on 32-bit ARM) and the tier is selected at run
 time. Each tier is a full copy of the codec, which a size-sensitive static link may
-not want. `ZXC_SIMD_VARIANTS` trades those copies away without changing the format or the
+not want. `ZXC_BUILD_SIMD_VARIANTS` trades those copies away without changing the format or the
 API: every such build reads what any other build wrote.
 
-| `ZXC_SIMD_VARIANTS` | Encoder | LZ decoder | Entropy decoder (levels 6-7) |
+| `ZXC_BUILD_SIMD_VARIANTS` | Encoder | LZ decoder | Entropy decoder (levels 6-7) |
 |---------------------|---------|------------|------------------------------|
 | `all` (default) | every tier | every tier | every tier |
 | `decoder` | baseline | baseline, AVX2 / NEON | baseline, AVX2 / NEON |
@@ -169,16 +169,16 @@ The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
 `ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. Without an AVX-512
 variant, AVX-512 CPUs run the AVX2 one.
 
-`ZXC_ENABLE_DICT=OFF` removes dictionary support. Unlike `ZXC_SIMD_VARIANTS`, it changes what
+`ZXC_ENABLE_DICT=OFF` removes dictionary support. Unlike `ZXC_BUILD_SIMD_VARIANTS`, it changes what
 the library accepts: installing a dictionary, or reading an archive written with one,
 returns `ZXC_ERROR_DICT_UNSUPPORTED`.
 
 ```bash
 # Small static library without dictionary support
-cmake -B build -DZXC_SIMD_VARIANTS=minimal -DZXC_ENABLE_DICT=OFF
+cmake -B build -DZXC_BUILD_SIMD_VARIANTS=minimal -DZXC_ENABLE_DICT=OFF
 ```
 
-The Meson build has the same switches: `-Dsimd_variants=` and `-Ddict=`.
+The Meson build has the same switches: `-Dbuild_simd_variants=` and `-Ddict=`.
 
 ### Profile-Guided Optimization (PGO — Clang and GCC, single-config generators)
 
@@ -307,13 +307,13 @@ skipped automatically).
 |--------|---------|-------------|
 | `build_cli` | `false` | Build the command-line interface |
 | `use_system_rapidhash` | `false` | Use a system-installed `rapidhash.h` instead of the vendored copy |
-| `optimize` | `perf` | SIMD variants to build: `perf`, `balanced` or `size` |
-| `dictionary` | `true` | Support dictionary frames (compression and decompression) |
+| `build_simd_variants` | `all` | SIMD variants to build: `all`, `decoder` or `minimal` |
+| `dict` | `true` | Support dictionary frames (compression and decompression) |
 
 `use_system_rapidhash` mirrors `ZXC_USE_SYSTEM_RAPIDHASH` in the CMake build,
 with the same setup-time check. It has no equivalent of `RAPIDHASH_INCLUDE_DIR`:
 Meson probes the compiler's default search path, so a header installed elsewhere
 is reached with `-Dc_args=-I<dir>`.
 
-`simd_variants` and `dict` mirror `ZXC_SIMD_VARIANTS` and `ZXC_ENABLE_DICT`; see
+`build_simd_variants` and `dict` mirror `ZXC_BUILD_SIMD_VARIANTS` and `ZXC_ENABLE_DICT`; see
 [Trimming the library](#trimming-the-library).
