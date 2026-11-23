@@ -175,7 +175,7 @@ pub const ZXC_HUF_TABLE_SIZE: usize = 128;
 pub const ZXC_MAX_THREADS: i64 = 512;
 /// The [`ZXC_C_FAVOR_DECODE_SPEED`] budget beyond which decoding barely speeds
 /// up: what the CLI's bare `--favor-decode-speed` sets.
-pub const ZXC_FAVOR_DECODE_SPEED_DEFAULT: i64 = 5;
+pub const ZXC_FAVOR_DECODE_SPEED_DEFAULT: i64 = 25;
 /// Largest [`ZXC_C_FAVOR_DECODE_SPEED`] budget.
 pub const ZXC_FAVOR_DECODE_SPEED_MAX: i64 = 100;
 

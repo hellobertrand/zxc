@@ -719,8 +719,6 @@ static_assert(ZXC_SPL_MATCH_SPLIT_MAX < (1U << ZXC_SPL_MATCH_SPLIT_CTX_BITS),
  * ZXC_FAVOR_DECODE_SPEED_MAX (the setter bounds it): an unbounded split inflates
  * blocks that compress well (JSON records: +45 percent at 128 bytes), so each
  * block may grow by this share of its size before entropy coding.
- * ZXC_FAVOR_DECODE_SPEED_DEFAULT is the knee on silesia: L3 decodes 7 percent
- * faster for 1.2 percent more size.
  */
 /** @} */
 #define ZXC_PAK_MAX_INLINE_OUT_PER_SEQ \

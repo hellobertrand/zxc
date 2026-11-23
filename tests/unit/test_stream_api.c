@@ -2333,9 +2333,9 @@ int test_stream_favor_decode_speed(void) {
                    same ? "identical" : "differ", sz[0], sz[1]);
             goto done;
         }
-        if (sz[1] > sz[0] + sz[0] / 5) {
-            printf("  [FAIL] level %d: the flag grew the stream by more than 20%% (%ld -> %ld)\n",
-                   levels[li], sz[0], sz[1]);
+        if (sz[1] > sz[0] + sz[0] * ZXC_FAVOR_DECODE_SPEED_DEFAULT / 100) {
+            printf("  [FAIL] level %d: the flag grew the stream by more than %d%% (%ld -> %ld)\n",
+                   levels[li], ZXC_FAVOR_DECODE_SPEED_DEFAULT, sz[0], sz[1]);
             goto done;
         }
         printf("  [PASS] level %d: %ld -> %ld bytes\n", levels[li], sz[0], sz[1]);

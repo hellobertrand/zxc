@@ -41,11 +41,11 @@ static const pin_t k_pinned[PIN_N_LEVELS] = {
 static const pin_t k_pinned_dspeed[PIN_N_LEVELS] = {
     {0x36C96735B3A565DBULL, 223833}, /* level 1 */
     {0xB5EB4781D0EFE78AULL, 222393}, /* level 2 */
-    {0x756EBE4D705FC0A5ULL, 176282}, /* level 3 */
-    {0xCE446EC038F02C2EULL, 174229}, /* level 4 */
-    {0x1D058EB18A9369FCULL, 142193}, /* level 5 */
-    {0xF1D3A1644369721DULL, 135077}, /* level 6 */
-    {0x4B26E6FE3EB50E4AULL, 115445}, /* level 7 */
+    {0x3240D05EDF52F291ULL, 190958}, /* level 3 */
+    {0x4170011D228B49EDULL, 189063}, /* level 4 */
+    {0xE6E13B1EDF6699ACULL, 145321}, /* level 5 */
+    {0x582816D48049A8B5ULL, 138637}, /* level 6 */
+    {0xD516E3A9383E3F81ULL, 119796}, /* level 7 */
 };
 
 /* Same inputs in 4 KB blocks, with a dictionary trained on them. */

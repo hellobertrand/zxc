@@ -804,7 +804,7 @@ static void print_help(const char* app) {
         "  -S, --seekable    Append seek table for random-access decompression\n"
         "  --favor-decode-speed [PCT]\n"
         "                    Favor decode speed over size (levels 3-7); PCT = how much\n"
-        "                    a block may grow for it, 1-100 {5}\n"
+        "                    a block may grow for it, 1-100 {25}\n"
         "  -o, --output FILE Write output to FILE (else derived from input;\n"
         "                    for --train: ./dictionary_<dict_id>.zxd, or a directory)\n"
         "  -k, --keep        Keep input file {default}\n"

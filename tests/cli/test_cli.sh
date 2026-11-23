@@ -2305,10 +2305,10 @@ else
 fi
 # 39.3 Benchmark mode reports it, with the budget the library applies
 BJ=$("$ZXC_BIN" -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null)
-if echo "$BJ" | grep -q '"favor_decode_speed": true' && echo "$BJ" | grep -q '"split_budget_pct": 5,'; then
+if echo "$BJ" | grep -q '"favor_decode_speed": true' && echo "$BJ" | grep -q '"split_budget_pct": 25,'; then
     log_pass "-b -j reports favor_decode_speed and the default budget"
 else
-    log_fail "-b -j does not report favor_decode_speed with budget 5"
+    log_fail "-b -j does not report favor_decode_speed with budget 25"
 fi
 # 39.3.0 ...and off at levels 1-2, where nothing applies
 BJ=$("$ZXC_BIN" -1 -b1 -j --favor-decode-speed "$TEST_FILE_ARG" 2>/dev/null)
