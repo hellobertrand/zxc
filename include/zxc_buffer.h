@@ -625,7 +625,7 @@ ZXC_EXPORT int zxc_cctx_reset(zxc_cctx* cctx);
  * @brief Compresses data using a reusable context.
  *
  * Like zxc_compress(), but with the context's parameters (level, block size,
- * checksum, seek table, dictionary) and its buffers, which are re-carved only
+ * checksum, seek table, decode-speed budget, dictionary) and its buffers, which are re-carved only
  * when the block size or the dictionary changes, or when the level rises into
  * @ref ZXC_LEVEL_DENSITY for the first time. A static (caller-workspace)
  * context cannot grow: such a raise returns @ref ZXC_ERROR_BAD_LEVEL there.
