@@ -465,10 +465,20 @@ static int g_walking = 0;
 static int g_favor_decode_speed = 0;
 static int g_split_budget_pct = 0;
 
+// argv in the order typed; getopt_long reorders the live one. NULL: not kept.
+static char** g_args_given = NULL;
+
 // The next argument, consumed as an optional option's value when it is all
 // digits: "-b 5" or "--favor-decode-speed 25", while "5samples.bin" stays a file.
 static const char* cli_number_arg(const int argc, char** argv) {
-    if (optind >= argc || argv[optind][0] < '0' || argv[optind][0] > '9') return NULL;
+    if (optind < 1 || optind >= argc || argv[optind][0] < '0' || argv[optind][0] > '9') return NULL;
+    // musl has by now moved the option ahead of the files before it: "zxc 25 -b"
+    // must not take the file 25, which was typed before -b, for its value
+    if (g_args_given != NULL) {
+        int i = 1;
+        while (i < argc && g_args_given[i] != argv[optind - 1]) i++;
+        if (i + 1 >= argc || g_args_given[i + 1] != argv[optind]) return NULL;
+    }
     const char* p = argv[optind] + 1;
     while (*p >= '0' && *p <= '9') p++;
     return *p == '\0' ? argv[optind++] : NULL;
@@ -2127,20 +2137,28 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 // Applies the last --color of the command line before the options are
 // processed, so that an error raised by an earlier option is colored as asked.
 // A silent first getopt pass: invalid values are left to the option loop.
+// It runs on a copy of argv, which getopt_long reorders: "zxc 25 -b" must not
+// reach the option loop as "zxc -b 25".
 static void zxc_color_prescan(const int argc, char** argv, const char* short_options,
                               const struct option* long_options) {
-    int opt;
-    opterr = 0;
-    while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
-        if (opt == OPT_COLOR) {
-            const int color_mode = zxc_color_parse(optarg);
-            if (color_mode >= 0) g_color_mode = color_mode;
-        } else if ((opt == 'b' || opt == OPT_FAVOR_DECODE_SPEED) && optarg == NULL) {
-            (void)cli_number_arg(argc, argv);  // as the option loop does
+    char** const args = malloc(((size_t)argc + 1) * sizeof(*args));
+    if (args != NULL) {
+        memcpy(args, argv, (size_t)argc * sizeof(*args));
+        args[argc] = NULL;
+        int opt;
+        opterr = 0;
+        while ((opt = getopt_long(argc, args, short_options, long_options, NULL)) != -1) {
+            if (opt == OPT_COLOR) {
+                const int color_mode = zxc_color_parse(optarg);
+                if (color_mode >= 0) g_color_mode = color_mode;
+            } else if ((opt == 'b' || opt == OPT_FAVOR_DECODE_SPEED) && optarg == NULL) {
+                (void)cli_number_arg(argc, args);  // as the option loop does
+            }
         }
+        opterr = 1;
+        optind = ZXC_GETOPT_REWIND;
+        free(args);
     }
-    opterr = 1;
-    optind = ZXC_GETOPT_REWIND;
     zxc_color_init();
 }
 
@@ -2221,6 +2239,8 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
+    g_args_given = malloc(((size_t)argc + 1) * sizeof(*g_args_given));
+    if (g_args_given != NULL) memcpy(g_args_given, argv, ((size_t)argc + 1) * sizeof(*argv));
     zxc_color_prescan(argc, argv, short_options, long_options);
     while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
         switch (opt) {

@@ -2695,6 +2695,25 @@ else
     log_fail "--color after the failing option should apply (last one wins)"
 fi
 
+# 35.4b The early look at --color leaves the argument order alone: a file named
+# as a number, before an option taking an optional number, stays a file
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] options after a file: POSIX getopt only" ;;
+    *)
+        cp "$TEST_FILE" "$TEST_DIR/25"
+        rm -f "$TEST_DIR/25.zxc"
+        set +e
+        (cd "$TEST_DIR" && "$ZXC_ABS" -q -k -f 25 --favor-decode-speed < /dev/null > /dev/null 2>&1)
+        set -e
+        if [[ -s "$TEST_DIR/25.zxc" ]]; then
+            log_pass "A numeric file name before --favor-decode-speed stays a file"
+        else
+            log_fail "File '25' was taken as the value of a later option"
+        fi
+        rm -f "$TEST_DIR/25" "$TEST_DIR/25.zxc"
+        ;;
+esac
+
 # 35.5 On a terminal: auto colors, and NO_COLOR, TERM=dumb and --color=never do not.
 # Runs the command on a pseudo-terminal: util-linux script, else the BSD one.
 run_tty() {
