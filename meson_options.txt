@@ -7,8 +7,8 @@ option('build_cli', type : 'boolean', value : false,
        description : 'Build the command-line interface')
 option('use_system_rapidhash', type : 'boolean', value : false,
        description : 'Use a system-installed rapidhash.h instead of the vendored copy')
-# As CMake's ZXC_SIMD_VARIANTS / ZXC_ENABLE_DICT.
-option('simd_variants', type : 'combo', choices : ['all', 'decoder', 'minimal'], value : 'all',
+# As CMake's ZXC_BUILD_SIMD_VARIANTS / ZXC_ENABLE_DICT.
+option('build_simd_variants', type : 'combo', choices : ['all', 'decoder', 'minimal'], value : 'all',
        description : 'SIMD variants to build: all, decoder (no encoder variants, no AVX-512), minimal (AVX2/NEON entropy decoder only)')
 option('dict', type : 'boolean', value : true,
        description : 'Support dictionary frames (compression and decompression)')
