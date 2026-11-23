@@ -90,7 +90,8 @@ int LLVMFuzzerInitialize(int* argc, char*** argv) {
         g_variants[g_n_variants++] = v;
     }
     if (bmi && __builtin_cpu_supports("avx512f") && __builtin_cpu_supports("avx512bw") &&
-        __builtin_cpu_supports("avx512vbmi") && __builtin_cpu_supports("avx512vbmi2")) {
+        __builtin_cpu_supports("avx512vl") && __builtin_cpu_supports("avx512vbmi") &&
+        __builtin_cpu_supports("avx512vbmi2")) {
         const variant_t v = VARIANT(_avx512);
         g_variants[g_n_variants++] = v;
     }
