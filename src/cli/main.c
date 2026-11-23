@@ -160,6 +160,8 @@ struct option {
 char* optarg = NULL;
 int optind = 1;
 int optopt = 0;
+int opterr = 1;
+#define ZXC_GETOPT_REWIND 1
 
 /**
  * @brief Minimal implementation of getopt_long for Windows.
@@ -199,8 +201,9 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
                 } else if (p->has_arg == optional_argument && name_end) {
                     optarg = name_end + 1;
                 } else if (name_end) {  // "--rm=false" is an error, not --rm
-                    fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", argv[0],
-                            p->name);
+                    if (opterr)
+                        fprintf(stderr, "%s: option '--%s' doesn't allow an argument\n", argv[0],
+                                p->name);
                     return '?';
                 }
                 if (p->flag) {
@@ -259,6 +262,8 @@ static int getopt_long(int argc, char* const argv[], const char* optstring,
 #include <dirent.h>
 #include <fcntl.h>
 #include <getopt.h>
+// optind = 0 restarts getopt_long in glibc, musl and the BSD implementations
+#define ZXC_GETOPT_REWIND 0
 #include <libgen.h>
 #include <limits.h>
 #include <stdio.h>
@@ -460,10 +465,20 @@ static int g_walking = 0;
 static int g_favor_decode_speed = 0;
 static int g_split_budget_pct = 0;
 
+// argv in the order typed; getopt_long reorders the live one. NULL: not kept.
+static char** g_args_given = NULL;
+
 // The next argument, consumed as an optional option's value when it is all
 // digits: "-b 5" or "--favor-decode-speed 25", while "5samples.bin" stays a file.
 static const char* cli_number_arg(const int argc, char** argv) {
-    if (optind >= argc || argv[optind][0] < '0' || argv[optind][0] > '9') return NULL;
+    if (optind < 1 || optind >= argc || argv[optind][0] < '0' || argv[optind][0] > '9') return NULL;
+    // musl has by now moved the option ahead of the files before it: "zxc 25 -b"
+    // must not take the file 25, which was typed before -b, for its value
+    if (g_args_given != NULL) {
+        int i = 1;
+        while (i < argc && g_args_given[i] != argv[optind - 1]) i++;
+        if (i + 1 >= argc || g_args_given[i + 1] != argv[optind]) return NULL;
+    }
     const char* p = argv[optind] + 1;
     while (*p >= '0' && *p <= '9') p++;
     return *p == '\0' ? argv[optind++] : NULL;
@@ -477,6 +492,91 @@ static const char* cli_number_arg(const int argc, char** argv) {
 #define ZXC_PRINTF_FORMAT(fmt_idx, args_idx)
 #endif
 
+/* Color policy (--color): auto = only on a terminal, unless NO_COLOR is set or
+ * TERM is "dumb"; always = force; never = plain text. Only diagnostics are
+ * colored (Error:/Warning:, -t OK/FAILED). Decided per stream. */
+enum { ZXC_COLOR_AUTO = 0, ZXC_COLOR_ALWAYS, ZXC_COLOR_NEVER };
+static int g_color_mode = ZXC_COLOR_AUTO;
+static int g_color_err = 0;  // emit ANSI colors on stderr
+static int g_color_out = 0;  // emit ANSI colors on stdout
+
+#define ZXC_ANSI_RESET "\033[0m"
+#define ZXC_ANSI_RED "\033[1;31m"
+#define ZXC_ANSI_GREEN "\033[1;32m"
+#define ZXC_ANSI_YELLOW "\033[1;33m"
+
+/* The escape sequence when colors are on for that stream, else "". */
+#define ZXC_CE(code) (g_color_err ? (code) : "")
+#define ZXC_CO(code) (g_color_out ? (code) : "")
+
+static int zxc_env_set(const char* name) {
+    const char* v = getenv(name);
+    return v != NULL && v[0] != '\0' && strcmp(v, "0") != 0;
+}
+
+/* Legacy Windows consoles print escapes verbatim unless VT processing is on;
+ * turn it on, and report whether the console understands escapes. */
+static int zxc_enable_vt(FILE* f) {
+#ifdef _WIN32
+#ifndef ENABLE_VIRTUAL_TERMINAL_PROCESSING
+#define ENABLE_VIRTUAL_TERMINAL_PROCESSING 0x0004
+#endif
+    HANDLE h = (HANDLE)_get_osfhandle(fileno(f));
+    DWORD mode = 0;
+    if (h == INVALID_HANDLE_VALUE || !GetConsoleMode(h, &mode)) return 1;  // pipe/file: as asked
+    if (mode & ENABLE_VIRTUAL_TERMINAL_PROCESSING) return 1;
+    return SetConsoleMode(h, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
+#else
+    (void)f;
+    return 1;
+#endif
+}
+
+static int zxc_stream_wants_color(FILE* f) {
+    if (g_color_mode == ZXC_COLOR_NEVER) return 0;
+    if (g_color_mode == ZXC_COLOR_AUTO) {
+        if (zxc_env_set("NO_COLOR") || !isatty(fileno(f))) return 0;
+        const char* term = getenv("TERM");
+        if (term && strcmp(term, "dumb") == 0) return 0;
+    }
+    return zxc_enable_vt(f);
+}
+
+/* (Re)computes the per-stream color flags from g_color_mode and the env. */
+static void zxc_color_init(void) {
+    g_color_err = zxc_stream_wants_color(stderr);
+    g_color_out = zxc_stream_wants_color(stdout);
+}
+
+// The ZXC_COLOR_* mode named by a --color value, or -1.
+static int zxc_color_parse(const char* arg) {
+    if (arg == NULL) return -1;
+    if (strcmp(arg, "auto") == 0) return ZXC_COLOR_AUTO;
+    if (strcmp(arg, "always") == 0) return ZXC_COLOR_ALWAYS;
+    if (strcmp(arg, "never") == 0) return ZXC_COLOR_NEVER;
+    return -1;
+}
+
+/* Prints to stderr, coloring a leading "Error:" (red) or "Warning:" (yellow). */
+static void zxc_vemit(const char* fmt, va_list args) ZXC_PRINTF_FORMAT(1, 0);
+static void zxc_vemit(const char* fmt, va_list args) {
+    static const struct {
+        const char* tag;
+        const char* color;
+    } tags[] = {{"Error:", ZXC_ANSI_RED}, {"Warning:", ZXC_ANSI_YELLOW}};
+    if (g_color_err) {
+        for (size_t i = 0; i < sizeof(tags) / sizeof(tags[0]); i++) {
+            const size_t n = strlen(tags[i].tag);
+            if (strncmp(fmt, tags[i].tag, n) == 0) {
+                fprintf(stderr, "%s%s" ZXC_ANSI_RESET, tags[i].color, tags[i].tag);
+                fmt += n;
+                break;
+            }
+        }
+    }
+    vfprintf(stderr, fmt, args);
+}
+
 /**
  * @brief Standard logging function. Respects the global quiet flag.
  */
@@ -485,7 +585,18 @@ static void zxc_log(const char* fmt, ...) {
     if (g_quiet) return;
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    zxc_vemit(fmt, args);
+    va_end(args);
+}
+
+/**
+ * @brief Diagnostic on stderr, printed even with -q (errors and warnings).
+ */
+static void zxc_err(const char* fmt, ...) ZXC_PRINTF_FORMAT(1, 2);
+static void zxc_err(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    zxc_vemit(fmt, args);
     va_end(args);
 }
 
@@ -498,7 +609,7 @@ static void zxc_log_v(const char* fmt, ...) {
     if (!g_verbose || g_quiet) return;
     va_list args;
     va_start(args, fmt);
-    vfprintf(stderr, fmt, args);
+    zxc_vemit(fmt, args);
     va_end(args);
 }
 
@@ -551,7 +662,8 @@ enum {
     OPT_PROGRESS,
     OPT_NO_PRESERVE,
     OPT_RM,
-    OPT_FAVOR_DECODE_SPEED
+    OPT_FAVOR_DECODE_SPEED,
+    OPT_COLOR
 };
 
 // Whether path ends with the archive extension.
@@ -658,7 +770,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 #ifdef _WIN32
     char* const search_path = zxc_path_join(dir_path, "*");
     if (!search_path) {
-        zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
+        zxc_log("Error: cannot allocate memory for path in directory '%s'\n", dir_path);
         return 1;
     }
 
@@ -667,7 +779,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
     free(search_path);
 
     if (hFind == INVALID_HANDLE_VALUE) {
-        zxc_log("Error opening directory '%s'\n", dir_path);
+        zxc_log("Error: cannot open directory '%s'\n", dir_path);
         return 1;
     }
 
@@ -678,7 +790,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
         char* const full_path = zxc_path_join(dir_path, find_data.cFileName);
         if (!full_path) {
-            zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
+            zxc_log("Error: cannot allocate memory for path in directory '%s'\n", dir_path);
             overall_ret = 1;
             continue;
         }
@@ -702,7 +814,8 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
     } while (FindNextFileA(hFind, &find_data) != 0);
     const DWORD walk_err = GetLastError();
     if (walk_err != ERROR_NO_MORE_FILES) {
-        zxc_log("Error reading directory '%s' (error %lu)\n", dir_path, (unsigned long)walk_err);
+        zxc_log("Error: cannot read directory '%s' (error %lu)\n", dir_path,
+                (unsigned long)walk_err);
         overall_ret = 1;
     }
 
@@ -714,7 +827,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         open(nested ? zxc_base_name(dir_path) : dir_path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
     DIR* const dir = (fd != -1) ? fdopendir(fd) : NULL;
     if (back == -1 || !dir || fchdir(fd) != 0) {
-        zxc_log("Error opening directory '%s': %s\n", dir_path, strerror(errno));
+        zxc_log("Error: cannot open directory '%s': %s\n", dir_path, strerror(errno));
         if (dir)
             closedir(dir);
         else if (fd != -1)
@@ -729,7 +842,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
         const struct dirent* const entry = readdir(dir);
         if (!entry) {
             if (errno != 0) {
-                zxc_log("Error reading directory '%s': %s\n", dir_path, strerror(errno));
+                zxc_log("Error: cannot read directory '%s': %s\n", dir_path, strerror(errno));
                 overall_ret = 1;
             }
             break;
@@ -740,7 +853,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
 
         char* const full_path = zxc_path_join(dir_path, entry->d_name);
         if (!full_path) {
-            zxc_log("Error allocating memory for path in directory '%s'\n", dir_path);
+            zxc_log("Error: cannot allocate memory for path in directory '%s'\n", dir_path);
             overall_ret = 1;
             continue;
         }
@@ -760,7 +873,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
                                                    json_output, seekable, dict, dict_size);
             }
         } else if (errno != ENOENT) {  // ENOENT: removed during the walk
-            zxc_log("Error accessing '%s': %s\n", full_path, strerror(errno));
+            zxc_log("Error: cannot access '%s': %s\n", full_path, strerror(errno));
             overall_ret = 1;
         }
         free(full_path);
@@ -768,7 +881,7 @@ static int process_directory(const char* dir_path, zxc_mode_t mode, int num_thre
     closedir(dir);
     g_walking = nested;
     if (fchdir(back) != 0) {
-        zxc_log("Error leaving directory '%s': %s\n", dir_path, strerror(errno));
+        zxc_log("Error: cannot leave directory '%s': %s\n", dir_path, strerror(errno));
         exit(1);
     }
     close(back);
@@ -818,7 +931,9 @@ static void print_help(const char* app) {
         "  -v, --verbose     Verbose mode\n"
         "  -q, --quiet       Quiet mode\n"
         "  -j, --json        JSON output (benchmark mode)\n"
-        "  --progress MODE   Progress display: auto, always, never {auto}\n");
+        "  --progress MODE   Progress display: auto, always, never {auto}\n"
+        "  --color MODE      Color errors, warnings and -t results: auto, always,\n"
+        "                    never {auto} (auto: terminal only; NO_COLOR disables it)\n");
 }
 
 static void print_version(void) {
@@ -1011,7 +1126,7 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
     uint32_t id = 0;
     const int rc = zxc_dict_load(buf, buf_size, &content, &content_size, NULL, &id);
     if (rc != ZXC_OK) {
-        fprintf(stderr, "Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
+        zxc_err("Error: invalid dictionary '%s': %s\n", path, zxc_error_name(rc));
         return 1;
     }
     if (json_output) {
@@ -1179,20 +1294,20 @@ static void cli_print_dict_ids(const cli_container_t* c, const int json) {
 static int zxc_list_archive(const char* path, int json_output, int show_name) {
     char resolved_path[4096];
     if (zxc_validate_input_path(path, resolved_path, sizeof(resolved_path)) != 0) {
-        fprintf(stderr, "Error: Invalid input file '%s': %s\n", path, strerror(errno));
+        zxc_err("Error: Invalid input file '%s': %s\n", path, strerror(errno));
         return 1;
     }
 
     FILE* f = fopen(resolved_path, "rb");
     if (!f) {
-        fprintf(stderr, "Error: Cannot open '%s': %s\n", path, strerror(errno));
+        zxc_err("Error: Cannot open '%s': %s\n", path, strerror(errno));
         return 1;
     }
 
     // Get file size
     if (fseeko(f, 0, SEEK_END) != 0) {
         fclose(f);
-        fprintf(stderr, "Error: Cannot seek in file\n");
+        zxc_err("Error: Cannot seek in file\n");
         return 1;
     }
     const long long file_size = ftello(f);
@@ -1213,7 +1328,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
                 fread(dbuf, 1, (size_t)file_size, f) == (size_t)file_size)
                 r = zxc_list_dict(path, dbuf, (size_t)file_size, file_size, json_output);
             else
-                fprintf(stderr, "Error: Cannot read '%s'\n", path);
+                zxc_err("Error: Cannot read '%s'\n", path);
             free(dbuf);
             fclose(f);
             return r;
@@ -1227,7 +1342,7 @@ static int zxc_list_archive(const char* path, int json_output, int show_name) {
     fclose(f);
     if (walked != ZXC_OK) {
         free(cont.dict_ids);
-        fprintf(stderr, "Error: Not a valid ZXC archive (%s)\n", zxc_error_name(walked));
+        zxc_err("Error: Not a valid ZXC archive (%s)\n", zxc_error_name(walked));
         return 1;
     }
     const uint64_t uncompressed_size = cont.dsize;
@@ -1690,7 +1805,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
 
         f_in = zxc_open_input(resolved_in_path);
         if (!f_in) {
-            zxc_log("Error open input %s: %s\n", in_path, strerror(errno));
+            zxc_log("Error: cannot open input %s: %s\n", in_path, strerror(errno));
             if (mode == MODE_INTEGRITY && json_output) zxc_test_json_cannot_open(in_path);
             return 1;
         }
@@ -1771,9 +1886,9 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         // Private while written if the input's mode is restored at the end
         if (zxc_output_open(&output, resolved_out_path, force, in_attrs.valid) != 0) {
             if (errno == EEXIST && !force)
-                zxc_log("Output exists. Use -f to overwrite '%s'.\n", out_path);
+                zxc_log("Error: output exists. Use -f to overwrite '%s'.\n", out_path);
             else
-                zxc_log("Error creating output %s: %s\n", out_path, strerror(errno));
+                zxc_log("Error: cannot create output %s: %s\n", out_path, strerror(errno));
             if (!use_stdin) fclose(f_in);
             return 1;
         }
@@ -1786,7 +1901,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     // Prevent writing binary data to the terminal unless forced
     if (use_stdout && isatty(fileno(stdout)) && mode == MODE_COMPRESS && !force) {
         zxc_log(
-            "Refusing to write compressed data to terminal.\n"
+            "Error: refusing to write compressed data to terminal.\n"
             "For help, type: zxc -h\n");
         if (!use_stdin) fclose(f_in);
         return 1;
@@ -1961,12 +2076,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                     in_path ? in_path : "<stdin>", verified ? "true" : "false", state, dt);
             } else if (g_verbose) {
                 printf(
-                    "%s: OK\n"
+                    "%s: %sOK%s\n"
                     "  Checksum:     %s\n"
                     "  Time:         %.3fs\n",
-                    in_path ? in_path : "<stdin>", summary, dt);
+                    in_path ? in_path : "<stdin>", ZXC_CO(ZXC_ANSI_GREEN), ZXC_CO(ZXC_ANSI_RESET),
+                    summary, dt);
             } else {
-                printf("%s: OK\n", in_path ? in_path : "<stdin>");
+                printf("%s: %sOK%s\n", in_path ? in_path : "<stdin>", ZXC_CO(ZXC_ANSI_GREEN),
+                       ZXC_CO(ZXC_ANSI_RESET));
             }
         } else {
             zxc_log_v("Processed %lld bytes in %.3fs\n", (long long)bytes, dt);
@@ -1996,7 +2113,8 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                     "}\n",
                     in_path ? in_path : "<stdin>", reason);
             } else {
-                fprintf(stderr, "%s: FAILED (%s)\n", in_path ? in_path : "<stdin>", reason);
+                fprintf(stderr, "%s: %sFAILED%s (%s)\n", in_path ? in_path : "<stdin>",
+                        ZXC_CE(ZXC_ANSI_RED), ZXC_CE(ZXC_ANSI_RESET), reason);
                 if (needs_dict)
                     fprintf(stderr,
                             "  This archive was compressed with a dictionary; pass it with -D.\n");
@@ -2016,6 +2134,34 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
  * Parses arguments and dispatches execution to Benchmark, Compress, or
  * Decompress modes.
  */
+// Applies the last --color of the command line before the options are
+// processed, so that an error raised by an earlier option is colored as asked.
+// A silent first getopt pass: invalid values are left to the option loop.
+// It runs on a copy of argv, which getopt_long reorders: "zxc 25 -b" must not
+// reach the option loop as "zxc -b 25".
+static void zxc_color_prescan(const int argc, char** argv, const char* short_options,
+                              const struct option* long_options) {
+    char** const args = malloc(((size_t)argc + 1) * sizeof(*args));
+    if (args != NULL) {
+        memcpy(args, argv, (size_t)argc * sizeof(*args));
+        args[argc] = NULL;
+        int opt;
+        opterr = 0;
+        while ((opt = getopt_long(argc, args, short_options, long_options, NULL)) != -1) {
+            if (opt == OPT_COLOR) {
+                const int color_mode = zxc_color_parse(optarg);
+                if (color_mode >= 0) g_color_mode = color_mode;
+            } else if ((opt == 'b' || opt == OPT_FAVOR_DECODE_SPEED) && optarg == NULL) {
+                (void)cli_number_arg(argc, args);  // as the option loop does
+            }
+        }
+        opterr = 1;
+        optind = ZXC_GETOPT_REWIND;
+        free(args);
+    }
+    zxc_color_init();
+}
+
 int main(int argc, char** argv) {
     zxc_mode_t mode = MODE_COMPRESS;
     int to_stdout = 0;
@@ -2026,6 +2172,7 @@ int main(int argc, char** argv) {
     signal(SIGPIPE, SIG_DFL);
 #endif
     zxc_install_signal_cleanup();
+    zxc_color_init();
 
     /* As "unzxc", default to decompression; as "zxccat", to zxc -dcf on every
      * argument. An explicit mode flag below still wins. */
@@ -2057,9 +2204,11 @@ int main(int argc, char** argv) {
     const char* dict_path = NULL;
     const char* output_path = NULL;
 
+    static const char short_options[] = "1234567b::B:cCdD:fho:jklmrNqST:tvVz";
     static const struct option long_options[] = {
         {"train", no_argument, 0, OPT_TRAIN_DICT},
         {"progress", required_argument, 0, OPT_PROGRESS},
+        {"color", required_argument, 0, OPT_COLOR},
         {"no-preserve", no_argument, 0, OPT_NO_PRESERVE},
         {"favor-decode-speed", optional_argument, 0, OPT_FAVOR_DECODE_SPEED},
         {"output", required_argument, 0, 'o'},
@@ -2090,8 +2239,10 @@ int main(int argc, char** argv) {
     int opt;
     int multiple_mode = 0;
     int recursive_mode = 0;
-    while ((opt = getopt_long(argc, argv, "1234567b::B:cCdD:fho:jklmrNqST:tvVz", long_options,
-                              NULL)) != -1) {
+    g_args_given = malloc(((size_t)argc + 1) * sizeof(*g_args_given));
+    if (g_args_given != NULL) memcpy(g_args_given, argv, ((size_t)argc + 1) * sizeof(*argv));
+    zxc_color_prescan(argc, argv, short_options, long_options);
+    while ((opt = getopt_long(argc, argv, short_options, long_options, NULL)) != -1) {
         switch (opt) {
             case 'z':
                 mode = MODE_COMPRESS;
@@ -2112,7 +2263,7 @@ int main(int argc, char** argv) {
                     char* end = NULL;
                     const long secs = strtol(bench_arg, &end, 10);
                     if (end == bench_arg || *end != '\0' || secs < 1 || secs > 3600) {
-                        fprintf(stderr, "Error: duration must be between 1 and 3600 seconds\n");
+                        zxc_err("Error: duration must be between 1 and 3600 seconds\n");
                         return 1;
                     }
                     bench_seconds = (int)secs;
@@ -2144,8 +2295,7 @@ int main(int argc, char** argv) {
                 char* end = NULL;
                 const long threads = strtol(optarg, &end, 10);
                 if (end == optarg || *end != '\0' || threads < 0 || threads > ZXC_MAX_THREADS) {
-                    fprintf(stderr, "Error: num_threads must be between 0 and %d\n",
-                            ZXC_MAX_THREADS);
+                    zxc_err("Error: num_threads must be between 0 and %d\n", ZXC_MAX_THREADS);
                     return 1;
                 }
                 num_threads = (int)threads;
@@ -2201,7 +2351,7 @@ int main(int argc, char** argv) {
                 char* end = NULL;
                 const long pct = strtol(pct_arg, &end, 10);
                 if (end == pct_arg || *end != '\0' || pct < 1 || pct > ZXC_FAVOR_DECODE_SPEED_MAX) {
-                    fprintf(stderr, "Error: --favor-decode-speed budget must be 1 to %d\n",
+                    zxc_err("Error: --favor-decode-speed budget must be 1 to %d\n",
                             ZXC_FAVOR_DECODE_SPEED_MAX);
                     return 1;
                 }
@@ -2216,7 +2366,14 @@ int main(int argc, char** argv) {
                 else if (optarg != NULL && strcmp(optarg, "never") == 0)
                     g_progress_mode = ZXC_PROGRESS_NEVER;
                 else {
-                    fprintf(stderr, "Error: --progress must be 'auto', 'always' or 'never'\n");
+                    zxc_err("Error: --progress must be 'auto', 'always' or 'never'\n");
+                    return 1;
+                }
+                break;
+            case OPT_COLOR:
+                // Applied by zxc_color_prescan(); only the value is checked here
+                if (zxc_color_parse(optarg) < 0) {
+                    zxc_err("Error: --color must be 'auto', 'always' or 'never'\n");
                     return 1;
                 }
                 break;
@@ -2247,9 +2404,9 @@ int main(int argc, char** argv) {
                         : 0;
                 if (end == optarg || *end != '\0' || bs < ZXC_BLOCK_SIZE_MIN ||
                     (bs & (bs - 1)) != 0) {
-                    fprintf(stderr,
-                            "Error: block-size must be a power of 2 between 4K and 2M\n"
-                            "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
+                    zxc_err(
+                        "Error: block-size must be a power of 2 between 4K and 2M\n"
+                        "  Examples: -B 4K, -B 128K, -B 1M, -B 2M\n");
                     return 1;
                 }
                 block_size = (size_t)bs;
@@ -2293,13 +2450,12 @@ int main(int argc, char** argv) {
     if (dict_path) {
         char resolved_dict[4096];
         if (zxc_validate_input_path(dict_path, resolved_dict, sizeof(resolved_dict)) != 0) {
-            fprintf(stderr, "Error: invalid dictionary path '%s': %s\n", dict_path,
-                    strerror(errno));
+            zxc_err("Error: invalid dictionary path '%s': %s\n", dict_path, strerror(errno));
             return 1;
         }
         FILE* f_dict = fopen(resolved_dict, "rb");
         if (!f_dict) {
-            fprintf(stderr, "Error: cannot open dictionary '%s': %s\n", dict_path, strerror(errno));
+            zxc_err("Error: cannot open dictionary '%s': %s\n", dict_path, strerror(errno));
             return 1;
         }
         fseeko(f_dict, 0, SEEK_END);
@@ -2307,13 +2463,13 @@ int main(int argc, char** argv) {
         fseeko(f_dict, 0, SEEK_SET);
         if (fsize <= 0 ||
             (size_t)fsize > ZXC_DICT_SIZE_MAX + ZXC_DICT_HEADER_SIZE + ZXC_HUF_TABLE_SIZE) {
-            fprintf(stderr, "Error: dictionary file '%s' has invalid size\n", dict_path);
+            zxc_err("Error: dictionary file '%s' has invalid size\n", dict_path);
             fclose(f_dict);
             return 1;
         }
         uint8_t* zxd_buf = (uint8_t*)malloc((size_t)fsize);
         if (!zxd_buf || fread(zxd_buf, 1, (size_t)fsize, f_dict) != (size_t)fsize) {
-            fprintf(stderr, "Error: failed to read dictionary '%s'\n", dict_path);
+            zxc_err("Error: failed to read dictionary '%s'\n", dict_path);
             free(zxd_buf);
             fclose(f_dict);
             return 1;
@@ -2325,7 +2481,7 @@ int main(int argc, char** argv) {
         const void* huf = NULL;
         const int rc = zxc_dict_load(zxd_buf, (size_t)fsize, &content, &content_size, &huf, NULL);
         if (rc != ZXC_OK) {
-            fprintf(stderr, "Error: invalid dictionary '%s': %s\n", dict_path, zxc_error_name(rc));
+            zxc_err("Error: invalid dictionary '%s': %s\n", dict_path, zxc_error_name(rc));
             free(zxd_buf);
             return 1;
         }
@@ -2333,7 +2489,7 @@ int main(int argc, char** argv) {
          * validates it, but re-check the untrusted size at the alloc/copy
          * boundary so the bound governing memcpy is explicit at the sink. */
         if (content_size == 0 || content_size > ZXC_DICT_SIZE_MAX) {
-            fprintf(stderr, "Error: invalid dictionary '%s'\n", dict_path);
+            zxc_err("Error: invalid dictionary '%s'\n", dict_path);
             free(zxd_buf);
             return 1;
         }
@@ -2365,7 +2521,7 @@ int main(int argc, char** argv) {
      */
     if (mode == MODE_TRAIN_DICT) {
         if (optind >= argc) {
-            fprintf(stderr, "Error: --train requires input files as training samples.\n");
+            zxc_err("Error: --train requires input files as training samples.\n");
             free(dict);
             return 1;
         }
@@ -2373,7 +2529,7 @@ int main(int argc, char** argv) {
         void** samples = (void**)malloc((size_t)n_files * sizeof(void*));
         size_t* sample_sizes = (size_t*)malloc((size_t)n_files * sizeof(size_t));
         if (!samples || !sample_sizes) {
-            fprintf(stderr, "Error: memory allocation failed\n");
+            zxc_err("Error: memory allocation failed\n");
             free(samples);
             free(sample_sizes);
             free(dict);
@@ -2383,12 +2539,12 @@ int main(int argc, char** argv) {
         for (int i = optind; i < argc; i++) {
             char resolved[4096];
             if (zxc_validate_input_path(argv[i], resolved, sizeof(resolved)) != 0) {
-                fprintf(stderr, "Warning: invalid path '%s', skipping\n", argv[i]);
+                zxc_err("Warning: invalid path '%s', skipping\n", argv[i]);
                 continue;
             }
             FILE* sf = fopen(resolved, "rb");
             if (!sf) {
-                fprintf(stderr, "Warning: cannot open '%s', skipping\n", argv[i]);
+                zxc_err("Warning: cannot open '%s', skipping\n", argv[i]);
                 continue;
             }
             fseeko(sf, 0, SEEK_END);
@@ -2406,7 +2562,7 @@ int main(int argc, char** argv) {
             const size_t rd = fread(buf, 1, sz, sf);
             fclose(sf);
             if (rd != sz) {
-                fprintf(stderr, "Warning: short read on '%s', skipping\n", resolved);
+                zxc_err("Warning: short read on '%s', skipping\n", resolved);
                 free(buf);
                 continue;
             }
@@ -2415,7 +2571,7 @@ int main(int argc, char** argv) {
             n_loaded++;
         }
         if (n_loaded == 0) {
-            fprintf(stderr, "Error: no valid samples loaded\n");
+            zxc_err("Error: no valid samples loaded\n");
             free(samples);
             free(sample_sizes);
             free(dict);
@@ -2426,7 +2582,7 @@ int main(int argc, char** argv) {
         if (block_size > 0 && block_size < dict_cap) dict_cap = block_size;
         uint8_t* dict_buf = (uint8_t*)malloc(dict_cap);
         if (!dict_buf) {
-            fprintf(stderr, "Error: memory allocation failed\n");
+            zxc_err("Error: memory allocation failed\n");
             for (int i = 0; i < n_loaded; i++) free(samples[i]);
             free(samples);
             free(sample_sizes);
@@ -2452,13 +2608,13 @@ int main(int argc, char** argv) {
         free(sample_sizes);
 
         if (dict_sz <= 0) {
-            fprintf(stderr, "Error: training failed: %s\n", zxc_error_name((int)dict_sz));
+            zxc_err("Error: training failed: %s\n", zxc_error_name((int)dict_sz));
             free(dict_buf);
             free(dict);
             return 1;
         }
         if (huf_rc != ZXC_OK) {
-            fprintf(stderr, "Error: literal table training failed: %s\n", zxc_error_name(huf_rc));
+            zxc_err("Error: literal table training failed: %s\n", zxc_error_name(huf_rc));
             free(dict_buf);
             free(dict);
             return 1;
@@ -2467,7 +2623,7 @@ int main(int argc, char** argv) {
         const size_t zxd_bound = zxc_dict_save_bound((size_t)dict_sz);
         uint8_t* zxd = (uint8_t*)malloc(zxd_bound);
         if (!zxd) {
-            fprintf(stderr, "Error: memory allocation failed\n");
+            zxc_err("Error: memory allocation failed\n");
             free(dict_buf);
             free(dict);
             return 1;
@@ -2476,7 +2632,7 @@ int main(int argc, char** argv) {
             zxc_dict_save(dict_buf, (size_t)dict_sz, huf_lengths, zxd, zxd_bound);
         free(dict_buf);
         if (zxd_sz <= 0) {
-            fprintf(stderr, "Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
+            zxc_err("Error: dict save failed: %s\n", zxc_error_name((int)zxd_sz));
             free(zxd);
             free(dict);
             return 1;
@@ -2511,9 +2667,9 @@ int main(int argc, char** argv) {
         zxc_output_t out;
         if (zxc_output_open(&out, final_path, force, 0) != 0) {
             if (errno == EEXIST && !force)
-                fprintf(stderr, "Output exists. Use -f to overwrite '%s'.\n", final_path);
+                zxc_err("Error: output exists. Use -f to overwrite '%s'.\n", final_path);
             else
-                fprintf(stderr, "Error: cannot create '%s': %s\n", final_path, strerror(errno));
+                zxc_err("Error: cannot create '%s': %s\n", final_path, strerror(errno));
             free(zxd);
             free(dict);
             return 1;
@@ -2522,13 +2678,13 @@ int main(int argc, char** argv) {
         const int close_rc = fclose(out.f);
         free(zxd);
         if (nwritten != (size_t)zxd_sz || close_rc != 0) {
-            fprintf(stderr, "Error: failed to write '%s': %s\n", final_path, strerror(errno));
+            zxc_err("Error: failed to write '%s': %s\n", final_path, strerror(errno));
             zxc_output_discard(&out);
             free(dict);
             return 1;
         }
         if (zxc_output_commit(&out) != 0) {
-            fprintf(stderr, "Error: cannot replace '%s': %s\n", final_path, strerror(errno));
+            zxc_err("Error: cannot replace '%s': %s\n", final_path, strerror(errno));
             zxc_output_discard(&out);
             free(dict);
             return 1;
@@ -2548,7 +2704,7 @@ int main(int argc, char** argv) {
      */
     if (mode == MODE_BENCHMARK) {
         if (optind >= argc) {
-            zxc_log("Benchmark requires input file.\n");
+            zxc_log("Error: benchmark requires input file.\n");
             free(dict);
             return 1;
         }
@@ -2805,7 +2961,7 @@ int main(int argc, char** argv) {
     if (mode == MODE_LIST) {
         free(dict);
         if (optind >= argc) {
-            zxc_log("List mode requires input file.\n");
+            zxc_log("Error: list mode requires input file.\n");
             return 1;
         }
         int ret = 0;
@@ -2854,13 +3010,13 @@ int main(int argc, char** argv) {
 
     // If no files passed but we aren't using stdin, or mode expects files:
     if (optind >= argc && mode == MODE_INTEGRITY) {
-        zxc_log("Test mode requires at least one input file.\n");
+        zxc_log("Error: test mode requires at least one input file.\n");
         free(dict);
         return 1;
     }
 
     if (multiple_mode && optind >= argc) {
-        zxc_log("Multiple files mode requires at least one input file.\n");
+        zxc_log("Error: multiple files mode requires at least one input file.\n");
         free(dict);
         return 1;
     }

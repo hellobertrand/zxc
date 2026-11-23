@@ -106,6 +106,9 @@ By default **zxc** compresses a single *INPUT-FILE*. Without *OUTPUT-FILE*, the 
 **--progress** *MODE*
 : Control the progress display: **auto** (default) shows a progress bar on stderr when it is a terminal and the file is larger than 1 MB; **always** reports progress even when stderr is not a terminal (one line per update, at most once per second) or when the size is unknown (stdin); **never** disables it. **-q** suppresses progress regardless of this option.
 
+**--color** *MODE*
+: Control colored diagnostics (**Error:** and **Warning:** prefixes, **-t** **OK**/**FAILED** results): **auto** (default) colors them only on a terminal, and not when **NO_COLOR** is set or **TERM** is **dumb**; **always** forces colors, even through a pipe; **never** disables them.
+
 ## SPECIAL OPTIONS
 
 **-V**, **--version**

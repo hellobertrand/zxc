@@ -263,6 +263,14 @@ bar on stderr when it is a terminal and the file is larger than 1 MB;
 (one line per update, at most once per second) or when the size is
 unknown (stdin); \f[B]never\f[R] disables it.
 \f[B]\-q\f[R] suppresses progress regardless of this option.
+.TP
+\f[B]\-\-color\f[R] \f[I]MODE\f[R]
+Control colored diagnostics (\f[B]Error:\f[R] and \f[B]Warning:\f[R]
+prefixes, \f[B]\-t\f[R] \f[B]OK\f[R]/\f[B]FAILED\f[R] results):
+\f[B]auto\f[R] (default) colors them only on a terminal, and not when
+\f[B]NO_COLOR\f[R] is set or \f[B]TERM\f[R] is \f[B]dumb\f[R];
+\f[B]always\f[R] forces colors, even through a pipe; \f[B]never\f[R]
+disables them.
 .SH SPECIAL OPTIONS
 .TP
 \f[B]\-V\f[R], \f[B]\-\-version\f[R]

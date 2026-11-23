@@ -2641,6 +2641,115 @@ case "$(uname -s 2>/dev/null)" in
         ;;
 esac
 
+# 35. Colored output (--color)
+echo "Testing Colored Output (--color)..."
+ESC=$(printf '\033')
+"$ZXC_BIN" -z -f -k "$TEST_FILE_ARG" 2> /dev/null
+
+# 35.1 --color=always colors -t results, even through a pipe; never the progress bar
+OUT=$("$ZXC_BIN" --color=always -t "$TEST_FILE_ARG.zxc")
+"$ZXC_BIN" --color=always --progress=always -f -c "$TEST_FILE_ARG" > /dev/null \
+    2> "$TEST_DIR/color1.err"
+if [[ "$OUT" == *"${ESC}["*"OK"* ]] && ! grep -q "$ESC" "$TEST_DIR/color1.err"; then
+    log_pass "--color=always emits ANSI colors off-tty"
+else
+    log_fail "--color=always should emit ANSI colors"
+fi
+
+# 35.2 auto off-tty, never, and NO_COLOR stay plain
+OUT_A=$("$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1)
+OUT_N=$("$ZXC_BIN" --color=never -t "$TEST_FILE_ARG.zxc" 2>&1)
+OUT_E=$(NO_COLOR=1 "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1)
+if [[ "$OUT_A" != *"$ESC"* ]] && [[ "$OUT_N" != *"$ESC"* ]] && [[ "$OUT_E" != *"$ESC"* ]]; then
+    log_pass "--color=auto off-tty, --color=never and NO_COLOR are plain"
+else
+    log_fail "No ANSI colors expected (auto off-tty / never / NO_COLOR)"
+fi
+
+# 35.3 Errors get a colored prefix; invalid --color values are rejected
+set +e
+ERR=$("$ZXC_BIN" --color=always -B 3 "$TEST_FILE_ARG" 2>&1)
+"$ZXC_BIN" --color=bogus "$TEST_FILE_ARG" > /dev/null 2>&1
+RET=$?
+set -e
+if [[ "$ERR" == *"${ESC}["*"Error:"* ]] && [[ $RET -ne 0 ]]; then
+    log_pass "--color colors errors and rejects invalid values"
+else
+    log_fail "--color: colored error prefix / invalid value check failed"
+fi
+
+# 35.4 --color placed after the failing option still applies to its error
+set +e
+ERR_LATE=$("$ZXC_BIN" -B 3 --color=always "$TEST_FILE_ARG" 2>&1)
+ERR_LAST=$("$ZXC_BIN" --color=always -B 3 --color=never "$TEST_FILE_ARG" 2>&1)
+# "--color=always" is here the value of -o, not an option
+ERR_ARG=$("$ZXC_BIN" --color=never -o --color=always -B 3 "$TEST_FILE_ARG" 2>&1)
+# The early look at --color must not report a bad option a second time
+ERR_ONCE=$("$ZXC_BIN" --color=always --zxc-no-such-option "$TEST_FILE_ARG" 2>&1 |
+    grep -c 'zxc-no-such-option')
+set -e
+if [[ "$ERR_LATE" == *"${ESC}["*"Error:"* ]] && [[ "$ERR_LAST" != *"$ESC"* ]] &&
+    [[ "$ERR_ARG" == *"Error:"* ]] && [[ "$ERR_ARG" != *"$ESC"* ]] && [[ "$ERR_ONCE" -le 1 ]]; then
+    log_pass "--color applies to errors raised by earlier options"
+else
+    log_fail "--color after the failing option should apply (last one wins)"
+fi
+
+# 35.4b The early look at --color leaves the argument order alone: a file named
+# as a number, before an option taking an optional number, stays a file
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] options after a file: POSIX getopt only" ;;
+    *)
+        cp "$TEST_FILE" "$TEST_DIR/25"
+        rm -f "$TEST_DIR/25.zxc"
+        set +e
+        (cd "$TEST_DIR" && "$ZXC_ABS" -q -k -f 25 --favor-decode-speed < /dev/null > /dev/null 2>&1)
+        set -e
+        if [[ -s "$TEST_DIR/25.zxc" ]]; then
+            log_pass "A numeric file name before --favor-decode-speed stays a file"
+        else
+            log_fail "File '25' was taken as the value of a later option"
+        fi
+        rm -f "$TEST_DIR/25" "$TEST_DIR/25.zxc"
+        ;;
+esac
+
+# 35.5 On a terminal: auto colors, and NO_COLOR, TERM=dumb and --color=never do not.
+# Runs the command on a pseudo-terminal: util-linux script, else the BSD one.
+run_tty() {
+    if script -qec true /dev/null > /dev/null 2>&1 < /dev/null; then
+        script -qec "$(printf '%q ' "$@")" /dev/null < /dev/null
+    else
+        script -q /dev/null "$@" < /dev/null
+    fi
+}
+# An MSYS pty is a pipe to a native Windows zxc.exe, never a console.
+TTY_OK=0
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) ;;
+    *)
+        if [[ "$(run_tty sh -c 'test -t 1 && test -t 2 && echo ZXC_TTY' 2> /dev/null || true)" == *ZXC_TTY* ]]; then
+            TTY_OK=1
+        fi
+        ;;
+esac
+if [[ $TTY_OK -eq 1 ]]; then
+    TTY_A=$(run_tty env -u NO_COLOR TERM=xterm "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    TTY_E=$(run_tty env NO_COLOR=1 TERM=xterm "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    TTY_D=$(run_tty env -u NO_COLOR TERM=dumb "$ZXC_BIN" -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    TTY_N=$(run_tty env -u NO_COLOR TERM=xterm "$ZXC_BIN" --color=never -t "$TEST_FILE_ARG.zxc" 2>&1 || true)
+    if [[ "$TTY_A" == *"${ESC}["*"OK"* ]] && [[ "$TTY_E" == *"OK"* ]] && [[ "$TTY_E" != *"$ESC"* ]] &&
+        [[ "$TTY_D" == *"OK"* ]] && [[ "$TTY_D" != *"$ESC"* ]] &&
+        [[ "$TTY_N" == *"OK"* ]] && [[ "$TTY_N" != *"$ESC"* ]]; then
+        log_pass "On a terminal, auto colors; NO_COLOR, TERM=dumb and --color=never do not"
+    else
+        log_fail "Terminal color policy (auto / NO_COLOR / TERM=dumb / --color=never)"
+    fi
+else
+    echo "  [SKIP] terminal color policy: no pseudo-terminal (script) available"
+fi
+rm -f "$TEST_DIR/color1.err"
+
 # A failed write is reported as such, even with a corrupt block further on
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] write failure code: POSIX only" ;;
