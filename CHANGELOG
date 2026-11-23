@@ -1,3 +1,10 @@
+[v1.0.2] - 2026-11-24
+api: Adds ZXC_BUILD_VARIANTS and ZXC_DICTIONARY build trim options (#641, #643, #646)
+api: Nix support and CI nix job. (#638)
+fix: Guard shared helpers in trimmed builds (#652)
+fix: Probe -march=native support (#640)
+fix: Install include dir from CMAKE_INSTALL_INCLUDEDIR (#639)
+
 [v1.0.1] - 2026-11-14
 fix: Remove redundant homepage field (#620)
 fix: Drop bad_esc sum miscompiled by GCC 14.2 AVX-512 (#614)
