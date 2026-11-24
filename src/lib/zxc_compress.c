@@ -34,6 +34,9 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
+// A copy of an encoder bound to _default is never dispatched (universal builds).
+#if defined(ZXC_VARIANT_PRIMARY) || !defined(ZXC_ENCODER_DEFAULT)
+
 /**
  * @brief Computes a hash value for either a 4-byte or 5-byte sequence.
  *
@@ -2502,3 +2505,5 @@ int zxc_compress_chunk_wrapper(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT
 
     return (int)w;
 }
+
+#endif  // ZXC_VARIANT_PRIMARY || !ZXC_ENCODER_DEFAULT

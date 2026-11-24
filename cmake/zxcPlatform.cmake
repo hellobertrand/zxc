@@ -26,6 +26,11 @@ foreach(_arch IN LISTS ZXC_TARGET_ARCHS)
         set(ZXC_TARGET_ARM32 ON)
     endif()
 endforeach()
+# The processor stays x86_64/AMD64 under -m32, -A Win32 or MinGW32; the
+# dispatcher selects x86 variants on x86-64 only.
+if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+    set(ZXC_TARGET_X86 OFF)
+endif()
 
 if(ZXC_NATIVE_ARCH AND (CMAKE_CROSSCOMPILING OR
                         NOT "${ZXC_TARGET_ARCHS}" STREQUAL "${CMAKE_SYSTEM_PROCESSOR}"))
@@ -39,6 +44,11 @@ endif()
 # =============================================================================
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     message(STATUS "Emscripten detected - configuring for WebAssembly.")
+    # Scalar, whatever EMSCRIPTEN_SYSTEM_PROCESSOR says.
+    set(ZXC_TARGET_X86     OFF)
+    set(ZXC_TARGET_AARCH64 OFF)
+    set(ZXC_TARGET_ARM32   OFF)
+    add_compile_definitions(ZXC_DISABLE_SIMD)
     set(ZXC_BUILD_CLI    OFF CACHE BOOL "" FORCE)
     set(ZXC_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
     set(ZXC_NATIVE_ARCH  OFF CACHE BOOL "" FORCE)
@@ -47,11 +57,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
 
-# Removed after 1.0: no concrete use. The macro stays for embedders (kernel, fuzzing).
-if(DEFINED ZXC_DISABLE_SIMD)
-    message(WARNING "ZXC_DISABLE_SIMD=${ZXC_DISABLE_SIMD}: no longer a build option, ignored; "
-                    "ZXC_BUILD_SIMD_VARIANTS trims the library.")
+# Removed after 1.0. The macro stays for embedders (kernel, fuzzing); an old
+# cache entry is dropped so the warning shows once.
+if(ZXC_DISABLE_SIMD)
+    message(WARNING "ZXC_DISABLE_SIMD is no longer a build option and is ignored: "
+                    "CMake builds no scalar-only library.")
 endif()
+unset(ZXC_DISABLE_SIMD CACHE)
 
 # =============================================================================
 # Native tuning

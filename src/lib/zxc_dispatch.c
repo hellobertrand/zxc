@@ -476,8 +476,6 @@ static ZXC_COLD ZXC_NOINLINE zxc_decompress_func_t zxc_decompress_safe_resolve(v
     if (v == &zxc_variants_avx2) f = zxc_decompress_chunk_wrapper_safe_avx2;
 #elif defined(__arm__) || defined(_M_ARM)
     if (v == &zxc_variants_neon32) f = zxc_decompress_chunk_wrapper_safe_neon32;
-#else
-    (void)v;
 #endif
 #if ZXC_USE_C11_ATOMICS
     atomic_store_explicit(&zxc_decompress_safe_ptr, f, memory_order_release);

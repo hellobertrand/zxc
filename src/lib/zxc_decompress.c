@@ -38,6 +38,9 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
+// A copy of an LZ decoder bound to _default is never dispatched (universal builds).
+#if defined(ZXC_VARIANT_PRIMARY) || !defined(ZXC_LZ_DECODER_DEFAULT)
+
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \
     defined(ZXC_USE_AVX512)
 /**
@@ -1736,3 +1739,5 @@ int zxc_decompress_chunk_wrapper_safe(const zxc_cctx_t* RESTRICT ctx, const uint
                                       const size_t dst_cap, const uint64_t block_index) {
     return zxc_decompress_chunk_wrapper_body(ctx, src, src_sz, dst, dst_cap, block_index, 0, 1);
 }
+
+#endif  // ZXC_VARIANT_PRIMARY || !ZXC_LZ_DECODER_DEFAULT
