@@ -399,13 +399,28 @@ jobs:
           $SUDO env DEBIAN_FRONTEND=noninteractive \
             apt-get install -y cmake build-essential curl xz-utils ca-certificates
 
+      - name: Restore SDE cache
+        id: sde-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: sde.tar.xz
+          key: sde-lin-${{ env.SDE_SHA256 }}
+
       - name: Install Intel SDE (pinned + checksum-verified)
         run: |
-          curl -fsSL -o sde.tar.xz "$SDE_URL"
+          # The checksum below also covers a tarball restored from the cache.
+          [ -f sde.tar.xz ] || curl -fsSL -o sde.tar.xz "$SDE_URL"
           echo "${SDE_SHA256}  sde.tar.xz" | sha256sum -c -
           mkdir -p "$HOME/sde"
           tar -xf sde.tar.xz -C "$HOME/sde" --strip-components=1
           echo "$HOME/sde" >> "$GITHUB_PATH"
+
+      - name: Save SDE cache
+        if: github.ref == 'refs/heads/main' && steps.sde-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: sde.tar.xz
+          key: ${{ steps.sde-cache.outputs.cache-primary-key }}
 
       - name: Configure, Build & Test (Static & Shared) under SDE
         shell: bash
@@ -469,16 +484,31 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      - name: Restore SDE cache
+        id: sde-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: sde.tar.xz
+          key: sde-win-${{ env.SDE_SHA256 }}
+
       - name: Install Intel SDE (pinned + checksum-verified)
         shell: bash
         run: |
-          curl -fsSL -o sde.tar.xz "$SDE_URL"
+          # The checksum below also covers a tarball restored from the cache.
+          [ -f sde.tar.xz ] || curl -fsSL -o sde.tar.xz "$SDE_URL"
           echo "${SDE_SHA256}  sde.tar.xz" | sha256sum -c -
           # SDE 10.8 fails to start from a path with a one-character directory.
           SDE_DIR="/c/zxc-sde"
           mkdir -p "$SDE_DIR"
           tar -xf sde.tar.xz -C "$SDE_DIR" --strip-components=1
           cygpath -w "$SDE_DIR" >> "$GITHUB_PATH"
+
+      - name: Save SDE cache
+        if: github.ref == 'refs/heads/main' && steps.sde-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: sde.tar.xz
+          key: ${{ steps.sde-cache.outputs.cache-primary-key }}
 
       - name: Configure, Build & Test (Static & Shared) under SDE
         shell: bash
