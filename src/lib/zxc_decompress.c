@@ -38,7 +38,7 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-// A copy of an LZ decoder bound to _default is never dispatched (universal builds).
+// Never dispatched (universal builds).
 #if defined(ZXC_VARIANT_PRIMARY) || !defined(ZXC_LZ_DECODER_DEFAULT)
 
 #if defined(ZXC_USE_NEON64) || defined(ZXC_USE_NEON32) || defined(ZXC_USE_AVX2) || \

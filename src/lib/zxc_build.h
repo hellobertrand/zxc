@@ -20,8 +20,7 @@
 #define ZXC_SIMD_TRIMMED
 #endif
 
-// The primary copy (_default, or a no-suffix build) keeps every role and the
-// ISA-independent code; the others drop the roles bound to _default.
+// Primary copy (_default or no suffix): the others drop the roles bound to _default.
 #ifdef ZXC_FUNCTION_SUFFIX
 #define ZXC_PRIMARY__default 1
 #define ZXC_PRIMARY__avx2 0
@@ -36,7 +35,7 @@
 #define ZXC_VARIANT_PRIMARY 1
 #endif
 
-// Nothing to dispatch: no SIMD, or a target with no variant (only x86-64 and ARM32 have some).
+// Nothing to dispatch: no SIMD, or no variant (x86-64 and ARM32 only).
 #if !defined(ZXC_ONLY_DEFAULT) && \
     (defined(ZXC_DISABLE_SIMD) || \
      (!defined(__x86_64__) && !defined(_M_X64) && !defined(__arm__) && !defined(_M_ARM)))

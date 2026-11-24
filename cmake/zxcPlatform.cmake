@@ -26,10 +26,21 @@ foreach(_arch IN LISTS ZXC_TARGET_ARCHS)
         set(ZXC_TARGET_ARM32 ON)
     endif()
 endforeach()
-# The processor stays x86_64/AMD64 under -m32, -A Win32 or MinGW32; the
-# dispatcher selects x86 variants on x86-64 only.
-if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
-    set(ZXC_TARGET_X86 OFF)
+# -m32, Win32 and MinGW32 still report x86_64/AMD64: probe as the dispatcher does.
+if(ZXC_TARGET_X86 AND NOT (APPLE AND CMAKE_OSX_ARCHITECTURES))
+    include(CheckCSourceCompiles)
+    # Compile only, no link.
+    set(_zxc_try_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    check_c_source_compiles("
+#if !defined(__x86_64__) && !defined(_M_X64)
+#error not x86-64
+#endif
+int zxc_x86_64_probe;" ZXC_COMPILER_X86_64)
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_zxc_try_type}")
+    if(NOT ZXC_COMPILER_X86_64)
+        set(ZXC_TARGET_X86 OFF)
+    endif()
 endif()
 
 if(ZXC_NATIVE_ARCH AND (CMAKE_CROSSCOMPILING OR
@@ -44,7 +55,6 @@ endif()
 # =============================================================================
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     message(STATUS "Emscripten detected - configuring for WebAssembly.")
-    # Scalar, whatever EMSCRIPTEN_SYSTEM_PROCESSOR says.
     set(ZXC_TARGET_X86     OFF)
     set(ZXC_TARGET_AARCH64 OFF)
     set(ZXC_TARGET_ARM32   OFF)
@@ -57,8 +67,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
 
-# Removed after 1.0. The macro stays for embedders (kernel, fuzzing); an old
-# cache entry is dropped so the warning shows once.
+# Removed after 1.0; the macro stays for embedders.
 if(ZXC_DISABLE_SIMD)
     message(WARNING "ZXC_DISABLE_SIMD is no longer a build option and is ignored: "
                     "CMake builds no scalar-only library.")

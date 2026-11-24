@@ -34,7 +34,7 @@
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 
-// A copy of an encoder bound to _default is never dispatched (universal builds).
+// Never dispatched (universal builds).
 #if defined(ZXC_VARIANT_PRIMARY) || !defined(ZXC_ENCODER_DEFAULT)
 
 /**
