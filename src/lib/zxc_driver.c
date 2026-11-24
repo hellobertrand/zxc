@@ -46,8 +46,6 @@
 // only the file-positioning names are remapped here, next to their users.
 #if defined(_WIN32)
 #include <io.h> /* _get_osfhandle, _fileno */
-#include <malloc.h>
-#include <sys/types.h>
 #include <windows.h>
 
 // Map POSIX file positioning functions to Windows equivalents
@@ -56,6 +54,7 @@
 #else
 #include <errno.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #endif
 
 // Below this block size the per-block system calls cost more than they save.

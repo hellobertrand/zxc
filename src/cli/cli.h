@@ -18,6 +18,7 @@
 #include <limits.h>
 #include <signal.h>  // IWYU pragma: keep
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,7 +32,6 @@
 #include "../../include/zxc_stream.h"     // IWYU pragma: keep
 
 #ifdef _WIN32
-#include <direct.h>
 #include <io.h>
 #include <process.h>
 #include <windows.h>

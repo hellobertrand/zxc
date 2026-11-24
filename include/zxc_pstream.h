@@ -63,7 +63,6 @@
 
 #include "zxc_buffer.h"
 #include "zxc_export.h"
-#include "zxc_opts.h"
 
 #ifdef __cplusplus
 extern "C" {

@@ -20,7 +20,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_dict.h"

@@ -40,7 +40,6 @@
 
 #include "zxc_buffer.h"
 #include "zxc_export.h"
-#include "zxc_opts.h"
 #include "zxc_seekable.h"
 
 #ifdef __cplusplus

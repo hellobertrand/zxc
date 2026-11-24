@@ -20,7 +20,6 @@
 #ifndef ZXC_OPTS_H
 #define ZXC_OPTS_H
 
-#include <stddef.h>
 #include <stdint.h>
 
 #include "zxc_export.h"
