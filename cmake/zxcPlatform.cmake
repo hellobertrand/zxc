@@ -32,6 +32,7 @@ if(ZXC_TARGET_X86 AND NOT (APPLE AND CMAKE_OSX_ARCHITECTURES))
     # Compile only, no link.
     set(_zxc_try_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
     set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    unset(ZXC_COMPILER_X86_64 CACHE)  # rerun: target flags may have changed
     check_c_source_compiles("
 #if !defined(__x86_64__) && !defined(_M_X64)
 #error not x86-64
