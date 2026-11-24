@@ -121,7 +121,6 @@ Installing into a system prefix needs `sudo` on Unix or an elevated shell on Win
 | `ZXC_BUILD_TESTS` | ON | OFF | Build unit tests |
 | `ZXC_INSTALL` | ON | OFF | Generate install rules (headers, pkg-config, CMake package) |
 | `ZXC_ENABLE_COVERAGE` | OFF | OFF | Enable code coverage generation (disables LTO/PGO) |
-| `ZXC_DISABLE_SIMD` | OFF | OFF | Disable hand-written SIMD paths (AVX2/AVX512/NEON) |
 | `ZXC_BUILD_SIMD_VARIANTS` | `all` | `all` | SIMD variants to build: `all`, `decoder` or `minimal` (see [Trimming the library](#trimming-the-library)) |
 | `ZXC_ENABLE_DICT` | ON | ON | Support dictionary frames (compression and decompression) |
 | `ZXC_USE_SYSTEM_RAPIDHASH` | OFF | OFF | Use a system-installed `rapidhash.h` instead of the vendored copy |
@@ -143,9 +142,6 @@ cmake -B build -DZXC_BUILD_CLI=OFF -DZXC_BUILD_TESTS=OFF
 
 # Code coverage build
 cmake -B build -DZXC_ENABLE_COVERAGE=ON
-
-# Disable explicit SIMD code paths (compiler auto-vectorisation is unaffected)
-cmake -B build -DZXC_DISABLE_SIMD=ON
 
 # Warnings as errors, as CI builds (CMake 3.24+)
 cmake -B build -DCMAKE_COMPILE_WARNING_AS_ERROR=ON
@@ -169,8 +165,7 @@ API: every such build reads what any other build wrote.
 | `decoder` | baseline | baseline, AVX2 / NEON | baseline, AVX2 / NEON |
 | `minimal` | baseline | baseline | baseline, AVX2 / NEON |
 
-The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64), unlike
-`ZXC_DISABLE_SIMD`, which removes every hand-written SIMD path. Without an AVX-512
+The baseline tier keeps its intrinsics (SSE2 on x86-64, NEON on AArch64). Without an AVX-512
 variant, AVX-512 CPUs run the AVX2 one.
 
 `ZXC_ENABLE_DICT=OFF` removes dictionary support. Unlike `ZXC_BUILD_SIMD_VARIANTS`, it changes what

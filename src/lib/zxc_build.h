@@ -20,10 +20,10 @@
 #define ZXC_SIMD_TRIMMED
 #endif
 
-// Nothing to dispatch: no SIMD, or trimmed variants on a baseline-only target.
-#if !defined(ZXC_ONLY_DEFAULT) &&                                                       \
-    (defined(ZXC_DISABLE_SIMD) || (defined(ZXC_SIMD_TRIMMED) && !defined(__x86_64__) && \
-                                   !defined(_M_X64) && !defined(__arm__) && !defined(_M_ARM)))
+// Nothing to dispatch: no SIMD, or a target with no variant (only x86-64 and ARM32 have some).
+#if !defined(ZXC_ONLY_DEFAULT) && \
+    (defined(ZXC_DISABLE_SIMD) || \
+     (!defined(__x86_64__) && !defined(_M_X64) && !defined(__arm__) && !defined(_M_ARM)))
 #define ZXC_ONLY_DEFAULT
 #endif
 

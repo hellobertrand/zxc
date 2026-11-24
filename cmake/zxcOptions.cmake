@@ -15,7 +15,6 @@ option(ZXC_BUILD_TESTS "Build unit tests" ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_INSTALL "Generate install rules (headers, pkg-config, CMake package)"
        ${PROJECT_IS_TOP_LEVEL})
 option(ZXC_ENABLE_COVERAGE "Enable code coverage generation" OFF)
-option(ZXC_DISABLE_SIMD "Disable explicit SIMD intrinsics (no AVX/NEON code paths)" OFF)
 # SIMD variants to build (docs/INSTALL.md, "Trimming the library").
 set(ZXC_BUILD_SIMD_VARIANTS "all" CACHE STRING "SIMD variants to build: all, decoder or minimal")
 set_property(CACHE ZXC_BUILD_SIMD_VARIANTS PROPERTY STRINGS all decoder minimal)

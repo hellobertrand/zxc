@@ -39,7 +39,6 @@ endif()
 # =============================================================================
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     message(STATUS "Emscripten detected - configuring for WebAssembly.")
-    set(ZXC_DISABLE_SIMD ON  CACHE BOOL "" FORCE)
     set(ZXC_BUILD_CLI    OFF CACHE BOOL "" FORCE)
     set(ZXC_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
     set(ZXC_NATIVE_ARCH  OFF CACHE BOOL "" FORCE)
@@ -48,8 +47,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
 
-if(ZXC_DISABLE_SIMD)
-    add_compile_definitions(ZXC_DISABLE_SIMD)
+# Removed after 1.0: no concrete use. The macro stays for embedders (kernel, fuzzing).
+if(DEFINED ZXC_DISABLE_SIMD)
+    message(WARNING "ZXC_DISABLE_SIMD=${ZXC_DISABLE_SIMD}: no longer a build option, ignored; "
+                    "ZXC_BUILD_SIMD_VARIANTS trims the library.")
 endif()
 
 # =============================================================================

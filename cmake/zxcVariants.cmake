@@ -50,10 +50,7 @@ else()
     set(ZXC_SIMD_SOURCES huffman)
 endif()
 
-# --- 2. Architecture Specific Variants (skipped in no-intrinsics mode) ---
-if(ZXC_DISABLE_SIMD)
-    message(STATUS "ZXC_DISABLE_SIMD: Skipping SIMD variants (no explicit AVX/NEON code paths).")
-else()
+# --- 2. Architecture Specific Variants ---
 # Driven by the target architectures, not the host: a universal build enables
 # several of these branches at once, so they are independent ifs.
 if(ZXC_TARGET_X86)
@@ -102,5 +99,4 @@ endif()
 if(ZXC_TARGET_ARM32)
     message(STATUS "Building ARMv7 NEON32 variant...")
     zxc_add_variant(_neon32 "-march=armv7-a;-mfpu=neon" "${ZXC_SIMD_SOURCES}")
-endif()
 endif()

@@ -231,8 +231,7 @@ typedef enum {
     ZXC_CPU_GENERIC = 0, /**< @brief Scalar-only fallback.   */
     ZXC_CPU_AVX2 = 1,    /**< @brief x86-64 AVX2 available.  */
     ZXC_CPU_AVX512 = 2,  /**< @brief x86-64 AVX-512F+BW available. */
-    ZXC_CPU_NEON = 3,    /**< @brief ARM NEON available (dedicated variant on 32-bit ARM only;
-                          *          AArch64 baseline, served by _default there). */
+    ZXC_CPU_NEON = 3,    /**< @brief 32-bit ARM NEON available. */
     ZXC_CPU_SSE2 = 4     /**< @brief x86 SSE2 available (no AVX2); x86-64 baseline,
                           *          served by _default (no dedicated variant). */
 } zxc_cpu_feature_t;
@@ -240,8 +239,8 @@ typedef enum {
 /**
  * @brief Probes the running CPU for SIMD support.
  *
- * Uses CPUID on x86-64 (MSVC and GCC/Clang paths), `getauxval` on
- * 32-bit ARM Linux, and compile-time constants on AArch64.
+ * Uses CPUID on x86-64 (MSVC and GCC/Clang paths) and `getauxval` on
+ * 32-bit ARM Linux.
  *
  * @return The highest @ref zxc_cpu_feature_t level supported.
  */
@@ -289,10 +288,6 @@ static zxc_cpu_feature_t zxc_detect_cpu_features(void) {
     } else if (sse2) {
         features = ZXC_CPU_SSE2;
     }
-
-#elif defined(__aarch64__) || defined(_M_ARM64)
-    // ARM64 usually guarantees NEON
-    features = ZXC_CPU_NEON;
 
 #elif defined(__arm__) || defined(_M_ARM)
     // ARM32 Runtime detection for Linux
@@ -426,8 +421,6 @@ static const zxc_variant_set_t* zxc_select_variants(void) {
     // 32-bit ARM: the only arch with a real runtime NEON probe (getauxval).
     // cppcheck-suppress knownConditionTrueFalse
     if (cpu == ZXC_CPU_NEON) return &zxc_variants_neon32;
-#else
-    (void)cpu;
 #endif
     return &zxc_variants_default;
 }
