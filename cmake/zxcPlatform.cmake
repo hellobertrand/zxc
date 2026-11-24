@@ -26,6 +26,23 @@ foreach(_arch IN LISTS ZXC_TARGET_ARCHS)
         set(ZXC_TARGET_ARM32 ON)
     endif()
 endforeach()
+# -m32, Win32 and MinGW32 still report x86_64/AMD64: probe as the dispatcher does.
+if(ZXC_TARGET_X86 AND NOT (APPLE AND CMAKE_OSX_ARCHITECTURES))
+    include(CheckCSourceCompiles)
+    # Compile only, no link.
+    set(_zxc_try_type "${CMAKE_TRY_COMPILE_TARGET_TYPE}")
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
+    unset(ZXC_COMPILER_X86_64 CACHE)  # rerun: target flags may have changed
+    check_c_source_compiles("
+#if !defined(__x86_64__) && !defined(_M_X64)
+#error not x86-64
+#endif
+int zxc_x86_64_probe;" ZXC_COMPILER_X86_64)
+    set(CMAKE_TRY_COMPILE_TARGET_TYPE "${_zxc_try_type}")
+    if(NOT ZXC_COMPILER_X86_64)
+        set(ZXC_TARGET_X86 OFF)
+    endif()
+endif()
 
 if(ZXC_NATIVE_ARCH AND (CMAKE_CROSSCOMPILING OR
                         NOT "${ZXC_TARGET_ARCHS}" STREQUAL "${CMAKE_SYSTEM_PROCESSOR}"))
@@ -39,7 +56,10 @@ endif()
 # =============================================================================
 if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     message(STATUS "Emscripten detected - configuring for WebAssembly.")
-    set(ZXC_DISABLE_SIMD ON  CACHE BOOL "" FORCE)
+    set(ZXC_TARGET_X86     OFF)
+    set(ZXC_TARGET_AARCH64 OFF)
+    set(ZXC_TARGET_ARM32   OFF)
+    add_compile_definitions(ZXC_DISABLE_SIMD)
     set(ZXC_BUILD_CLI    OFF CACHE BOOL "" FORCE)
     set(ZXC_BUILD_TESTS  OFF CACHE BOOL "" FORCE)
     set(ZXC_NATIVE_ARCH  OFF CACHE BOOL "" FORCE)
@@ -48,9 +68,12 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Emscripten")
     set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 endif()
 
+# Removed after 1.0; the macro stays for embedders.
 if(ZXC_DISABLE_SIMD)
-    add_compile_definitions(ZXC_DISABLE_SIMD)
+    message(WARNING "ZXC_DISABLE_SIMD is no longer a build option and is ignored: "
+                    "CMake builds no scalar-only library.")
 endif()
+unset(ZXC_DISABLE_SIMD CACHE)
 
 # =============================================================================
 # Native tuning

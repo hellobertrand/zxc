@@ -50,23 +50,6 @@
 #define zxc_huf_decode_section_dict ZXC_CAT(zxc_huf_decode_section_dict, ZXC_FUNCTION_SUFFIX)
 #endif
 
-// Mark the primary variant (only _default, or a no-suffix build) so ISA-
-// independent cold code compiles once, not in every per-ISA copy. Keyed off the
-// suffix value, so every build gets it with no extra flag.
-#ifdef ZXC_FUNCTION_SUFFIX
-#define ZXC_PRIMARY__default 1
-#define ZXC_PRIMARY__avx2 0
-#define ZXC_PRIMARY__avx512 0
-#define ZXC_PRIMARY__neon32 0
-#define ZXC_PRIMARY_CAT_(a, b) a##b
-#define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
-#if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
-#define ZXC_VARIANT_PRIMARY 1
-#endif
-#else
-#define ZXC_VARIANT_PRIMARY 1
-#endif
-
 #include "../../include/zxc_error.h"
 #include "zxc_internal.h"
 #include "zxc_pivco_tables.h"
@@ -1020,6 +1003,7 @@ int zxc_huf_unpack_lengths(const uint8_t* RESTRICT in, uint8_t* RESTRICT code_le
 // ZXC_PAD_SIZE on dst (already true for lit/token buffers), and
 // ZXC_PIVCO_SCRATCH_PAD on scratch.
 
+#if !defined(ZXC_HUF_NO_ENCODER) || !defined(ZXC_HUF_NO_DECODER)
 static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt32(const uint32_t v) { return (int)ZXC_POPCOUNT32(v); }
 
 static ZXC_ALWAYS_INLINE int zxc_pivco_popcnt64(const uint64_t v) { return (int)ZXC_POPCOUNT64(v); }
@@ -1036,7 +1020,6 @@ static ZXC_ALWAYS_INLINE int zxc_pivco_flat_leaves(const zxc_pivco_tree_t* RESTR
     return t->leaf_base[e] + t->base[e] - t->node_base[e] + ((g - t->base[d]) << D);
 }
 
-#if !defined(ZXC_HUF_NO_ENCODER) || !defined(ZXC_HUF_NO_DECODER)
 /** @brief Reorders @p s[0, 2^D) by bit-reversed index (an involution). */
 static void zxc_pivco_bitrev_permute(uint8_t* RESTRICT s, const int D) {
     const unsigned m = 1U << D;
@@ -1173,6 +1156,7 @@ static void zxc_pivco_codes(const zxc_pivco_tree_t* RESTRICT t, uint32_t* RESTRI
 }
 #endif /* !ZXC_HUF_NO_ENCODER */
 
+#if !defined(ZXC_HUF_NO_ENCODER) || !defined(ZXC_HUF_NO_DECODER)
 /**
  * @brief Byte size of one PivCo node's on-wire bit run.
  *
@@ -1198,6 +1182,7 @@ static void zxc_pivco_codes(const zxc_pivco_tree_t* RESTRICT t, uint32_t* RESTRI
 static ZXC_ALWAYS_INLINE size_t zxc_pivco_run_bytes(const uint32_t count, const uint8_t flat_d) {
     return flat_d ? ((size_t)count * flat_d + 7) / 8 : ((size_t)count + 7) / 8;
 }
+#endif
 
 #ifndef ZXC_HUF_NO_ENCODER
 /**

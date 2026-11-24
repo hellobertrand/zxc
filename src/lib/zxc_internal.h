@@ -93,7 +93,8 @@ extern "C" {
  * emulated with pure SSE2 instruction sequences or fall back to scalar code.
  *
  * Define @c ZXC_DISABLE_SIMD to gate all hand-written SIMD paths (intrinsics,
- * inline assembly).  Compiler auto-vectorisation is unaffected.
+ * inline assembly), as wasm, the kernel module and scalar fuzzers do.
+ * Compiler auto-vectorisation is unaffected.
  * @{
  */
 #ifndef ZXC_DISABLE_SIMD

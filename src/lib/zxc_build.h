@@ -20,10 +20,25 @@
 #define ZXC_SIMD_TRIMMED
 #endif
 
-// Nothing to dispatch: no SIMD, or trimmed variants on a baseline-only target.
-#if !defined(ZXC_ONLY_DEFAULT) &&                                                       \
-    (defined(ZXC_DISABLE_SIMD) || (defined(ZXC_SIMD_TRIMMED) && !defined(__x86_64__) && \
-                                   !defined(_M_X64) && !defined(__arm__) && !defined(_M_ARM)))
+// Primary copy (_default or no suffix): the others drop the roles bound to _default.
+#ifdef ZXC_FUNCTION_SUFFIX
+#define ZXC_PRIMARY__default 1
+#define ZXC_PRIMARY__avx2 0
+#define ZXC_PRIMARY__avx512 0
+#define ZXC_PRIMARY__neon32 0
+#define ZXC_PRIMARY_CAT_(a, b) a##b
+#define ZXC_PRIMARY_CAT(a, b) ZXC_PRIMARY_CAT_(a, b)
+#if ZXC_PRIMARY_CAT(ZXC_PRIMARY_, ZXC_FUNCTION_SUFFIX)
+#define ZXC_VARIANT_PRIMARY 1
+#endif
+#else
+#define ZXC_VARIANT_PRIMARY 1
+#endif
+
+// Nothing to dispatch: no SIMD, or no variant (x86-64 and ARM32 only).
+#if !defined(ZXC_ONLY_DEFAULT) && \
+    (defined(ZXC_DISABLE_SIMD) || \
+     (!defined(__x86_64__) && !defined(_M_X64) && !defined(__arm__) && !defined(_M_ARM)))
 #define ZXC_ONLY_DEFAULT
 #endif
 
