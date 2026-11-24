@@ -20,7 +20,6 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 
 #include "../format/vector_io.h"
 #include "invalid_cases.h"

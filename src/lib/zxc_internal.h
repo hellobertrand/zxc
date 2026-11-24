@@ -99,7 +99,6 @@ extern "C" {
 #ifndef ZXC_DISABLE_SIMD
 #if defined(__x86_64__) || defined(_M_X64) || defined(__i386__) || defined(_M_IX86)
 #include <immintrin.h>
-#include <nmmintrin.h>
 #if defined(__AVX512F__) && defined(__AVX512BW__)
 #ifndef ZXC_USE_AVX512
 #define ZXC_USE_AVX512
@@ -117,9 +116,6 @@ extern "C" {
 #endif
 #elif (defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64) || \
        defined(ZXC_USE_NEON32) || defined(ZXC_USE_NEON64))
-#if !defined(_MSC_VER)
-#include <arm_acle.h>
-#endif
 #include <arm_neon.h>
 #if defined(__aarch64__) || defined(_M_ARM64)
 #ifndef ZXC_USE_NEON64
