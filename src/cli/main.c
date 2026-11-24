@@ -751,10 +751,9 @@ static void zxc_test_json_separator(void) {
 
 static void zxc_test_json_cannot_open(const char* path) {
     zxc_test_json_separator();
-    printf(
-        "{\n  \"filename\": \"%s\",\n  \"status\": \"failed\",\n  \"error\": \"cannot open "
-        "file\"\n}\n",
-        path);
+    printf("{\n  \"filename\": ");
+    zxc_json_string(path);
+    printf(",\n  \"status\": \"failed\",\n  \"error\": \"cannot open file\"\n}\n");
 }
 
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
@@ -1046,15 +1045,16 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                                               : "unknown (frame unreadable)";
             if (json_output) {
                 zxc_test_json_separator();
+                printf("{\n  \"filename\": ");
+                zxc_json_string(in_path ? in_path : "<stdin>");
                 printf(
-                    "{\n"
-                    "  \"filename\": \"%s\",\n"
+                    ",\n"
                     "  \"status\": \"ok\",\n"
                     "  \"checksum_verified\": %s,\n"
                     "  \"checksum\": \"%s\",\n"
                     "  \"time_seconds\": %.6f\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>", verified ? "true" : "false", state, dt);
+                    verified ? "true" : "false", state, dt);
             } else if (g_verbose) {
                 printf(
                     "%s: %sOK%s\n"
@@ -1086,13 +1086,14 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
                 (err_code == ZXC_ERROR_DICT_REQUIRED || err_code == ZXC_ERROR_DICT_MISMATCH);
             if (json_output) {
                 zxc_test_json_separator();
+                printf("{\n  \"filename\": ");
+                zxc_json_string(in_path ? in_path : "<stdin>");
                 printf(
-                    "{\n"
-                    "  \"filename\": \"%s\",\n"
+                    ",\n"
                     "  \"status\": \"failed\",\n"
                     "  \"error\": \"%s\"\n"
                     "}\n",
-                    in_path ? in_path : "<stdin>", reason);
+                    reason);
             } else {
                 fprintf(stderr, "%s: %sFAILED%s (%s)\n", in_path ? in_path : "<stdin>",
                         ZXC_CE(ZXC_ANSI_RED), ZXC_CE(ZXC_ANSI_RESET), reason);
@@ -1891,10 +1892,11 @@ int main(int argc, char** argv) {
         const double decompress_speed_mbps = (double)in_size / (1000.0 * 1000.0) / best_decompress;
         const double ratio = (c_sz > 0) ? ((double)in_size / c_sz) : 0.0;
 
-        if (json_output)
+        if (json_output) {
+            printf("{\n  \"input_file\": ");
+            zxc_json_string(in_path);
             printf(
-                "{\n"
-                "  \"input_file\": \"%s\",\n"
+                ",\n"
                 "  \"input_size_bytes\": %zu,\n"
                 "  \"compressed_size_bytes\": %lld,\n"
                 "  \"compression_ratio\": %.3f,\n"
@@ -1911,17 +1913,18 @@ int main(int argc, char** argv) {
                 "  \"compress_time_seconds\": %.6f,\n"
                 "  \"decompress_time_seconds\": %.6f\n"
                 "}\n",
-                in_path, in_size, (long long)c_sz, ratio, bench_seconds, compress_iters,
-                decompress_iters, num_threads, level, checksum ? "true" : "false",
+                in_size, (long long)c_sz, ratio, bench_seconds, compress_iters, decompress_iters,
+                num_threads, level, checksum ? "true" : "false",
                 g_favor_decode_speed ? "true" : "false", g_split_budget_pct, compress_speed_mbps,
                 decompress_speed_mbps, best_compress, best_decompress);
-        else
+        } else {
             printf(
                 "Compressed: %lld bytes (ratio %.3f)\n"
                 "Compress  : %.3f MB/s (%d iters)\n"
                 "Decompress: %.3f MB/s (%d iters)\n",
                 (long long)c_sz, ratio, compress_speed_mbps, compress_iters, decompress_speed_mbps,
                 decompress_iters);
+        }
         ret = 0;
 
     bench_cleanup:
@@ -1954,9 +1957,11 @@ int main(int argc, char** argv) {
             const int r = zxc_list_archive(argv[i], json_output, num_files > 1);
             // Keep the JSON array well-formed: a failed entry prints nothing,
             // so emit an error object in its place
-            if (r != 0 && json_output)
-                printf("{\n  \"filename\": \"%s\",\n  \"error\": \"cannot list file\"\n}\n",
-                       argv[i]);
+            if (r != 0 && json_output) {
+                printf("{\n  \"filename\": ");
+                zxc_json_string(argv[i]);
+                printf(",\n  \"error\": \"cannot list file\"\n}\n");
+            }
             ret |= r;
             if (json_output && num_files > 1 && i < argc - 1) {
                 printf(",\n");

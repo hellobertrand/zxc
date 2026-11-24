@@ -42,15 +42,15 @@ static int zxc_list_dict(const char* path, const uint8_t* buf, size_t buf_size, 
         return 1;
     }
     if (json_output) {
+        printf("{\n  \"type\": \"dictionary\",\n  \"filename\": ");
+        zxc_json_string(path);
         printf(
-            "{\n"
-            "  \"type\": \"dictionary\",\n"
-            "  \"filename\": \"%s\",\n"
+            ",\n"
             "  \"dict_id\": \"0x%08X\",\n"
             "  \"content_size_bytes\": %zu,\n"
             "  \"file_size_bytes\": %lld\n"
             "}\n",
-            path, id, content_size, file_size);
+            id, content_size, file_size);
     } else {
         printf(
             "\n  Dictionary file (.zxd)\n"
@@ -297,15 +297,16 @@ int zxc_list_archive(const char* path, int json_output, int show_name) {
     const int show_dict = has_dict || mixed_dict;
 
     if (json_output) {
+        printf("{\n  \"filename\": ");
+        zxc_json_string(path);
         printf(
-            "{\n"
-            "  \"filename\": \"%s\",\n"
+            ",\n"
             "  \"compressed_size_bytes\": %lld,\n"
             "  \"uncompressed_size_bytes\": %llu,\n"
             "  \"compression_ratio\": %.3f,\n"
             "  \"format_version\": %u,\n"
             "  \"block_size_kb\": ",
-            path, file_size, (unsigned long long)uncompressed_size, ratio, format_version);
+            file_size, (unsigned long long)uncompressed_size, ratio, format_version);
         cli_print_block_sizes(&cont, 1);
         printf(
             ",\n"

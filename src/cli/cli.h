@@ -14,26 +14,26 @@
 #define ZXC_CLI_H
 
 #include <errno.h>
+#include <fcntl.h>
 #include <limits.h>
-#include <signal.h>
+#include <signal.h>  // IWYU pragma: keep
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/types.h>
 
-#include "../../include/zxc_buffer.h"
-#include "../../include/zxc_constants.h"
-#include "../../include/zxc_dict.h"
-#include "../../include/zxc_error.h"
-#include "../../include/zxc_stream.h"
+#include "../../include/zxc_buffer.h"     // IWYU pragma: keep
+#include "../../include/zxc_constants.h"  // IWYU pragma: keep
+#include "../../include/zxc_dict.h"       // IWYU pragma: keep
+#include "../../include/zxc_error.h"      // IWYU pragma: keep
+#include "../../include/zxc_stream.h"     // IWYU pragma: keep
 
 #ifdef _WIN32
 #include <direct.h>
-#include <fcntl.h>
 #include <io.h>
 #include <process.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <windows.h>
 
 // Map POSIX macros to MSVC equivalents
@@ -49,13 +49,7 @@
 #define ftello _ftelli64
 #else
 #include <dirent.h>
-#include <fcntl.h>
 #include <libgen.h>
-#include <limits.h>
-#include <stdio.h>
-#include <string.h>
-#include <sys/stat.h>
-#include <sys/types.h>
 #include <time.h>
 #include <unistd.h>
 #endif
@@ -102,6 +96,8 @@ void zxc_err(const char* fmt, ...) ZXC_PRINTF_FORMAT(1, 2);
 void zxc_log_v(const char* fmt, ...) ZXC_PRINTF_FORMAT(1, 2);
 // A byte size as TB/GB/MB/KB/B (base 1000).
 void format_size_decimal(uint64_t bytes, char* buf, size_t buf_size);
+// Prints s on stdout as a quoted JSON string.
+void zxc_json_string(const char* s);
 
 // fileio.c: paths, inputs, and outputs replaced atomically
 

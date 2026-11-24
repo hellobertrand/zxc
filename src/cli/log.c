@@ -141,3 +141,18 @@ void format_size_decimal(uint64_t bytes, char* buf, size_t buf_size) {
     else
         snprintf(buf, buf_size, "%llu B", (unsigned long long)bytes);
 }
+
+// Bytes of 0x80 and above pass as they are: a name in UTF-8 stays readable.
+void zxc_json_string(const char* s) {
+    putchar('"');
+    for (; *s != '\0'; s++) {
+        const unsigned char c = (unsigned char)*s;
+        if (c == '"' || c == '\\')
+            printf("\\%c", c);
+        else if (c < 0x20)
+            printf("\\u%04x", c);
+        else
+            putchar(c);
+    }
+    putchar('"');
+}

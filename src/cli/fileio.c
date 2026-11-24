@@ -15,8 +15,8 @@
 #include "cli.h"
 
 /**
- * @brief Validates and resolves the input file path to prevent directory traversal
- * and ensure it is a regular file.
+ * @brief Resolves an input path given by the user and checks that it names a
+ * regular file. The path is not confined to any directory: "../x" is valid.
  *
  * @param[in] path The raw input path from command line.
  * @param[out] resolved_buffer Buffer to store resolved path (needs sufficient size).

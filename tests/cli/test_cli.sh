@@ -2750,6 +2750,29 @@ else
 fi
 rm -f "$TEST_DIR/color1.err"
 
+# JSON output escapes file names: a quote or a backslash must not break the string
+case "$(uname -s 2>/dev/null)" in
+    MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] quote and backslash in a file name: POSIX only" ;;
+    *)
+        JSON_NAME="$TEST_DIR/q\"b\\c"
+        JSON_WANT='q\"b\\c.zxc"'
+        cp "$TEST_FILE" "$JSON_NAME"
+        "$ZXC_BIN" -q -k -f "$JSON_NAME"
+        set +e
+        JSON_L=$("$ZXC_BIN" -l -j "$JSON_NAME.zxc")
+        JSON_T=$("$ZXC_BIN" -t -j "$JSON_NAME.zxc")
+        JSON_E=$("$ZXC_BIN" -t -j "$JSON_NAME.missing.zxc" 2> /dev/null)
+        set -e
+        if [[ "$JSON_L" == *"$JSON_WANT"* ]] && [[ "$JSON_T" == *"$JSON_WANT"* ]] &&
+            [[ "$JSON_E" == *'q\"b\\c.missing.zxc"'* ]]; then
+            log_pass "JSON output escapes quotes and backslashes in file names"
+        else
+            log_fail "JSON file names should be escaped (-l -j, -t -j)"
+        fi
+        rm -f "$JSON_NAME" "$JSON_NAME.zxc"
+        ;;
+esac
+
 # A failed write is reported as such, even with a corrupt block further on
 case "$(uname -s 2>/dev/null)" in
     MINGW*|MSYS*|CYGWIN*) echo "  [SKIP] write failure code: POSIX only" ;;
