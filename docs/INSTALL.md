@@ -232,7 +232,7 @@ zxc can be vendored directly into a CMake build, either as a git submodule with
 include(FetchContent)
 FetchContent_Declare(zxc
     GIT_REPOSITORY https://github.com/hellobertrand/zxc.git
-    GIT_TAG        v1.0.1
+    GIT_TAG        v1.0.2
 )
 FetchContent_MakeAvailable(zxc)
 
