@@ -1371,6 +1371,18 @@ else
     echo "  [SKIP] symlinks unsupported here, skipping unzxc and zxccat alias tests"
 fi
 
+# 26.4 stdin named twice: its buffer must outlive the first operand (musl)
+for STDIN_ARGS in "-dc - -" "-t - -" "-dcf - -"; do
+    set +e
+    STDIN_ERR=$(printf '0123456789abcdefX' | "$ZXC_BIN" $STDIN_ARGS 2>&1 >/dev/null)
+    STDIN_RC=$?
+    set -e
+    if [[ $STDIN_RC -ge 128 ]]; then
+        log_fail "zxc $STDIN_ARGS died on signal (rc=$STDIN_RC): $STDIN_ERR"
+    fi
+done
+log_pass "stdin named twice survives a failing first operand"
+
 # 26.4 -c appends to a >> redirect
 "$ZXC_BIN" -z -c "$TEST_FILE_ARG" > "$TEST_DIR/append.zxc"
 printf 'kept line\n' > "$TEST_DIR/append_out"
