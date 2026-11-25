@@ -168,6 +168,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE(test_error_name),
     TEST_CASE(test_library_info_api),
     TEST_CASE(test_dict_build_support),
+    TEST_CASE(test_ctz_debruijn),
 
     /* --- Dictionary --- */
     TEST_CASE(test_dict_zxd_roundtrip),
