@@ -117,7 +117,7 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  * @var zxc_stream_job_t::job_id
  *      A unique identifier for the job, often used for ordering or debugging.
  * @var zxc_stream_job_t::status
- *      The current state of this job (Free, Filled, or Processed).
+ *      The current state of this job (Free, Filled, or Processed), under @c lock.
  * @var zxc_stream_job_t::pad
  *      Padding bytes to ensure the structure size aligns with the cache line
  * size (@c ZXC_CACHE_LINE_SIZE), minimizing cache contention between threads
@@ -134,8 +134,8 @@ typedef struct {
     uint64_t block_index;
     uint64_t in_off;
     int job_id;
-    ZXC_ATOMIC job_status_t status;  // Atomic for lock-free status updates
-    char pad[ZXC_CACHE_LINE_SIZE];   // Prevent False Sharing
+    job_status_t status;            // Under ctx->lock
+    char pad[ZXC_CACHE_LINE_SIZE];  // Prevent False Sharing
 } zxc_stream_job_t;
 
 /**
