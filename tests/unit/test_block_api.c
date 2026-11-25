@@ -1100,3 +1100,107 @@ int test_block_api_invalid_varint(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+/* Re-signs a header so only the field under test is wrong. */
+static void resign_block_header(uint8_t* h) {
+    h[7] = 0;
+    h[7] = zxc_hash8(h);
+}
+
+int test_block_api_bad_header(void) {
+    printf("=== TEST: Block API - corrupt block headers are rejected ===\n");
+
+    enum { N = 4096 };
+    static uint8_t lz[N], rnd[N];
+    gen_lz_data(lz, N);
+    gen_random_data(rnd, N);
+
+    static const struct {
+        const char* name;
+        const uint8_t* src;
+        int level;
+        uint8_t type;
+    } shapes[] = {
+        {"RAW", rnd, 1, ZXC_BLOCK_RAW},
+        {"PAK L1", lz, 1, ZXC_BLOCK_PAK},
+        {"SPL L3", lz, 3, ZXC_BLOCK_SPL},
+        {"SPL L7", lz, 7, ZXC_BLOCK_SPL},
+    };
+    /* Non-zero Block Flags / Reserved, checksum kept valid. */
+    static const struct {
+        int byte;
+        uint8_t val;
+    } fields[] = {{1, 0x01}, {1, 0x80}, {1, 0xFF}, {2, 0x01}, {2, 0x80}, {2, 0xFF}};
+
+    const size_t bound = (size_t)zxc_compress_block_bound(N);
+    const size_t cap = zxc_decompress_block_bound(N);
+    const size_t ws_sz = zxc_static_dctx_workspace_size(N);
+    uint8_t* good = malloc(bound);
+    uint8_t* bad = malloc(bound);
+    uint8_t* out = malloc(cap);
+    void* ws = ws_sz ? test_aligned_alloc(64, ws_sz) : NULL;
+    zxc_cctx* cctx = zxc_create_cctx();
+    zxc_dctx* heap = zxc_create_dctx();
+    zxc_dctx* stat = ws ? zxc_init_static_dctx(ws, ws_sz, N) : NULL;
+    const int ready = good && bad && out && cctx && heap && stat;
+    int failures = !ready;
+    int checks = 0;
+
+    for (size_t s = 0; ready && s < sizeof shapes / sizeof shapes[0]; s++) {
+        for (int cs = 0; cs <= 1; cs++) {
+            if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, shapes[s].level) != ZXC_OK ||
+                zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, cs) != ZXC_OK ||
+                zxc_dctx_set_param(heap, ZXC_D_CHECKSUM, cs) != ZXC_OK ||
+                zxc_dctx_set_param(stat, ZXC_D_CHECKSUM, cs) != ZXC_OK) {
+                failures++;
+                continue;
+            }
+            const int64_t csize = zxc_compress_block(cctx, shapes[s].src, N, good, bound);
+            if (csize <= 0 || good[0] != shapes[s].type ||
+                zxc_decompress_block(heap, good, (size_t)csize, out, cap) != N ||
+                memcmp(out, shapes[s].src, N) != 0 ||
+                zxc_decompress_block_safe(stat, good, (size_t)csize, out, N) != N ||
+                memcmp(out, shapes[s].src, N) != 0) {
+                printf("  [FAIL] %s cs=%d: control round-trip\n", shapes[s].name, cs);
+                failures++;
+                continue;
+            }
+            const size_t nf = sizeof fields / sizeof fields[0];
+            for (size_t k = 0; k < 64 + nf; k++) {
+                memcpy(bad, good, (size_t)csize);
+                if (k < 64) {
+                    bad[k / 8] ^= (uint8_t)(1U << (k % 8));
+                } else {
+                    bad[fields[k - 64].byte] = fields[k - 64].val;
+                    resign_block_header(bad);
+                }
+                const int64_t r[4] = {
+                    zxc_decompress_block(heap, bad, (size_t)csize, out, cap),
+                    zxc_decompress_block_safe(heap, bad, (size_t)csize, out, N),
+                    zxc_decompress_block(stat, bad, (size_t)csize, out, cap),
+                    zxc_decompress_block_safe(stat, bad, (size_t)csize, out, N),
+                };
+                for (int i = 0; i < 4; i++, checks++) {
+                    if (r[i] != ZXC_ERROR_BAD_HEADER) {
+                        printf("  [FAIL] %s cs=%d %s %s: %s returned %lld\n", shapes[s].name, cs,
+                               i < 2 ? "heap" : "static", i & 1 ? "safe" : "fast",
+                               k < 64 ? "bit flip" : "flags/reserved", (long long)r[i]);
+                        failures++;
+                    }
+                }
+            }
+        }
+    }
+
+    free(good);
+    free(bad);
+    free(out);
+    zxc_free_cctx(cctx);
+    zxc_free_dctx(heap);
+    zxc_free_dctx(stat);
+    if (ws) test_aligned_free(ws);
+    if (failures) return 0;
+    printf("  [PASS] %d corrupt headers rejected\n", checks);
+    printf("PASS\n\n");
+    return 1;
+}

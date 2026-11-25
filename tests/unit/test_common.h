@@ -190,6 +190,7 @@ int test_block_api_tiny_capacity(void);
 int test_block_api_direct_decode(void);
 int test_block_api_large_block_varint(void);
 int test_block_api_invalid_varint(void);
+int test_block_api_bad_header(void);
 int test_decompress_block_safe(void);
 int test_decompress_block_bound(void);
 
