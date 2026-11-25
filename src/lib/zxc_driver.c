@@ -177,8 +177,8 @@ typedef struct {
  * @var zxc_stream_ctx_t::compression_mode
  *      Indicates the operation mode (e.g., compression or decompression).
  * @var zxc_stream_ctx_t::io_error
- *      Atomic flag telling every thread to stop. Set for any failure, not just
- *      I/O, because the wait loops poll it without holding the lock.
+ *      Flag telling every thread to stop. Set for any failure, not just I/O;
+ *      protected by @c lock while worker or writer threads are running.
  * @var zxc_stream_ctx_t::fail_code
  *      The first failure's actual error code, kept so a corrupt archive is not
  *      reported as an I/O problem. Written under @c lock; the writer thread
@@ -245,7 +245,7 @@ typedef struct {
     pthread_cond_t cond_writer;
     int shutdown_workers;
     int compression_mode;
-    ZXC_ATOMIC int io_error;
+    int io_error;
     int workers_lost;
     int fail_code;
     int write_idx;
@@ -878,8 +878,12 @@ static int zxc_stream_engine_close(zxc_stream_engine_t* e, FILE* f_in) {
     return fseeko(f_in, (long long)e->ctx.in_pos, SEEK_SET) == 0 ? ZXC_OK : ZXC_ERROR_IO;
 }
 
-/** @brief Waits until the writer has written every job queued so far. */
-static void zxc_stream_engine_drain(zxc_stream_engine_t* e) {
+/**
+ * @brief Waits until the writer has written every job queued so far.
+ *
+ * @return Non-zero if an error stopped the engine.
+ */
+static int zxc_stream_engine_drain(zxc_stream_engine_t* e) {
     zxc_stream_ctx_t* const ctx = &e->ctx;
     // The writer frees jobs in order: the last one queued is free last.
     const zxc_stream_job_t* const last =
@@ -887,7 +891,9 @@ static void zxc_stream_engine_drain(zxc_stream_engine_t* e) {
     pthread_mutex_lock(&ctx->lock);
     while (last->status != JOB_STATUS_FREE && !ctx->io_error)
         pthread_cond_wait(&ctx->cond_reader, &ctx->lock);
+    const int failed = ctx->io_error;
     pthread_mutex_unlock(&ctx->lock);
+    return failed;
 }
 
 /**
@@ -1020,14 +1026,15 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, int read_idx)
     int read_eof = 0;
     uint64_t block_index = 0;
 
-    while (!read_eof && !ctx->io_error) {
+    while (!read_eof) {
         zxc_stream_job_t* const job = &ctx->jobs[read_idx];
         pthread_mutex_lock(&ctx->lock);
         while (job->status != JOB_STATUS_FREE && !ctx->io_error)
             pthread_cond_wait(&ctx->cond_reader, &ctx->lock);
+        const int failed = ctx->io_error;
         pthread_mutex_unlock(&ctx->lock);
 
-        if (UNLIKELY(ctx->io_error)) break;
+        if (UNLIKELY(failed)) break;
 
         int n_blocks = 1;
         const size_t read_sz = ctx->compression_mode
@@ -1107,6 +1114,8 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
                                          FILE* f_in) {
     // After the EOF block: the SEK block when the header announced one, then the
     // footer, whose length follows from the bytes read and the bytes produced.
+    // The writer and workers are still alive, so errors publish via
+    // zxc_stream_reader_fail() under ctx->lock rather than writing io_error directly.
 
     if (ctx->file_has_seek) {
         uint8_t sek[ZXC_BLOCK_HEADER_SIZE];
@@ -1118,8 +1127,8 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
                                    : zxc_check_seek_header(sek, (size_t)got, frame_out,
                                                            ctx->chunk_size, &remaining);
         if (UNLIKELY(src_rc != ZXC_OK)) {
-            if (src_rc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = src_rc;
-            ctx->io_error = 1;
+            zxc_stream_reader_fail(ctx, src_rc == ZXC_ERROR_CORRUPT_DATA ? src_rc : 0);
+            return;
         }
         sek_bytes = remaining;
         // Skip the SEK payload; positioned, a cut table shows at the footer read.
@@ -1128,9 +1137,12 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
             remaining = 0;
         }
         uint8_t discard[512];  // scratch, any size
-        while (remaining > 0 && !ctx->io_error) {
+        while (remaining > 0) {
             const size_t chunk = remaining < sizeof(discard) ? (size_t)remaining : sizeof(discard);
-            if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) ctx->io_error = 1;
+            if (UNLIKELY(fread(discard, 1, chunk, f_in) != chunk)) {
+                zxc_stream_reader_fail(ctx, 0);
+                return;
+            }
             remaining -= chunk;
         }
         ctx->frame_in += ZXC_BLOCK_HEADER_SIZE + sek_bytes;
@@ -1138,21 +1150,17 @@ static void zxc_stream_finish_decompress(zxc_stream_ctx_t* ctx, const uint64_t f
     const zxc_footer_layout_t fl =
         zxc_footer_layout(ctx->frame_in, frame_out, ctx->file_has_checksum);
     uint64_t stored_digest = 0;
-    if (!ctx->io_error) {
-        uint8_t footer[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
-        const int64_t got = zxc_stream_in_read(ctx, f_in, footer, fl.len);
-        const int frc =
-            got < 0 ? ZXC_ERROR_IO
-                    : zxc_check_file_footer(footer, (size_t)got, &fl, frame_out, &stored_digest);
-        if (UNLIKELY(frc != ZXC_OK)) {
-            if (frc == ZXC_ERROR_CORRUPT_DATA && !ctx->fail_code) ctx->fail_code = frc;
-            ctx->io_error = 1;
-        }
+    uint8_t footer[ZXC_FOOTER_MAX_SIZE_WITH_DIGEST];
+    const int64_t got = zxc_stream_in_read(ctx, f_in, footer, fl.len);
+    const int frc =
+        got < 0 ? ZXC_ERROR_IO
+                : zxc_check_file_footer(footer, (size_t)got, &fl, frame_out, &stored_digest);
+    if (UNLIKELY(frc != ZXC_OK)) {
+        zxc_stream_reader_fail(ctx, frc == ZXC_ERROR_CORRUPT_DATA ? frc : 0);
+        return;
     }
-    if (!ctx->io_error && ctx->file_has_checksum && ctx->checksum_enabled &&
-        UNLIKELY(stored_digest != ctx->digest)) {
-        if (!ctx->fail_code) ctx->fail_code = ZXC_ERROR_BAD_CHECKSUM;
-        ctx->io_error = 1;
+    if (ctx->file_has_checksum && ctx->checksum_enabled && UNLIKELY(stored_digest != ctx->digest)) {
+        zxc_stream_reader_fail(ctx, ZXC_ERROR_BAD_CHECKSUM);
     }
     // Whatever follows is the next frame's, or an error: see zxc_stream_decompress().
 }
@@ -1229,17 +1237,15 @@ static int64_t zxc_stream_decode_frame(zxc_stream_engine_t* e, FILE* f_in, const
     ctx->ahead_len = -1;
 
     e->read_idx = zxc_stream_read_loop(ctx, f_in, e->read_idx);
-    zxc_stream_engine_drain(e);
-    if (!ctx->io_error)
+    if (!zxc_stream_engine_drain(e))
         zxc_stream_finish_decompress(ctx, (uint64_t)(e->w.total_bytes - base), f_in);
 
     // fail_code holds the cause, else a read/write failed; a worker may still set it.
-    if (UNLIKELY(ctx->io_error)) {
-        pthread_mutex_lock(&ctx->lock);
-        const int code = ctx->fail_code;
-        pthread_mutex_unlock(&ctx->lock);
-        return code ? code : ZXC_ERROR_IO;
-    }
+    pthread_mutex_lock(&ctx->lock);
+    const int failed = ctx->io_error;
+    const int code = ctx->fail_code;
+    pthread_mutex_unlock(&ctx->lock);
+    if (UNLIKELY(failed)) return code ? code : ZXC_ERROR_IO;
     return e->w.total_bytes - base;
 }
 
@@ -1324,7 +1330,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_cctx* cfg) {
                               dict && dict_size > 0, zxc_dict_compute_id(dict, dict_size, dict_huf),
                               seekable);
         if (UNLIKELY(fwrite(h, 1, ZXC_FILE_HEADER_SIZE, f_out) != ZXC_FILE_HEADER_SIZE))
-            ctx->io_error = 1;
+            zxc_stream_reader_fail(ctx, 0);
     }
     e.w.total_bytes = ZXC_FILE_HEADER_SIZE;
 
