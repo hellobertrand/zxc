@@ -187,3 +187,30 @@ int test_dict_build_support(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+int test_ctz_debruijn(void) {
+    printf("--- Test: De Bruijn ctz fallbacks ---\n");
+
+    // Each lowest set bit, alone and under set higher bits (the x & -x step).
+    for (int i = 0; i < 64; i++) {
+        const uint64_t bit = 1ULL << i;
+        const uint64_t cases[2] = {bit, bit | ~((bit << 1) - 1)};
+        for (int c = 0; c < 2; c++) {
+            const int got = zxc_ctz64_debruijn(cases[c]);
+            if (got != i) {
+                printf("  [FAIL] zxc_ctz64_debruijn(0x%016llx) = %d, expected %d\n",
+                       (unsigned long long)cases[c], got, i);
+                return 0;
+            }
+            if (i < 32 && zxc_ctz32_debruijn((uint32_t)cases[c]) != i) {
+                printf("  [FAIL] zxc_ctz32_debruijn(0x%08x) = %d, expected %d\n",
+                       (unsigned)(uint32_t)cases[c], zxc_ctz32_debruijn((uint32_t)cases[c]), i);
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] Every bit position, 32 and 64 bits\n");
+
+    printf("PASS\n\n");
+    return 1;
+}

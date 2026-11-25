@@ -361,6 +361,7 @@ int test_encoder_output_pinned(void);
 int test_error_name(void);
 int test_library_info_api(void);
 int test_dict_build_support(void);
+int test_ctz_debruijn(void);
 
 /* Dictionary */
 int test_dict_zxd_roundtrip(void);
