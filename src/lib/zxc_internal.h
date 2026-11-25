@@ -38,7 +38,6 @@
 #include "../../include/zxc_constants.h"
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
-#include "rapidhash.h"
 #include "zxc_build.h"
 
 #ifdef __cplusplus
@@ -459,7 +458,7 @@ static_assert(ZXC_BLOCK_FORMAT_OVERHEAD >=
                   ZXC_SPL_HEADER_BINARY_SIZE + ZXC_SPL_DESC_MAX_SIZE + ZXC_BLOCK_LIT_SLACK,
               "ZXC_BLOCK_FORMAT_OVERHEAD must cover sub-header, descriptors and slack");
 
-/** @brief Checksum algorithm id for RapidHash (default, sole implementation). */
+/** @brief Checksum algorithm id for RapidHash (default, sole implementation so far). */
 #define ZXC_CHECKSUM_RAPIDHASH 0
 
 /** @name Seekable Format Constants
@@ -1726,15 +1725,15 @@ static ZXC_ALWAYS_INLINE uint64_t zxc_seek_block_count(const uint64_t total_deco
  * @param[in] len Length of the data in bytes.
  * @param[in] seed 0, a previous 32-bit checksum (zero-extended), or a block index.
  * @param[in] hash_method Checksum algorithm identifier (e.g., ZXC_CHECKSUM_RAPIDHASH).
- * @return The calculated 32-bit hash value.
+ * @return The 64-bit hash folded to 32 bits.
  */
-static ZXC_ALWAYS_INLINE uint32_t zxc_checksum(const void* RESTRICT input, const size_t len,
-                                               const uint64_t seed, const uint8_t hash_method) {
-    (void)hash_method; /* single algorithm for now; extend when adding more */
-    const uint64_t hash = rapidhash_withSeed(input, len, seed);
-
-    return (uint32_t)(hash ^ (hash >> (sizeof(uint32_t) * CHAR_BIT)));
-}
+// One copy per variant (zxc_checksum.c); a unit outside the variants gets _default.
+#ifdef ZXC_FUNCTION_SUFFIX
+#define zxc_checksum ZXC_PRIMARY_CAT(zxc_checksum, ZXC_FUNCTION_SUFFIX)
+#else
+#define zxc_checksum zxc_checksum_default
+#endif
+uint32_t zxc_checksum(const void* RESTRICT input, size_t len, uint64_t seed, uint8_t hash_method);
 
 /**
  * @brief Folds a data block's 32-bit checksum into the running archive digest.

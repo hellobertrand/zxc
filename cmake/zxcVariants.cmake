@@ -39,13 +39,14 @@ endmacro()
 set(ZXC_VARIANT_OBJECTS "")
 
 # --- 1. Default Variant (Scalar/Baseline) ---
-zxc_add_variant(_default "" "compress;decompress;huffman")
+zxc_add_variant(_default "" "compress;decompress;huffman;checksum")
 
 # SIMD variant sources (src/lib/zxc_build.h); AVX-512 with "all" only.
+# checksum follows its callers, compress and decompress.
 if(ZXC_BUILD_SIMD_VARIANTS STREQUAL "all")
-    set(ZXC_SIMD_SOURCES compress decompress huffman)
+    set(ZXC_SIMD_SOURCES compress decompress huffman checksum)
 elseif(ZXC_BUILD_SIMD_VARIANTS STREQUAL "decoder")
-    set(ZXC_SIMD_SOURCES decompress huffman)
+    set(ZXC_SIMD_SOURCES decompress huffman checksum)
 else()
     set(ZXC_SIMD_SOURCES huffman)
 endif()

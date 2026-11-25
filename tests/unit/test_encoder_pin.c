@@ -6,6 +6,7 @@
  */
 
 #include "../../include/zxc_dict.h"
+#include "rapidhash.h"
 #include "test_common.h"
 
 /* Pins the encoder's output: round-trip tests accept any valid parse, so a

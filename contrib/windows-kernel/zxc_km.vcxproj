@@ -3,7 +3,7 @@
 <!-- ZXC - High-performance lossless compression -->
 <!-- Copyright (c) Jean Gautier and contributors. -->
 <!--
-  zxc_km.lib: the seven core units compiled in kernel mode. The ZxcStage
+  zxc_km.lib: the eight core units compiled in kernel mode. The ZxcStage
   target copies them, the internal headers, the vendored hash and the public
   headers into build\stage\, with contrib/windows-kernel/zxc_deps.h in place
   of src/lib/zxc_deps.h. The copy is the point: zxc_internal.h includes the
@@ -59,7 +59,7 @@
     <ZxcPublicHeader Include="$(ZxcRoot)include\*.h" />
     <ZxcLibHeader Include="$(ZxcRoot)src\lib\*.h" Exclude="$(ZxcRoot)src\lib\zxc_deps.h" />
     <ZxcVendor Include="$(ZxcRoot)src\lib\vendors\*" />
-    <ZxcUnit Include="$(ZxcRoot)src\lib\zxc_common.c;$(ZxcRoot)src\lib\zxc_pivco_tables.c;$(ZxcRoot)src\lib\zxc_dispatch.c;$(ZxcRoot)src\lib\zxc_dict.c;$(ZxcRoot)src\lib\zxc_compress.c;$(ZxcRoot)src\lib\zxc_decompress.c;$(ZxcRoot)src\lib\zxc_huffman.c" />
+    <ZxcUnit Include="$(ZxcRoot)src\lib\zxc_common.c;$(ZxcRoot)src\lib\zxc_pivco_tables.c;$(ZxcRoot)src\lib\zxc_dispatch.c;$(ZxcRoot)src\lib\zxc_dict.c;$(ZxcRoot)src\lib\zxc_compress.c;$(ZxcRoot)src\lib\zxc_decompress.c;$(ZxcRoot)src\lib\zxc_huffman.c;$(ZxcRoot)src\lib\zxc_checksum.c" />
     <ZxcKernelDeps Include="$(MSBuildThisFileDirectory)zxc_deps.h" />
   </ItemGroup>
 
@@ -77,6 +77,7 @@
     <ClCompile Include="$(ZxcStage)src\lib\zxc_compress.c" />
     <ClCompile Include="$(ZxcStage)src\lib\zxc_decompress.c" />
     <ClCompile Include="$(ZxcStage)src\lib\zxc_huffman.c" />
+    <ClCompile Include="$(ZxcStage)src\lib\zxc_checksum.c" />
   </ItemGroup>
 
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

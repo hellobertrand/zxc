@@ -9,7 +9,7 @@
 KDIR  ?= /lib/modules/$(shell uname -r)/build
 BUILD ?= $(CURDIR)/build
 ROOT  := $(abspath $(CURDIR)/../..)
-UNITS := zxc_common zxc_pivco_tables zxc_dispatch zxc_dict zxc_compress zxc_decompress zxc_huffman
+UNITS := zxc_common zxc_pivco_tables zxc_dispatch zxc_dict zxc_compress zxc_decompress zxc_huffman zxc_checksum
 
 .PHONY: all stage clean
 

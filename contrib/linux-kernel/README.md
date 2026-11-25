@@ -37,11 +37,11 @@ levels 6-7 (see [Contexts](#contexts)).
 
 ## What to build
 
-Seven translation units:
+Eight translation units:
 
 ```
 zxc_common.c  zxc_pivco_tables.c  zxc_dispatch.c  zxc_dict.c
-zxc_compress.c  zxc_decompress.c  zxc_huffman.c
+zxc_compress.c  zxc_decompress.c  zxc_huffman.c  zxc_checksum.c
 ```
 
 They carry the whole buffer API: frame, blocks, dictionaries. Left out:

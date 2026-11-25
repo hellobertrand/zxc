@@ -19,4 +19,4 @@ obj-m += zxc_selftest.o
 zxc_selftest-y := selftest.o \
     zxc/src/lib/zxc_common.o zxc/src/lib/zxc_pivco_tables.o zxc/src/lib/zxc_dispatch.o \
     zxc/src/lib/zxc_dict.o zxc/src/lib/zxc_compress.o zxc/src/lib/zxc_decompress.o \
-    zxc/src/lib/zxc_huffman.o
+    zxc/src/lib/zxc_huffman.o zxc/src/lib/zxc_checksum.o

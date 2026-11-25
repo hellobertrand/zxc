@@ -115,12 +115,13 @@ libzxc_includes = [inc_public, inc_private] + rapidhash_inc
 # =============================================================================
 # SIMD runtime dispatch
 # =============================================================================
-# Compiles compress/decompress/huffman per-ISA so the runtime dispatcher can
+# Compiles compress/decompress/huffman/checksum per-ISA so the runtime dispatcher can
 # route to the fastest implementation available at startup.
 
 variant_sources = ['src/lib/zxc_compress.c',
                    'src/lib/zxc_decompress.c',
-                   'src/lib/zxc_huffman.c']
+                   'src/lib/zxc_huffman.c',
+                   'src/lib/zxc_checksum.c']
 
 variant_sets = [['_default', [], variant_sources]]
 
@@ -129,7 +130,7 @@ build_simd_variants = get_option('build_simd_variants')
 if build_simd_variants == 'all'
   simd_sources = variant_sources
 elif build_simd_variants == 'decoder'
-  simd_sources = ['src/lib/zxc_decompress.c', 'src/lib/zxc_huffman.c']
+  simd_sources = ['src/lib/zxc_decompress.c', 'src/lib/zxc_huffman.c', 'src/lib/zxc_checksum.c']
 else
   simd_sources = ['src/lib/zxc_huffman.c']
 endif

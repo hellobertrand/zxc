@@ -133,11 +133,11 @@ fn apply_feature_macros(build: &mut cc::Build) {
     }
 }
 
-/// Compiles one FMV variant of the three per-ISA translation units
-/// (zxc_compress.c, zxc_decompress.c, zxc_huffman.c) with the given function
+/// Compiles one FMV variant of the four per-ISA translation units
+/// (zxc_compress.c, zxc_decompress.c, zxc_huffman.c, zxc_checksum.c) with the given function
 /// suffix and ISA flags.
 fn compile_variant(include_dir: &Path, src_lib: &Path, suffix: &str, flags: &[&str]) {
-    for unit in ["zxc_compress", "zxc_decompress", "zxc_huffman"] {
+    for unit in ["zxc_compress", "zxc_decompress", "zxc_huffman", "zxc_checksum"] {
         let mut build = cc::Build::new();
         build
             .include(include_dir)

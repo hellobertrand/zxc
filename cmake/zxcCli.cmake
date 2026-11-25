@@ -12,7 +12,6 @@ if(ZXC_BUILD_CLI)
         src/cli/list.c
         src/cli/log.c)
     target_link_libraries(zxc PRIVATE zxc_lib)
-    target_include_directories(zxc PRIVATE ${RAPIDHASH_INCLUDE_DIR})
 
     # Math library on Unix
     if(UNIX)

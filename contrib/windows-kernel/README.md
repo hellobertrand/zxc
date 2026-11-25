@@ -85,7 +85,7 @@ externals are `memcpy`, `memset`, `memcmp`, the two pool routines,
 `__chkstk`, and the `/GS` and CFG support symbols; a linked image imports
 `ntoskrnl.exe` only, which `check-image.ps1` asserts.
 
-Vendoring instead: add the seven units named in `zxc_km.vcxproj` to the
+Vendoring instead: add the eight units named in `zxc_km.vcxproj` to the
 driver project, import `zxc_km.props` after `Microsoft.Cpp.props`, and keep
 the staging rule: `zxc_internal.h` includes the dependency header with
 quotes, so this tree's `zxc_deps.h` must sit next to the units in place of

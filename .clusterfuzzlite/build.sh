@@ -8,7 +8,7 @@
 FUZZERS="decompress roundtrip seekable pstream dict stream inplace block"
 SCALAR_FUZZERS="roundtrip"
 
-LIB_SOURCES="src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_pivco_tables.c src/lib/zxc_pstream.c src/lib/zxc_seekable.c"
+LIB_SOURCES="src/lib/zxc_checksum.c src/lib/zxc_common.c src/lib/zxc_compress.c src/lib/zxc_decompress.c src/lib/zxc_dict.c src/lib/zxc_driver.c src/lib/zxc_dispatch.c src/lib/zxc_huffman.c src/lib/zxc_pivco_tables.c src/lib/zxc_pstream.c src/lib/zxc_seekable.c"
 
 COMMON_CFLAGS="-I include -I src/lib/vendors \
     -D_POSIX_C_SOURCE=200809L -D_XOPEN_SOURCE=700 -D_FILE_OFFSET_BITS=64 -D_LARGEFILE_SOURCE"
@@ -36,7 +36,7 @@ build _scalar "$SCALAR_FUZZERS" -DZXC_DISABLE_SIMD
 variant() {
     local suffix=$1 src
     shift
-    for src in compress decompress huffman; do
+    for src in compress decompress huffman checksum; do
         $CC $CFLAGS $COMMON_CFLAGS -DZXC_FUNCTION_SUFFIX=$suffix "$@" \
             -c src/lib/zxc_$src.c -o "objvariants/zxc_${src}${suffix}.o"
     done
