@@ -756,6 +756,15 @@ static void zxc_test_json_cannot_open(const char* path) {
     printf(",\n  \"status\": \"failed\",\n  \"error\": \"cannot open file\"\n}\n");
 }
 
+// setvbuf only before the first I/O (C17 7.21.5.6); the buffer lives until exit.
+static void zxc_buffer_std_stream(FILE* f) {
+    static char* bufs[2];
+    const int i = (f == stdout);
+    if (bufs[i]) return;
+    bufs[i] = malloc(ZXC_STDIO_BUFFER_SIZE);
+    if (bufs[i]) setvbuf(f, bufs[i], _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+}
+
 static int process_single_file(const char* in_path, const char* out_path_override, zxc_mode_t mode,
                                int num_threads, int keep_input, int force, int to_stdout,
                                int checksum_enabled, int level, size_t block_size, int json_output,
@@ -893,17 +902,21 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     if (use_stdout) _setmode(_fileno(stdout), _O_BINARY);
 #endif
 
-    // Determine if we should show progress bar and get file size
-    // IMPORTANT: This must be done BEFORE setting large buffers with setvbuf
-    // to avoid buffer inconsistency issues when reading the footer
     int show_progress = 0;
     uint64_t total_size = 0;
     const int stderr_tty = isatty(fileno(stderr)) != 0;
 
-    char* b1 = malloc(ZXC_STDIO_BUFFER_SIZE);
-    char* b2 = malloc(ZXC_STDIO_BUFFER_SIZE);
-    if (b1) setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
-    if (f_out && b2) setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+    // Before any read or seek: MSVC drops a deferred seek
+    char* const b1 = use_stdin ? NULL : malloc(ZXC_STDIO_BUFFER_SIZE);
+    char* const b2 = created_out_file ? malloc(ZXC_STDIO_BUFFER_SIZE) : NULL;
+    if (use_stdin)
+        zxc_buffer_std_stream(stdin);
+    else if (b1)
+        setvbuf(f_in, b1, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
+    if (use_stdout)
+        zxc_buffer_std_stream(stdout);
+    else if (b2)
+        setvbuf(f_out, b2, _IOFBF, ZXC_STDIO_BUFFER_SIZE);
 
     // To stdout, -f passes non-archives through
     const int pass_through = mode == MODE_DECOMPRESS && force && use_stdout &&
@@ -991,10 +1004,7 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
     // Clear the in-place progress line on completion (off-tty lines end in '\n')
     if (show_progress && pctx.to_tty) zxc_progress_clear(pctx.last_len);
 
-    if (!use_stdin)
-        fclose(f_in);
-    else
-        setvbuf(stdin, NULL, _IONBF, 0);
+    if (!use_stdin) fclose(f_in);
 
     // stdio defers write errors to flush/close: a failure here means the
     // output is truncated even though the codec reported success
@@ -1008,7 +1018,6 @@ static int process_single_file(const char* in_path, const char* out_path_overrid
         write_error |= (fclose(f_out) != 0);
     } else if (use_stdout) {
         write_error = (fflush(stdout) != 0);
-        setvbuf(stdout, NULL, _IONBF, 0);
     }
 
     free(b1);
