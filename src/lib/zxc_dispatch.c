@@ -1653,7 +1653,7 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
                                      size_t* frame_end) {
     const int checksum_enabled = opts ? opts->checksum_enabled : 0;
     const uint8_t* dict = opts ? (const uint8_t*)opts->dict : NULL;
-    const size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
+    size_t dict_size = ZXC_OPTS_DICT_SIZE(opts);
     const uint8_t* dict_huf = ZXC_OPTS_DICT_HUF(opts);
 
     const uint8_t* ip = (const uint8_t*)src;
@@ -1687,6 +1687,12 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
         if (UNLIKELY(!dict || dict_size == 0)) return ZXC_ERROR_DICT_REQUIRED;
         if (UNLIKELY(zxc_dict_compute_id(dict, dict_size, dict_huf) != header_dict_id))
             return ZXC_ERROR_DICT_MISMATCH;
+    } else {
+        // A frame without the flag decodes as if no dictionary were attached: no
+        // back-reference into the prefix, no shared literal table.
+        dict = NULL;
+        dict_size = 0;
+        dict_huf = NULL;
     }
 
     ip += ZXC_FILE_HEADER_SIZE;
