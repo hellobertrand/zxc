@@ -235,6 +235,10 @@ export default async function createZXC(moduleOverrides, factory) {
     "number",
     "number",
   ]);
+  const _requires_dict = Module.cwrap("zxc_requires_dict", "number", [
+    "number",
+    "number",
+  ]);
   const _dict_get_id = Module.cwrap("zxc_dict_read_id", "number", [
     "number",
     "number",
@@ -1413,16 +1417,40 @@ export default async function createZXC(moduleOverrides, factory) {
   /**
    * Read the dictionary ID referenced by a compressed `.zxc` archive.
    * @param {Uint8Array} archive
-   * @returns {number} Unsigned 32-bit ID (0 if no dictionary required).
+   * @returns {number} Unsigned 32-bit ID (0 if no dictionary required). 0 is
+   *   also a valid ID: `requiresDict` tells them apart.
    */
   function getDictId(archive) {
     return _callIdOnBuffer(_get_dict_id, archive);
   }
 
   /**
+   * Tell whether a `.zxc` archive requires a dictionary, from its header flag
+   * alone: a required dictionary may have ID 0. Only the first 16 bytes are read.
+   * @param {Uint8Array} archive
+   * @returns {boolean}
+   * @throws {Error} On an invalid header.
+   */
+  function requiresDict(archive) {
+    const head = _bytes(archive).subarray(0, 16);
+    const ptr = _alloc(head.length || 1);
+    try {
+      Module.HEAPU8.set(head, ptr);
+      const rc = _requires_dict(ptr, head.length);
+      if (rc < 0) {
+        throw new Error(`ZXC header error: ${_error_name(rc)} (${rc})`);
+      }
+      return rc !== 0;
+    } finally {
+      _free(ptr);
+    }
+  }
+
+  /**
    * Read the dictionary ID stored in a serialized `.zxd` file buffer.
    * @param {Uint8Array} zxd
-   * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd).
+   * @returns {number} Unsigned 32-bit ID (0 if not a valid .zxd). 0 is also
+   *   a valid ID: `dictLoad` tells them apart.
    */
   function dictGetId(zxd) {
     return _callIdOnBuffer(_dict_get_id, zxd);
@@ -1854,6 +1882,7 @@ export default async function createZXC(moduleOverrides, factory) {
     trainDictHuf,
     dictId,
     getDictId,
+    requiresDict,
     dictGetId,
     dictSave,
     dictLoad,

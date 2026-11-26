@@ -77,6 +77,10 @@ static const valid_case_t VALID_CASES[] = {
     {"dict_seekable_l7",
      "dict_text.zxd",
      {.level = 7, .block_size = VC_KB(512), .checksum_enabled = 1, .seekable = 1}},
+
+    /* A dictionary whose ID is 0: only the header's HAS_DICTIONARY flag tells
+     * it is required. A decoder reading ID 0 as "no dictionary" fails here. */
+    {"dict_id_zero", "dict_id_zero.zxd", {.level = 3, .block_size = VC_KB(512)}},
 };
 
 #define VALID_CASE_COUNT (sizeof(VALID_CASES) / sizeof(VALID_CASES[0]))

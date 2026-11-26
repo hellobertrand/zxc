@@ -426,6 +426,24 @@ static Napi::Value GetDictId(const Napi::CallbackInfo& info) {
     return Napi::Number::New(env, static_cast<double>(id));
 }
 
+// requiresDict(archive: Buffer): boolean  (from .zxc)
+static Napi::Value RequiresDict(const Napi::CallbackInfo& info) {
+    Napi::Env env = info.Env();
+    if (info.Length() < 1 || !info[0].IsBuffer()) {
+        Napi::TypeError::New(env, "Expected a Buffer (archive)").ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    Napi::Buffer<uint8_t> b = info[0].As<Napi::Buffer<uint8_t>>();
+    const int rc = zxc_requires_dict(b.Data(), b.Length());
+    if (rc < 0) {
+        Napi::Error err = Napi::Error::New(env, zxc_error_name(rc));
+        err.Set("code", Napi::Number::New(env, rc));
+        err.ThrowAsJavaScriptException();
+        return env.Undefined();
+    }
+    return Napi::Boolean::New(env, rc != 0);
+}
+
 // dictGetId(zxd: Buffer): number  (from .zxd)
 static Napi::Value DictGetId(const Napi::CallbackInfo& info) {
     Napi::Env env = info.Env();
@@ -1492,6 +1510,7 @@ static Napi::Object Init(Napi::Env env, Napi::Object exports) {
     exports.Set("trainDict", Napi::Function::New(env, TrainDict, "trainDict"));
     exports.Set("dictId", Napi::Function::New(env, DictId, "dictId"));
     exports.Set("getDictId", Napi::Function::New(env, GetDictId, "getDictId"));
+    exports.Set("requiresDict", Napi::Function::New(env, RequiresDict, "requiresDict"));
     exports.Set("dictGetId", Napi::Function::New(env, DictGetId, "dictGetId"));
     exports.Set("dictSave", Napi::Function::New(env, DictSave, "dictSave"));
     exports.Set("trainDictHuf", Napi::Function::New(env, TrainDictHuf, "trainDictHuf"));

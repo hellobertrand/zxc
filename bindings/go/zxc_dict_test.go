@@ -103,6 +103,19 @@ func TestDictIDConsistency(t *testing.T) {
 	if archiveID := GetDictID(comp); archiveID != contentID {
 		t.Fatalf("GetDictID(archive) = %d, want %d", archiveID, contentID)
 	}
+	if need, err := RequiresDict(comp); err != nil || !need {
+		t.Fatalf("RequiresDict(archive) = %v, %v", need, err)
+	}
+	plain, err := Compress(payload)
+	if err != nil {
+		t.Fatalf("Compress: %v", err)
+	}
+	if need, err := RequiresDict(plain); err != nil || need {
+		t.Fatalf("RequiresDict(plain) = %v, %v", need, err)
+	}
+	if _, err := RequiresDict(comp[:8]); err != ErrSrcTooSmall {
+		t.Fatalf("RequiresDict(short) error = %v", err)
+	}
 
 	huf, err := TrainDictHuf(dictSamples(), dict)
 	if err != nil {

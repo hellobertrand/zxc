@@ -244,9 +244,26 @@ ZXC_EXPORT uint64_t zxc_get_decompressed_size(const void* src, const size_t src_
  *
  * @param[in] src       Compressed buffer.
  * @param[in] src_size  Compressed size in bytes.
- * @return Dictionary ID, or 0 if no dictionary is required or the buffer is invalid.
+ * @return Dictionary ID, or 0 if no dictionary is required, the buffer is too
+ *         small or the magic word is wrong; the rest of the header is not
+ *         checked. 0 is also a valid ID: zxc_requires_dict() tells them apart
+ *         and validates the header.
  */
 ZXC_EXPORT uint32_t zxc_get_dict_id(const void* src, size_t src_size);
+
+/**
+ * @brief Tells whether an archive requires a dictionary, from its header.
+ *
+ * The header's dictionary flag alone decides: a required dictionary may have
+ * ID 0, which zxc_get_dict_id() cannot tell from none. Only the first
+ * @ref ZXC_FILE_HEADER_SIZE bytes are read.
+ *
+ * @param[in] src       Compressed buffer.
+ * @param[in] src_size  Compressed size in bytes.
+ * @return 1 if a dictionary is required, 0 if not, or a negative @ref zxc_error_t
+ *         for an invalid header.
+ */
+ZXC_EXPORT int zxc_requires_dict(const void* src, size_t src_size);
 
 /**
  * @brief What a frame's header and footer declare, read without decoding.
@@ -260,7 +277,7 @@ typedef struct {
     uint64_t compressed_size;   /**< Compressed bytes of the frame, footer included. */
     uint64_t digest;            /**< Archive digest; 0 when @c has_checksum is 0. */
     size_t block_size;          /**< Block size, 4 KB to 2 MB. */
-    uint32_t dict_id;           /**< Dictionary the frame needs; 0 for none. */
+    uint32_t dict_id;           /**< Dictionary ID; 0 is none or ID 0, see zxc_requires_dict(). */
     uint8_t format_version;     /**< Format version of the frame. */
     uint8_t has_checksum;       /**< 1 when blocks carry checksums and the footer a digest. */
     uint8_t has_seek_table;     /**< 1 when a seek table precedes the footer. */

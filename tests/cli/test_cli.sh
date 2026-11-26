@@ -1299,6 +1299,29 @@ else
     log_fail "Decompress with -D failed to recreate original"
 fi
 
+# 25.12 A dictionary whose ID is 0 is an ordinary one: the header flag marks it.
+echo "  Testing a dictionary of ID 0..."
+ZERO_ZXD="$TEST_DIR/zero.zxd"
+{
+    printf '\xc7\xd1\xb0\x9c\x02\x00\x1b\x00\x00\x00\x00\x00\x00\x00\xba\xea'
+    printf 'zxc-dict-id-zero-3707268039'
+    for _ in $(seq 128); do printf '\x88'; done
+} > "$ZERO_ZXD"
+"$ZXC_BIN" -3 -D "$ZERO_ZXD" -c "$TEST_FILE_ARG" > "$TEST_DIR/zero.zxc"
+ZERO_LIST=$("$ZXC_BIN" -l -v "$TEST_DIR/zero.zxc")
+ZERO_JSON=$("$ZXC_BIN" -l -j "$TEST_DIR/zero.zxc")
+set +e
+"$ZXC_BIN" -d -c "$TEST_DIR/zero.zxc" > /dev/null 2>&1
+RET=$?
+set -e
+"$ZXC_BIN" -d -D "$ZERO_ZXD" -c "$TEST_DIR/zero.zxc" > "$TEST_DIR/zero.dec"
+if [[ "$ZERO_LIST" == *"0x00000000"* && "$ZERO_JSON" == *'"0x00000000"'* && $RET -ne 0 ]] &&
+   cmp -s "$TEST_FILE" "$TEST_DIR/zero.dec"; then
+    log_pass "Dictionary of ID 0: listed, required, round trip"
+else
+    log_fail "Dictionary of ID 0 mishandled (no -D exit $RET): $ZERO_LIST"
+fi
+
 # 26. unzxc and zxccat Aliases (argv[0]-based mode detection)
 echo "Testing unzxc and zxccat aliases..."
 

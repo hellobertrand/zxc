@@ -271,8 +271,8 @@ pub mod seekable;
 mod stdio;
 
 pub use dict::{
-    Dictionary, dict_get_id, dict_huf, dict_id, dict_load, dict_save, get_dict_id, train_dict,
-    train_dict_huf,
+    Dictionary, dict_get_id, dict_huf, dict_id, dict_load, dict_save, get_dict_id, requires_dict,
+    train_dict, train_dict_huf,
 };
 pub use zxc_sys::{ZXC_DICT_SIZE_MAX, ZXC_HUF_TABLE_SIZE};
 

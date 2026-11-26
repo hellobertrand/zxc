@@ -133,11 +133,11 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
         if (n < 0 || (size_t)n >= sizeof(path)) continue;
         size_t sz = 0;
         uint8_t* buf = vio_read_file(path, &sz);
-        if (buf && zxc_dict_read_id(buf, sz) == target_id) {
-            if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
-                FindClose(hf);
-                return buf;
-            }
+        uint32_t id = 0;
+        if (buf && zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, &id) == ZXC_OK &&
+            id == target_id) {
+            FindClose(hf);
+            return buf;
         }
         free(buf);
     } while (FindNextFileA(hf, &fd));
@@ -153,11 +153,11 @@ static uint8_t* find_dict_for_id(const char* zxc_path, uint32_t target_id, const
         if (n < 0 || (size_t)n >= sizeof(path)) continue;
         size_t sz = 0;
         uint8_t* buf = vio_read_file(path, &sz);
-        if (buf && zxc_dict_read_id(buf, sz) == target_id) {
-            if (zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, NULL) == 0) {
-                closedir(dp);
-                return buf;
-            }
+        uint32_t id = 0;
+        if (buf && zxc_dict_load(buf, sz, content_out, content_size_out, huf_out, &id) == ZXC_OK &&
+            id == target_id) {
+            closedir(dp);
+            return buf;
         }
         free(buf);
     }
@@ -182,15 +182,15 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
         return 0;
     }
 
-    /* Auto-detect dictionary: if the archive has a dict_id, find the .zxd */
+    /* Auto-detect dictionary: if the archive needs one, whatever its id, find the .zxd */
     const void* dict = NULL;
     size_t dict_size = 0;
     const void* dict_huf = NULL;
     uint8_t* dict_buf = NULL;
-    uint32_t did = zxc_get_dict_id(comp, comp_sz);
+    const uint32_t did = zxc_get_dict_id(comp, comp_sz);
 #ifdef ZXC_NO_DICT
     /* No dictionary support: every decoder must refuse the vector as such. */
-    if (did != 0) {
+    if (zxc_requires_dict(comp, comp_sz) == 1) {
         const size_t cap = expected_sz ? expected_sz : 1;
         uint8_t* const out = (uint8_t*)malloc(cap);
         const int64_t r = out ? zxc_decompress(comp, comp_sz, out, cap) : ZXC_ERROR_MEMORY;
@@ -226,7 +226,7 @@ static int test_valid_vector(const char* zxc_path, const char* expected_path) {
         return rejected;
     }
 #endif
-    if (did != 0) {
+    if (zxc_requires_dict(comp, comp_sz) == 1) {
         dict_buf = find_dict_for_id(zxc_path, did, &dict, &dict_size, &dict_huf);
         if (!dict_buf) {
             fprintf(stderr, "FAIL: %s  requires dict 0x%08X but no matching .zxd found\n", zxc_path,

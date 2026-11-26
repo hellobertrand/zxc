@@ -28,6 +28,7 @@ from ._zxc import (
     pyzxc_train_dict,
     pyzxc_dict_id,
     pyzxc_get_dict_id,
+    pyzxc_requires_dict,
     pyzxc_dict_get_id,
     pyzxc_dict_save,
     pyzxc_dict_load,
@@ -114,6 +115,7 @@ __all__ = [
     "train_dict",
     "dict_id",
     "get_dict_id",
+    "requires_dict",
     "dict_get_id",
     "dict_save",
     "dict_load",
@@ -221,13 +223,29 @@ def dict_id(content: bytes) -> int:
 def get_dict_id(archive: bytes) -> int:
     """Return the dictionary ID a ``.zxc`` *archive* requires (0 if none).
 
-    Only the first 16 bytes of the archive are needed.
+    0 is also a valid ID: `requires_dict` tells them apart. Only the first
+    16 bytes of the archive are needed.
     """
     return pyzxc_get_dict_id(archive)
 
 
+def requires_dict(archive: bytes) -> bool:
+    """Return whether a ``.zxc`` *archive* requires a dictionary.
+
+    The header flag alone decides: a required dictionary may have ID 0. Only
+    the first 16 bytes of the archive are needed.
+
+    Raises:
+        RuntimeError: If the header is invalid.
+    """
+    return pyzxc_requires_dict(archive)
+
+
 def dict_get_id(zxd: bytes) -> int:
-    """Return the dictionary ID stored in a ``.zxd`` file (0 if not valid)."""
+    """Return the dictionary ID stored in a ``.zxd`` file (0 if not valid).
+
+    0 is also a valid ID: `dict_load` tells them apart.
+    """
     return pyzxc_dict_get_id(zxd)
 
 

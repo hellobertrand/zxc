@@ -149,7 +149,8 @@ with open("corpus.zxd", "rb") as f:
 ```
 
 `get_dict_id(archive)` returns the dictionary id an archive was built with, so
-you can pick the right one before decompressing.
+you can pick the right one before decompressing. An id of 0 is valid:
+`requires_dict(archive)` tells whether the archive needs a dictionary at all.
 
 ## Testing
 

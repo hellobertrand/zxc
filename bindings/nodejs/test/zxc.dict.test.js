@@ -73,6 +73,7 @@ describe("dictionary compress/decompress roundtrip", () => {
     const compressed = zxc.compress(original, { dict });
     expect(zxc.getDictId(compressed)).toBe(zxc.dictId(dict));
     expect(zxc.getDictId(compressed)).not.toBe(0);
+    expect(zxc.requiresDict(compressed)).toBe(true);
   });
 
   test("decompressing a dict archive without the dictionary throws", () => {
@@ -83,6 +84,8 @@ describe("dictionary compress/decompress roundtrip", () => {
   test("a non-dictionary archive reports dict id 0", () => {
     const compressed = zxc.compress(original);
     expect(zxc.getDictId(compressed)).toBe(0);
+    expect(zxc.requiresDict(compressed)).toBe(false);
+    expect(() => zxc.requiresDict(compressed.subarray(0, 8))).toThrow();
   });
 });
 
