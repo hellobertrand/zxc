@@ -5,7 +5,33 @@
  * Copyright (c) Bertrand Lebonnois and contributors.
  */
 
+#if defined(__linux__) && !defined(_GNU_SOURCE)
+#define _GNU_SOURCE
+#endif
 #include "test_common.h"
+
+#if defined(__GLIBC__)
+#include <errno.h>
+
+/* Supplies the archive through its EOF block, then fails the footer read. */
+typedef struct {
+    const uint8_t* next;
+    size_t left;
+} failing_input_t;
+
+static ssize_t read_until_error(void* cookie, char* buf, const size_t size) {
+    failing_input_t* const in = cookie;
+    if (in->left == 0) {
+        errno = EIO;
+        return -1;
+    }
+    const size_t n = in->left < size ? in->left : size;
+    memcpy(buf, in->next, n);
+    in->next += n;
+    in->left -= n;
+    return (ssize_t)n;
+}
+#endif
 
 #if !defined(_WIN32)
 #include <signal.h>
@@ -276,10 +302,34 @@ int test_io_failures(void) {
         return 0;
     }
 
-    printf("PASS\n\n");
     fclose(f_in);
     fclose(f_out);
     remove(bad_filename);
+
+#if defined(__GLIBC__)
+    uint8_t arc[256];
+    const int64_t n = test_compress_cfg("x", 1, arc, sizeof(arc), 3, 0, 1, 0);
+    if (n <= 0) return 0;
+    const size_t footer = test_footer_len(arc, (size_t)n);
+    if (!footer) return 0;
+    failing_input_t in = {arc, (size_t)n - footer};
+    const cookie_io_functions_t io = {.read = read_until_error};
+    FILE* const f_bad = fopencookie(&in, "rb", io);
+    if (!f_bad) return 0;
+    zxc_dctx* const d = dctx_for(2, 1);
+    if (!d) {
+        fclose(f_bad);
+        return 0;
+    }
+    const int64_t r = zxc_stream_decompress(f_bad, NULL, d);
+    zxc_free_dctx(d);
+    fclose(f_bad);
+    if (r != ZXC_ERROR_IO) {
+        printf("Failed: footer read error: expected %d, got %lld\n", ZXC_ERROR_IO, (long long)r);
+        return 0;
+    }
+#endif
+    printf("PASS\n\n");
     return 1;
 }
 
