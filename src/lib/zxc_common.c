@@ -698,11 +698,7 @@ int zxc_read_block_header(const uint8_t* RESTRICT src, const size_t src_size,
                           zxc_block_header_t* RESTRICT bh) {
     if (UNLIKELY(src_size < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
 
-    uint8_t temp[ZXC_BLOCK_HEADER_SIZE];
-    ZXC_MEMCPY(temp, src, ZXC_BLOCK_HEADER_SIZE);
-    temp[7] = 0;  // Zero out checksum byte before hashing
-    if (UNLIKELY(src[7] != zxc_hash8(temp))) return ZXC_ERROR_BAD_HEADER;
-    if (UNLIKELY((src[1] | src[2]) != 0)) return ZXC_ERROR_BAD_HEADER;
+    if (UNLIKELY(!zxc_block_header_ok(src))) return ZXC_ERROR_BAD_HEADER;
 
     bh->block_type = src[0];
     bh->block_flags = src[1];

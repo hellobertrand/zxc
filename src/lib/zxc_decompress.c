@@ -1625,6 +1625,7 @@ static ZXC_ALWAYS_INLINE int zxc_decompress_chunk_wrapper_body(
     uint8_t* RESTRICT dst, const size_t dst_cap, const uint64_t block_index, const int has_dict,
     const int safe) {
     if (UNLIKELY(src_sz < ZXC_BLOCK_HEADER_SIZE)) return ZXC_ERROR_SRC_TOO_SMALL;
+    if (UNLIKELY(!zxc_block_header_ok(src))) return ZXC_ERROR_BAD_HEADER;
 
     const uint8_t type = src[0];
     const uint32_t comp_sz = zxc_le32(src + 3);
