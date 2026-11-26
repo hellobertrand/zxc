@@ -431,6 +431,8 @@ ZXC_EXPORT int64_t zxc_compress_block(zxc_cctx* cctx, const void* src, size_t sr
  * @note @p src and @p dst must not overlap (same contract as memcpy).
  *
  * @return Decompressed size (> 0), or a negative @ref zxc_error_t;
+ *         @ref ZXC_ERROR_BAD_HEADER if the block header fails its checksum or
+ *         has non-zero flags or reserved bytes;
  *         @ref ZXC_ERROR_BAD_BLOCK_SIZE if @p dst_capacity exceeds the
  *         per-block limit. Static context: the carved block is the effective
  *         capacity; a larger block is @ref ZXC_ERROR_BAD_BLOCK_SIZE while it

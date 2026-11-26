@@ -1500,6 +1500,20 @@ static ZXC_ALWAYS_INLINE uint8_t zxc_hash8(const uint8_t* p) {
 }
 
 /**
+ * @brief Block header integrity (FORMAT.md Sec 4.1, 7.1): checksum byte matches,
+ *        Block Flags and Reserved are 0.
+ *
+ * @param[in] p The 8 header bytes, checksum included.
+ * @return 1 when the header is sound, 0 otherwise.
+ */
+static ZXC_ALWAYS_INLINE int zxc_block_header_ok(const uint8_t* p) {
+    uint8_t temp[ZXC_BLOCK_HEADER_SIZE];
+    ZXC_MEMCPY(temp, p, ZXC_BLOCK_HEADER_SIZE);
+    temp[7] = 0;  // The checksum covers the header with its own byte zeroed
+    return p[7] == zxc_hash8(temp) && (p[1] | p[2]) == 0;
+}
+
+/**
  * @brief Computes the 2-byte checksum for file and dictionary headers.
  *
  * Two multiplies in a chain: the first half is mixed, the second is added and
