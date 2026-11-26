@@ -110,6 +110,8 @@ typedef enum { JOB_STATUS_FREE, JOB_STATUS_FILLED, JOB_STATUS_PROCESSED } job_st
  *      The actual size of the valid data produced in the output buffer.
  * @var zxc_stream_job_t::fail_code
  *      The error this job failed with, 0 otherwise. Set with @c status.
+ * @var zxc_stream_job_t::has_dict
+ *      Decompression: whether the job's frame is bound to the dictionary.
  * @var zxc_stream_job_t::block_index
  *      Frame position of the job's first block: seeds the block checksums.
  * @var zxc_stream_job_t::in_off
@@ -131,6 +133,7 @@ typedef struct {
     size_t out_cap;
     size_t result_sz;
     int fail_code;
+    int has_dict;
     uint64_t block_index;
     uint64_t in_off;
     int job_id;
@@ -468,7 +471,7 @@ static int zxc_stream_decode_job(const zxc_stream_ctx_t* ctx, zxc_cctx_t* cctx,
     // One block of output plus the fast decoder's margin.
     const size_t room = ctx->chunk_size + ZXC_DECOMPRESS_TAIL_PAD;
     // Dictionary: decode behind the prefix so back-references resolve.
-    uint8_t* const scratch = dict_work ? dict_work + ctx->dict_size : NULL;
+    uint8_t* const scratch = cctx->dict_size ? dict_work + cctx->dict_size : NULL;
     uint64_t block_index = job->block_index;
     size_t ip = 0;
     size_t op = 0;
@@ -543,6 +546,7 @@ static void* zxc_stream_worker(void* arg) {
 
     // Per-worker dict buffer for assembling [dict | block_data]
     const size_t dsz = ctx->dict_size;
+    const int dict_huf_tree_ok = cctx.dict_huf_tree_ok;
     uint8_t* const dict_work = cctx.dict_buffer;
     if (dict_work) ZXC_MEMCPY(dict_work, ctx->dict, dsz);
 
@@ -569,6 +573,9 @@ static void* zxc_stream_worker(void* arg) {
                                 (int64_t)job->in_sz)) {
             res = ZXC_ERROR_IO;
         } else if (ctx->compression_mode == 0) {
+            // The prefix and table stay set up; only bound frames see them.
+            cctx.dict_size = job->has_dict ? dsz : 0;
+            cctx.dict_huf_tree_ok = job->has_dict ? dict_huf_tree_ok : 0;
             res = zxc_stream_decode_job(ctx, &cctx, job, in, dict_work);
         } else if (dict_work) {
             ZXC_MEMCPY(dict_work + dsz, in, job->in_sz);
@@ -1016,9 +1023,11 @@ static size_t zxc_stream_read_chunk(zxc_stream_ctx_t* ctx, FILE* f_in, zxc_strea
 /**
  * @brief Reads the input and feeds the ring until the stream ends.
  *
- * Fills the ring from slot @p read_idx on; returns the slot after the last job.
+ * Fills the ring from slot @p read_idx on, each job tagged with @p has_dict;
+ * returns the slot after the last job.
  */
-static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, int read_idx) {
+static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, int read_idx,
+                                const int has_dict) {
     int read_eof = 0;
     uint64_t block_index = 0;
 
@@ -1039,6 +1048,7 @@ static int zxc_stream_read_loop(zxc_stream_ctx_t* ctx, FILE* f_in, int read_idx)
         if (UNLIKELY(read_eof && read_sz == 0)) break;
 
         job->in_sz = read_sz;
+        job->has_dict = has_dict;
         job->block_index = block_index;
         block_index += (uint64_t)n_blocks;
         pthread_mutex_lock(&ctx->lock);
@@ -1228,7 +1238,8 @@ static int zxc_stream_read_frame_header(zxc_stream_ctx_t* ctx, FILE* f_in, const
  *
  * @return Bytes the frame produced, or a negative @ref zxc_error_t.
  */
-static int64_t zxc_stream_decode_frame(zxc_stream_engine_t* e, FILE* f_in, const int has_seek) {
+static int64_t zxc_stream_decode_frame(zxc_stream_engine_t* e, FILE* f_in, const int has_seek,
+                                       const int has_dict) {
     zxc_stream_ctx_t* const ctx = &e->ctx;
     const int64_t base = e->w.total_bytes;
     ctx->file_has_seek = has_seek;
@@ -1236,7 +1247,7 @@ static int64_t zxc_stream_decode_frame(zxc_stream_engine_t* e, FILE* f_in, const
     ctx->digest = 0;
     ctx->ahead_len = -1;
 
-    e->read_idx = zxc_stream_read_loop(ctx, f_in, e->read_idx);
+    e->read_idx = zxc_stream_read_loop(ctx, f_in, e->read_idx, has_dict);
     if (!zxc_stream_engine_drain(e))
         zxc_stream_finish_decompress(ctx, (uint64_t)(e->w.total_bytes - base), f_in);
 
@@ -1334,7 +1345,7 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_cctx* cfg) {
     }
     e.w.total_bytes = ZXC_FILE_HEADER_SIZE;
 
-    e.read_idx = zxc_stream_read_loop(ctx, f_in, 0);
+    e.read_idx = zxc_stream_read_loop(ctx, f_in, 0, dict_size > 0);
     zxc_stream_engine_stop(&e, 1);
 
     if (!ctx->io_error && e.w.total_bytes >= 0) zxc_stream_finish_compress(ctx, &e.w, f_out);
@@ -1353,8 +1364,9 @@ int64_t zxc_stream_compress(FILE* f_in, FILE* f_out, const zxc_cctx* cfg) {
  *
  * Public API; see @c zxc_stream.h. Before each frame, 4 bytes: the end of the
  * input, a magic word or an error. Block size and level come from each frame
- * header, not from @p opts. Consecutive frames with the same block size,
- * checksum flag and dictionary binding share one engine.
+ * header, not from @p opts. Consecutive frames with the same block size and
+ * checksum flag share one engine; each job says whether its frame is bound to
+ * the dictionary.
  */
 int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_dctx* cfg) {
     if (UNLIKELY(!f_in)) return ZXC_ERROR_NULL_INPUT;
@@ -1391,12 +1403,9 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_dctx* cfg) {
         rc = zxc_stream_read_frame_header(running ? &e.ctx : NULL, f_in, magic, dict_size > 0,
                                           dict_id, &chunk, &has_checksum, &has_seek, &frame_dict);
         if (UNLIKELY(rc != ZXC_OK)) break;
-        // A frame without the flag never sees the dictionary nor its literal table.
-        const size_t frame_dict_size = frame_dict ? dict_size : 0;
 
-        // The workers are set up for one block size, checksum flag and dictionary.
-        if (running && (e.ctx.chunk_size != chunk || e.ctx.file_has_checksum != has_checksum ||
-                        e.ctx.dict_size != frame_dict_size)) {
+        // The workers are set up for one block size and checksum flag.
+        if (running && (e.ctx.chunk_size != chunk || e.ctx.file_has_checksum != has_checksum)) {
             running = 0;
             rc = zxc_stream_engine_close(&e, f_in);
             if (UNLIKELY(rc != ZXC_OK)) break;  // LCOV_EXCL_LINE
@@ -1408,9 +1417,9 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_dctx* cfg) {
             e.ctx.file_has_checksum = has_checksum;
             e.ctx.progress_cb = opts ? opts->progress_cb : NULL;
             e.ctx.progress_user_data = opts ? opts->user_data : NULL;
-            e.ctx.dict = frame_dict ? dict : NULL;
-            e.ctx.dict_size = frame_dict_size;
-            e.ctx.dict_huf = frame_dict ? dict_huf : NULL;
+            e.ctx.dict = dict;
+            e.ctx.dict_size = dict_size;
+            e.ctx.dict_huf = dict_huf;
             e.w.f = f_out;
             e.w.bytes_processed = (uint64_t)total;  // Progress counts across frames
             rc = zxc_stream_engine_start(&e, f_in, n_threads);
@@ -1418,7 +1427,8 @@ int64_t zxc_stream_decompress(FILE* f_in, FILE* f_out, const zxc_dctx* cfg) {
             running = 1;
         }
 
-        const int64_t r = zxc_stream_decode_frame(&e, f_in, has_seek);
+        // A frame without the flag never sees the dictionary nor its literal table.
+        const int64_t r = zxc_stream_decode_frame(&e, f_in, has_seek, frame_dict);
         if (UNLIKELY(r < 0)) {
             rc = (int)r;
             break;

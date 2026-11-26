@@ -2508,8 +2508,8 @@ int test_dict_nodict_frame_isolated(void) {
         uint8_t* const dframe = (uint8_t*)test_malloc(cap);
         uint8_t* const plain = (uint8_t*)test_malloc(cap);
         uint8_t* const forged = (uint8_t*)test_malloc(cap);
-        uint8_t* const mix = (uint8_t*)test_malloc(2 * cap);
-        uint8_t* const out = (uint8_t*)test_malloc(2 * n);
+        uint8_t* const mix = (uint8_t*)test_malloc(3 * cap);
+        uint8_t* const out = (uint8_t*)test_malloc(3 * n);
 
         uint32_t s = 0x9e3779b9U;
         for (int i = 0; i < DSZ; i++) {
@@ -2570,21 +2570,22 @@ int test_dict_nodict_frame_isolated(void) {
                     stream_decode_mem(mix, 2 * fn, dict, DSZ, h, t, out, 2 * n), want);
         }
 
-        // An honest mix still round-trips, in both orders.
+        // An honest mix [a | b | a] still round-trips, in both orders: one stream
+        // engine turns the dictionary off and back on.
         for (int order = 0; order < 2 && ok; order++) {
             const uint8_t* const a = order ? plain : dframe;
             const uint8_t* const b = order ? dframe : plain;
-            const size_t la = order ? an : fn, lb = order ? fn : an;
+            const size_t la = order ? an : fn, lb = order ? fn : an, lm = 2 * la + lb;
             memcpy(mix, a, la);
             memcpy(mix + la, b, lb);
+            memcpy(mix + la + lb, a, la);
             int64_t got[3];
-            got[0] = ctx_decompress(0, dict, DSZ, h, mix, la + lb, out, 2 * n);
-            int same =
-                got[0] == (int64_t)(2 * n) && !memcmp(out, src, n) && !memcmp(out + n, src, n);
-            for (int t = 1; t <= 2; t++) {
-                got[t] = stream_decode_mem(mix, la + lb, dict, DSZ, h, t, out, 2 * n);
-                same &=
-                    got[t] == (int64_t)(2 * n) && !memcmp(out, src, n) && !memcmp(out + n, src, n);
+            int same = 1;
+            for (int t = 0; t <= 2; t++) {
+                got[t] = t ? stream_decode_mem(mix, lm, dict, DSZ, h, t, out, 3 * n)
+                           : ctx_decompress(0, dict, DSZ, h, mix, lm, out, 3 * n);
+                same &= got[t] == (int64_t)(3 * n);
+                for (int k = 0; k < 3; k++) same &= !memcmp(out + k * n, src, n);
             }
             if (!same) {
                 printf("  [FAIL] %s, honest mix (order %d): %lld / %lld / %lld\n", name, order,
