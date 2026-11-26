@@ -2444,100 +2444,160 @@ static int64_t stream_decode_mem(const uint8_t* arc, size_t n, const uint8_t* di
     return r;
 }
 
+/* In-place decode of the single frame `arc` with `dict` (and `huf`) attached. */
+static int64_t inplace_decode_mem(const uint8_t* arc, size_t n, const uint8_t* dict, size_t dsz,
+                                  const uint8_t* huf) {
+    const size_t need = zxc_decompress_inplace_bound(arc, n);
+    if (need < n) return ZXC_ERROR_CORRUPT_DATA;
+    uint8_t* const buf = (uint8_t*)test_malloc(need);
+    memcpy(buf + (need - n), arc, n);
+    zxc_dctx* const dctx = zxc_create_dctx();
+    int64_t r = dctx ? zxc_dctx_set_dict(dctx, dict, dsz, huf) : ZXC_ERROR_MEMORY;
+    if (r == ZXC_OK) r = zxc_decompress_inplace_dctx(dctx, buf, need, n);
+    zxc_free_dctx(dctx);
+    free(buf);
+    return r;
+}
+
+/* Seekable decode of all `n_out` bytes: the reader that already isolated frames. */
+static int64_t seekable_decode_mem(const uint8_t* arc, size_t n, const uint8_t* dict, size_t dsz,
+                                   const uint8_t* huf, uint8_t* out, size_t n_out) {
+    zxc_seekable* const sk = zxc_seekable_open(arc, n);
+    if (!sk) return ZXC_ERROR_NULL_INPUT;
+    int64_t r = zxc_seekable_set_dict(sk, dict, dsz, huf);
+    if (r == ZXC_OK) r = zxc_seekable_decompress_range(sk, out, n_out, 0, n_out);
+    zxc_seekable_free(sk);
+    return r;
+}
+
+static int nodict_expect(const char* name, const char* path, int64_t got, int64_t want) {
+    if (got == want) return 1;
+    printf("  [FAIL] %s, %s: expected %s, got %lld (%s)\n", name, path, zxc_error_name((int)want),
+           (long long)got, zxc_error_name((int)got));
+    return 0;
+}
+
 /* A frame whose header clears HAS_DICTIONARY decodes as if no dictionary were
- * attached (FORMAT.md Sec 5.2.2): matches into the prefix and the shared literal
- * table are refused, alone and after a dictionary frame, on every decode path. */
+ * attached: matches into the prefix and Literal Encoding 3 are refused, alone and
+ * after a dictionary frame, by every frame decoder. */
 int test_dict_nodict_frame_isolated(void) {
     printf("=== TEST: Dict - frame without the flag never sees the dictionary ===\n");
-    enum { DSZ = 2048, BS = 4096, N = 4 * BS, CAP = 4 * N };
-    static uint8_t dict[DSZ], huf[ZXC_HUF_TABLE_SIZE], src[N], dframe[CAP], plain[CAP], forged[CAP],
-        mix[2 * CAP], out[2 * N];
-    uint32_t s = 0x9e3779b9U;
-    for (int i = 0; i < DSZ; i++) {
-        s = s * 1103515245U + 12345U;
-        dict[i] = (uint8_t)('a' + (s >> 16) % 16);
-    }
-    build_test_huf_lengths(dict, DSZ, huf);
-    for (size_t i = 0; i < N; i += 128) memcpy(src + i, dict + ((i / 128 * 57) % (DSZ - 128)), 128);
+    // table_only: dictionary bytes absent from the input, so the shared literal
+    // table is the frame's only dependency on the dictionary.
+    static const struct {
+        const char* name;
+        int level;
+        size_t bs;
+        int table_only;
+        int64_t want;
+    } cases[] = {
+        {"prefix L3", 3, 4096, 0, ZXC_ERROR_BAD_OFFSET},
+        {"prefix L3 64K", 3, 65536, 0, ZXC_ERROR_BAD_OFFSET},
+        {"prefix+table L6", 6, 4096, 0, ZXC_ERROR_DICT_REQUIRED},
+        {"table L6", 6, 4096, 1, ZXC_ERROR_DICT_REQUIRED},
+    };
+    enum { DSZ = 2048 };
+    static uint8_t dict[DSZ], huf[ZXC_HUF_TABLE_SIZE];
 
-    static const int levels[] = {3, 6};
     int ok = 1;
-    for (size_t li = 0; li < sizeof(levels) / sizeof(levels[0]) && ok; li++) {
-        const int lvl = levels[li];
+    for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]) && ok; ci++) {
+        const char* const name = cases[ci].name;
+        const int lvl = cases[ci].level;
+        const size_t bs = cases[ci].bs, n = 4 * bs, cap = 2 * n + 4096;
+        uint8_t* const src = (uint8_t*)test_malloc(n);
+        uint8_t* const dframe = (uint8_t*)test_malloc(cap);
+        uint8_t* const plain = (uint8_t*)test_malloc(cap);
+        uint8_t* const forged = (uint8_t*)test_malloc(cap);
+        uint8_t* const mix = (uint8_t*)test_malloc(2 * cap);
+        uint8_t* const out = (uint8_t*)test_malloc(2 * n);
+
+        uint32_t s = 0x9e3779b9U;
+        for (int i = 0; i < DSZ; i++) {
+            s = s * 1103515245U + 12345U;
+            dict[i] = (uint8_t)(cases[ci].table_only ? 0x80U | (s >> 16) : 'a' + (s >> 16) % 16);
+        }
+        if (cases[ci].table_only) {
+            for (size_t i = 0; i < n; i++) {
+                s = s * 1103515245U + 12345U;
+                src[i] = (uint8_t)('a' + (s >> 16) % 16);
+            }
+        } else {
+            for (size_t i = 0; i < n; i += 128)
+                memcpy(src + i, dict + ((i / 128 * 57) % (DSZ - 128)), 128);
+        }
+        build_test_huf_lengths(cases[ci].table_only ? src : dict, cases[ci].table_only ? n : DSZ,
+                               huf);
         const uint8_t* const h = lvl >= 6 ? huf : NULL;
-        const int64_t dn = ctx_compress(lvl, BS, 0, 1, dict, DSZ, h, src, N, dframe, CAP);
-        const int64_t pn = ctx_compress(lvl, BS, 0, 0, NULL, 0, NULL, src, N, plain, CAP);
-        if (dn <= 0 || pn <= 0) {
-            printf("  [FAIL] L%d compress %lld / %lld\n", lvl, (long long)dn, (long long)pn);
-            ok = 0;
-            break;
-        }
+
         // The dictionary frame (seekable, for the reference reader), flag and id cleared.
-        memcpy(forged, dframe, (size_t)dn);
-        forged[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_DICTIONARY;
-        memset(forged + 7, 0, 4);
-        zxc_file_header_sign(forged);
-        if (zxc_requires_dict(forged, (size_t)dn) != 0) {
-            printf("  [FAIL] L%d forged frame still flagged\n", lvl);
-            ok = 0;
-            break;
+        const int64_t dn = ctx_compress(lvl, bs, 0, 1, dict, DSZ, h, src, n, dframe, cap);
+        const int64_t pn = ctx_compress(lvl, bs, 0, 0, NULL, 0, NULL, src, n, plain, cap);
+        if (dn > 0 && pn > 0) {
+            memcpy(forged, dframe, (size_t)dn);
+            forged[6] &= (uint8_t)~ZXC_FILE_FLAG_HAS_DICTIONARY;
+            memset(forged + 7, 0, 4);
+            zxc_file_header_sign(forged);
         }
-        const size_t fn = (size_t)dn;
+        if (dn <= 0 || pn <= 0 || zxc_requires_dict(forged, (size_t)dn) != 0) {
+            printf("  [FAIL] %s: setup (compress %lld / %lld)\n", name, (long long)dn,
+                   (long long)pn);
+            ok = 0;
+        }
+        const size_t fn = ok ? (size_t)dn : 0, an = ok ? (size_t)pn : 0;
+        const int64_t want = cases[ci].want;
 
-        // Alone: every path refuses it, the dictionary attached.
-        int64_t r = ctx_decompress(0, dict, DSZ, h, forged, fn, out, sizeof(out));
-        for (int t = 1; t <= 2 && r < 0; t++)
-            r = stream_decode_mem(forged, fn, dict, DSZ, h, t, out, sizeof(out));
-        if (r >= 0) {
-            printf("  [FAIL] L%d forged frame decoded alone: %lld\n", lvl, (long long)r);
-            ok = 0;
-            break;
-        }
-        // Seekable already decodes it dictionary-free: the reference.
-        zxc_seekable* const sk = zxc_seekable_open(forged, fn);
-        const int64_t sr = sk && zxc_seekable_set_dict(sk, dict, DSZ, h) == ZXC_OK
-                               ? zxc_seekable_decompress_range(sk, out, N, 0, N)
-                               : 0;
-        zxc_seekable_free(sk);
-        if (sr >= 0) {
-            printf("  [FAIL] L%d seekable accepted the forged frame: %lld\n", lvl, (long long)sr);
-            ok = 0;
-            break;
-        }
+        if (ok) {
+            // Alone, the dictionary attached.
+            ok &= nodict_expect(name, "one-shot",
+                                ctx_decompress(0, dict, DSZ, h, forged, fn, out, 2 * n), want);
+            ok &=
+                nodict_expect(name, "in place", inplace_decode_mem(forged, fn, dict, DSZ, h), want);
+            ok &= nodict_expect(name, "stream 1T",
+                                stream_decode_mem(forged, fn, dict, DSZ, h, 1, out, 2 * n), want);
+            ok &= nodict_expect(name, "stream 2T",
+                                stream_decode_mem(forged, fn, dict, DSZ, h, 2, out, 2 * n), want);
+            ok &= nodict_expect(name, "seekable",
+                                seekable_decode_mem(forged, fn, dict, DSZ, h, out, n), want);
 
-        // After a dictionary frame: refused too.
-        memcpy(mix, dframe, (size_t)dn);
-        memcpy(mix + dn, forged, fn);
-        r = ctx_decompress(0, dict, DSZ, h, mix, (size_t)dn + fn, out, sizeof(out));
-        for (int t = 1; t <= 2 && r < 0; t++)
-            r = stream_decode_mem(mix, (size_t)dn + fn, dict, DSZ, h, t, out, sizeof(out));
-        if (r >= 0) {
-            printf("  [FAIL] L%d forged frame decoded after a dict frame: %lld\n", lvl,
-                   (long long)r);
-            ok = 0;
-            break;
+            // After a dictionary frame.
+            memcpy(mix, dframe, fn);
+            memcpy(mix + fn, forged, fn);
+            ok &= nodict_expect(name, "one-shot after dict frame",
+                                ctx_decompress(0, dict, DSZ, h, mix, 2 * fn, out, 2 * n), want);
+            for (int t = 1; t <= 2; t++)
+                ok &= nodict_expect(
+                    name, t == 1 ? "stream 1T after dict frame" : "stream 2T after dict frame",
+                    stream_decode_mem(mix, 2 * fn, dict, DSZ, h, t, out, 2 * n), want);
         }
 
         // An honest mix still round-trips, in both orders.
         for (int order = 0; order < 2 && ok; order++) {
             const uint8_t* const a = order ? plain : dframe;
             const uint8_t* const b = order ? dframe : plain;
-            const size_t an = (size_t)(order ? pn : dn), bn = (size_t)(order ? dn : pn);
-            memcpy(mix, a, an);
-            memcpy(mix + an, b, bn);
+            const size_t la = order ? an : fn, lb = order ? fn : an;
+            memcpy(mix, a, la);
+            memcpy(mix + la, b, lb);
             int64_t got[3];
-            got[0] = ctx_decompress(0, dict, DSZ, h, mix, an + bn, out, sizeof(out));
-            int same = got[0] == 2 * N && !memcmp(out, src, N) && !memcmp(out + N, src, N);
+            got[0] = ctx_decompress(0, dict, DSZ, h, mix, la + lb, out, 2 * n);
+            int same =
+                got[0] == (int64_t)(2 * n) && !memcmp(out, src, n) && !memcmp(out + n, src, n);
             for (int t = 1; t <= 2; t++) {
-                got[t] = stream_decode_mem(mix, an + bn, dict, DSZ, h, t, out, sizeof(out));
-                same &= got[t] == 2 * N && !memcmp(out, src, N) && !memcmp(out + N, src, N);
+                got[t] = stream_decode_mem(mix, la + lb, dict, DSZ, h, t, out, 2 * n);
+                same &=
+                    got[t] == (int64_t)(2 * n) && !memcmp(out, src, n) && !memcmp(out + n, src, n);
             }
             if (!same) {
-                printf("  [FAIL] L%d honest mix (order %d): %lld / %lld / %lld\n", lvl, order,
+                printf("  [FAIL] %s, honest mix (order %d): %lld / %lld / %lld\n", name, order,
                        (long long)got[0], (long long)got[1], (long long)got[2]);
                 ok = 0;
             }
         }
+        free(src);
+        free(dframe);
+        free(plain);
+        free(forged);
+        free(mix);
+        free(out);
     }
     if (ok) printf("PASS\n\n");
     return ok;
