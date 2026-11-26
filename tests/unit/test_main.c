@@ -204,6 +204,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE_DICT(test_dict_block_stored_block_size),
     TEST_CASE_DICT(test_dict_id_collision_caught_by_checksum),
     TEST_CASE_DICT(test_dict_checksum_cross_paths),
+    TEST_CASE_DICT(test_dict_nodict_frame_isolated),
     TEST_CASE(test_dict_huf_zxd_roundtrip),
     TEST_CASE_DICT(test_dict_huf_table_roundtrip),
     TEST_CASE_DICT(test_dict_huf_degenerate_corpus),

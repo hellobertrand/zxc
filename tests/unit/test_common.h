@@ -386,6 +386,7 @@ int test_dict_block_huf_roundtrip(void);
 int test_dict_block_stored_block_size(void);
 int test_dict_id_collision_caught_by_checksum(void);
 int test_dict_checksum_cross_paths(void);
+int test_dict_nodict_frame_isolated(void);
 int test_dict_huf_zxd_roundtrip(void);
 int test_dict_huf_table_roundtrip(void);
 int test_dict_huf_degenerate_corpus(void);
