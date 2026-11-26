@@ -27,7 +27,7 @@
 /** @brief Minor version number. */
 #define ZXC_VERSION_MINOR 0
 /** @brief Patch version number. */
-#define ZXC_VERSION_PATCH 2
+#define ZXC_VERSION_PATCH 3
 /** @brief Release code name. */
 #define ZXC_VERSION_CODENAME "Hydrogen"
 

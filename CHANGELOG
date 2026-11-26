@@ -1,3 +1,12 @@
+[v1.0.3] - 2026-11-28
+fix: Zero the compression context before init, so freeing it after a failed init is safe (#663)
+fix: Isolate frames without the dictionary flag from the attached dictionary (#659)
+fix: Accept dictionary ID 0 as a real dictionary (#619)
+fix: Reject corrupt block headers in the block API (#658)
+fix: Fix races on job status and io_error flags in the stream engine (#657)
+fix: Correct ctz64 De Bruijn constant (#655)
+cli: Buffer stdin/stdout safely
+
 [v1.0.2] - 2026-11-24
 api: Adds ZXC_BUILD_VARIANTS and ZXC_DICTIONARY build trim options (#641, #643, #646)
 api: Nix support and CI nix job. (#638)
