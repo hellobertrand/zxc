@@ -1248,7 +1248,7 @@ static int zxc_lz77_optimal_parse_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     size_t sz_po;
     size_t sz_bm;
     zxc_opt_dp_sizes(ctx->chunk_size, &sz_dp, &sz_pl, &sz_po, &sz_bm);
-    const size_t n_bm_words = ZXC_BITMAP_WORDS(ctx->chunk_size + 1);
+    const size_t n_bm_words = ZXC_BITMAP_WORDS(block_sz + 1);
 
     // Per-block literal cost (sample only block data, not dict prefix):
     const uint32_t lit_cost = zxc_opt_estimate_lit_bits(src_base, block_sz, ctx->opt_scratch);
@@ -1260,7 +1260,7 @@ static int zxc_lz77_optimal_parse_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
 
     dp[0] = 0;
     ZXC_MEMSET(dp + 1, 0xFF, block_sz * sizeof(uint32_t));
-    ZXC_MEMSET(match_end_bits, 0, sz_bm);
+    ZXC_MEMSET(match_end_bits, 0, n_bm_words * sizeof(uint64_t));
 
     // Forward DP: visit every position, update reachable successors.
     // `skip_until` suppresses find_best_match strictly inside the last long
