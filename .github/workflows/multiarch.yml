@@ -175,6 +175,15 @@ jobs:
             cmake_processor: loongarch64
             qemu_binary: qemu-loongarch64
             qemu_cpu: la464
+          - name: loong64-lasx minimal
+            tier: 2
+            cross_pkg: gcc-loongarch64-linux-gnu
+            cross_prefix: loongarch64-linux-gnu
+            cmake_processor: loongarch64
+            build_simd_variants: minimal
+            dict: "OFF"
+            qemu_binary: qemu-loongarch64
+            qemu_cpu: la464
           - name: loong64-nolsx
             tier: 2
             cross_pkg: gcc-loongarch64-linux-gnu
@@ -302,6 +311,12 @@ jobs:
               fi
               if [ "${{ matrix.lto }}" = "true" ]; then
                   EXTRA_ARGS+=(-DZXC_ENABLE_LTO=ON)
+              fi
+              if [ -n "${{ matrix.build_simd_variants }}" ]; then
+                  EXTRA_ARGS+=(-DZXC_BUILD_SIMD_VARIANTS="${{ matrix.build_simd_variants }}")
+              fi
+              if [ -n "${{ matrix.dict }}" ]; then
+                  EXTRA_ARGS+=(-DZXC_ENABLE_DICT="${{ matrix.dict }}")
               fi
 
               cmake -S . -B $BUILD_DIR \
