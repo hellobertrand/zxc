@@ -41,7 +41,7 @@ jobs:
       - name: Clone LZbench
         run: |
           # git clone --depth 1 https://github.com/inikep/lzbench "${LZBENCH_DIR}"
-          git clone -b zxc-avx512vl --depth 1 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
+          git clone -b zxc-checksum --depth 1 https://github.com/hellobertrand/lzbench "${LZBENCH_DIR}"
 
       - name: Copy Lib ZXC
         run: |
