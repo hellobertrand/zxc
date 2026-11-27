@@ -318,6 +318,8 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
  */
 int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int mode,
                   const int level, const int checksum_enabled, const size_t dict_size) {
+    // Cleared first, so that zxc_cctx_free is safe after a failure.
+    ZXC_MEMSET(ctx, 0, sizeof(*ctx));
     if (UNLIKELY(chunk_size == 0)) return ZXC_ERROR_NULL_INPUT;
     // Heap contexts defer the decode-side entropy scratch to the first entropy
     // section; static workspaces must have it already, they may never allocate.

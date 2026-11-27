@@ -2078,7 +2078,8 @@ typedef struct {
  *                               workspace and @c ctx->dict_buffer is set.
  *
  * @return @c ZXC_OK on success, or a negative @ref zxc_error_t code (notably
- *         @c ZXC_ERROR_MEMORY on allocation failure).
+ *         @c ZXC_ERROR_MEMORY on allocation failure). @p ctx is cleared either
+ *         way, so zxc_cctx_free() may follow a failure.
  */
 int zxc_cctx_init(zxc_cctx_t* ctx, const size_t chunk_size, const int mode, const int level,
                   const int checksum_enabled, const size_t dict_size);
