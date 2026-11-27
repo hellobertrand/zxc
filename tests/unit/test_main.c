@@ -201,6 +201,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE_DICT(test_dict_static_dctx_rejected),
     TEST_CASE_DICT(test_dict_cctx_roundtrip),
     TEST_CASE_DICT(test_dict_block_cctx_dict_reinit),
+    TEST_CASE_DICT(test_dict_block_seed_snapshot),
     TEST_CASE_DICT(test_dict_ctx_table_cache_recovers),
     TEST_CASE_DICT(test_dict_ctx_table_without_dict),
     TEST_CASE_DICT(test_dict_oversized_rejected_everywhere),

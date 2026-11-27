@@ -390,6 +390,7 @@ int test_dict_dctx_roundtrip(void);
 int test_dict_static_dctx_rejected(void);
 int test_dict_cctx_roundtrip(void);
 int test_dict_block_cctx_dict_reinit(void);
+int test_dict_block_seed_snapshot(void);
 int test_dict_ctx_table_cache_recovers(void);
 int test_dict_ctx_table_without_dict(void);
 int test_dict_oversized_rejected_everywhere(void);

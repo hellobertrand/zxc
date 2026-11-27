@@ -1947,6 +1947,142 @@ int test_dict_block_cctx_dict_reinit(void) {
     return ok;
 }
 
+/* Distinct per seed: runs copied from @p dict, repeats within the block and
+ * random bytes, so matches reach into both the dictionary and the block. */
+static void gen_mixed_block(uint8_t* buf, size_t size, const uint8_t* dict, size_t dict_size,
+                            uint32_t seed) {
+    uint32_t st = seed * 2654435761U + 1U;
+    size_t i = 0;
+    while (i < size) {
+        st = st * 1103515245U + 12345U;
+        const uint32_t r = st >> 8;
+        size_t len = 6 + (r % 35);
+        if (len > size - i) len = size - i;
+        if (dict && r % 3 == 0) {
+            const size_t off = (r >> 6) % (dict_size - len);
+            memcpy(buf + i, dict + off, len);
+        } else if (i > 64 && r % 3 == 1) {
+            const size_t back = 1 + (r >> 6) % i;
+            for (size_t k = 0; k < len; k++) buf[i + k] = buf[i + k - back];
+        } else {
+            for (size_t k = 0; k < len; k++) {
+                st = st * 1103515245U + 12345U;
+                buf[i + k] = (uint8_t)(st >> 16);
+            }
+        }
+        i += len;
+    }
+}
+
+/* Compresses a sequence of blocks with one reused context and with a fresh
+ * context per block; both must emit the same bytes. dict: 0 = none, 1 = A,
+ * 2 = B. The tables are snapshot on the second block in a row with a
+ * dictionary (and hash variant) and restored from the third: after a
+ * dictionary-free block (steps 4, 10), at level 6 after a re-carve (step 13),
+ * at levels 1-2 (steps 18-21), whose last seeded position hashes the block's
+ * first byte. keep_dict: set the dictionary only when it changes (reuse by
+ * generation, not by comparing bytes). */
+static int seed_snapshot_case(const size_t dict_size, const int random_dict, const size_t BSZ,
+                              const int keep_dict) {
+    enum { NSTEPS = 24 };
+    static const int k_dict[NSTEPS] = {1, 1, 1, 0, 1, 2, 2, 1, 1, 0, 1, 1,
+                                       1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 2};
+    static const int k_level[NSTEPS] = {3, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 6,
+                                        6, 6, 3, 3, 1, 1, 1, 2, 2, 1, 1, 1};
+    uint8_t* dicts[2] = {(uint8_t*)malloc(dict_size), (uint8_t*)malloc(dict_size)};
+    uint8_t* src = (uint8_t*)malloc(BSZ);
+    const size_t cap = zxc_compress_block_bound(BSZ);
+    uint8_t* comp_reused = (uint8_t*)malloc(cap);
+    uint8_t* comp_fresh = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(BSZ);
+    zxc_cctx* reused = zxc_create_cctx();
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    do {
+        if (!dicts[0] || !dicts[1] || !src || !comp_reused || !comp_fresh || !out || !reused ||
+            !dctx) {
+            printf("  [FAIL] allocation\n");
+            break;
+        }
+        if (random_dict) {
+            gen_random_data(dicts[0], dict_size);
+            gen_random_data(dicts[1], dict_size);
+        } else {
+            gen_lz_data(dicts[0], dict_size);
+            gen_lz_data(dicts[1], dict_size);
+        }
+        for (size_t i = 0; i < dict_size; i++) dicts[1][i] ^= 0x5A;
+        if (zxc_cctx_set_param(reused, ZXC_C_BLOCK_SIZE, (int64_t)BSZ) != ZXC_OK) {
+            printf("  [FAIL] set block size\n");
+            break;
+        }
+        int step;
+        for (step = 0; step < NSTEPS; step++) {
+            const uint8_t* dict = k_dict[step] ? dicts[k_dict[step] - 1] : NULL;
+            const size_t dsz = dict ? dict_size : 0;
+            const int set_dict = !keep_dict || step == 0 || k_dict[step] != k_dict[step - 1];
+            gen_mixed_block(src, BSZ, dict, dict_size, (uint32_t)step + 1U);
+            src[0] = (uint8_t)(step * 29 + 7);
+            if (dict) {
+                // Reference the last seeded position
+                memcpy(src + 64, dict + dict_size - 5, 5);
+                memcpy(src + 69, src, 3);
+            }
+            zxc_cctx* fresh = zxc_create_cctx();
+            int rc = fresh ? ZXC_OK : ZXC_ERROR_MEMORY;
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(reused, ZXC_C_LEVEL, k_level[step]);
+            if (rc == ZXC_OK && set_dict) rc = zxc_cctx_set_dict(reused, dict, dsz, NULL);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_LEVEL, k_level[step]);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_BLOCK_SIZE, (int64_t)BSZ);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_dict(fresh, dict, dsz, NULL);
+            const int64_t a =
+                rc == ZXC_OK ? zxc_compress_block(reused, src, BSZ, comp_reused, cap) : rc;
+            const int64_t b =
+                rc == ZXC_OK ? zxc_compress_block(fresh, src, BSZ, comp_fresh, cap) : rc;
+            zxc_free_cctx(fresh);
+            int64_t r = set_dict ? zxc_dctx_set_dict(dctx, dict, dsz, NULL) : ZXC_OK;
+            if (r == ZXC_OK && a > 0)
+                r = zxc_decompress_block_safe(dctx, comp_reused, (size_t)a, out, BSZ);
+            if (a <= 0 || a != b || memcmp(comp_reused, comp_fresh, (size_t)a) != 0 ||
+                r != (int64_t)BSZ || memcmp(out, src, BSZ) != 0) {
+                printf(
+                    "  [FAIL] dict %zu B (%s%s), step %d (dict %d, level %d): reused %lld, "
+                    "fresh %lld, roundtrip %lld\n",
+                    dict_size, random_dict ? "random" : "text", keep_dict ? ", kept" : "", step,
+                    k_dict[step], k_level[step], (long long)a, (long long)b, (long long)r);
+                break;
+            }
+        }
+        if (step < NSTEPS) break;
+        printf("  [PASS] dict %zu B (%s%s): %d blocks match a fresh context byte for byte\n",
+               dict_size, random_dict ? "random" : "text", keep_dict ? ", kept" : "", NSTEPS);
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(reused);
+    zxc_free_dctx(dctx);
+    free(dicts[0]);
+    free(dicts[1]);
+    free(src);
+    free(comp_reused);
+    free(comp_fresh);
+    free(out);
+    return ok;
+}
+
+/* Blocks sharing a dictionary restore the tables seeded for an earlier block
+ * instead of re-seeding: the output must match a fresh context's. A small text
+ * dictionary leaves few live slots (restored as a list), a random one many
+ * (restored as a whole-table copy). */
+int test_dict_block_seed_snapshot(void) {
+    printf("=== TEST: Dict - block cctx reuses seeded tables, same output ===\n");
+    int ok = 1;
+    for (int keep_dict = 0; keep_dict <= 1; keep_dict++)
+        ok = ok && seed_snapshot_case(4096, 0, 4096, keep_dict) &&
+             seed_snapshot_case(16384, 1, 16384, keep_dict);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* A failed table attach must not leave the context believing it still holds
  * the previous table: the next call with that table has to rebuild its tree. */
 int test_dict_ctx_table_cache_recovers(void) {

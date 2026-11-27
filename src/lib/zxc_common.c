@@ -306,6 +306,30 @@ int zxc_cctx_init_in_workspace(zxc_cctx_t* RESTRICT ctx, void* RESTRICT workspac
     return ZXC_OK;
 }
 
+#define ZXC_DICT_SNAP_HDR_SIZE ((sizeof(zxc_dict_snap_t) + 7) & ~(size_t)7)
+
+size_t zxc_dict_snap_size(const size_t dict_size) {
+    // List positions are 16-bit.
+    if (dict_size < ZXC_LZ_MIN_MATCH_LEN || dict_size > ZXC_DICT_SIZE_MAX) return 0;
+    return ZXC_DICT_SNAP_HDR_SIZE + ZXC_DICT_SNAP_TABLES_SIZE + dict_size * sizeof(uint16_t) +
+           dict_size;
+}
+
+/** @brief Empty snapshot for dictionaries up to @p dict_size bytes, or NULL. */
+static zxc_dict_snap_t* zxc_dict_snap_create(const size_t dict_size) {
+    const size_t total = zxc_dict_snap_size(dict_size);
+    if (total == 0) return NULL;
+    uint8_t* const mem = (uint8_t*)ZXC_MALLOC(total);
+    if (UNLIKELY(!mem)) return NULL;  // LCOV_EXCL_LINE
+    zxc_dict_snap_t* const snap = (zxc_dict_snap_t*)mem;
+    ZXC_MEMSET(snap, 0, sizeof(*snap));
+    snap->capacity = dict_size;
+    snap->tables = mem + ZXC_DICT_SNAP_HDR_SIZE;
+    snap->chain = (uint16_t*)(snap->tables + ZXC_DICT_SNAP_TABLES_SIZE);
+    snap->dict = (uint8_t*)(snap->chain + dict_size);
+    return snap;
+}
+
 /**
  * @brief Initialises a compression / decompression context, allocating the
  *        persistent buffer with @c ZXC_ALIGNED_MALLOC.
@@ -341,6 +365,8 @@ int zxc_cctx_init(zxc_cctx_t* RESTRICT ctx, const size_t chunk_size, const int m
     }
     // Library-owned buffer: record the allocation so zxc_cctx_free frees it.
     ctx->memory_block = mem;
+    // Allocated with the workspace, so that blocks never allocate.
+    if (mode == 1) ctx->dict_snap = zxc_dict_snap_create(dict_size);
     return ZXC_OK;
 }
 
@@ -388,6 +414,9 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
         ZXC_ALIGNED_FREE(ctx->entropy_block);
         ctx->entropy_block = NULL;
     }
+    ZXC_FREE(ctx->dict_snap);
+    ctx->dict_snap = NULL;
+    ctx->dict_buffer_gen = 0;
 
     ctx->lit_buffer = NULL;
     ctx->hash_table = NULL;
