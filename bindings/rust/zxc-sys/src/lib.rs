@@ -660,7 +660,20 @@ unsafe extern "C" {
     /// `src_size` bytes), free'd at the end of each block.
     ///
     /// Returns the estimated peak memory usage in bytes, or 0 if `src_size == 0`.
+    #[deprecated(note = "use zxc_estimate_cctx_memory, which also accounts for a dictionary")]
     pub fn zxc_estimate_cctx_size(src_size: usize, level: c_int) -> usize;
+
+    /// Estimates the peak memory a compression context reserves to compress
+    /// blocks of `src_size` bytes at `level`, with a dictionary of `dict_size`
+    /// bytes attached (0 for none).
+    ///
+    /// With a dictionary, the working buffers hold the dictionary and the block
+    /// together, and the figure adds the context's copy of the dictionary and
+    /// the snapshot of the match tables seeded from it.
+    ///
+    /// Returns the estimated peak memory usage in bytes, or 0 if `src_size == 0`
+    /// or `dict_size` exceeds `ZXC_DICT_SIZE_MAX`.
+    pub fn zxc_estimate_cctx_memory(src_size: usize, level: c_int, dict_size: usize) -> usize;
 }
 
 // =============================================================================

@@ -40,22 +40,33 @@ func DecompressBlockBound(uncompressedSize int) uint64 {
 	return uint64(C.zxc_decompress_block_bound(C.size_t(uncompressedSize)))
 }
 
-// EstimateCctxSize returns an accurate estimate of the memory a compression
-// context reserves when compressing a single block of srcSize bytes at the
-// given compression level via [Cctx.CompressBlock].
+// EstimateCctxMemory returns an accurate estimate of the peak memory a
+// compression context reserves to compress blocks of srcSize bytes at the
+// given compression level via [Cctx.CompressBlock], with a dictionary of
+// dictSize bytes attached (0 for none).
 //
 // The estimate covers all per-chunk working buffers (chain table, literals,
 // sequence/token/offset/extras buffers) plus the fixed hash tables and
 // cache-line alignment padding. At level 6+ it also accounts for the
-// optimal-parser scratch. It scales roughly linearly with srcSize and is
+// optimal-parser scratch. With a dictionary, the buffers hold the dictionary
+// and the block together, and the estimate adds the context's copy of the
+// dictionary and the snapshot of the match tables seeded from it. It is
 // intended for integrators that need an accurate memory budget.
 //
-// Returns 0 if srcSize is 0 or negative.
-func EstimateCctxSize(srcSize, level int) uint64 {
-	if srcSize <= 0 {
+// Returns 0 if srcSize is 0 or negative, or dictSize is negative or exceeds
+// the dictionary size limit.
+func EstimateCctxMemory(srcSize, level, dictSize int) uint64 {
+	if srcSize <= 0 || dictSize < 0 {
 		return 0
 	}
-	return uint64(C.zxc_estimate_cctx_size(C.size_t(srcSize), C.int(level)))
+	return uint64(C.zxc_estimate_cctx_memory(C.size_t(srcSize), C.int(level), C.size_t(dictSize)))
+}
+
+// EstimateCctxSize returns [EstimateCctxMemory](srcSize, level, 0).
+//
+// Deprecated: Use [EstimateCctxMemory], which also accounts for a dictionary.
+func EstimateCctxSize(srcSize, level int) uint64 {
+	return EstimateCctxMemory(srcSize, level, 0)
 }
 
 // Cctx is a reusable compression context for the Block API.

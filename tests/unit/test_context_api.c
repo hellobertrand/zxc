@@ -779,6 +779,8 @@ done:
     return ok;
 }
 
+/* Deprecated, kept until 2.0: tested as is. */
+ZXC_TEST_ALLOW_DEPRECATED_BEGIN
 int test_estimate_cctx_size(void) {
     printf("=== TEST: Unit - zxc_estimate_cctx_size ===\n");
 
@@ -852,6 +854,58 @@ int test_estimate_cctx_size(void) {
     printf("PASS\n\n");
     return 1;
 }
+
+int test_estimate_cctx_memory(void) {
+    printf("=== TEST: Unit - zxc_estimate_cctx_memory ===\n");
+
+    /* 1. Invalid inputs return zero. */
+    if (zxc_estimate_cctx_memory(0, 3, 0) != 0 ||
+        zxc_estimate_cctx_memory(4096, 3, (size_t)ZXC_DICT_SIZE_MAX + 1) != 0) {
+        printf("  [FAIL] zero source or oversized dictionary must return 0\n");
+        return 0;
+    }
+    printf("  [PASS] zero source and oversized dictionary return 0\n");
+
+    /* 2. Without a dictionary: the figure of the deprecated estimate. */
+    static const size_t k_sizes[] = {512, 4096, 65536, 1024 * 1024};
+    static const int k_levels[] = {1, 3, 5, 6, 7};
+    for (size_t i = 0; i < sizeof(k_sizes) / sizeof(k_sizes[0]); i++) {
+        for (size_t j = 0; j < sizeof(k_levels) / sizeof(k_levels[0]); j++) {
+            const size_t m = zxc_estimate_cctx_memory(k_sizes[i], k_levels[j], 0);
+            const size_t e = zxc_estimate_cctx_size(k_sizes[i], k_levels[j]);
+            if (m == 0 || m != e) {
+                printf("  [FAIL] src %zu level %d: memory %zu != size %zu\n", k_sizes[i],
+                       k_levels[j], m, e);
+                return 0;
+            }
+        }
+    }
+    printf("  [PASS] no dictionary: same figure as zxc_estimate_cctx_size\n");
+
+    /* 3. A dictionary carves the buffers for [dict | block], and adds the
+     *    context's copy of it and the ~160 KB snapshot of the seeded tables. */
+    const size_t base = zxc_estimate_cctx_memory(4096, 3, 0);
+    const size_t d16k = zxc_estimate_cctx_memory(4096, 3, 16384);
+    const size_t carved = zxc_estimate_cctx_memory(32768, 3, 0); /* ceil(16K + 4K) */
+    if (d16k < carved + 16384 + 160 * 1024) {
+        printf("  [FAIL] 16 KiB dict: %zu < carved %zu + copy + snapshot\n", d16k, carved);
+        return 0;
+    }
+    printf("  [PASS] 16 KiB dict at 4 KiB blocks: %zu bytes (%zu without)\n", d16k, base);
+
+    /* 4. Monotonic in the dictionary size. */
+    const size_t d4k = zxc_estimate_cctx_memory(4096, 3, 4096);
+    const size_t dmax = zxc_estimate_cctx_memory(4096, 3, ZXC_DICT_SIZE_MAX);
+    if (!(base < d4k && d4k < d16k && d16k < dmax)) {
+        printf("  [FAIL] not monotonic in dict size: %zu, %zu, %zu, %zu\n", base, d4k, d16k, dmax);
+        return 0;
+    }
+    printf("  [PASS] monotonic: none=%zu, 4K=%zu, 16K=%zu, max=%zu\n", base, d4k, d16k, dmax);
+
+    printf("PASS\n\n");
+    return 1;
+}
+ZXC_TEST_ALLOW_DEPRECATED_END
 
 /* A seek table sits between the EOF block and the footer. The one-shot reads
  * the footer from the end of the archive; the context path used to read it

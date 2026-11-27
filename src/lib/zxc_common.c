@@ -167,7 +167,7 @@ static zxc_cctx_layout_t compute_cctx_layout(const size_t chunk_size, const int 
 
         // opt_scratch (level >= ZXC_LEVEL_DENSITY): the optimal parser's DP arrays,
         // reused transiently by the code-length builder and its nudge, so sized to
-        // the larger demand. Keep in sync with zxc_estimate_cctx_size() and its
+        // the larger demand. Keep in sync with zxc_estimate_cctx_memory() and its
         // consumer in zxc_compress.c.
         if (level >= ZXC_LEVEL_DENSITY) {
             size_t sz_dp;
@@ -1094,23 +1094,33 @@ size_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 }
 
 /**
- * @brief Estimates the total buffer bytes allocated inside a cctx for a block.
+ * @brief Estimates the peak bytes a cctx allocates to compress blocks.
  *
- * Thin wrapper around @ref zxc_cctx_compute_workspace_size for @c mode == 1
- * (compress), with @c src_size clamped up to a valid block size via
- * @ref zxc_block_size_ceil.  The opaque wrapper struct allocated by
- * @ref zxc_create_cctx adds a fixed overhead (< 128 B) that is negligible
- * next to the per-chunk buffers and is intentionally omitted.
+ * The workspace of @ref zxc_cctx_compute_workspace_size for @c mode == 1
+ * (compress), carved for [dict | block] when a dictionary is attached, plus the
+ * context's copy of the dictionary and the snapshot of the tables seeded from
+ * it. The opaque wrapper struct allocated by @ref zxc_create_cctx adds a fixed
+ * overhead (< 1 KB) that is negligible next to the buffers and is omitted.
  *
  * For @p level >= 6 the figure includes the optimal-parser scratch
  * (@c opt_scratch, ~8.125 bytes per chunk_size byte) used by the optimal
  * parser and reused as transient package-merge scratch for the Huffman
  * code-length builder.
  */
+size_t zxc_estimate_cctx_memory(const size_t src_size, const int level, const size_t dict_size) {
+    if (UNLIKELY(src_size == 0 || dict_size > ZXC_DICT_SIZE_MAX)) return 0;
+    const size_t block_size = zxc_block_size_ceil(src_size);
+    // A dictionary prefixes every block: the buffers hold both.
+    const size_t chunk_size =
+        dict_size > 0 ? zxc_block_size_ceil(dict_size + block_size) : block_size;
+    const size_t workspace = zxc_cctx_compute_workspace_size(chunk_size, 1, level, dict_size);
+    const size_t extra = dict_size + zxc_dict_snap_size(dict_size);
+    if (UNLIKELY(workspace == 0 || workspace > SIZE_MAX - extra)) return 0;  // LCOV_EXCL_LINE
+    return workspace + extra;
+}
+
 size_t zxc_estimate_cctx_size(const size_t src_size, const int level) {
-    if (UNLIKELY(src_size == 0)) return 0;
-    const size_t chunk_size = zxc_block_size_ceil(src_size);
-    return zxc_cctx_compute_workspace_size(chunk_size, 1, level, 0);
+    return zxc_estimate_cctx_memory(src_size, level, 0);
 }
 
 // ============================================================================
