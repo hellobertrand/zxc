@@ -1487,6 +1487,118 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
 }
 
 /**
+ * @brief Seeded-table snapshot for a dictionary shared by consecutive blocks.
+ *
+ * Seeding visits about 0.6 x dict_size positions, more work than a small block
+ * itself. When the same dictionary comes back, restoring the tables as they were
+ * right after seeding is a few memcpy instead, and yields the exact same table
+ * state, so the same output.
+ */
+typedef struct {
+    size_t dict_size;     /**< Size of the dictionary below. */
+    uint32_t offset_bits; /**< ctx->offset_bits the entries were encoded with. */
+    uint32_t epoch;       /**< Epoch the snapshot entries carry. */
+    int use_hash5;        /**< Hash variant the entries were computed with. */
+    int valid;            /**< 1 when the tables below hold a snapshot. */
+    uint8_t* dict;        /**< Copy of the dictionary, to recognise it. */
+    uint16_t* chain;      /**< chain_table[0, dict_size) after seeding. */
+    uint32_t* hash_table; /**< Whole hash_table after seeding. */
+    uint8_t* hash_tags;   /**< Whole hash_tags after seeding. */
+} zxc_dict_snap_t;
+
+/**
+ * @brief Returns a snapshot slot for @p dict_size bytes of dictionary, or NULL
+ *        when it cannot be allocated (seeding then proceeds without one).
+ */
+static zxc_dict_snap_t* zxc_dict_snap_reserve(zxc_cctx_t* RESTRICT ctx, const size_t dict_size) {
+    zxc_dict_snap_t* snap = (zxc_dict_snap_t*)ctx->dict_snap;
+    if (snap && snap->dict_size == dict_size) return snap;
+    ZXC_FREE(snap);
+    ctx->dict_snap = NULL;
+    // Largest alignment first: header, hash_table, chain, then byte arrays.
+    const size_t hdr = (sizeof(zxc_dict_snap_t) + 7) & ~(size_t)7;
+    const size_t total = hdr + ZXC_LZ_HASH_SIZE * sizeof(uint32_t) + dict_size * sizeof(uint16_t) +
+                         ZXC_LZ_HASH_SIZE * sizeof(uint8_t) + dict_size;
+    uint8_t* const mem = (uint8_t*)ZXC_MALLOC(total);
+    if (UNLIKELY(!mem)) return NULL;  // LCOV_EXCL_LINE
+    snap = (zxc_dict_snap_t*)mem;
+    ZXC_MEMSET(snap, 0, sizeof(*snap));
+    snap->dict_size = dict_size;
+    snap->hash_table = (uint32_t*)(mem + hdr);
+    snap->chain = (uint16_t*)(snap->hash_table + ZXC_LZ_HASH_SIZE);
+    snap->hash_tags = (uint8_t*)(snap->chain + dict_size);
+    snap->dict = snap->hash_tags + ZXC_LZ_HASH_SIZE;
+    ctx->dict_snap = snap;
+    return snap;
+}
+
+/**
+ * @brief Starts a block: advances the epoch and seeds the dictionary, or
+ *        restores the tables seeded from the same dictionary for an earlier block.
+ *
+ * @param[in,out] ctx     Compression context.
+ * @param[in]     src     Input, prefixed by the dictionary content when one is active.
+ * @param[in]     dict_sz Dictionary prefix size (0 = none).
+ * @param[in]     level   Compression level.
+ * @return The epoch mark entries of this block carry.
+ */
+static uint32_t zxc_lz_begin_block(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
+                                   const size_t dict_sz, const int level) {
+    const int use_hash5 = zxc_lz77_use_hash5(level);
+    zxc_dict_snap_t* snap = NULL;
+    int save = 0;
+    if (dict_sz >= ZXC_LZ_MIN_MATCH_LEN) {
+        snap = (zxc_dict_snap_t*)ctx->dict_snap;
+        if (snap && snap->dict_size == dict_sz && snap->offset_bits == ctx->offset_bits &&
+            snap->use_hash5 == use_hash5 && memcmp(snap->dict, src, dict_sz) == 0) {
+            if (snap->valid) {
+                // Every entry restored carries snap->epoch or older, and the whole
+                // hash table is overwritten: the same state seeding leaves.
+                const size_t limit = dict_sz - (ZXC_LZ_MIN_MATCH_LEN - 1);
+                ZXC_MEMCPY(ctx->hash_table, snap->hash_table, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+                ZXC_MEMCPY(ctx->hash_tags, snap->hash_tags, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
+                ZXC_MEMCPY(ctx->chain_table, snap->chain, limit * sizeof(uint16_t));
+                ctx->epoch = snap->epoch;
+                return ctx->epoch << ctx->offset_bits;
+            }
+            // Second block in a row with this dictionary: worth a snapshot.
+            save = 1;
+        } else {
+            // New dictionary: remember it, snapshot only if it comes back.
+            snap = zxc_dict_snap_reserve(ctx, dict_sz);
+            if (snap) {
+                snap->valid = 0;
+                snap->offset_bits = ctx->offset_bits;
+                snap->use_hash5 = use_hash5;
+                ZXC_MEMCPY(snap->dict, src, dict_sz);
+            }
+        }
+    }
+
+    ctx->epoch++;
+    if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
+        ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
+        ctx->epoch = 1;
+    }
+    const uint32_t epoch_mark = ctx->epoch << ctx->offset_bits;
+
+    if (dict_sz > 0) {
+        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
+                         epoch_mark, ctx->offset_mask, level);
+        if (save) {
+            const size_t limit = dict_sz - (ZXC_LZ_MIN_MATCH_LEN - 1);
+            ZXC_MEMCPY(snap->hash_table, ctx->hash_table, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+            ZXC_MEMCPY(snap->hash_tags, ctx->hash_tags, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
+            ZXC_MEMCPY(snap->chain, ctx->chain_table, limit * sizeof(uint16_t));
+            snap->epoch = ctx->epoch;
+            snap->valid = 1;
+        }
+    }
+    return epoch_mark;
+}
+
+/**
  * @brief Lazy parse of one SPL block (levels 3 to 5).
  *
  * @p level is a constant at each instantiation below: the parameter table and
@@ -1668,19 +1780,8 @@ static int zxc_encode_block_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (lzp.min_offset > 1 && zxc_block_is_short_dist_bound(src + dict_sz, src_sz - dict_sz))
         lzp.min_offset = 1;
 
-    ctx->epoch++;
-    if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
-        ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
-        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
-        ctx->epoch = 1;
-    }
-    const uint32_t offset_bits = ctx->offset_bits;
     const uint32_t offset_mask = ctx->offset_mask;
-    const uint32_t epoch_mark = ctx->epoch << offset_bits;
-
-    if (dict_sz > 0)
-        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
-                         epoch_mark, offset_mask, level);
+    const uint32_t epoch_mark = zxc_lz_begin_block(ctx, src, dict_sz, level);
 
     uint8_t* const literals = ctx->literals;
     uint8_t* const buf_tokens = ctx->buf_tokens;
@@ -2339,19 +2440,7 @@ static int zxc_encode_block_pak(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRIC
     if (lzp.min_offset > 1 && zxc_block_is_short_dist_bound(src + dict_sz, src_sz - dict_sz))
         lzp.min_offset = 1;
 
-    ctx->epoch++;
-    if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
-        ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
-        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
-        ctx->epoch = 1;
-    }
-    const uint32_t offset_bits = ctx->offset_bits;
-    const uint32_t offset_mask = ctx->offset_mask;
-    const uint32_t epoch_mark = ctx->epoch << offset_bits;
-
-    if (dict_sz > 0)
-        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
-                         epoch_mark, offset_mask, level);
+    const uint32_t epoch_mark = zxc_lz_begin_block(ctx, src, dict_sz, level);
 
     const uint8_t* const literals = ctx->literals;
     const uint8_t* const buf_extras = ctx->buf_extras;

@@ -388,6 +388,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
         ZXC_ALIGNED_FREE(ctx->entropy_block);
         ctx->entropy_block = NULL;
     }
+    ZXC_FREE(ctx->dict_snap);
+    ctx->dict_snap = NULL;
 
     ctx->lit_buffer = NULL;
     ctx->hash_table = NULL;

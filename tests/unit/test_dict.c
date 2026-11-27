@@ -1947,6 +1947,113 @@ int test_dict_block_cctx_dict_reinit(void) {
     return ok;
 }
 
+/* Distinct per seed: runs copied from @p dict, repeats within the block and
+ * random bytes, so matches reach into both the dictionary and the block. */
+static void gen_mixed_block(uint8_t* buf, size_t size, const uint8_t* dict, size_t dict_size,
+                            uint32_t seed) {
+    uint32_t st = seed * 2654435761U + 1U;
+    size_t i = 0;
+    while (i < size) {
+        st = st * 1103515245U + 12345U;
+        const uint32_t r = st >> 8;
+        size_t len = 6 + (r % 35);
+        if (len > size - i) len = size - i;
+        if (dict && r % 3 == 0) {
+            const size_t off = (r >> 6) % (dict_size - len);
+            memcpy(buf + i, dict + off, len);
+        } else if (i > 64 && r % 3 == 1) {
+            const size_t back = 1 + (r >> 6) % i;
+            for (size_t k = 0; k < len; k++) buf[i + k] = buf[i + k - back];
+        } else {
+            for (size_t k = 0; k < len; k++) {
+                st = st * 1103515245U + 12345U;
+                buf[i + k] = (uint8_t)(st >> 16);
+            }
+        }
+        i += len;
+    }
+}
+
+/* Blocks sharing a dictionary restore the tables seeded for an earlier block
+ * instead of re-seeding: the output must match a fresh context's, across
+ * repeats, dictionary switches, dictionary-free blocks and level changes. */
+int test_dict_block_seed_snapshot(void) {
+    printf("=== TEST: Dict - block cctx reuses seeded tables, same output ===\n");
+    /* DSZ <= BSZ: the dictionary-free block overwrites the chain entries of the
+     * densely seeded half, which a restore must bring back. */
+    enum { DSZ = 4096, BSZ = 4096, NSTEPS = 16 };
+    /* dict: 0 = none, 1 = A, 2 = B. The tables are snapshot on the second block
+     * in a row with a dictionary and restored from the third, including right
+     * after a dictionary-free block (steps 4 and 10). */
+    static const int k_dict[NSTEPS] = {1, 1, 1, 0, 1, 2, 2, 1, 1, 0, 1, 1, 1, 1, 2, 1};
+    static const int k_level[NSTEPS] = {3, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 6, 6, 3, 3, 1};
+    uint8_t* dicts[2] = {(uint8_t*)malloc(DSZ), (uint8_t*)malloc(DSZ)};
+    uint8_t* src = (uint8_t*)malloc(BSZ);
+    const size_t cap = zxc_compress_block_bound(BSZ);
+    uint8_t* comp_reused = (uint8_t*)malloc(cap);
+    uint8_t* comp_fresh = (uint8_t*)malloc(cap);
+    uint8_t* out = (uint8_t*)malloc(BSZ);
+    zxc_cctx* reused = zxc_create_cctx();
+    zxc_dctx* dctx = zxc_create_dctx();
+    int ok = 0;
+    do {
+        if (!dicts[0] || !dicts[1] || !src || !comp_reused || !comp_fresh || !out || !reused ||
+            !dctx) {
+            printf("  [FAIL] allocation\n");
+            break;
+        }
+        gen_lz_data(dicts[0], DSZ);
+        gen_lz_data(dicts[1], DSZ);
+        for (size_t i = 0; i < DSZ; i++) dicts[1][i] ^= 0x5A;
+        if (zxc_cctx_set_param(reused, ZXC_C_BLOCK_SIZE, BSZ) != ZXC_OK) {
+            printf("  [FAIL] set block size\n");
+            break;
+        }
+        int step;
+        for (step = 0; step < NSTEPS; step++) {
+            const uint8_t* dict = k_dict[step] ? dicts[k_dict[step] - 1] : NULL;
+            const size_t dsz = dict ? DSZ : 0;
+            gen_mixed_block(src, BSZ, dict, DSZ, (uint32_t)step + 1U);
+            zxc_cctx* fresh = zxc_create_cctx();
+            int rc = fresh ? ZXC_OK : ZXC_ERROR_MEMORY;
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(reused, ZXC_C_LEVEL, k_level[step]);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_dict(reused, dict, dsz, NULL);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_LEVEL, k_level[step]);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_BLOCK_SIZE, BSZ);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_dict(fresh, dict, dsz, NULL);
+            const int64_t a =
+                rc == ZXC_OK ? zxc_compress_block(reused, src, BSZ, comp_reused, cap) : rc;
+            const int64_t b =
+                rc == ZXC_OK ? zxc_compress_block(fresh, src, BSZ, comp_fresh, cap) : rc;
+            zxc_free_cctx(fresh);
+            int64_t r = zxc_dctx_set_dict(dctx, dict, dsz, NULL);
+            if (r == ZXC_OK && a > 0)
+                r = zxc_decompress_block_safe(dctx, comp_reused, (size_t)a, out, BSZ);
+            if (a <= 0 || a != b || memcmp(comp_reused, comp_fresh, (size_t)a) != 0 || r != BSZ ||
+                memcmp(out, src, BSZ) != 0) {
+                printf(
+                    "  [FAIL] step %d (dict %d, level %d): reused %lld, fresh %lld, "
+                    "roundtrip %lld\n",
+                    step, k_dict[step], k_level[step], (long long)a, (long long)b, (long long)r);
+                break;
+            }
+        }
+        if (step < NSTEPS) break;
+        printf("  [PASS] %d blocks match a fresh context byte for byte\n", NSTEPS);
+        ok = 1;
+    } while (0);
+    zxc_free_cctx(reused);
+    zxc_free_dctx(dctx);
+    free(dicts[0]);
+    free(dicts[1]);
+    free(src);
+    free(comp_reused);
+    free(comp_fresh);
+    free(out);
+    if (ok) printf("PASS\n\n");
+    return ok;
+}
+
 /* A failed table attach must not leave the context believing it still holds
  * the previous table: the next call with that table has to rebuild its tree. */
 int test_dict_ctx_table_cache_recovers(void) {

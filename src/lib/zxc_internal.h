@@ -2051,6 +2051,10 @@ typedef struct {
                                          dict_size > 0 (NULL otherwise); built once by
                                          zxc_cctx_attach_dict_huf. Valid iff dict_huf_tree_ok. */
     int dict_huf_tree_ok;           /**< 1 when *dict_huf is built and valid. */
+    void* dict_snap;                /**< Hash/chain tables as seeded from a dictionary used
+                                         by consecutive blocks, restored instead of re-seeding
+                                         (heap, lazy, see zxc_lz_begin_block). NULL when unused.
+                                         Freed by zxc_cctx_free. */
     uint32_t* lit_freq_acc;         /**< Trainer hook: when non-NULL, the SPL encoder
                                          accumulates post-LZ literal byte frequencies here
                                          (256 entries). NULL outside dictionary training. */
