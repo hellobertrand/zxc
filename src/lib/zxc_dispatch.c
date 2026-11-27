@@ -1026,6 +1026,7 @@ typedef struct {
     size_t size;
     uint8_t huf[ZXC_HUF_TABLE_SIZE]; /* copy of the shared table, when has_huf */
     int has_huf;
+    uint64_t gen; /* bumped on every change, never reused; 0 = never set */
 } zxc_dict_copy_t;
 
 /**
@@ -1047,7 +1048,30 @@ static int zxc_dict_copy_set(zxc_dict_copy_t* c, const void* dict, const size_t 
     c->data = copy;
     c->size = copy ? dict_size : 0;
     c->has_huf = copy && dict_huf;
+    c->gen++;
     return ZXC_OK;
+}
+
+/**
+ * @brief Generation of @p dict when it is @p c's copy, else 0 (unknown).
+ *
+ * The bytes behind a given generation never change, so a buffer tagged with it
+ * still holds them.
+ */
+static uint64_t zxc_dict_copy_gen(const zxc_dict_copy_t* c, const void* dict,
+                                  const size_t dict_size) {
+    return (dict && dict == c->data && dict_size == c->size) ? c->gen : 0;
+}
+
+/**
+ * @brief Places @p dict at the start of @c ctx->dict_buffer, unless @p gen
+ *        says it is already there. Neither encoding nor decoding writes the prefix.
+ */
+static void zxc_dict_buffer_load(zxc_cctx_t* RESTRICT ctx, const void* RESTRICT dict,
+                                 const size_t dict_size, const uint64_t gen) {
+    if (gen != 0 && ctx->dict_buffer_gen == gen) return;
+    ZXC_MEMCPY(ctx->dict_buffer, dict, dict_size);
+    ctx->dict_buffer_gen = gen;
 }
 
 struct zxc_cctx_s {
@@ -1345,7 +1369,8 @@ static int64_t zxc_compress_cctx_resolved(zxc_cctx* cctx, const void* RESTRICT s
 
     // [dict | block] input for the encoder, NULL without a dictionary.
     uint8_t* const dict_input = dict_size > 0 ? ctx->dict_buffer : NULL;
-    if (dict_input) ZXC_MEMCPY(dict_input, dict, dict_size);
+    ctx->dict_gen = zxc_dict_copy_gen(&cctx->dict_copy, dict, dict_size);
+    if (dict_input) zxc_dict_buffer_load(ctx, dict, dict_size, ctx->dict_gen);
 
     uint8_t* op = (uint8_t*)dst;
     const uint8_t* const op_start = op;
@@ -1761,7 +1786,9 @@ static int64_t zxc_dctx_decode_frame(zxc_dctx* dctx, const uint8_t* src, const s
                                            file_has_checksums && checksum_enabled, dict_huf);
             if (UNLIKELY(crc != ZXC_OK)) return crc;
             dict_dec = ctx->dict_buffer;
-            if (dict_dec) ZXC_MEMCPY(dict_dec, dict, dict_size);
+            if (dict_dec)
+                zxc_dict_buffer_load(ctx, dict, dict_size,
+                                     zxc_dict_copy_gen(&dctx->dict_copy, dict, dict_size));
             ctx_ready = 1;
         }
 
@@ -1913,7 +1940,8 @@ static int64_t zxc_compress_block_resolved(zxc_cctx* cctx, const void* RESTRICT 
     if (b_dict && b_dict_size > 0) {
         // [dict | block] assembled in the cctx-owned dict_buffer
         uint8_t* const combined = cctx->inner.dict_buffer;
-        ZXC_MEMCPY(combined, b_dict, b_dict_size);
+        cctx->inner.dict_gen = zxc_dict_copy_gen(&cctx->dict_copy, b_dict, b_dict_size);
+        zxc_dict_buffer_load(&cctx->inner, b_dict, b_dict_size, cctx->inner.dict_gen);
         ZXC_MEMCPY(combined + b_dict_size, src, src_size);
         res = zxc_compress_chunk_wrapper(&cctx->inner, combined, b_dict_size + src_size,
                                          (uint8_t*)dst, dst_capacity, block_index);
@@ -2081,7 +2109,8 @@ int64_t zxc_decompress_block(zxc_dctx* dctx, const void* RESTRICT src, const siz
     if (dict && dict_size > 0) {
         // [dict | decode] assembled in the cctx-owned dict_buffer
         uint8_t* const dec_buf = ctx->dict_buffer;
-        ZXC_MEMCPY(dec_buf, dict, dict_size);
+        zxc_dict_buffer_load(ctx, dict, dict_size,
+                             zxc_dict_copy_gen(&dctx->dict_copy, dict, dict_size));
         res = zxc_decompress_chunk_wrapper(ctx, (const uint8_t*)src, src_size, dec_buf + dict_size,
                                            work_sz, 0);
         if (LIKELY(res > 0)) {

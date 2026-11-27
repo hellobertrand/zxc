@@ -390,6 +390,8 @@ void zxc_cctx_free(zxc_cctx_t* ctx) {
     }
     ZXC_FREE(ctx->dict_snap);
     ctx->dict_snap = NULL;
+    ctx->dict_gen = 0;
+    ctx->dict_buffer_gen = 0;
 
     ctx->lit_buffer = NULL;
     ctx->hash_table = NULL;

@@ -2051,6 +2051,10 @@ typedef struct {
                                          dict_size > 0 (NULL otherwise); built once by
                                          zxc_cctx_attach_dict_huf. Valid iff dict_huf_tree_ok. */
     int dict_huf_tree_ok;           /**< 1 when *dict_huf is built and valid. */
+    uint64_t dict_gen;              /**< Identity of the dictionary prefixing the input
+                                         (0 = unknown, compare bytes), see zxc_lz_begin_block. */
+    uint64_t dict_buffer_gen;       /**< Identity of the dictionary at the start of
+                                         dict_buffer (0 = unknown, reload). */
     void* dict_snap;                /**< Hash/chain tables as seeded from a dictionary used
                                          by consecutive blocks, restored instead of re-seeding
                                          (heap, lazy, see zxc_lz_begin_block). NULL when unused.

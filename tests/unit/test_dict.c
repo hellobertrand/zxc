@@ -1974,20 +1974,17 @@ static void gen_mixed_block(uint8_t* buf, size_t size, const uint8_t* dict, size
     }
 }
 
-/* Blocks sharing a dictionary restore the tables seeded for an earlier block
- * instead of re-seeding: the output must match a fresh context's, across
- * repeats, dictionary switches, dictionary-free blocks and level changes. */
-int test_dict_block_seed_snapshot(void) {
-    printf("=== TEST: Dict - block cctx reuses seeded tables, same output ===\n");
-    /* DSZ <= BSZ: the dictionary-free block overwrites the chain entries of the
-     * densely seeded half, which a restore must bring back. */
-    enum { DSZ = 4096, BSZ = 4096, NSTEPS = 16 };
-    /* dict: 0 = none, 1 = A, 2 = B. The tables are snapshot on the second block
-     * in a row with a dictionary and restored from the third, including right
-     * after a dictionary-free block (steps 4 and 10). */
+/* Compresses a sequence of blocks with one reused context and with a fresh
+ * context per block; both must emit the same bytes. dict: 0 = none, 1 = A,
+ * 2 = B. The tables are snapshot on the second block in a row with a
+ * dictionary and restored from the third, including right after a
+ * dictionary-free block (steps 4 and 10), whose positions overwrite the chain
+ * entries of the dictionary as dict_size <= BSZ. */
+static int seed_snapshot_case(const size_t dict_size, const int random_dict, const size_t BSZ) {
+    enum { NSTEPS = 16 };
     static const int k_dict[NSTEPS] = {1, 1, 1, 0, 1, 2, 2, 1, 1, 0, 1, 1, 1, 1, 2, 1};
     static const int k_level[NSTEPS] = {3, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 6, 6, 3, 3, 1};
-    uint8_t* dicts[2] = {(uint8_t*)malloc(DSZ), (uint8_t*)malloc(DSZ)};
+    uint8_t* dicts[2] = {(uint8_t*)malloc(dict_size), (uint8_t*)malloc(dict_size)};
     uint8_t* src = (uint8_t*)malloc(BSZ);
     const size_t cap = zxc_compress_block_bound(BSZ);
     uint8_t* comp_reused = (uint8_t*)malloc(cap);
@@ -2002,24 +1999,29 @@ int test_dict_block_seed_snapshot(void) {
             printf("  [FAIL] allocation\n");
             break;
         }
-        gen_lz_data(dicts[0], DSZ);
-        gen_lz_data(dicts[1], DSZ);
-        for (size_t i = 0; i < DSZ; i++) dicts[1][i] ^= 0x5A;
-        if (zxc_cctx_set_param(reused, ZXC_C_BLOCK_SIZE, BSZ) != ZXC_OK) {
+        if (random_dict) {
+            gen_random_data(dicts[0], dict_size);
+            gen_random_data(dicts[1], dict_size);
+        } else {
+            gen_lz_data(dicts[0], dict_size);
+            gen_lz_data(dicts[1], dict_size);
+        }
+        for (size_t i = 0; i < dict_size; i++) dicts[1][i] ^= 0x5A;
+        if (zxc_cctx_set_param(reused, ZXC_C_BLOCK_SIZE, (int64_t)BSZ) != ZXC_OK) {
             printf("  [FAIL] set block size\n");
             break;
         }
         int step;
         for (step = 0; step < NSTEPS; step++) {
             const uint8_t* dict = k_dict[step] ? dicts[k_dict[step] - 1] : NULL;
-            const size_t dsz = dict ? DSZ : 0;
-            gen_mixed_block(src, BSZ, dict, DSZ, (uint32_t)step + 1U);
+            const size_t dsz = dict ? dict_size : 0;
+            gen_mixed_block(src, BSZ, dict, dict_size, (uint32_t)step + 1U);
             zxc_cctx* fresh = zxc_create_cctx();
             int rc = fresh ? ZXC_OK : ZXC_ERROR_MEMORY;
             if (rc == ZXC_OK) rc = zxc_cctx_set_param(reused, ZXC_C_LEVEL, k_level[step]);
             if (rc == ZXC_OK) rc = zxc_cctx_set_dict(reused, dict, dsz, NULL);
             if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_LEVEL, k_level[step]);
-            if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_BLOCK_SIZE, BSZ);
+            if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_BLOCK_SIZE, (int64_t)BSZ);
             if (rc == ZXC_OK) rc = zxc_cctx_set_dict(fresh, dict, dsz, NULL);
             const int64_t a =
                 rc == ZXC_OK ? zxc_compress_block(reused, src, BSZ, comp_reused, cap) : rc;
@@ -2029,17 +2031,19 @@ int test_dict_block_seed_snapshot(void) {
             int64_t r = zxc_dctx_set_dict(dctx, dict, dsz, NULL);
             if (r == ZXC_OK && a > 0)
                 r = zxc_decompress_block_safe(dctx, comp_reused, (size_t)a, out, BSZ);
-            if (a <= 0 || a != b || memcmp(comp_reused, comp_fresh, (size_t)a) != 0 || r != BSZ ||
-                memcmp(out, src, BSZ) != 0) {
+            if (a <= 0 || a != b || memcmp(comp_reused, comp_fresh, (size_t)a) != 0 ||
+                r != (int64_t)BSZ || memcmp(out, src, BSZ) != 0) {
                 printf(
-                    "  [FAIL] step %d (dict %d, level %d): reused %lld, fresh %lld, "
-                    "roundtrip %lld\n",
-                    step, k_dict[step], k_level[step], (long long)a, (long long)b, (long long)r);
+                    "  [FAIL] dict %zu B (%s), step %d (dict %d, level %d): reused %lld, "
+                    "fresh %lld, roundtrip %lld\n",
+                    dict_size, random_dict ? "random" : "text", step, k_dict[step], k_level[step],
+                    (long long)a, (long long)b, (long long)r);
                 break;
             }
         }
         if (step < NSTEPS) break;
-        printf("  [PASS] %d blocks match a fresh context byte for byte\n", NSTEPS);
+        printf("  [PASS] dict %zu B (%s): %d blocks match a fresh context byte for byte\n",
+               dict_size, random_dict ? "random" : "text", NSTEPS);
         ok = 1;
     } while (0);
     zxc_free_cctx(reused);
@@ -2050,6 +2054,16 @@ int test_dict_block_seed_snapshot(void) {
     free(comp_reused);
     free(comp_fresh);
     free(out);
+    return ok;
+}
+
+/* Blocks sharing a dictionary restore the tables seeded for an earlier block
+ * instead of re-seeding: the output must match a fresh context's. A small text
+ * dictionary leaves few live slots (restored as a list), a random one many
+ * (restored as a whole-table copy). */
+int test_dict_block_seed_snapshot(void) {
+    printf("=== TEST: Dict - block cctx reuses seeded tables, same output ===\n");
+    const int ok = seed_snapshot_case(4096, 0, 4096) && seed_snapshot_case(16384, 1, 16384);
     if (ok) printf("PASS\n\n");
     return ok;
 }
