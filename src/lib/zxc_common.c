@@ -1094,23 +1094,21 @@ size_t zxc_decompress_block_bound(const size_t uncompressed_size) {
 }
 
 /**
- * @brief Estimates the peak bytes a cctx allocates to compress blocks.
- *
- * The workspace of @ref zxc_cctx_compute_workspace_size for @c mode == 1
- * (compress), carved for [dict | block] when a dictionary is attached, plus the
- * context's copy of the dictionary and the snapshot of the tables seeded from
- * it. The opaque wrapper struct allocated by @ref zxc_create_cctx adds a fixed
- * overhead (< 1 KB) that is negligible next to the buffers and is omitted.
- *
- * For @p level >= 6 the figure includes the optimal-parser scratch
- * (@c opt_scratch, ~8.125 bytes per chunk_size byte) used by the optimal
- * parser and reused as transient package-merge scratch for the Huffman
- * code-length builder.
+ * @brief Compress workspace for [dict | block], plus the dictionary copy and
+ *        snapshot. The cctx wrapper struct (< 1 KB) is omitted.
  */
 size_t zxc_estimate_cctx_memory(const size_t src_size, const int level, const size_t dict_size) {
-    if (UNLIKELY(src_size == 0 || dict_size > ZXC_DICT_SIZE_MAX)) return 0;
+    // Keeps the log2 within 32 bits and the total (~12 x block) within size_t.
+    const size_t max_block =
+        SIZE_MAX / 32 < ((size_t)1 << 30) ? SIZE_MAX / 32 + 1 : (size_t)1 << 31;
+    if (UNLIKELY(src_size == 0 || src_size > max_block || level < ZXC_LEVEL_FASTEST ||
+                 level > ZXC_LEVEL_ULTRA || dict_size > ZXC_DICT_SIZE_MAX))
+        return 0;
+#ifdef ZXC_NO_DICT
+    if (UNLIKELY(dict_size > 0)) return 0;
+#endif
     const size_t block_size = zxc_block_size_ceil(src_size);
-    // A dictionary prefixes every block: the buffers hold both.
+    if (UNLIKELY(block_size > max_block - dict_size)) return 0;
     const size_t chunk_size =
         dict_size > 0 ? zxc_block_size_ceil(dict_size + block_size) : block_size;
     const size_t workspace = zxc_cctx_compute_workspace_size(chunk_size, 1, level, dict_size);

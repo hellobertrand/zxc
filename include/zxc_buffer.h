@@ -498,41 +498,28 @@ ZXC_EXPORT int64_t zxc_decompress_block_safe(zxc_dctx* dctx, const void* src, co
 /**
  * @brief Estimates peak compression memory for a block size, level and dictionary.
  *
- * Totals everything a compression context reserves to compress @p src_size
- * blocks: per-chunk working buffers (chain table, literals,
- * sequence/token/offset/extras), the fixed hash tables and match-split
- * histograms, and cache-line padding. At @p level >= 6 it also counts the
- * `opt_scratch` region: ~8.125 x the block size for the optimal parser,
- * allocated on the first level-6 call, then kept for the cctx's lifetime.
+ * Counts the working buffers, hash tables and padding. Level >= 6 adds the
+ * optimal-parser scratch (~8.125 x the block size). A dictionary carves the
+ * buffers for [dict | block] and adds its copy and the seeded-table snapshot
+ * (~160 KB + 3 x @p dict_size). Replacing a dictionary briefly holds two
+ * copies, not counted.
  *
- * With a dictionary, the working buffers are carved for the dictionary and the
- * block together, and the figure adds the context's copy of the dictionary and
- * the snapshot of the match tables seeded from it, allocated with the buffers
- * (~160 KB + 3 x @p dict_size).
- *
- * @param[in] src_size  Block size the context compresses, in bytes: the larger
- *                      of @ref ZXC_C_BLOCK_SIZE and the input size.
- * @param[in] level     Compression level (1..7). Levels <= 5 share the same
- *                      persistent footprint; levels >= 6 add the
- *                      optimal-parser scratch.
- * @param[in] dict_size Size of the dictionary attached with
- *                      zxc_cctx_set_dict(), or 0 for none.
- * @return Estimated peak cctx memory in bytes, or 0 if @p src_size is 0 or
- *         @p dict_size exceeds @ref ZXC_DICT_SIZE_MAX.
+ * @param[in] src_size  Block size: @ref ZXC_C_BLOCK_SIZE for zxc_compress_cctx();
+ *                      the larger of it and the largest input for
+ *                      zxc_compress_block().
+ * @param[in] level     Compression level (1..7).
+ * @param[in] dict_size Size of the attached dictionary, or 0.
+ * @return Estimated peak cctx memory in bytes, or 0 if @p src_size is 0 or too
+ *         large, @p level is outside 1..7, or @p dict_size is too large (or
+ *         not 0 without dictionary support).
  */
 ZXC_EXPORT size_t zxc_estimate_cctx_memory(size_t src_size, int level, size_t dict_size);
 
 /**
- * @brief Estimates peak compression memory for a block size and level,
- *        without a dictionary.
+ * @brief Estimates peak compression memory, without a dictionary.
  *
- * @deprecated Use zxc_estimate_cctx_memory(), which also accounts for a
- *             dictionary; this returns zxc_estimate_cctx_memory(@p src_size,
- *             @p level, 0). To be removed in 2.0.
- *
- * @param[in] src_size Block size the context compresses, in bytes.
- * @param[in] level    Compression level (1..7).
- * @return Estimated peak cctx memory in bytes, or 0 if @p src_size is 0.
+ * @deprecated Returns zxc_estimate_cctx_memory(@p src_size, @p level, 0).
+ *             To be removed in 2.0.
  */
 ZXC_DEPRECATED_EXPORT size_t zxc_estimate_cctx_size(size_t src_size, int level);
 

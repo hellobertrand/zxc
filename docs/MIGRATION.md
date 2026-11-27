@@ -25,7 +25,7 @@ removed at the next major version.
 
 | Deprecated | Replacement | Note |
 | :--- | :--- | :--- |
-| `zxc_estimate_cctx_size(src_size, level)` | `zxc_estimate_cctx_memory(src_size, level, 0)` | The replacement also counts a dictionary: pass its size. Go: `EstimateCctxSize` → `EstimateCctxMemory`. |
+| `zxc_estimate_cctx_size(src_size, level)` | `zxc_estimate_cctx_memory(src_size, level, 0)` | The replacement also counts a dictionary: pass its size. Both now return 0 for a level outside 1..7. Go: `EstimateCctxSize` → `EstimateCctxMemory`; both raise `srcSize` to the 512 KiB block a `Cctx` carves. |
 
 ---
 

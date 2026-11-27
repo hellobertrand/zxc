@@ -42,15 +42,14 @@
 #define TEST_DICT_OK ZXC_OK
 #endif
 
-/* --- Deprecated API --------------------------------------------------- */
-/* Calling a deprecated symbol on purpose, e.g. to test it until it is removed. */
-#if defined(_MSC_VER)
-#define ZXC_TEST_ALLOW_DEPRECATED_BEGIN __pragma(warning(push)) __pragma(warning(disable : 4996))
-#define ZXC_TEST_ALLOW_DEPRECATED_END __pragma(warning(pop))
-#elif defined(__GNUC__) || defined(__clang__)
+/* --- Deprecated API (clang-cl takes the GCC pragmas) ------------------ */
+#if defined(__GNUC__) || defined(__clang__)
 #define ZXC_TEST_ALLOW_DEPRECATED_BEGIN \
     _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
 #define ZXC_TEST_ALLOW_DEPRECATED_END _Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+#define ZXC_TEST_ALLOW_DEPRECATED_BEGIN __pragma(warning(push)) __pragma(warning(disable : 4996))
+#define ZXC_TEST_ALLOW_DEPRECATED_END __pragma(warning(pop))
 #else
 #define ZXC_TEST_ALLOW_DEPRECATED_BEGIN
 #define ZXC_TEST_ALLOW_DEPRECATED_END

@@ -852,8 +852,10 @@ ZXC_EXPORT size_t zxc_estimate_cctx_memory(size_t src_size, int level, size_t di
 Returns an accurate estimate of the peak memory a compression context uses to
 compress blocks of `src_size` bytes at the given `level`, with a dictionary of
 `dict_size` bytes attached through `zxc_cctx_set_dict()` (`0` for none).
-`src_size` is the block size the context is carved for: the larger of
-`ZXC_C_BLOCK_SIZE` and the input size.
+`src_size` is the block size the context is carved for: `ZXC_C_BLOCK_SIZE` for
+`zxc_compress_cctx()`; for `zxc_compress_block()`, the larger of
+`ZXC_C_BLOCK_SIZE` and the largest input, since the context keeps the largest
+buffers it carved.
 
 The estimate covers all per-chunk working buffers (chain table, literals,
 sequence/token/offset/extras buffers), the fixed hash tables and match-split
@@ -862,12 +864,14 @@ includes the optimal parser's scratch (~8.125 × the block size), allocated once
 and reused. With a dictionary, the buffers are carved for the dictionary and the
 block together, and the estimate adds the context's copy of the dictionary and
 the snapshot of the match tables seeded from it (~160 KB + 3 × `dict_size`,
-allocated on the second block in a row with that dictionary). It is intended for
+allocated with the buffers). Replacing an attached dictionary briefly holds both
+copies, which the estimate does not count. It is intended for
 integrators that need to build an accurate memory budget (filesystems, embedded
 devices, sandboxed workloads, storage engines).
 
-**Returns**: estimated peak cctx memory usage in bytes, or `0` if `src_size == 0`
-or `dict_size > ZXC_DICT_SIZE_MAX`.
+**Returns**: estimated peak cctx memory usage in bytes, or `0` if `src_size` is 0
+or too large, `level` is outside 1..7, or `dict_size > ZXC_DICT_SIZE_MAX` (or
+`dict_size > 0` in a build without dictionaries).
 
 ### `zxc_estimate_cctx_size` (deprecated)
 
