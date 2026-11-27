@@ -24,7 +24,10 @@
 #include "../../include/zxc_error.h"
 #include "../../include/zxc_seekable.h"
 
-#define FUZZ_SEEKABLE_MAX_INPUT (4 << 20) /* 4 MiB */
+/* Bigger inputs grow the OSS-Fuzz corpus past what its pruning finishes. */
+#define FUZZ_SEEKABLE_MAX_INPUT (256 << 10) /* 256 KiB */
+
+static const size_t kBlockSizes[] = {0, 4096, 16384, 65536}; /* 0: default */
 
 /* Phases 1-6 and 8; @p flags is the control byte. */
 static void seekable_phases(const uint8_t* data, const size_t size, const int level,
@@ -32,7 +35,7 @@ static void seekable_phases(const uint8_t* data, const size_t size, const int le
                             uint8_t* decomp_buf) {
     const int use_checksum = flags & 1;
     const int use_mt = flags & 2;
-    const int small_blocks = flags & 0x40; /* many blocks: in place, several batches */
+    const size_t block_size = kBlockSizes[(flags >> 6) & 3];
 
     /* ------------------------------------------------------------------ */
     /* Phase 1: Compress with seekable=1                                  */
@@ -43,7 +46,8 @@ static void seekable_phases(const uint8_t* data, const size_t size, const int le
     if (zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
         zxc_cctx_set_param(cctx, ZXC_C_CHECKSUM, use_checksum) == ZXC_OK &&
         zxc_cctx_set_param(cctx, ZXC_C_SEEKABLE, 1) == ZXC_OK &&
-        (!small_blocks || zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, 4096) == ZXC_OK)) {
+        (!block_size ||
+         zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE, (int64_t)block_size) == ZXC_OK)) {
         csize = zxc_compress_cctx(cctx, data, size, comp_buf, bound);
     }
     zxc_free_cctx(cctx);

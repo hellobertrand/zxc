@@ -16,8 +16,9 @@
  * mismatches rather than malformed-frame handling.
  *
  * Strategy: derive the compression level from the first byte so libFuzzer
- * explores every level, compress the fuzzed bytes, then decompress into an
- * exact-size buffer and assert a bit-exact roundtrip.
+ * explores every level and the block size from the third, compress the fuzzed
+ * bytes, then decompress into an exact-size buffer and assert a bit-exact
+ * roundtrip.
  */
 
 #include <assert.h>
@@ -29,7 +30,10 @@
 #include "../../include/zxc_buffer.h"
 #include "../../include/zxc_error.h"
 
-#define FUZZ_ROUNDTRIP_MAX_INPUT (4 << 20) /* 4 MiB */
+// Bigger inputs grow the OSS-Fuzz corpus past what its pruning finishes.
+#define FUZZ_ROUNDTRIP_MAX_INPUT (256 << 10) /* 256 KiB */
+
+static const size_t kBlockSizes[] = {0, 4096, 16384, 65536}; /* 0: default */
 
 int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     if (size > FUZZ_ROUNDTRIP_MAX_INPUT) return 0;
@@ -43,12 +47,16 @@ int LLVMFuzzerTestOneInput(const uint8_t* data, size_t size) {
     // Bit 6 of data[0] turns the decode-speed split on, data[1] sizes its budget.
     const int budget =
         size > 1 && ((data[0] >> 6) & 1) ? 1 + data[1] % ZXC_FAVOR_DECODE_SPEED_MAX : 0;
+    const size_t block_size = size > 2 ? kBlockSizes[data[2] & 3] : 0;
     int64_t csize = ZXC_ERROR_MEMORY;
-    if (budget) {
+    if (budget || block_size) {
         zxc_cctx* const cctx = zxc_create_cctx();
         if (cctx)
             csize = zxc_cctx_set_param(cctx, ZXC_C_LEVEL, level) == ZXC_OK &&
-                            zxc_cctx_set_param(cctx, ZXC_C_FAVOR_DECODE_SPEED, budget) == ZXC_OK
+                            (!budget || zxc_cctx_set_param(cctx, ZXC_C_FAVOR_DECODE_SPEED,
+                                                           budget) == ZXC_OK) &&
+                            (!block_size || zxc_cctx_set_param(cctx, ZXC_C_BLOCK_SIZE,
+                                                               (int64_t)block_size) == ZXC_OK)
                         ? zxc_compress_cctx(cctx, data, size, comp_buf, bound)
                         : ZXC_ERROR_BAD_PARAM;
         zxc_free_cctx(cctx);
