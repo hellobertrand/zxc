@@ -2018,57 +2018,83 @@ typedef struct {
     uint8_t* literals;                          /**< Buffer for literal bytes. */
 
     // Cold zone: configuration / scratch / resizeable.
-    uint8_t* lit_buffer;            /**< Scratch buffer for literals (RLE / Huffman). */
-    size_t lit_buffer_cap;          /**< Current capacity of the scratch buffer. */
-    uint8_t* work_buf;              /**< Padded scratch buffer for buffer-API decompression. */
-    size_t work_buf_cap;            /**< Capacity of the work buffer. */
-    uint8_t* tok_buffer;            /**< Decode scratch for a Huffman-coded SPL token
-                                         section (enc_tok == HUFFMAN); NULL on compress.
-                                         Heap decode contexts defer it (with pivco_scratch)
-                                         to the first entropy section, see entropy_block. */
-    size_t tok_buffer_cap;          /**< Capacity of tok_buffer in bytes. */
-    uint8_t* pivco_scratch;         /**< Level ping-pong scratch for PivCo decode. */
-    size_t pivco_scratch_cap;       /**< Capacity of pivco_scratch in bytes. */
-    void* entropy_block;            /**< Lazy allocation backing tok_buffer + pivco_scratch
-                                         (heap decode contexts, first entropy block only).
-                                         NULL on compress contexts and static workspaces.
-                                         Freed by zxc_cctx_free. */
-    uint8_t* opt_scratch;           /**< Optimal-parser DP scratch (level >= 6 only,
-                                         lazy-allocated, packs dp/parent_len/parent_off/actions).
-                                         Also the Huffman code-length builder's and
-                                         nudge's scratch (::ZXC_HUF_NUDGE_SCRATCH_SIZE). */
-    size_t opt_scratch_cap;         /**< Current capacity of opt_scratch in bytes. */
-    int checksum_enabled;           /**< 1 if checksum calculation/verification is enabled. */
-    int compression_level;          /**< Compression level. */
-    uint8_t split_budget_pct;       /**< ZXC_C_FAVOR_DECODE_SPEED: growth budget in
-                                         percent, 0 = off. */
-    size_t dict_size;               /**< Dictionary prefill size (0 = no dictionary). */
-    uint8_t* dict_buffer;           /**< [dict | data] concat scratch carved from memory_block
-                                         when dict_size > 0 (NULL otherwise). */
-    size_t dict_buffer_cap;         /**< Capacity of dict_buffer in bytes (0 = none). */
-    zxc_dict_huf_state_t* dict_huf; /**< Tree-at-attach state (PivCo tree + codes + code
-                                         lengths), carved from the workspace only when
-                                         dict_size > 0 (NULL otherwise); built once by
-                                         zxc_cctx_attach_dict_huf. Valid iff dict_huf_tree_ok. */
-    int dict_huf_tree_ok;           /**< 1 when *dict_huf is built and valid. */
-    uint64_t dict_gen;              /**< Identity of the dictionary prefixing the input
-                                         (0 = unknown, compare bytes), see zxc_lz_begin_block. */
-    uint64_t dict_buffer_gen;       /**< Identity of the dictionary at the start of
-                                         dict_buffer (0 = unknown, reload). */
-    void* dict_snap;                /**< Hash/chain tables as seeded from a dictionary used
-                                         by consecutive blocks, restored instead of re-seeding
-                                         (heap, lazy, see zxc_lz_begin_block). NULL when unused.
-                                         Freed by zxc_cctx_free. */
-    uint32_t* lit_freq_acc;         /**< Trainer hook: when non-NULL, the SPL encoder
-                                         accumulates post-LZ literal byte frequencies here
-                                         (256 entries). NULL outside dictionary training. */
+    uint8_t* lit_buffer;               /**< Scratch buffer for literals (RLE / Huffman). */
+    size_t lit_buffer_cap;             /**< Current capacity of the scratch buffer. */
+    uint8_t* work_buf;                 /**< Padded scratch buffer for buffer-API decompression. */
+    size_t work_buf_cap;               /**< Capacity of the work buffer. */
+    uint8_t* tok_buffer;               /**< Decode scratch for a Huffman-coded SPL token
+                                            section (enc_tok == HUFFMAN); NULL on compress.
+                                            Heap decode contexts defer it (with pivco_scratch)
+                                            to the first entropy section, see entropy_block. */
+    size_t tok_buffer_cap;             /**< Capacity of tok_buffer in bytes. */
+    uint8_t* pivco_scratch;            /**< Level ping-pong scratch for PivCo decode. */
+    size_t pivco_scratch_cap;          /**< Capacity of pivco_scratch in bytes. */
+    void* entropy_block;               /**< Lazy allocation backing tok_buffer + pivco_scratch
+                                            (heap decode contexts, first entropy block only).
+                                            NULL on compress contexts and static workspaces.
+                                            Freed by zxc_cctx_free. */
+    uint8_t* opt_scratch;              /**< Optimal-parser DP scratch (level >= 6 only,
+                                            lazy-allocated, packs dp/parent_len/parent_off/actions).
+                                            Also the Huffman code-length builder's and
+                                            nudge's scratch (::ZXC_HUF_NUDGE_SCRATCH_SIZE). */
+    size_t opt_scratch_cap;            /**< Current capacity of opt_scratch in bytes. */
+    int checksum_enabled;              /**< 1 if checksum calculation/verification is enabled. */
+    int compression_level;             /**< Compression level. */
+    uint8_t split_budget_pct;          /**< ZXC_C_FAVOR_DECODE_SPEED: growth budget in
+                                            percent, 0 = off. */
+    size_t dict_size;                  /**< Dictionary prefill size (0 = no dictionary). */
+    uint8_t* dict_buffer;              /**< [dict | data] concat scratch carved from memory_block
+                                            when dict_size > 0 (NULL otherwise). */
+    size_t dict_buffer_cap;            /**< Capacity of dict_buffer in bytes (0 = none). */
+    zxc_dict_huf_state_t* dict_huf;    /**< Tree-at-attach state (PivCo tree + codes + code
+                                            lengths), carved from the workspace only when
+                                            dict_size > 0 (NULL otherwise); built once by
+                                            zxc_cctx_attach_dict_huf. Valid iff dict_huf_tree_ok. */
+    uint64_t dict_buffer_gen;          /**< Identity of the dictionary at the start of
+                                            dict_buffer (0 = unknown, reload). */
+    struct zxc_dict_snap_s* dict_snap; /**< Seeded-table snapshot (compression with a
+                                            dictionary), NULL if none. */
+    uint32_t* lit_freq_acc;            /**< Trainer hook: when non-NULL, the SPL encoder
+                                            accumulates post-LZ literal byte frequencies here
+                                            (256 entries). NULL outside dictionary training. */
 
     // Block-size derived parameters (computed once at init).
     size_t chunk_size;    /**< Effective block size in bytes. */
     uint32_t offset_bits; /**< log2(chunk_size) - governs epoch_mark shift. */
     uint32_t offset_mask; /**< (1U << offset_bits) - 1 */
     uint32_t max_epoch;   /**< 1U << (32 - offset_bits) */
+    int dict_huf_tree_ok; /**< 1 when *dict_huf is built and valid. */
 } zxc_cctx_t;
+
+/**
+ * @brief Tables as seeded from a dictionary, restored instead of re-seeding
+ *        (see zxc_lz_begin_block). One allocation: header, tables, chain, dict.
+ */
+typedef struct zxc_dict_snap_s {
+    size_t capacity;      /**< Largest dictionary it holds. */
+    size_t dict_size;     /**< Size of @c dict (0 = none). */
+    size_t n;             /**< List mode: live slots after seeding. */
+    uint64_t dict_gen;    /**< Identity of @c dict (0 = unknown, compare bytes). */
+    uint64_t input_gen;   /**< Identity of the current input's dictionary (0 = unknown). */
+    uint32_t offset_bits; /**< ctx->offset_bits the entries were encoded with. */
+    uint32_t epoch;       /**< Copy mode: epoch the copied entries carry. */
+    int use_hash5;        /**< Hash variant the entries were computed with. */
+    int valid;            /**< 1 when @c tables and @c chain hold a snapshot. */
+    int copy;             /**< 1: whole-table copy; 0: list of live slots. */
+    uint16_t* chain;      /**< chain_table[0, stable) after seeding. */
+    uint8_t* tables;      /**< Copy mode: hash_table then hash_tags. List mode: slots,
+                               positions (16-bit each) then tags. */
+    uint8_t* dict;        /**< Copy of the dictionary, to recognise it. */
+} zxc_dict_snap_t;
+
+/** @brief Most live slots in list mode; more use copy mode. */
+#define ZXC_DICT_SNAP_LIST_MAX (ZXC_LZ_HASH_SIZE / 8)
+
+/** @brief Bytes of @c tables: the larger of the two modes. */
+#define ZXC_DICT_SNAP_TABLES_SIZE (ZXC_LZ_HASH_SIZE * (sizeof(uint32_t) + sizeof(uint8_t)))
+
+/** @brief Snapshot bytes zxc_cctx_init allocates for @p dict_size (0 = none). */
+size_t zxc_dict_snap_size(size_t dict_size);
 
 /**
  * @brief Initialises a ZXC compression / decompression context in place.
@@ -2083,7 +2109,8 @@ typedef struct {
  * @param[in]  checksum_enabled  Non-zero to enable checksum computation.
  * @param[in]  dict_size         Dictionary prefill size; when > 0 an extra
  *                               [dict | data] concat buffer is carved into the
- *                               workspace and @c ctx->dict_buffer is set.
+ *                               workspace and @c ctx->dict_buffer is set; with
+ *                               @p mode == 1, a snapshot is also allocated.
  *
  * @return @c ZXC_OK on success, or a negative @ref zxc_error_t code (notably
  *         @c ZXC_ERROR_MEMORY on allocation failure). @p ctx is cleared either

@@ -55,6 +55,9 @@ static ZXC_ALWAYS_INLINE uint32_t zxc_hash_func(const uint64_t val, const int us
     }
 }
 
+/** @brief Input bytes zxc_hash_func() reads (val >> 15 adds bytes 4-5 to the 4-byte hash). */
+static ZXC_ALWAYS_INLINE size_t zxc_hash_span(const int use_hash5) { return use_hash5 ? 5 : 6; }
+
 /**
  * @brief Which hash a level uses: the single definition, so that a hash computed
  *        by a parse loop and the one the match finder needs are the same function.
@@ -1436,29 +1439,46 @@ static int zxc_lz77_optimal_parse_spl(zxc_cctx_t* RESTRICT ctx, const uint8_t* R
     return 0;
 }
 
+/** @brief Inserts every dictionary position in [@p begin, @p end). */
+static ZXC_ALWAYS_INLINE void zxc_lz_seed_dense(const uint8_t* RESTRICT src, const size_t begin,
+                                                const size_t end, uint32_t* RESTRICT hash_table,
+                                                uint8_t* RESTRICT hash_tags,
+                                                uint16_t* RESTRICT chain_table,
+                                                const uint32_t epoch_mark,
+                                                const uint32_t offset_mask, const int use_hash5) {
+    for (size_t i = begin; i < end; i++) {
+        const uint64_t val8 = zxc_le64(src + i);
+        const uint32_t h = zxc_hash_func(val8, use_hash5);
+        const uint32_t cur_pos = (uint32_t)i;
+        const uint32_t prev_idx = zxc_epoch_pos(hash_table[h], offset_mask, epoch_mark);
+
+        hash_table[h] = epoch_mark | cur_pos;
+        hash_tags[h] = zxc_hash_tag((uint32_t)val8);
+        chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = zxc_chain_delta(cur_pos, prev_idx);
+    }
+}
+
 /**
  * @brief Seeds the hash/chain tables from dictionary content prepended to @p src.
  *
  * When a dictionary is active, @p src is laid out as [dict_content | block_data].
- * This function inserts hash entries for dictionary positions [0, dict_size) so
- * the match finder can reference them during block encoding.
+ * Inserts dictionary positions [0, @p end) of [0, dict_size - 4), so the match
+ * finder can reference them during block encoding.
  *
  * @param[in]     src         Source buffer starting with dictionary content.
- * @param[in]     dict_size   Size of the dictionary prefix in bytes.
+ * @param[in]     dict_size   Size of the dictionary prefix in bytes (>= ZXC_LZ_MIN_MATCH_LEN).
  * @param[in,out] hash_table  Hash table to seed with dictionary positions.
  * @param[in,out] hash_tags   Tag table for fast match rejection.
  * @param[in,out] chain_table Chain table for collision resolution.
  * @param[in]     epoch_mark  Current epoch marker for hash table entries.
  * @param[in]     offset_mask Position mask for epoch/offset encoding.
- * @param[in]     level       Compression level (controls hash function variant).
+ * @param[in]     use_hash5   Hash variant (see zxc_lz77_use_hash5).
+ * @param[in]     end         First position not inserted (>= half of the range).
  */
 static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size,
                              uint32_t* RESTRICT hash_table, uint8_t* RESTRICT hash_tags,
                              uint16_t* RESTRICT chain_table, const uint32_t epoch_mark,
-                             const uint32_t offset_mask, const int level) {
-    if (UNLIKELY(dict_size < ZXC_LZ_MIN_MATCH_LEN)) return;
-
-    const int use_hash5 = zxc_lz77_use_hash5(level);
+                             const uint32_t offset_mask, const int use_hash5, const size_t end) {
     const size_t limit = dict_size - (ZXC_LZ_MIN_MATCH_LEN - 1);
 
     // Sparse seeding for the first half, dense for the second half.
@@ -1474,81 +1494,16 @@ static void zxc_lz_seed_dict(const uint8_t* RESTRICT src, const size_t dict_size
         hash_tags[h] = zxc_hash_tag((uint32_t)val8);
         chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = 0;
     }
-    for (size_t i = half; i < limit; i++) {
-        const uint64_t val8 = zxc_le64(src + i);
-        const uint32_t h = zxc_hash_func(val8, use_hash5);
-        const uint32_t cur_pos = (uint32_t)i;
-        const uint32_t prev_idx = zxc_epoch_pos(hash_table[h], offset_mask, epoch_mark);
-
-        hash_table[h] = epoch_mark | cur_pos;
-        hash_tags[h] = zxc_hash_tag((uint32_t)val8);
-        chain_table[cur_pos & ZXC_LZ_WINDOW_MASK] = zxc_chain_delta(cur_pos, prev_idx);
-    }
+    zxc_lz_seed_dense(src, half, end, hash_table, hash_tags, chain_table, epoch_mark, offset_mask,
+                      use_hash5);
 }
 
-/**
- * @brief Seeded-table snapshot for a dictionary shared by consecutive blocks.
- *
- * Seeding visits about 0.6 x dict_size positions, more work than a small block
- * itself. When the same dictionary comes back, the table is brought back to the
- * state seeding left, which gives the same output:
- * - few live slots (a repetitive dictionary): those slots are written back
- *   under a fresh epoch, which invalidates every other slot as seeding into a
- *   fresh epoch does. The tag of a slot whose epoch is stale is never read.
- * - many live slots: they touch most cache lines anyway, so the whole table
- *   is copied back, with the epoch it was seeded in.
- */
-#define ZXC_DICT_SNAP_LIST_MAX (ZXC_LZ_HASH_SIZE / 8)
-
-typedef struct {
-    size_t dict_size;     /**< Size of the dictionary below. */
-    size_t n;             /**< List mode: live slots after seeding. */
-    uint64_t dict_gen;    /**< ctx->dict_gen of the dictionary below (0 = unknown). */
-    uint32_t offset_bits; /**< ctx->offset_bits the entries were encoded with. */
-    uint32_t epoch;       /**< Copy mode: epoch the copied entries carry. */
-    int use_hash5;        /**< Hash variant the entries were computed with. */
-    int valid;            /**< 1 when @c tables holds a snapshot. */
-    int copy;             /**< 1: whole-table copy; 0: list of live slots. */
-    uint16_t* chain;      /**< chain_table[0, dict_size) after seeding. */
-    uint8_t* tables;      /**< Copy mode: hash_table then hash_tags. List mode: slots,
-                               positions (16-bit each) then tags. */
-    uint8_t* dict;        /**< Copy of the dictionary, to recognise it. */
-} zxc_dict_snap_t;
-
-/** @brief Bytes of the @c tables region: room for the larger of the two modes. */
-#define ZXC_DICT_SNAP_TABLES_SIZE (ZXC_LZ_HASH_SIZE * (sizeof(uint32_t) + sizeof(uint8_t)))
 static_assert(ZXC_DICT_SNAP_LIST_MAX * (2 * sizeof(uint16_t) + 1) <= ZXC_DICT_SNAP_TABLES_SIZE,
-               "the slot list must fit the whole-table region");
+              "the slot list must fit the whole-table region");
 
-/**
- * @brief Returns a snapshot slot for @p dict_size bytes of dictionary, or NULL
- *        when it cannot be allocated (seeding then proceeds without one).
- */
-static zxc_dict_snap_t* zxc_dict_snap_reserve(zxc_cctx_t* RESTRICT ctx, const size_t dict_size) {
-    zxc_dict_snap_t* snap = (zxc_dict_snap_t*)ctx->dict_snap;
-    if (snap && snap->dict_size == dict_size) return snap;
-    ZXC_FREE(snap);
-    ctx->dict_snap = NULL;
-    // List positions are stored in 16 bits.
-    if (UNLIKELY(dict_size > ZXC_DICT_SIZE_MAX)) return NULL;  // LCOV_EXCL_LINE
-    // Largest alignment first: header, tables, chain, then the dictionary copy.
-    const size_t hdr = (sizeof(zxc_dict_snap_t) + 7) & ~(size_t)7;
-    const size_t total = hdr + ZXC_DICT_SNAP_TABLES_SIZE + dict_size * sizeof(uint16_t) + dict_size;
-    uint8_t* const mem = (uint8_t*)ZXC_MALLOC(total);
-    if (UNLIKELY(!mem)) return NULL;  // LCOV_EXCL_LINE
-    snap = (zxc_dict_snap_t*)mem;
-    ZXC_MEMSET(snap, 0, sizeof(*snap));
-    snap->dict_size = dict_size;
-    snap->tables = mem + hdr;
-    snap->chain = (uint16_t*)(snap->tables + ZXC_DICT_SNAP_TABLES_SIZE);
-    snap->dict = (uint8_t*)(snap->chain + dict_size);
-    ctx->dict_snap = snap;
-    return snap;
-}
-
-/** @brief Records the tables seeding just left, in the cheaper mode to restore. */
+/** @brief Records the tables seeding left, in the cheaper mode to restore. */
 static void zxc_dict_snap_save(zxc_dict_snap_t* RESTRICT snap, const zxc_cctx_t* RESTRICT ctx,
-                               const size_t limit) {
+                               const size_t stable) {
     uint16_t* const slot = (uint16_t*)snap->tables;
     uint16_t* const pos = slot + ZXC_DICT_SNAP_LIST_MAX;
     uint8_t* const tag = (uint8_t*)(pos + ZXC_DICT_SNAP_LIST_MAX);
@@ -1571,13 +1526,19 @@ static void zxc_dict_snap_save(zxc_dict_snap_t* RESTRICT snap, const zxc_cctx_t*
         snap->epoch = ctx->epoch;
     }
     snap->n = n;
-    ZXC_MEMCPY(snap->chain, ctx->chain_table, limit * sizeof(uint16_t));
+    ZXC_MEMCPY(snap->chain, ctx->chain_table, stable * sizeof(uint16_t));
     snap->valid = 1;
 }
 
 /**
  * @brief Starts a block: advances the epoch, then seeds the dictionary, or
  *        restores the tables seeded from the same dictionary for an earlier block.
+ *
+ * Seeding visits about 0.6 x dict_size positions, more work than a small block.
+ * The snapshot holds the tables after [0, stable), the positions whose hash reads
+ * only dictionary bytes; [stable, limit) is inserted from each block. Same output:
+ * - few live slots: written back under a fresh epoch, which invalidates the others.
+ * - many live slots: the whole table is copied back, with its epoch.
  *
  * @param[in,out] ctx     Compression context.
  * @param[in]     src     Input, prefixed by the dictionary content when one is active.
@@ -1588,67 +1549,74 @@ static void zxc_dict_snap_save(zxc_dict_snap_t* RESTRICT snap, const zxc_cctx_t*
 static uint32_t zxc_lz_begin_block(zxc_cctx_t* RESTRICT ctx, const uint8_t* RESTRICT src,
                                    const size_t dict_sz, const int level) {
     const int use_hash5 = zxc_lz77_use_hash5(level);
-    const size_t limit = dict_sz - (ZXC_LZ_MIN_MATCH_LEN - 1);
-    zxc_dict_snap_t* snap = NULL;
+    const int seed = dict_sz >= ZXC_LZ_MIN_MATCH_LEN;
+    const size_t limit = seed ? dict_sz - (ZXC_LZ_MIN_MATCH_LEN - 1) : 0;
+    // Positions from `stable` on also hash the block's first bytes.
+    const size_t stable = seed ? dict_sz + 1 - zxc_hash_span(use_hash5) : 0;
+    zxc_dict_snap_t* snap = seed ? ctx->dict_snap : NULL;
     int restore = 0;
     int save = 0;
-    if (dict_sz >= ZXC_LZ_MIN_MATCH_LEN) {
-        snap = (zxc_dict_snap_t*)ctx->dict_snap;
+    if (snap) {
         // A known identity spares comparing the bytes.
-        if (snap && snap->dict_size == dict_sz && snap->offset_bits == ctx->offset_bits &&
+        if (snap->dict_size == dict_sz && snap->offset_bits == ctx->offset_bits &&
             snap->use_hash5 == use_hash5 &&
-            ((ctx->dict_gen != 0 && snap->dict_gen == ctx->dict_gen) ||
+            ((snap->input_gen != 0 && snap->dict_gen == snap->input_gen) ||
              memcmp(snap->dict, src, dict_sz) == 0)) {
-            snap->dict_gen = ctx->dict_gen;
+            snap->dict_gen = snap->input_gen;
             restore = snap->valid;
             // Second block in a row with this dictionary: worth a snapshot.
             save = !snap->valid;
-        } else {
+        } else if (dict_sz <= snap->capacity) {
             // New dictionary: remember it, snapshot only if it comes back.
-            snap = zxc_dict_snap_reserve(ctx, dict_sz);
-            if (snap) {
-                snap->valid = 0;
-                snap->dict_gen = ctx->dict_gen;
-                snap->offset_bits = ctx->offset_bits;
-                snap->use_hash5 = use_hash5;
-                ZXC_MEMCPY(snap->dict, src, dict_sz);
-            }
+            snap->valid = 0;
+            snap->dict_size = dict_sz;
+            snap->dict_gen = snap->input_gen;
+            snap->offset_bits = ctx->offset_bits;
+            snap->use_hash5 = use_hash5;
+            ZXC_MEMCPY(snap->dict, src, dict_sz);
+        } else {
+            // Larger than the snapshot: seed every block.
+            snap->valid = 0;
+            snap->dict_size = 0;
+            snap = NULL;
         }
     }
 
+    uint32_t epoch_mark;
     if (restore && snap->copy) {
-        // Every entry copied back carries snap->epoch or older and the whole
-        // table is overwritten: the state seeding left.
+        // The whole table is overwritten: the state seeding [0, stable) left.
         ZXC_MEMCPY(ctx->hash_table, snap->tables, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
         ZXC_MEMCPY(ctx->hash_tags, snap->tables + ZXC_LZ_HASH_SIZE * sizeof(uint32_t),
                    ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
-        ZXC_MEMCPY(ctx->chain_table, snap->chain, limit * sizeof(uint16_t));
+        ZXC_MEMCPY(ctx->chain_table, snap->chain, stable * sizeof(uint16_t));
         ctx->epoch = snap->epoch;
-        return ctx->epoch << ctx->offset_bits;
-    }
-
-    ctx->epoch++;
-    if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
-        ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
-        ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
-        ctx->epoch = 1;
-    }
-    const uint32_t epoch_mark = ctx->epoch << ctx->offset_bits;
-
-    if (restore) {
-        const uint16_t* const slot = (const uint16_t*)snap->tables;
-        const uint16_t* const pos = slot + ZXC_DICT_SNAP_LIST_MAX;
-        const uint8_t* const tag = (const uint8_t*)(pos + ZXC_DICT_SNAP_LIST_MAX);
-        for (size_t i = 0; i < snap->n; i++) {
-            ctx->hash_table[slot[i]] = epoch_mark | pos[i];
-            ctx->hash_tags[slot[i]] = tag[i];
+        epoch_mark = ctx->epoch << ctx->offset_bits;
+    } else {
+        ctx->epoch++;
+        if (UNLIKELY(ctx->epoch >= ctx->max_epoch)) {
+            ZXC_MEMSET(ctx->hash_table, 0, ZXC_LZ_HASH_SIZE * sizeof(uint32_t));
+            ZXC_MEMSET(ctx->hash_tags, 0, ZXC_LZ_HASH_SIZE * sizeof(uint8_t));
+            ctx->epoch = 1;
         }
-        ZXC_MEMCPY(ctx->chain_table, snap->chain, limit * sizeof(uint16_t));
-    } else if (dict_sz > 0) {
-        zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
-                         epoch_mark, ctx->offset_mask, level);
-        if (save) zxc_dict_snap_save(snap, ctx, limit);
+        epoch_mark = ctx->epoch << ctx->offset_bits;
+        if (restore) {
+            const uint16_t* const slot = (const uint16_t*)snap->tables;
+            const uint16_t* const pos = slot + ZXC_DICT_SNAP_LIST_MAX;
+            const uint8_t* const tag = (const uint8_t*)(pos + ZXC_DICT_SNAP_LIST_MAX);
+            for (size_t i = 0; i < snap->n; i++) {
+                ctx->hash_table[slot[i]] = epoch_mark | pos[i];
+                ctx->hash_tags[slot[i]] = tag[i];
+            }
+            ZXC_MEMCPY(ctx->chain_table, snap->chain, stable * sizeof(uint16_t));
+        } else if (seed) {
+            zxc_lz_seed_dict(src, dict_sz, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
+                             epoch_mark, ctx->offset_mask, use_hash5, stable);
+            if (save) zxc_dict_snap_save(snap, ctx, stable);
+        }
     }
+    if (seed)
+        zxc_lz_seed_dense(src, stable, limit, ctx->hash_table, ctx->hash_tags, ctx->chain_table,
+                          epoch_mark, ctx->offset_mask, use_hash5);
     return epoch_mark;
 }
 

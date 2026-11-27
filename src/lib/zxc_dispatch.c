@@ -1369,8 +1369,9 @@ static int64_t zxc_compress_cctx_resolved(zxc_cctx* cctx, const void* RESTRICT s
 
     // [dict | block] input for the encoder, NULL without a dictionary.
     uint8_t* const dict_input = dict_size > 0 ? ctx->dict_buffer : NULL;
-    ctx->dict_gen = zxc_dict_copy_gen(&cctx->dict_copy, dict, dict_size);
-    if (dict_input) zxc_dict_buffer_load(ctx, dict, dict_size, ctx->dict_gen);
+    const uint64_t dict_gen = zxc_dict_copy_gen(&cctx->dict_copy, dict, dict_size);
+    if (ctx->dict_snap) ctx->dict_snap->input_gen = dict_gen;
+    if (dict_input) zxc_dict_buffer_load(ctx, dict, dict_size, dict_gen);
 
     uint8_t* op = (uint8_t*)dst;
     const uint8_t* const op_start = op;
@@ -1940,8 +1941,9 @@ static int64_t zxc_compress_block_resolved(zxc_cctx* cctx, const void* RESTRICT 
     if (b_dict && b_dict_size > 0) {
         // [dict | block] assembled in the cctx-owned dict_buffer
         uint8_t* const combined = cctx->inner.dict_buffer;
-        cctx->inner.dict_gen = zxc_dict_copy_gen(&cctx->dict_copy, b_dict, b_dict_size);
-        zxc_dict_buffer_load(&cctx->inner, b_dict, b_dict_size, cctx->inner.dict_gen);
+        const uint64_t dict_gen = zxc_dict_copy_gen(&cctx->dict_copy, b_dict, b_dict_size);
+        if (cctx->inner.dict_snap) cctx->inner.dict_snap->input_gen = dict_gen;
+        zxc_dict_buffer_load(&cctx->inner, b_dict, b_dict_size, dict_gen);
         ZXC_MEMCPY(combined + b_dict_size, src, src_size);
         res = zxc_compress_chunk_wrapper(&cctx->inner, combined, b_dict_size + src_size,
                                          (uint8_t*)dst, dst_capacity, block_index);

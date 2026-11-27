@@ -1977,13 +1977,18 @@ static void gen_mixed_block(uint8_t* buf, size_t size, const uint8_t* dict, size
 /* Compresses a sequence of blocks with one reused context and with a fresh
  * context per block; both must emit the same bytes. dict: 0 = none, 1 = A,
  * 2 = B. The tables are snapshot on the second block in a row with a
- * dictionary and restored from the third, including right after a
- * dictionary-free block (steps 4 and 10), whose positions overwrite the chain
- * entries of the dictionary as dict_size <= BSZ. */
-static int seed_snapshot_case(const size_t dict_size, const int random_dict, const size_t BSZ) {
-    enum { NSTEPS = 16 };
-    static const int k_dict[NSTEPS] = {1, 1, 1, 0, 1, 2, 2, 1, 1, 0, 1, 1, 1, 1, 2, 1};
-    static const int k_level[NSTEPS] = {3, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 6, 6, 3, 3, 1};
+ * dictionary (and hash variant) and restored from the third: after a
+ * dictionary-free block (steps 4, 10), at level 6 after a re-carve (step 13),
+ * at levels 1-2 (steps 18-21), whose last seeded position hashes the block's
+ * first byte. keep_dict: set the dictionary only when it changes (reuse by
+ * generation, not by comparing bytes). */
+static int seed_snapshot_case(const size_t dict_size, const int random_dict, const size_t BSZ,
+                              const int keep_dict) {
+    enum { NSTEPS = 24 };
+    static const int k_dict[NSTEPS] = {1, 1, 1, 0, 1, 2, 2, 1, 1, 0, 1, 1,
+                                       1, 1, 1, 2, 1, 1, 1, 1, 1, 1, 2, 2};
+    static const int k_level[NSTEPS] = {3, 3, 3, 3, 3, 3, 3, 3, 5, 5, 5, 6,
+                                        6, 6, 3, 3, 1, 1, 1, 2, 2, 1, 1, 1};
     uint8_t* dicts[2] = {(uint8_t*)malloc(dict_size), (uint8_t*)malloc(dict_size)};
     uint8_t* src = (uint8_t*)malloc(BSZ);
     const size_t cap = zxc_compress_block_bound(BSZ);
@@ -2015,11 +2020,18 @@ static int seed_snapshot_case(const size_t dict_size, const int random_dict, con
         for (step = 0; step < NSTEPS; step++) {
             const uint8_t* dict = k_dict[step] ? dicts[k_dict[step] - 1] : NULL;
             const size_t dsz = dict ? dict_size : 0;
+            const int set_dict = !keep_dict || step == 0 || k_dict[step] != k_dict[step - 1];
             gen_mixed_block(src, BSZ, dict, dict_size, (uint32_t)step + 1U);
+            src[0] = (uint8_t)(step * 29 + 7);
+            if (dict) {
+                // Reference the last seeded position
+                memcpy(src + 64, dict + dict_size - 5, 5);
+                memcpy(src + 69, src, 3);
+            }
             zxc_cctx* fresh = zxc_create_cctx();
             int rc = fresh ? ZXC_OK : ZXC_ERROR_MEMORY;
             if (rc == ZXC_OK) rc = zxc_cctx_set_param(reused, ZXC_C_LEVEL, k_level[step]);
-            if (rc == ZXC_OK) rc = zxc_cctx_set_dict(reused, dict, dsz, NULL);
+            if (rc == ZXC_OK && set_dict) rc = zxc_cctx_set_dict(reused, dict, dsz, NULL);
             if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_LEVEL, k_level[step]);
             if (rc == ZXC_OK) rc = zxc_cctx_set_param(fresh, ZXC_C_BLOCK_SIZE, (int64_t)BSZ);
             if (rc == ZXC_OK) rc = zxc_cctx_set_dict(fresh, dict, dsz, NULL);
@@ -2028,22 +2040,22 @@ static int seed_snapshot_case(const size_t dict_size, const int random_dict, con
             const int64_t b =
                 rc == ZXC_OK ? zxc_compress_block(fresh, src, BSZ, comp_fresh, cap) : rc;
             zxc_free_cctx(fresh);
-            int64_t r = zxc_dctx_set_dict(dctx, dict, dsz, NULL);
+            int64_t r = set_dict ? zxc_dctx_set_dict(dctx, dict, dsz, NULL) : ZXC_OK;
             if (r == ZXC_OK && a > 0)
                 r = zxc_decompress_block_safe(dctx, comp_reused, (size_t)a, out, BSZ);
             if (a <= 0 || a != b || memcmp(comp_reused, comp_fresh, (size_t)a) != 0 ||
                 r != (int64_t)BSZ || memcmp(out, src, BSZ) != 0) {
                 printf(
-                    "  [FAIL] dict %zu B (%s), step %d (dict %d, level %d): reused %lld, "
+                    "  [FAIL] dict %zu B (%s%s), step %d (dict %d, level %d): reused %lld, "
                     "fresh %lld, roundtrip %lld\n",
-                    dict_size, random_dict ? "random" : "text", step, k_dict[step], k_level[step],
-                    (long long)a, (long long)b, (long long)r);
+                    dict_size, random_dict ? "random" : "text", keep_dict ? ", kept" : "", step,
+                    k_dict[step], k_level[step], (long long)a, (long long)b, (long long)r);
                 break;
             }
         }
         if (step < NSTEPS) break;
-        printf("  [PASS] dict %zu B (%s): %d blocks match a fresh context byte for byte\n",
-               dict_size, random_dict ? "random" : "text", NSTEPS);
+        printf("  [PASS] dict %zu B (%s%s): %d blocks match a fresh context byte for byte\n",
+               dict_size, random_dict ? "random" : "text", keep_dict ? ", kept" : "", NSTEPS);
         ok = 1;
     } while (0);
     zxc_free_cctx(reused);
@@ -2063,7 +2075,10 @@ static int seed_snapshot_case(const size_t dict_size, const int random_dict, con
  * (restored as a whole-table copy). */
 int test_dict_block_seed_snapshot(void) {
     printf("=== TEST: Dict - block cctx reuses seeded tables, same output ===\n");
-    const int ok = seed_snapshot_case(4096, 0, 4096) && seed_snapshot_case(16384, 1, 16384);
+    int ok = 1;
+    for (int keep_dict = 0; keep_dict <= 1; keep_dict++)
+        ok = ok && seed_snapshot_case(4096, 0, 4096, keep_dict) &&
+             seed_snapshot_case(16384, 1, 16384, keep_dict);
     if (ok) printf("PASS\n\n");
     return ok;
 }
