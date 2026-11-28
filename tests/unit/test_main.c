@@ -86,6 +86,7 @@ static const test_entry_t g_tests[] = {
     TEST_CASE_DICT(test_ctx_dict_copied),
     TEST_CASE(test_cctx_configured_archives),
     TEST_CASE(test_estimate_cctx_size),
+    TEST_CASE(test_estimate_cctx_memory),
 
     /* --- Static Context API --- */
     TEST_CASE(test_static_ctx_size_query),

@@ -601,7 +601,7 @@ Cycles per byte are `frequency / decompression speed`, at the base frequency (th
 | **512 KB** *(default)*|    **~1.79 MB** |       **~5.85 MB** |
 | 2 MB *(max)*          |        ~6.29 MB |          ~22.54 MB |
 
-Levels -1 to -5 share one layout (hash, chain, sequence and literal buffers) that scales linearly with block size. Levels -6 and -7 add the optimal parser's scratch, about 3x more, allocated lazily. `zxc_estimate_cctx_size(block_size, level)` gives the exact figure for any combination.
+Levels -1 to -5 share one layout (hash, chain, sequence and literal buffers) that scales linearly with block size. Levels -6 and -7 add the optimal parser's scratch, about 3x more, allocated lazily. `zxc_estimate_cctx_memory(block_size, level, dict_size)` gives the exact figure for any combination, dictionary included.
 
 > **Guideline:** the default 512 KB block keeps a context under 6 MB even at levels -6 and -7. For streaming, embedded or memory-constrained use, take `-B 256K` or smaller and levels -1 to -5; keep -6 and -7 for offline encoding where RAM per thread is plentiful.
 

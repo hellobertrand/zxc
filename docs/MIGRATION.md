@@ -18,6 +18,17 @@ see [0.15.x → 1.0.0](#015x--100-format-v9-unchanged).
 
 ---
 
+## Deprecated APIs
+
+Deprecated symbols keep working and warn at compile time (`ZXC_DEPRECATED`). They are
+removed at the next major version.
+
+| Deprecated | Replacement | Note |
+| :--- | :--- | :--- |
+| `zxc_estimate_cctx_size(src_size, level)` | `zxc_estimate_cctx_memory(src_size, level, 0)` | The replacement also counts a dictionary: pass its size. Both now return 0 for a level outside 1..7. Go: `EstimateCctxSize` → `EstimateCctxMemory`; both raise `srcSize` to the 512 KiB block a `Cctx` carves. |
+
+---
+
 ## 0.15.x → 1.0.0 (format v9 unchanged)
 
 **No archive migration.** Archives and `.zxd` dictionaries read in both directions

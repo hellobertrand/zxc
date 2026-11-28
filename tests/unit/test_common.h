@@ -42,6 +42,19 @@
 #define TEST_DICT_OK ZXC_OK
 #endif
 
+/* --- Deprecated API (clang-cl takes the GCC pragmas) ------------------ */
+#if defined(__GNUC__) || defined(__clang__)
+#define ZXC_TEST_ALLOW_DEPRECATED_BEGIN \
+    _Pragma("GCC diagnostic push") _Pragma("GCC diagnostic ignored \"-Wdeprecated-declarations\"")
+#define ZXC_TEST_ALLOW_DEPRECATED_END _Pragma("GCC diagnostic pop")
+#elif defined(_MSC_VER)
+#define ZXC_TEST_ALLOW_DEPRECATED_BEGIN __pragma(warning(push)) __pragma(warning(disable : 4996))
+#define ZXC_TEST_ALLOW_DEPRECATED_END __pragma(warning(pop))
+#else
+#define ZXC_TEST_ALLOW_DEPRECATED_BEGIN
+#define ZXC_TEST_ALLOW_DEPRECATED_END
+#endif
+
 /* --- IO helper ---------------------------------------------------------- */
 
 /* Creates a temporary file with restricted permissions (0600).
@@ -206,6 +219,7 @@ int test_dctx_param_contract(void);
 int test_ctx_dict_copied(void);
 int test_cctx_configured_archives(void);
 int test_estimate_cctx_size(void);
+int test_estimate_cctx_memory(void);
 
 /* Static Context API */
 int test_static_ctx_roundtrip_all_levels(void);

@@ -40,22 +40,28 @@ func DecompressBlockBound(uncompressedSize int) uint64 {
 	return uint64(C.zxc_decompress_block_bound(C.size_t(uncompressedSize)))
 }
 
-// EstimateCctxSize returns an accurate estimate of the memory a compression
-// context reserves when compressing a single block of srcSize bytes at the
-// given compression level via [Cctx.CompressBlock].
+// EstimateCctxMemory estimates the peak memory of a [Cctx] compressing blocks
+// of up to srcSize bytes at level, with a dictionary of dictSize bytes (0 for
+// none). srcSize is raised to the 512 KiB block a Cctx carves. A per-call
+// [WithDict] briefly holds two dictionary copies, not counted.
 //
-// The estimate covers all per-chunk working buffers (chain table, literals,
-// sequence/token/offset/extras buffers) plus the fixed hash tables and
-// cache-line alignment padding. At level 6+ it also accounts for the
-// optimal-parser scratch. It scales roughly linearly with srcSize and is
-// intended for integrators that need an accurate memory budget.
-//
-// Returns 0 if srcSize is 0 or negative.
-func EstimateCctxSize(srcSize, level int) uint64 {
-	if srcSize <= 0 {
+// Returns 0 if srcSize is not positive or too large, level is outside 1..7,
+// or dictSize is negative or too large.
+func EstimateCctxMemory(srcSize, level, dictSize int) uint64 {
+	if srcSize <= 0 || dictSize < 0 {
 		return 0
 	}
-	return uint64(C.zxc_estimate_cctx_size(C.size_t(srcSize), C.int(level)))
+	if srcSize < C.ZXC_BLOCK_SIZE_DEFAULT {
+		srcSize = C.ZXC_BLOCK_SIZE_DEFAULT
+	}
+	return uint64(C.zxc_estimate_cctx_memory(C.size_t(srcSize), C.int(level), C.size_t(dictSize)))
+}
+
+// EstimateCctxSize returns [EstimateCctxMemory](srcSize, level, 0).
+//
+// Deprecated: Use [EstimateCctxMemory], which also accounts for a dictionary.
+func EstimateCctxSize(srcSize, level int) uint64 {
+	return EstimateCctxMemory(srcSize, level, 0)
 }
 
 // Cctx is a reusable compression context for the Block API.

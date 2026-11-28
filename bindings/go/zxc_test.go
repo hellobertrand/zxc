@@ -898,3 +898,30 @@ func TestGetFrameInfo(t *testing.T) {
 		t.Fatal("empty input must be refused")
 	}
 }
+
+func TestEstimateCctxMemory(t *testing.T) {
+	if got := EstimateCctxMemory(0, 3, 0); got != 0 {
+		t.Fatalf("EstimateCctxMemory(0, 3, 0) = %d, want 0", got)
+	}
+	if got := EstimateCctxMemory(4096, 3, -1); got != 0 {
+		t.Fatalf("negative dictSize: got %d, want 0", got)
+	}
+	if got := EstimateCctxMemory(4096, 3, 1<<16); got != 0 {
+		t.Fatalf("dictSize above the limit: got %d, want 0", got)
+	}
+	if got := EstimateCctxMemory(4096, 8, 0); got != 0 {
+		t.Fatalf("level 8: got %d, want 0", got)
+	}
+	if a, b := EstimateCctxMemory(4096, 3, 0), EstimateCctxMemory(512<<10, 3, 0); a != b {
+		t.Fatalf("4 KiB blocks: %d, want the 512 KiB figure %d", a, b)
+	}
+	base := EstimateCctxMemory(4096, 3, 0)
+	if base == 0 || base != EstimateCctxSize(4096, 3) {
+		t.Fatalf("no dictionary: EstimateCctxMemory = %d, EstimateCctxSize = %d", base,
+			EstimateCctxSize(4096, 3))
+	}
+	withDict := EstimateCctxMemory(4096, 3, 16384)
+	if withDict <= base+16384 {
+		t.Fatalf("16 KiB dictionary: %d, want more than %d", withDict, base+16384)
+	}
+}

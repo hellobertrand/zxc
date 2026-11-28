@@ -650,17 +650,18 @@ unsafe extern "C" {
         dst_capacity: usize,
     ) -> i64;
 
-    /// Estimates the memory reserved by a compression context for a single
-    /// block of `src_size` bytes via [`zxc_compress_block`].
-    ///
-    /// Covers all per-chunk working buffers (chain table, literals,
-    /// sequence/token/offset/extras buffers) plus the fixed hash tables and
-    /// cache-line alignment padding. At `level >= 6` the value also accounts
-    /// for the price-based optimal parser's transient DP scratch (~18 x
-    /// `src_size` bytes), free'd at the end of each block.
-    ///
-    /// Returns the estimated peak memory usage in bytes, or 0 if `src_size == 0`.
+    /// Same as [`zxc_estimate_cctx_memory`]`(src_size, level, 0)`.
+    #[deprecated(note = "use zxc_estimate_cctx_memory, which also accounts for a dictionary")]
     pub fn zxc_estimate_cctx_size(src_size: usize, level: c_int) -> usize;
+
+    /// Estimates the peak memory of a compression context at `level`, with a
+    /// dictionary of `dict_size` bytes (0 for none). `src_size` is
+    /// `ZXC_C_BLOCK_SIZE` for [`zxc_compress_cctx`], or the larger of it and the
+    /// largest input for [`zxc_compress_block`].
+    ///
+    /// Returns 0 if `src_size` is 0 or too large, `level` is outside 1..7, or
+    /// `dict_size` exceeds `ZXC_DICT_SIZE_MAX`.
+    pub fn zxc_estimate_cctx_memory(src_size: usize, level: c_int, dict_size: usize) -> usize;
 }
 
 // =============================================================================
